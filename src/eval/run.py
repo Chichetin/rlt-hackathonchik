@@ -16,9 +16,11 @@ from pathlib import Path
 
 import yaml
 
+from src.enrich.evidence import strip_unverified
 from src.eval.metrics import METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import search as search_mod
+from src.sources.cache import SourceCache
 
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 RESULTS = ROOT / "eval" / "results"
@@ -65,6 +67,10 @@ def evaluate(cases: list[EvalCase], cfg: dict) -> dict:
     per_query = []
     for case in cases:
         matches = search_mod.search(case.query, k=cfg.get("k", 20), weights=cfg.get("weights"))
+        if not getattr(search_mod, "IS_STUB", False):  # measure what the user sees (as /api/search)
+            cache = SourceCache()
+            matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
+                       for m in matches]
         ranked = [m.counterparty.inn for m in matches if m.origin == "history" and m.counterparty.inn]
         rel = set(case.relevant_inns)
         per_query.append({"query_id": case.query.query_id,

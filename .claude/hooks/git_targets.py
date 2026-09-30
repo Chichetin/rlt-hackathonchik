@@ -39,13 +39,14 @@ def targets(text: str, cwd: str) -> list[str]:
     for line in text.replace("\\\n", " ").splitlines():
         for tail in ("", '"', "'", "'\""):  # a quote opened here closes on a later line
             try:
-                cmds += commands(line + tail)
+                parsed = commands(line + tail)
                 break
             except ValueError:
                 continue
         else:
             return [cwd]
-        if "<<" in line:
+        cmds += parsed
+        if any(t.startswith("<<") for c in parsed for t in c):  # a real heredoc, not "<<" in quotes
             break
     here, found = cwd, []
     for c in cmds:

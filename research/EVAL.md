@@ -69,3 +69,5 @@ stub-dev-1,,ООО «…» (ИНН не подтверждён),0,llm:<моде�
   4. `search()` — не `# STUB`.
   Каждый запуск — строка в `eval/final-log.md`. Запускает только `evaluator` и только по заморозке.
 - Тест замка — `tests/unit/test_eval_seal.py`.
+- `make eval` оценивает ту же выдачу, что видит пользователь: после замены заглушки `evaluate()`
+  прогоняет `strip_unverified()`, как `/api/search` (D-015).

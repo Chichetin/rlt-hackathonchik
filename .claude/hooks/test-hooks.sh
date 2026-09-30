@@ -215,6 +215,7 @@ expect_pre block "задача: многострочная команда, commi
 expect_pre block "задача: комментарий не съедает следующую строку"    "$(bashcmd "$TMP" "$(printf 'echo x # note\ngit push -u origin HEAD')")"
 expect_pre block "задача: перенос строки обратным слешем"             "$(bashcmd "$TMP" "$(printf 'git \\\n  commit -m x')")"
 expect_pre pass  "задача: cd worktree && commit с heredoc-сообщением" "$(bashcmd "$TMP" "$(printf "cd $TMP/.claude/worktrees/12-x && git commit -m \"\$(cat <<'EOF'\nсообщение\nEOF\n)\"")")"
+expect_pre block "задача: \"<<\" в кавычках — не heredoc"            "$(bashcmd "$TMP" "$(printf 'echo "a << b"\ngit commit -m x')")"
 rm -f "$(git -C .claude/worktrees/13-x rev-parse --git-dir)/issue-check"
 GH_FAIL=1 expect_pre pass "задача: GitHub недоступен — номер в ветке есть, пропуск" "$(edit "$TMP/.claude/worktrees/13-x/a.py")"
 mkdir -p "$TMP/other" && git -C "$TMP/other" init -q

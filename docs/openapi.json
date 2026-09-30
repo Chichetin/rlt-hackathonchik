@@ -404,7 +404,7 @@
           "fact"
         ],
         "title": "Evidence",
-        "description": "One fact and where it came from. A fact without Evidence is not shown (CLAUDE.md).\n\n`url` is required: organizers' data uses `data:<table>#<row key>`, the web uses http(s).\n`field`/`value` name the extracted value (inn, phone, email, address, ...); for web\nsources `value` must literally occur in the cached page text (src/enrich/evidence.py)."
+        "description": "One fact and where it came from. A fact without Evidence is not shown (CLAUDE.md).\n\n`url` is required: organizers' data uses `data:<table>#<row key>`, the web uses http(s).\nThe DATA loader MUST add `Evidence(field=\"inn\", value=<inn>, url=\"data:…\")` for every\ncounterparty from organizers' data: without it strip_unverified() shows \"ИНН не подтверждён\".\n`field`/`value` name the extracted value (inn, phone, email, address, ...); for web\nsources `value` must literally occur in the cached page text (src/enrich/evidence.py)."
       },
       "HTTPValidationError": {
         "properties": {

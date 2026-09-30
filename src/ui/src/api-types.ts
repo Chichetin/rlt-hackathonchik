@@ -145,6 +145,8 @@ export interface components {
          * @description One fact and where it came from. A fact without Evidence is not shown (CLAUDE.md).
          *
          *     `url` is required: organizers' data uses `data:<table>#<row key>`, the web uses http(s).
+         *     The DATA loader MUST add `Evidence(field="inn", value=<inn>, url="data:…")` for every
+         *     counterparty from organizers' data: without it strip_unverified() shows "ИНН не подтверждён".
          *     `field`/`value` name the extracted value (inn, phone, email, address, ...); for web
          *     sources `value` must literally occur in the cached page text (src/enrich/evidence.py).
          */
