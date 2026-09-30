@@ -1,0 +1,14 @@
+{
+  "inn": "0000100012",
+  "name": "ООО «Синтетика Поставка»",
+  "evidence": [
+    {"source": "сайт компании", "url": "https://example.org/rekvizity", "fetched_at": "2026-09-30T12:00:00Z",
+     "fact": "ИНН со страницы реквизитов", "field": "inn", "value": "0000100012"},
+    {"source": "сайт компании", "url": "https://example.org/rekvizity", "fetched_at": "2026-09-30T12:00:00Z",
+     "fact": "Телефон со страницы реквизитов", "field": "phone", "value": "8 812 000 00 01"},
+    {"source": "сайт компании", "url": "https://example.org/rekvizity", "fetched_at": "2026-09-30T12:00:00Z",
+     "fact": "Email со страницы реквизитов", "field": "email", "value": "sales@example.org"},
+    {"source": "сайт компании", "url": "https://example.org/rekvizity", "fetched_at": "2026-09-30T12:00:00Z",
+     "fact": "Адрес со страницы реквизитов", "field": "address", "value": "Санкт-Петербург, ул. Тестовая, д. 1"}
+  ]
+}

@@ -1,0 +1,74 @@
+"""Metrics, cache, queue, stub warning, filters."""
+
+import logging
+
+import pytest
+
+from src.contracts import Query
+from src.eval.metrics import bootstrap_ci, ndcg_at_k, recall_at_k, reciprocal_rank
+from src.match import search as search_mod
+from src.match.filters import apply_filters
+from src.sources.cache import SourceCache
+from src.worker import queue as Q
+
+
+def test_metrics_known_values():
+    ranked = ["a", "b", "c", "d"]
+    assert recall_at_k(ranked, {"b", "z"}, 10) == 0.5
+    assert reciprocal_rank(ranked, {"c"}) == pytest.approx(1 / 3)
+    assert ndcg_at_k(ranked, {"a"}, 10) == 1.0
+    assert ndcg_at_k(ranked, set(), 10) == 0.0
+    assert reciprocal_rank(ranked, {"z"}) == 0.0
+
+
+def test_bootstrap_ci_brackets_mean_and_is_deterministic():
+    vals = [0.0, 1.0, 0.5, 0.25, 0.75] * 4
+    lo, hi = bootstrap_ci(vals)
+    assert lo <= sum(vals) / len(vals) <= hi
+    assert bootstrap_ci(vals) == (lo, hi)
+    assert bootstrap_ci([0.3]) == (0.3, 0.3)
+
+
+def test_stub_search_warns_and_is_schema_valid(caplog):
+    with caplog.at_level(logging.WARNING):
+        res = search_mod.search(Query(query_id="q", text="бумага"))
+    assert "STUB" in caplog.text
+    assert {m.origin for m in res} == {"history", "discovered"}
+
+
+def test_filters():
+    res = search_mod.search(Query(query_id="q", text="x"))
+    only_man = apply_filters(res, Query(query_id="q", text="x", filters={"only_manufacturers": True}))
+    assert only_man and all(m.counterparty.kind == "manufacturer" for m in only_man)
+    only_msp = apply_filters(res, Query(query_id="q", text="x", filters={"only_msp": True}))
+    assert only_msp and all(m.counterparty.is_msp for m in only_msp)
+    res[0].counterparty.in_rnp = True
+    assert res[0] not in apply_filters(res, Query(query_id="q", text="x"))
+
+
+def test_cache_ttl_and_stale_fallback(tmp_path):
+    c = SourceCache(tmp_path / "c.sqlite", ttl_s=60)
+    c.put("u", "old", fetched_at=0)
+    assert c.get("u") is None and c.get("u", allow_stale=True).body == "old"  # type: ignore[union-attr]
+
+    def boom(_url):
+        raise OSError("no network")
+
+    assert c.fetch("u", boom).body == "old"
+    assert c.fetch("v", lambda _u: (200, "fresh")).body == "fresh"
+    assert c.fetch("v", boom).body == "fresh"  # fresh cache, fetcher not called
+
+
+def test_queue_idempotent_claim_retry(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    eng = Q.engine_from_env()
+    a = Q.enqueue(eng, "enrich", "0000100012")
+    assert Q.enqueue(eng, "enrich", "0000100012") == a
+    task = Q.claim(eng, "enrich")
+    assert task == (a, "0000100012") and Q.claim(eng, "enrich") is None
+    Q.finish(eng, a, error="timeout")
+    assert Q.status_counts(eng) == {"pending": 1}
+    for _ in range(Q.MAX_ATTEMPTS - 1):
+        Q.claim(eng, "enrich")
+        Q.finish(eng, a, error="timeout")
+    assert Q.status_counts(eng) == {"failed": 1}

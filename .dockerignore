@@ -1,0 +1,13 @@
+.git
+.venv
+.claude
+**/node_modules
+src/ui/dist
+data
+cache
+indexes
+eval/results
+docs
+research
+pitch
+.env

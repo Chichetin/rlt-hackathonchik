@@ -1,0 +1,9 @@
+# Разбиение по времени (research/EVAL.md, раздел 7 workflow). Признаки — только из данных до
+# cutoff; dev — запросы из [cutoff, holdout_from); holdout — с holdout_from, запечатан
+# (читает только `make eval-final`).
+# [ОБНОВИТЬ 01.10] даты — по реальному диапазону дат в данных организаторов (DATA).
+cutoff: "2026-01-01"
+holdout_from: "2026-07-01"
+cases:
+  dev: eval/cases/dev.jsonl                         # [ОБНОВИТЬ 01.10] собирает DATA из данных
+  holdout: data/processed/eval/holdout.jsonl        # вне git; собирает DATA, читает только eval-final

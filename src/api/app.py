@@ -1,0 +1,125 @@
+"""HTTP API (FastAPI). Owner: APP. OpenAPI from src/contracts.py: `make openapi`.
+
+Also serves the built UI (src/ui/dist) at "/", so `make demo` is one process + worker.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+import os
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from openpyxl import Workbook
+from pydantic import BaseModel
+
+from src.contracts import Counterparty, Query, SearchResponse, inn_is_valid
+from src.enrich import enrich as enrich_mod
+from src.llm.provider import get_provider
+from src.match import search as search_mod
+from src.match.filters import apply_filters
+from src.worker.queue import engine_from_env, enqueue, status_counts
+
+log = logging.getLogger(__name__)
+ROOT = Path(__file__).resolve().parents[2]
+UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
+
+app = FastAPI(
+    title="RLT.Hack — подбор поставщиков для АИС ГЗ",
+    version="0.1.0",
+    description="Подбор поставщиков, производителей и дистрибьюторов с объяснением и источниками фактов.",
+)
+_engine = None
+
+
+def _queue():
+    global _engine
+    if _engine is None:
+        _engine = engine_from_env()
+    return _engine
+
+
+def _is_stub() -> bool:
+    return bool(getattr(search_mod, "IS_STUB", False) or getattr(enrich_mod, "IS_STUB", False))
+
+
+class Health(BaseModel):
+    status: str
+    stub: bool
+    llm: str
+    queue: dict[str, int]
+
+
+class EnqueueResult(BaseModel):
+    task_id: int
+
+
+@app.get("/api/health", response_model=Health)
+def health() -> Health:
+    return Health(status="ok", stub=_is_stub(), llm=get_provider().name, queue=status_counts(_queue()))
+
+
+@app.post("/api/search", response_model=SearchResponse)
+def api_search(query: Query) -> SearchResponse:
+    matches = apply_filters(search_mod.search(query), query)
+    return SearchResponse(
+        query=query,
+        history=[m for m in matches if m.origin == "history"],
+        discovered=[m for m in matches if m.origin == "discovered"],
+        stub=_is_stub(),
+    )
+
+
+@app.get("/api/counterparty/{inn}", response_model=Counterparty)
+def api_counterparty(inn: str) -> Counterparty:
+    if not inn_is_valid(inn):
+        raise HTTPException(422, "ИНН не проходит контрольные цифры")
+    try:
+        return enrich_mod.enrich(inn)
+    except KeyError as e:
+        raise HTTPException(404, "контрагент не найден") from e
+
+
+@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202)
+def api_enqueue(inn: str) -> EnqueueResult:
+    if not inn_is_valid(inn):
+        raise HTTPException(422, "ИНН не проходит контрольные цифры")
+    return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn))
+
+
+@app.post("/api/export")
+def api_export(query: Query) -> StreamingResponse:
+    res = api_search(query)
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Поставщики"
+    ws.append(["Блок", "Наименование", "ИНН", "Тип", "Регион", "МСП", "Score", "Почему в списке", "Источники"])
+    for block, rows in (("С опытом госзакупок", res.history), ("Новые из открытых источников", res.discovered)):
+        for m in rows:
+            cp = m.counterparty
+            ws.append([
+                block, cp.name, cp.inn or "ИНН не подтверждён", cp.kind or "", cp.region or "",
+                {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], round(m.score, 3),
+                "; ".join(c.explanation for c in m.components),
+                "; ".join(f"{e.source}: {e.url}" for e in cp.evidence),
+            ])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="suppliers.xlsx"'},
+    )
+
+
+if (UI_DIST / "index.html").exists():
+    app.mount("/assets", StaticFiles(directory=UI_DIST / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> FileResponse:
+        return FileResponse(UI_DIST / "index.html")

@@ -1,0 +1,10 @@
+{
+  "inn": "0000100020",
+  "name": "ООО «Синтетика Поставка»",
+  "evidence": [
+    {"source": "сайт компании", "url": "https://example.org/rekvizity", "fetched_at": "2026-09-30T12:00:00Z",
+     "fact": "ИНН, который LLM «извлекла», но его нет на странице", "field": "inn", "value": "0000100020"},
+    {"source": "сайт компании", "url": "https://example.org/rekvizity", "fetched_at": "2026-09-30T12:00:00Z",
+     "fact": "Телефон, которого нет на странице", "field": "phone", "value": "+7 812 999-99-99"}
+  ]
+}

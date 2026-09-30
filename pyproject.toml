@@ -1,0 +1,64 @@
+[project]
+name = "rlt-supplier-match"
+version = "0.1.0"
+description = "RLT.Hack: подбор поставщиков, производителей и дистрибьюторов для АИС ГЗ и Электронного магазина СПб"
+requires-python = ">=3.12,<3.13"
+# Стек — стартовая ставка, не решение (CLAUDE.md, «Стек»). Меняется записью в research/DECISIONS.md.
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "duckdb>=1.1",
+    "pyarrow>=17",
+    "bm25s>=0.2",
+    "httpx>=0.27",
+    "sqlalchemy>=2.0",
+    "openpyxl>=3.1",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Эмбеддинги: тяжёлые (torch). Ставятся `make setup-ml`; демо и тесты без них работают.
+ml = [
+    "sentence-transformers>=3.0",
+    "torch>=2.4",
+]
+# Postgres для очереди обогащения в docker-compose (DATABASE_URL=postgresql+psycopg://…).
+pg = ["psycopg[binary]>=3.2"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["src/ui", "docs/source"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = ["src/ui", "**/node_modules", ".venv", ".claude"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"

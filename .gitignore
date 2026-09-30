@@ -1,0 +1,35 @@
+# Секреты
+.env
+.env.*
+!.env.example
+
+# Данные организаторов, кеш внешних источников, индексы — не в git (CLAUDE.md, страж данных)
+data/*
+!data/README.md
+cache/
+indexes/
+*.parquet
+*.duckdb
+*.sqlite
+*.sqlite3
+
+# Python / Node
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+node_modules/
+src/ui/dist/
+src/ui/test-results/
+src/ui/playwright-report/
+*.tsbuildinfo
+
+# Claude Code
+.claude/worktrees/
+.claude/settings.local.json
+.claude/.last-green-test-run
+
+# IDE
+.idea/
+.vscode/
