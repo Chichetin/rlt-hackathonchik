@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ def test_eval_run_cannot_take_final_id(capsys):
 
 def test_dev_cases_load_and_respect_dates():
     cases = load_cases("dev")
-    assert cases and all(c.date < split_config()["holdout_from"] for c in cases)
+    assert cases and all(c.date < date.fromisoformat(split_config()["holdout_from"]) for c in cases)
 
 
 def test_dev_case_from_holdout_period_is_a_leak(tmp_path):
@@ -107,3 +108,27 @@ def test_final_main_refuses_in_this_repo(monkeypatch, capsys):
     monkeypatch.delenv(F.CONFIRM_ENV, raising=False)
     assert F.main() == 2
     assert "отказ" in capsys.readouterr().err
+
+
+def test_gate_refuses_without_git(tmp_path, monkeypatch):
+    for rel in ("configs/search.yaml", "configs/split.yaml"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / rel, tmp_path / rel)
+    monkeypatch.setattr(R, "ROOT", tmp_path)
+    with pytest.raises(PermissionError, match="git недоступен"):
+        F.gate("x", tmp_path, tmp_path / "log.md")
+
+
+def test_seen_marker_in_git_dir_blocks_rerun_even_with_clean_log(repo):
+    sha = R.config_sha256(repo)
+    F.seen_file(repo).write_text(f"{sha} earlier attempt\n")
+    with pytest.raises(PermissionError, match="уже оценивалась"):
+        F.gate(sha, repo, repo / "log.md")
+
+
+def test_config_hash_changes_with_committed_code(repo):
+    before = R.config_sha256(repo)
+    (repo / "src" / "a.py").write_text("x = 2\n")
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "commit", "-qam", "method change"], check=True)
+    assert R.config_sha256(repo) != before

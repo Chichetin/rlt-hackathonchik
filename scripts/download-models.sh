@@ -11,19 +11,21 @@ MODELS=(
   intfloat/multilingual-e5-small   # e5: префиксы "query: " и "passage: " обязательны
   intfloat/multilingual-e5-base
   intfloat/multilingual-e5-large
-  BAAI/bge-m3
+  BAAI/bge-m3:bin                  # веса только в pytorch_model.bin
   deepvk/USER-bge-m3
   ai-forever/FRIDA
 )
 [ $# -gt 0 ] && MODELS=("$@")
 
 fail=0
-for m in "${MODELS[@]}"; do
+for entry in "${MODELS[@]}"; do
+  m="${entry%%:*}"
   echo "== $m"
-  # Только веса safetensors и конфиги: без дублей в pytorch_model.bin/onnx/openvino.
-  if ! uvx --from 'huggingface_hub[cli]' hf download "$m" \
-      --exclude '*.bin' --exclude '*onnx*' --exclude '*openvino*' --exclude '*.ot' \
-      --exclude '*.msgpack' --exclude '*.h5' --exclude '*.gguf'; then
+  # Только safetensors и конфиги: без дублей в pytorch_model.bin/onnx/openvino.
+  # Суффикс :bin — у модели нет safetensors, веса берём из *.bin.
+  excl=(--exclude '*onnx*' --exclude '*openvino*' --exclude '*.ot' --exclude '*.msgpack' --exclude '*.h5' --exclude '*.gguf')
+  [ "${entry#*:}" = bin ] || excl+=(--exclude '*.bin')
+  if ! uvx --from 'huggingface_hub[cli]' hf download "$m" "${excl[@]}"; then
     echo "!! $m не скачана"; fail=1
   fi
 done

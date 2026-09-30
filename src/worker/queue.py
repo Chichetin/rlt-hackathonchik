@@ -24,6 +24,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 
 metadata = MetaData()
 tasks = Table(
@@ -41,6 +42,7 @@ tasks = Table(
 )
 
 MAX_ATTEMPTS = 3
+STALE_RUNNING_S = int(os.environ.get("QUEUE_STALE_RUNNING_S", "600"))  # running longer = crashed worker
 
 
 def engine_from_env() -> Engine:
@@ -57,6 +59,13 @@ def _now() -> datetime:
 
 
 def enqueue(eng: Engine, kind: str, key: str) -> int:
+    try:
+        return _enqueue(eng, kind, key)
+    except IntegrityError:  # a concurrent enqueue of the same (kind, key) won the insert
+        return _enqueue(eng, kind, key)
+
+
+def _enqueue(eng: Engine, kind: str, key: str) -> int:
     with eng.begin() as c:
         row = c.execute(select(tasks.c.id, tasks.c.status).where(tasks.c.kind == kind, tasks.c.key == key)).first()
         if row is not None:
@@ -70,16 +79,28 @@ def enqueue(eng: Engine, kind: str, key: str) -> int:
 
 
 def claim(eng: Engine, kind: str) -> tuple[int, str] | None:
+    # Postgres: SKIP LOCKED — concurrent workers take different rows instead of one losing the race
+    # and seeing an "empty" queue. SQLite serializes writers, a plain subquery is enough.
+    lock = " FOR UPDATE SKIP LOCKED" if eng.dialect.name == "postgresql" else ""
     with eng.begin() as c:
         row = c.execute(
             text(
                 "UPDATE tasks SET status='running', attempts=attempts+1, updated_at=:now "
-                "WHERE id = (SELECT id FROM tasks WHERE kind=:kind AND status='pending' ORDER BY id LIMIT 1) "
-                "AND status='pending' RETURNING id, key"
+                "WHERE id = (SELECT id FROM tasks WHERE kind=:kind AND status='pending' ORDER BY id LIMIT 1"
+                f"{lock}) AND status='pending' RETURNING id, key"
             ),
             {"kind": kind, "now": _now()},
         ).first()
     return (row.id, row.key) if row else None
+
+
+def requeue_stale(eng: Engine, older_than_s: int = STALE_RUNNING_S) -> int:
+    """Tasks `running` longer than the timeout belong to a crashed worker: back to the queue."""
+    cutoff = datetime.fromtimestamp(_now().timestamp() - older_than_s, UTC)
+    with eng.begin() as c:
+        res = c.execute(tasks.update().where(tasks.c.status == "running", tasks.c.updated_at < cutoff)
+                        .values(status="pending", updated_at=_now()))
+    return res.rowcount or 0
 
 
 def finish(eng: Engine, task_id: int, error: str | None = None) -> None:

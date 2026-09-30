@@ -3,6 +3,7 @@
 # tests/) и vitest (src/ui с node_modules). Нет тестов или окружения — молчит. Прогон
 # пропускается, если ничего не менялось с последнего зелёного.
 set -uo pipefail
+cd "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || exit 0  # хук может стартовать из подкаталога
 
 MARKER=".claude/.last-green-test-run"
 

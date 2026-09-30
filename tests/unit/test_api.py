@@ -61,3 +61,7 @@ def test_export_xlsx(client):
 def test_openapi_has_contracts(client):
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     assert {"Query", "Evidence", "Counterparty", "ScoreComponent", "CounterpartyMatch"} <= set(schemas)
+
+
+def test_unknown_api_path_is_404_not_spa(client, tmp_path, monkeypatch):
+    assert client.get("/api/nope").status_code == 404

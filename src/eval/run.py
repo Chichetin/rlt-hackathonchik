@@ -26,15 +26,36 @@ RESULTS = ROOT / "eval" / "results"
 CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
 
 
-def git(*args: str) -> str:
-    r = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False)
-    return r.stdout.strip() if r.returncode == 0 else ""
+class GitError(RuntimeError):
+    pass
 
 
-def config_sha256(root: Path = ROOT) -> str:
+def git(*args: str, root: Path | None = None, strict: bool = False) -> str:
+    """git output; on failure "" — or GitError with strict=True (gates must fail closed)."""
+    try:
+        r = subprocess.run(["git", "-C", str(root or ROOT), *args], capture_output=True, text=True, check=False)
+    except OSError as e:
+        if strict:
+            raise GitError(str(e)) from e
+        return ""
+    if r.returncode != 0:
+        if strict:
+            raise GitError(f"git {' '.join(args)}: {r.stderr.strip()}")
+        return ""
+    return r.stdout.strip()
+
+
+def config_sha256(root: Path | None = None) -> str:
+    """sha256 of the evaluated configuration: config files + the committed tree of src/.
+
+    The code tree makes the hash name the method, not only its YAML; without git (no .git) the
+    hash cannot be computed and eval-final refuses.
+    """
+    root = root or ROOT
     h = hashlib.sha256()
     for rel in CONFIG_FILES:
         h.update(rel.encode() + b"\0" + (root / rel).read_bytes() + b"\0")
+    h.update(b"src-tree\0" + git("rev-parse", "HEAD:src", root=root, strict=True).encode())
     return h.hexdigest()
 
 
@@ -62,10 +83,17 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "commit": git("rev-parse", "HEAD"),
         "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
         "config": cfg,
-        "config_sha256": config_sha256(),
+        "config_sha256": _safe_sha(),
         "stub": bool(getattr(search_mod, "IS_STUB", False)),
         **body,
     }
+
+
+def _safe_sha() -> str | None:
+    try:
+        return config_sha256()
+    except GitError:
+        return None
 
 
 def print_table(rec: dict) -> None:

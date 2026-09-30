@@ -15,6 +15,6 @@ while read -r wt; do
     printf '%s' "$out" | jq --arg wt "$wt" '.reason = ("worktree " + $wt + ":\n" + .reason)'
     exit 0
   fi
-done < <(git worktree list --porcelain | awk '/^worktree /{print $2}')
+done < <(git worktree list --porcelain | sed -n 's/^worktree //p')
 
 exit 0

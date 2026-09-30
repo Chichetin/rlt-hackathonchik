@@ -27,6 +27,7 @@ STALE_MIN="${ISSUES_STALE_MIN:-45}"
 T="${ISSUES_TIMEOUT:-15}"
 HOW="Сначала задача: bash scripts/issues.sh free → take <N> → git worktree add .claude/worktrees/<N>-<тема> -b worktree-<N>-<тема> origin/main (GIT.md)"
 
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"  # до любого cd: $0 может быть относительным
 warn() { echo "[issues] $*" >&2; }
 
 # --- check: правило «без взятой задачи не работаем». Ветка проверяется без сети; назначение
@@ -57,7 +58,7 @@ if [ "$cmd" = check ]; then
     warn "нет gh или jq — задача #$n не сверена с GitHub"
     exit 0
   fi
-  verdict="$(ISSUES_TIMEOUT=5 bash "$0" verify "$n" 2>&1)"
+  verdict="$(ISSUES_TIMEOUT=5 bash "$SELF" verify "$n" 2>&1)"
   case $? in
     0) printf '%s' "$n" > "$cache"; exit 0 ;;
     1) echo "#$n: ${verdict#нет: }. $HOW" >&2; exit 1 ;;
@@ -92,7 +93,7 @@ repository(owner:$owner,name:$name){
  refs(refPrefix:"refs/heads/",query:"worktree-",first:100){nodes{name target{...on Commit{committedDate}}}}}}'
 fetch() {
   local raw
-  raw="$(g api graphql -f query="$Q" -F owner="$owner" -F name="$name" 2>/dev/null)" || return 1
+  raw="$(g api graphql -f query="$Q" -f owner="$owner" -f name="$name" 2>/dev/null)" || return 1
   printf '%s' "$raw" | jq -e '.data.repository.issues.nodes | type == "array"' >/dev/null 2>&1 || return 1
   printf '%s' "$raw" | jq -c '{me: .data.viewer.login,
     issues: [.data.repository.issues.nodes[] | {number, title, createdAt, updatedAt,
@@ -152,14 +153,14 @@ case "$cmd" in
       echo "#$n не найдена среди открытых задач (закрыта или нет такой): bash scripts/issues.sh free" >&2; exit 1
     fi
     sub() { J "$data" --argjson n "$n" --arg me "$me" ".issues[] | select(.number == \$n) | $1"; }
-    other="$(sub 'others($me) | join(", ")')"
+    other="$(sub 'others($me) | join(",")')"
     moved="$(sub 'moved($d)')"; branch="$(sub 'branch($d)')"
     age=$((now - moved))
     since="$(J "$data" --argjson m "$moved" '$m | utc') ($(J "$data" --argjson a "$age" '$a | dur') назад)"
     reason=""
     if [ -n "$other" ]; then
       if [ "$age" -le "$stale_s" ] && [ "$force" != --force ]; then
-        echo "#$n взята: $other; последнее движение $since." >&2
+        echo "#$n взята: ${other//,/, }; последнее движение $since." >&2
         echo "Перехват — после $STALE_MIN мин без движения ($(J "$data" --argjson t "$((moved + stale_s))" '$t | utc'))" >&2
         echo "или по прямому указанию человека: bash scripts/issues.sh take $n --force. Сейчас — другую: free." >&2
         exit 1
@@ -181,11 +182,11 @@ case "$cmd" in
     [ -n "$other" ] && args+=(--remove-assignee "$other")
     g "${args[@]}" >/dev/null || { echo "#$n: gh issue edit не прошёл" >&2; exit 1; }
     if [ -n "$other" ]; then
-      note="Перехвачена @$me у @${other//, /, @}: $reason."
+      note="Перехвачена @$me у @${other//,/, @}: $reason."
       if [ -n "$branch" ]; then note="$note Ветка: \`$branch\` — продолжаю её, чужие коммиты не переписываю."
       else note="$note Ветки нет."; fi
       g issue comment "$n" -R "$repo" --body "$note" >/dev/null
-      echo "#$n перехвачена: $me (у $other; $reason); комментарий оставлен."
+      echo "#$n перехвачена: $me (у ${other//,/, }; $reason); комментарий оставлен."
     else
       echo "#$n взята: $me."
     fi
@@ -252,6 +253,6 @@ LABELS
     J "$data" '"[issues] свободных: \([.issues[] | select((.assignees | length) == 0)] | length) — bash scripts/issues.sh free"'
     ;;
   *)
-    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,21p' "$SELF" | sed 's/^# \{0,1\}//'
     ;;
 esac

@@ -7,7 +7,7 @@ PORT ?= 8000
 EXP ?=
 CONFIRM ?=
 
-.PHONY: help setup setup-ml models check lint typecheck test test-ui hooks-test stubs openapi openapi-check \
+.PHONY: help setup setup-ml models check lint typecheck test test-ui hooks-test stubs openapi openapi-check seal-check \
         ui-build api worker ui-dev demo e2e eval eval-final up down
 
 help:              ## список целей
@@ -26,7 +26,7 @@ models:            ## скачать эмбеддинг-модели в кеш H
 	bash scripts/download-models.sh
 
 lint:
-	$(PY) ruff check src tests scripts
+	$(PY) ruff check src tests scripts .claude/hooks
 
 typecheck:
 	$(PY) pyright
@@ -56,7 +56,12 @@ openapi-check:     ## контракты, OpenAPI и TS-типы UI не раз�
 	diff -q $$tmp/api-types.ts $(UI)/src/api-types.ts >/dev/null || { echo "openapi: src/ui/src/api-types.ts устарел — make openapi"; rm -rf $$tmp; exit 1; }; \
 	rm -rf $$tmp; echo "openapi: контракты, OpenAPI и типы UI совпадают"
 
-check: lint typecheck test test-ui hooks-test openapi-check stubs   ## полный прогон перед push
+seal-check:        ## holdout читают только src/eval/split.py и final.py (D-010)
+	@hits=$$(grep -rnE 'unseal\(|holdout\.jsonl|load_cases\(["'"'"']holdout' src --include='*.py' | grep -vE '^src/eval/(split|final)\.py:'); \
+	if [ -n "$$hits" ]; then echo "seal: holdout вне src/eval/split.py и final.py:"; echo "$$hits"; exit 1; fi; \
+	echo "seal: holdout читается только через make eval-final"
+
+check: lint typecheck test test-ui hooks-test openapi-check seal-check stubs   ## полный прогон перед push
 	@echo "make check: OK"
 
 ui-build:

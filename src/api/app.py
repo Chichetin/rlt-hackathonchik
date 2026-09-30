@@ -18,9 +18,11 @@ from pydantic import BaseModel
 
 from src.contracts import Counterparty, Query, SearchResponse, inn_is_valid
 from src.enrich import enrich as enrich_mod
+from src.enrich.evidence import strip_unverified
 from src.llm.provider import get_provider
 from src.match import search as search_mod
 from src.match.filters import apply_filters
+from src.sources.cache import SourceCache
 from src.worker.queue import engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
@@ -78,9 +80,13 @@ def api_counterparty(inn: str) -> Counterparty:
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
-        return enrich_mod.enrich(inn)
+        cp = enrich_mod.enrich(inn)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
+    if getattr(enrich_mod, "IS_STUB", False):
+        return cp
+    # A fact without a verified source is not shown (CLAUDE.md, «Проверки кодом»).
+    return strip_unverified(cp, SourceCache().page_text)
 
 
 @app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202)
@@ -122,4 +128,6 @@ if (UI_DIST / "index.html").exists():
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(404, "нет такого метода API")
         return FileResponse(UI_DIST / "index.html")

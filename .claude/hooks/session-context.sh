@@ -19,6 +19,10 @@ if [ "$(git rev-parse --git-dir)" = "$(git rev-parse --git-common-dir)" ] && [ "
   [ "$dirty" != 0 ] && echo "      Незакоммиченные изменения здесь могут быть чужими — не коммить и не трогай их."
 fi
 
+if [ "$(git config core.hooksPath)" != .githooks ]; then
+  echo "[git] ВНИМАНИЕ: git-хуки не подключены (страж данных, «без задачи не коммитим») — make setup"
+fi
+
 # Ближайшая веха: строки «- ГГГГ-ММ-ДД ЧЧ:ММ | Название» в docs/timeline.md, время московское.
 tl="$root/docs/timeline.md"
 if [ -f "$tl" ]; then

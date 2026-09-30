@@ -4,6 +4,7 @@
 # Ключи API (LLM, DaData, поиск) живут только в .env. См. CLAUDE.md, «Guardrails».
 # Ложное срабатывание: дописать в строку комментарий `secret-scan: allow`.
 set -uo pipefail
+cd "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || exit 0  # хук может стартовать из подкаталога
 
 mapfile -t FILES < <(git ls-files -co --exclude-standard 2>/dev/null | grep -v '^\.claude/hooks/')
 [ "${#FILES[@]}" -eq 0 ] && exit 0

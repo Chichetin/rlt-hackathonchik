@@ -1,0 +1,11 @@
+{
+  "inn": "0000100012",
+  "name": "ООО «Синтетика Поставка»",
+  "contacts": {"phone": "+7 999 123-45-67", "email": "ceo@fake.ru"},
+  "evidence": [
+    {"source": "сайт компании", "url": "https://example.org/rekvizity", "fetched_at": "2026-09-30T12:00:00Z",
+     "fact": "ИНН со страницы реквизитов", "field": "inn", "value": "0000100012"},
+    {"source": "сайт компании", "url": "https://example.org/rekvizity", "fetched_at": "2026-09-30T12:00:00Z",
+     "fact": "Отдел продаж: +7 999 111-22-33", "field": "email", "value": "sales@example.org"}
+  ]
+}

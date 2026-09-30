@@ -72,3 +72,13 @@ def test_queue_idempotent_claim_retry(tmp_path, monkeypatch):
         Q.claim(eng, "enrich")
         Q.finish(eng, a, error="timeout")
     assert Q.status_counts(eng) == {"failed": 1}
+
+
+def test_requeue_only_stale_running_tasks(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    eng = Q.engine_from_env()
+    Q.enqueue(eng, "enrich", "0000100012")
+    Q.claim(eng, "enrich")
+    assert Q.requeue_stale(eng, older_than_s=600) == 0  # another worker may be on it
+    assert Q.requeue_stale(eng, older_than_s=-1) == 1  # older than the timeout: a crashed worker
+    assert Q.status_counts(eng) == {"pending": 1}

@@ -1,7 +1,8 @@
 """`python -m src.worker.worker`: drains the enrichment queue (docker-compose service `worker`).
 
-Resumable: state lives in the task table, a crash leaves `running` tasks that are retried
-after restart (`--recover`). Pauses between tasks protect external sources (section 6).
+Resumable: state lives in the task table; tasks left `running` by a crashed worker longer than
+QUEUE_STALE_RUNNING_S go back to the queue (not all `running` — other workers may hold them).
+Pauses between tasks protect external sources (section 6).
 """
 
 from __future__ import annotations
@@ -10,18 +11,15 @@ import argparse
 import logging
 import time
 
-from sqlalchemy import text
-
 from src.enrich.enrich import enrich
-from src.worker.queue import claim, engine_from_env, finish
+from src.worker.queue import claim, engine_from_env, finish, requeue_stale
 
 log = logging.getLogger("worker")
 
 
 def run(once: bool = False, pause_s: float = 1.0) -> int:
     eng = engine_from_env()
-    with eng.begin() as c:  # tasks left running by a crashed worker go back to the queue
-        c.execute(text("UPDATE tasks SET status='pending' WHERE status='running'"))
+    requeue_stale(eng)
     done = 0
     while True:
         task = claim(eng, "enrich")

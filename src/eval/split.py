@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextvars
 import json
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -36,7 +37,7 @@ class EvalCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     query: Query
     relevant_inns: list[str]
-    date: str  # ISO date of the procurement; decides dev/holdout
+    date: date  # procurement date; decides dev/holdout
 
 
 def split_config(path: Path = SPLIT_CONFIG) -> dict:
@@ -66,7 +67,8 @@ def load_cases(part: str, cfg: dict | None = None) -> list[EvalCase]:
         raise ValueError(part)
     path = _case_path(part, cfg)
     cases = [EvalCase(**json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    lo, hi = (cfg["cutoff"], cfg["holdout_from"]) if part == "dev" else (cfg["holdout_from"], "9999-12-31")
+    d = {k: date.fromisoformat(str(cfg[k])) for k in ("cutoff", "holdout_from")}
+    lo, hi = (d["cutoff"], d["holdout_from"]) if part == "dev" else (d["holdout_from"], date.max)
     leaked = [c.query.query_id for c in cases if not (lo <= c.date < hi)]
     if leaked:
         raise ValueError(f"{part}: cases outside [{lo}, {hi}): {leaked[:5]} — split leak")

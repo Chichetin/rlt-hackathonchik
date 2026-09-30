@@ -2,13 +2,17 @@
 
 Rules (CLAUDE.md, «Проверки кодом»):
 1. every Evidence has `url` and `fetched_at` (enforced by the contract);
-2. an extracted value (inn, phone, email, address, ...) of a web source literally occurs in
-   the text of the cached page at `url` (after whitespace/case normalization; phones compare
-   by digits);
-3. an INN passes the checksum (10 and 12 digits);
-4. the counterparty INN, if set, is backed by at least one Evidence with field="inn".
+2. an extracted value literally occurs in the cached page at `url`: phones and emails compare
+   whole (numbers/addresses extracted from the page), INN/OGRN as a whole number, text fields
+   (address, name) as a normalized substring of at least MIN_TEXT characters;
+3. a web Evidence (http/https) must name what it extracted (`field` + `value`); any INN, phone or
+   email mentioned in its free-text `fact` must be on the page too;
+4. an INN passes the checksum (10 and 12 digits);
+5. the counterparty INN and every contact are backed by an Evidence with the same field/value;
+6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
+   checks those rows, not this module.
 
-Organizers' data (`url` starting with "data:") is checked by DATA's loader, not here.
+`strip_unverified()` is what the API shows: facts and contacts that failed are dropped.
 """
 
 from __future__ import annotations
@@ -21,8 +25,14 @@ from src.contracts import Counterparty, Evidence, inn_is_valid
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
+FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status"}
+MIN_TEXT = 6
+
 _WS = re.compile(r"\s+")
 _TAG = re.compile(r"<[^>]+>")
+_PHONE = re.compile(r"(?<![\d+])(?:\+7|8)?[\s(.-]*\d{3}[\s).-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2}(?!\d)")
+_EMAIL = re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I)
+_INN_LIKE = re.compile(r"(?<!\d)(\d{10}|\d{12})(?!\d)")
 
 
 def normalize(text: str) -> str:
@@ -34,28 +44,63 @@ def _digits(s: str) -> str:
     return re.sub(r"\D", "", s)
 
 
+def phones(text: str) -> set[str]:
+    return {_digits(m)[-10:] for m in _PHONE.findall(normalize(text)) if len(_digits(m)) >= 10}
+
+
+def emails(text: str) -> set[str]:
+    return {e.lower().strip(".") for e in _EMAIL.findall(normalize(text))}
+
+
 def value_in_page(field: str, value: str, page: str) -> bool:
-    norm_page = normalize(page)
     if field == "phone":
-        want = _digits(value)[-10:]
-        return len(want) == 10 and want in _digits(norm_page)
-    if field == "inn":
-        return re.search(rf"(?<!\d){re.escape(value)}(?!\d)", norm_page) is not None
-    return normalize(value) in norm_page
+        want = _digits(value)
+        return len(want) in (10, 11) and want[-10:] in phones(page)
+    if field == "email":
+        return value.strip().lower() in emails(page)
+    if field in ("inn", "ogrn", "kpp"):
+        return value.isascii() and value.isdigit() and re.search(
+            rf"(?<!\d){re.escape(value)}(?!\d)", normalize(page)) is not None
+    want = normalize(value)
+    if len(want) < MIN_TEXT:
+        return False
+    return re.search(rf"(?<!\w){re.escape(want)}(?!\w)", normalize(page)) is not None
 
 
 def check_evidence(ev: Evidence, page_text: PageText) -> list[str]:
     errors: list[str] = []
+    is_data = ev.url.startswith("data:")
+    if is_data != ev.source.startswith("data:"):
+        errors.append(f"{ev.url}: источник {ev.source!r} не соответствует схеме url")
+        return errors
     if ev.field == "inn" and ev.value is not None and not inn_is_valid(ev.value):
         errors.append(f"{ev.url}: ИНН {ev.value} не проходит контрольные цифры")
-    if ev.url.startswith("data:") or ev.value is None:
+    if is_data:
+        return errors
+    if ev.field is None or ev.value is None:
+        errors.append(f"{ev.url}: веб-факт без field/value — нечего проверить на странице")
+        return errors
+    if ev.field not in FIELDS:
+        errors.append(f"{ev.url}: неизвестное поле {ev.field!r}")
         return errors
     page = page_text(ev.url)
     if page is None:
         errors.append(f"{ev.url}: страницы нет в кеше источников — факт не подтверждён")
-    elif not value_in_page(ev.field or "", ev.value, page):
+        return errors
+    if not value_in_page(ev.field, ev.value, page):
         errors.append(f"{ev.url}: {ev.field}={ev.value!r} нет в тексте страницы источника")
+    for p in phones(ev.fact) - phones(page):
+        errors.append(f"{ev.url}: телефон {p} из текста факта нет на странице")
+    for e in emails(ev.fact) - emails(page):
+        errors.append(f"{ev.url}: email {e} из текста факта нет на странице")
+    for inn in set(_INN_LIKE.findall(ev.fact)):
+        if not value_in_page("inn", inn, page):
+            errors.append(f"{ev.url}: число {inn} из текста факта нет на странице")
     return errors
+
+
+def _backed(cp: Counterparty, field: str, value: str, page_text: PageText) -> bool:
+    return any(e.field == field and e.value == value and not check_evidence(e, page_text) for e in cp.evidence)
 
 
 def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
@@ -64,4 +109,15 @@ def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
         errors += check_evidence(ev, page_text)
     if cp.inn is not None and not any(e.field == "inn" and e.value == cp.inn for e in cp.evidence):
         errors.append(f"ИНН {cp.inn} без Evidence с field='inn'")
+    for field, value in cp.contacts.items():
+        if not any(e.field == field and e.value == value for e in cp.evidence):
+            errors.append(f"контакт {field}={value!r} без Evidence")
     return errors
+
+
+def strip_unverified(cp: Counterparty, page_text: PageText) -> Counterparty:
+    """What the user sees: only evidence that passes, only contacts backed by passing evidence."""
+    good = [e for e in cp.evidence if not check_evidence(e, page_text)]
+    contacts = {k: v for k, v in cp.contacts.items() if _backed(cp, k, v, page_text)}
+    inn = cp.inn if cp.inn is None or _backed(cp, "inn", cp.inn, page_text) else None
+    return cp.model_copy(update={"evidence": good, "contacts": contacts, "inn": inn})

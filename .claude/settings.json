@@ -20,7 +20,7 @@
       "Bash(git worktree remove:*)",
       "Bash(git worktree prune)",
       "Bash(git merge origin/main)",
-      "Bash(git push -u origin HEAD:*)",
+      "Bash(git push -u origin HEAD)",
       "Bash(git push origin --delete worktree-*)",
       "Bash(git branch -d:*)",
       "Bash(git branch -D worktree-*)",
@@ -62,7 +62,17 @@
       "Bash(git clean:*)",
       "Bash(gh pr merge * --rebase*)",
       "Bash(gh pr merge * --squash*)",
-      "Bash(gh pr merge * --admin*)"
+      "Bash(gh pr merge * --admin*)",
+      "Bash(git push *:main*)",
+      "Bash(git push *+*)",
+      "Bash(git push * -f *)",
+      "Bash(git push *--force-with-lease*)",
+      "Bash(git push *--no-verify*)",
+      "Bash(git commit *--no-verify*)",
+      "Bash(git commit -n *)",
+      "Bash(git worktree remove --force*)",
+      "Bash(git worktree remove -f*)",
+      "Bash(git checkout -- *)"
     ]
   },
   "hooks": {
@@ -71,7 +81,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/session-context.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-context.sh",
             "timeout": 15
           }
         ]
@@ -83,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-data-files.sh pre-tool",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-data-files.sh pre-tool",
             "timeout": 15,
             "statusMessage": "Страж данных: нет ли данных, кеша и больших файлов в коммите…"
           }
@@ -95,19 +105,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-secrets.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-secrets.sh",
             "timeout": 30,
             "statusMessage": "Поиск секретов в файлах для коммита…"
           },
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-tests.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-tests.sh",
             "timeout": 240,
             "statusMessage": "Тесты (pytest, vitest), если что-то менялось…"
           },
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-upstream.sh stop",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-upstream.sh stop",
             "timeout": 30,
             "statusMessage": "Чужие коммиты в origin/main против текущей работы…"
           }
@@ -120,7 +130,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-upstream.sh post",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-upstream.sh post",
             "timeout": 30
           }
         ]
@@ -131,7 +141,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-worktrees.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-worktrees.sh",
             "timeout": 60,
             "statusMessage": "Секреты в worktree субагентов…"
           }

@@ -12,6 +12,8 @@
       Docker (для `make up`, необязательно).
 - [ ] `git clone https://github.com/Chichetin/rlt-hackathonchik.git && cd rlt-hackathonchik && make setup`
       (uv + npm по lockfile, Playwright chromium, git-хуки).
+- [ ] Один раз на репозиторий (кто первый): `bash scripts/issues.sh labels` — метки `area:*`,
+      `P0–P2`, `blocker`, `contract`, `ui`, `experiment`; без них `issues.sh create` с метками упадёт.
 - [ ] `make check` и `make e2e` зелёные; `make demo` открывается на http://127.0.0.1:8000.
 - [ ] `make setup-ml` и `make models` — эмбеддинг-модели в кеш HF до площадки (Wi-Fi — частая
       точка отказа). Хотя бы у одного человека в команде.

@@ -13,7 +13,8 @@ import hashlib
 import os
 import sqlite3
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,8 +41,10 @@ class SourceCache:
                 "body TEXT NOT NULL, status INTEGER NOT NULL, fetched_at REAL NOT NULL)"
             )
 
-    def _conn(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path)
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        with closing(sqlite3.connect(self.path)) as c, c:  # commit/rollback, then close
+            yield c
 
     @staticmethod
     def key(url: str) -> str:
@@ -68,6 +71,11 @@ class SourceCache:
                 (self.key(url), page.url, page.body, page.status, page.fetched_at),
             )
         return page
+
+    def page_text(self, url: str) -> str | None:
+        """For src/enrich/evidence.py: the cached text regardless of TTL (the fact was read then)."""
+        page = self.get(url, allow_stale=True)
+        return page.body if page else None
 
     def fetch(self, url: str, fetcher: Callable[[str], tuple[int, str]]) -> CachedPage:
         """Cached fetch: fresh cache → cache; else fetcher; fetcher failed → stale cache if any."""

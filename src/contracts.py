@@ -13,6 +13,7 @@ is the "integration into AIS GZ" slide.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -33,7 +34,7 @@ def _control(digits: list[int], weights: tuple[int, ...]) -> int:
 
 def inn_is_valid(inn: str) -> bool:
     """Checksum of a Russian INN: 10 digits (legal entity) or 12 digits (individual)."""
-    if not inn.isdigit() or len(inn) not in (10, 12):
+    if not re.fullmatch(r"\d{10}|\d{12}", inn, re.ASCII):  # isdigit() accepts "²" and Arabic digits
         return False
     d = [int(c) for c in inn]
     if len(inn) == 10:
