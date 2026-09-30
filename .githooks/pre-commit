@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Люди и любые агенты: страж данных + «без взятой задачи не коммитим» (CLAUDE.md, «Задачи»).
+# Подключает `make setup` (git config core.hooksPath .githooks). --no-verify — только по явной
+# просьбе человека.
+root="$(git rev-parse --show-toplevel)"
+bash "$root/.claude/hooks/check-data-files.sh" || exit 1
+script="$root/scripts/issues.sh"
+if [ ! -f "$script" ]; then
+  echo "[issues] в этой ветке нет scripts/issues.sh — влейте origin/main; работа без задачи запрещена" >&2
+  exit 1
+fi
+exec bash "$script" check .
