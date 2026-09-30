@@ -9,15 +9,18 @@ worktree + PR (D-002): trunk-based и `git pull --rebase` из документ�
 
 ## Автономность агента
 
-Агент коммитит, пушит свою ветку, открывает PR и **после вердикта `reviewer` «merge» сам его
-вливает** — без запроса подтверждения (`permissions.allow` в `.claude/settings.json`). Разрешение
-опирается на проверки, а не отменяет их:
+Агент коммитит, **пушит сам** (D-016), открывает PR и **после вердикта `reviewer` «merge» сам его
+вливает** — без запроса подтверждения (`permissions.allow` в `.claude/settings.json`). Push в
+`main` тоже не запрещён: обычный путь в `main` — PR после `reviewer`, прямой push — для
+bootstrap, срочной починки сломанного `main` или по прямому указанию человека. Запрещено только
+переписывать историю. Разрешение опирается на проверки, а не отменяет их:
 
 - перед коммитом и push — `git fetch --prune` и просмотр обеих сторон расхождения;
 - в коммит — только текущий шаг: `git add <явные пути>`. Никогда `git add -A`, `git add .`,
   `git commit -a`: в дереве может лежать чужая незакоммиченная работа;
-- `--force`, `rebase`, `amend`, `reset --hard`, `clean`, `pull --rebase` — запрещены
-  (`permissions.deny`); только по явной просьбе человека;
+- `--force`/`+refspec`, `--no-verify`, удаление `main`, `rebase`, `amend`, `reset --hard`,
+  `clean`, `pull --rebase` — запрещены (`permissions.deny`); только по явной просьбе человека;
+- push, как и коммит, — только из worktree взятой задачи (`check-issue.sh`, `.githooks/pre-push`);
 - секреты, `.env`, `data/`, `cache/`, `indexes/`, `node_modules`, сборки не коммитятся
   (`.gitignore`, Stop-хук `check-secrets.sh`, страж `check-data-files.sh`).
 

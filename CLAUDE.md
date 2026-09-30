@@ -181,7 +181,8 @@ Claude Code (Claude Max); субагентами пользуемся актив
 Задача → worktree `.claude/worktrees/<N>-<тема>` на ветке `worktree-<N>-<тема>` → PR в `main` с
 `Closes #N` → перед push `git fetch --prune && git merge origin/main` и `make check` → merge после
 вердикта `reviewer`, по одному (`gh pr merge <PR> --merge --delete-branch`). Не trunk-based: без
-`pull --rebase`, без push в `main`. Запрещено (`permissions.deny`): force-push, rebase,
+`pull --rebase`. Пушить агент может сам, в том числе в `main` (D-016); обычный путь в `main` —
+PR. Запрещено (`permissions.deny`): force-push, `--no-verify`, удаление `main`, rebase,
 `reset --hard`, `add -A`/`add .`, `commit -a`, amend. В коммит — только свои пути. Трейлеров
 соавторства ИИ нет (`attribution` пустой).
 
