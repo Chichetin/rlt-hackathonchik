@@ -23,6 +23,20 @@ expect() { # expect <block|pass> <описание> <хук>
   else ok "$2"; fi
 }
 
+# --- подключение хуков в settings.json (тест скрипта без подключения ничего не держит)
+wired() { # wired <событие> <matcher|""> <скрипт>
+  jq -e --arg ev "$1" --arg m "$2" --arg s "$3" \
+    '.hooks[$ev][] | select(($m == "") or (.matcher // "" | split("|") | index($m))) | .hooks[] | select(.command | contains($s))' \
+    "$REPO/.claude/settings.json" >/dev/null 2>&1 && ok "settings: $3 подключён к $1${2:+ ($2)}" || bad "settings: $3 не подключён к $1 $2"
+}
+for m in Edit Write MultiEdit NotebookEdit Bash; do wired PreToolUse "$m" check-issue.sh; done
+wired PreToolUse Bash check-data-files.sh
+wired SessionStart "" session-context.sh
+wired Stop "" check-secrets.sh
+wired Stop "" check-tests.sh
+wired Stop "" check-upstream.sh
+wired SubagentStop "" check-worktrees.sh
+
 # --- check-secrets.sh
 expect pass  "секреты: чистый репозиторий"                check-secrets.sh
 echo 'LLM_API_KEY=your_api_key_here' > .env.example
