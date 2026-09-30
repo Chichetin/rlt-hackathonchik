@@ -33,15 +33,20 @@ def commands(text: str) -> list[list[str]]:
 
 
 def targets(text: str, cwd: str) -> list[str]:
-    body = []
-    for line in text.splitlines():
-        body.append(line)
-        if "<<" in line:  # heredoc body is data
+    cmds: list[list[str]] = []
+    # Each line is its own command list (a newline separates commands; a comment ends at it);
+    # a trailing backslash continues the line; a heredoc body is data.
+    for line in text.replace("\\\n", " ").splitlines():
+        for tail in ("", '"', "'", "'\""):  # a quote opened here closes on a later line
+            try:
+                cmds += commands(line + tail)
+                break
+            except ValueError:
+                continue
+        else:
+            return [cwd]
+        if "<<" in line:
             break
-    try:
-        cmds = commands("\n".join(body))
-    except ValueError:
-        return [cwd]
     here, found = cwd, []
     for c in cmds:
         while c and "=" in c[0] and not c[0].startswith("-") and c[0].split("=")[0].isidentifier():

@@ -45,7 +45,14 @@ def _digits(s: str) -> str:
 
 
 def phones(text: str) -> set[str]:
-    return {_digits(m)[-10:] for m in _PHONE.findall(normalize(text)) if len(_digits(m)) >= 10}
+    """Phone numbers written as phones: with a +7/8 prefix or separators. A bare 10-digit run
+    is an INN/OGRN fragment, not a phone."""
+    out = set()
+    for m in _PHONE.findall(normalize(text)):
+        d, raw = _digits(m), m.strip()
+        if len(d) == 11 or re.search(r"[\s().-]", raw):
+            out.add(d[-10:])
+    return out
 
 
 def emails(text: str) -> set[str]:

@@ -74,6 +74,9 @@ guard block "страж: файл 6 МБ"
 git rm -q --cached src/big.txt && rm src/big.txt
 echo 'x = 1' > src/a.py && git add src/a.py
 guard pass  "страж: обычный код"
+git add -f data/raw/contracts.csv 2>/dev/null || { mkdir -p data/raw && echo a > data/raw/contracts.csv && git add -f data/raw/contracts.csv; }
+(cd src && guard block "страж: данные ловятся и из подкаталога")
+git rm -q --cached data/raw/contracts.csv
 out="$(jq -cn --arg c "cd $TMP && git commit -m x" '{tool_input: {command: $c}}' | bash "$HOOKS/check-data-files.sh" pre-tool)"
 [ -z "$out" ] && ok "страж pre-tool: чистый индекс — пропуск" || bad "страж pre-tool: лишний вывод $out"
 git add -f data/raw/contracts.csv
@@ -208,6 +211,10 @@ expect_pre block "задача: cd в worktree, потом cd обратно"   
 mkdir -p "$TMP/sp ace" && git -C "$TMP/sp ace" init -q
 expect_pre pass  "задача: cd \"путь с пробелом\" в чужой репозиторий" "$(bashcmd "$TMP" "cd \"$TMP/sp ace\" && git commit -m y")"
 expect_pre pass  "задача: сессия в подкаталоге worktree задачи"  "$(bashcmd "$TMP/.claude/worktrees/12-x/src" "git commit -m y")"
+expect_pre block "задача: многострочная команда, commit во второй строке" "$(bashcmd "$TMP" "$(printf 'git status\ngit commit -m x')")"
+expect_pre block "задача: комментарий не съедает следующую строку"    "$(bashcmd "$TMP" "$(printf 'echo x # note\ngit push -u origin HEAD')")"
+expect_pre block "задача: перенос строки обратным слешем"             "$(bashcmd "$TMP" "$(printf 'git \\\n  commit -m x')")"
+expect_pre pass  "задача: cd worktree && commit с heredoc-сообщением" "$(bashcmd "$TMP" "$(printf "cd $TMP/.claude/worktrees/12-x && git commit -m \"\$(cat <<'EOF'\nсообщение\nEOF\n)\"")")"
 rm -f "$(git -C .claude/worktrees/13-x rev-parse --git-dir)/issue-check"
 GH_FAIL=1 expect_pre pass "задача: GitHub недоступен — номер в ветке есть, пропуск" "$(edit "$TMP/.claude/worktrees/13-x/a.py")"
 mkdir -p "$TMP/other" && git -C "$TMP/other" init -q

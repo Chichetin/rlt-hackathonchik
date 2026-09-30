@@ -67,6 +67,11 @@ def health() -> Health:
 @app.post("/api/search", response_model=SearchResponse)
 def api_search(query: Query) -> SearchResponse:
     matches = apply_filters(search_mod.search(query), query)
+    if not getattr(search_mod, "IS_STUB", False):
+        # What the card and the xlsx show: only facts and contacts that pass the Evidence check.
+        cache = SourceCache()
+        matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
+                   for m in matches]
     return SearchResponse(
         query=query,
         history=[m for m in matches if m.origin == "history"],

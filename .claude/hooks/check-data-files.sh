@@ -15,6 +15,7 @@ if [ "$mode" = pre-tool ]; then
   [ -n "$dir" ] && { cd "$dir" 2>/dev/null || exit 0; }
 fi
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+cd "$(git rev-parse --show-toplevel)" || exit 0  # пути из git diff — от корня
 
 MAX_MB="${MAX_FILE_MB:-5}"
 DATA_RE='^(data|cache|indexes)/|\.(parquet|duckdb|sqlite3?|db|feather|arrow|pkl|npy|npz|safetensors|pt|bin|onnx)$'

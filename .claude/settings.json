@@ -72,7 +72,12 @@
       "Bash(git commit -n *)",
       "Bash(git worktree remove --force*)",
       "Bash(git worktree remove -f*)",
-      "Bash(git checkout -- *)"
+      "Bash(git checkout -- *)",
+      "Bash(git push *refs/heads/main*)",
+      "Bash(git push --set-upstream origin main*)",
+      "Bash(git push * main)",
+      "Bash(git restore .)",
+      "Bash(git restore :/*)"
     ]
   },
   "hooks": {

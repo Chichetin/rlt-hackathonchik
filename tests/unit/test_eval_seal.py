@@ -43,8 +43,8 @@ def repo(tmp_path, monkeypatch):
     for rel in ("configs/search.yaml", "configs/split.yaml"):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / rel, tmp_path / rel)
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "a.py").write_text("x = 1\n")
+    (tmp_path / "src" / "match").mkdir(parents=True)
+    (tmp_path / "src" / "match" / "a.py").write_text("x = 1\n")
     git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "add", "."], check=True)
@@ -65,7 +65,7 @@ def test_gate_refuses_wrong_hash(repo):
 
 
 def test_gate_refuses_dirty_tree(repo):
-    (repo / "src" / "a.py").write_text("x = 2\n")
+    (repo / "src" / "match" / "a.py").write_text("x = 2\n")
     with pytest.raises(PermissionError, match="не чистое"):
         F.gate(R.config_sha256(repo), repo, repo / "log.md")
 
@@ -128,7 +128,17 @@ def test_seen_marker_in_git_dir_blocks_rerun_even_with_clean_log(repo):
 
 def test_config_hash_changes_with_committed_code(repo):
     before = R.config_sha256(repo)
-    (repo / "src" / "a.py").write_text("x = 2\n")
+    (repo / "src" / "match" / "a.py").write_text("x = 2\n")
     git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "commit", "-qam", "method change"], check=True)
     assert R.config_sha256(repo) != before
+
+
+def test_config_hash_ignores_ui_code(repo):
+    before = R.config_sha256(repo)
+    (repo / "src" / "ui").mkdir()
+    (repo / "src" / "ui" / "App.tsx").write_text("export {}\n")
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "ui"], check=True)
+    assert R.config_sha256(repo) == before

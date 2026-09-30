@@ -65,3 +65,17 @@ def test_openapi_has_contracts(client):
 
 def test_unknown_api_path_is_404_not_spa(client, tmp_path, monkeypatch):
     assert client.get("/api/nope").status_code == 404
+
+
+def test_search_strips_unverified_facts_once_real(client, monkeypatch, tmp_path):
+    """After the stub is replaced, a fabricated contact never reaches the card or the xlsx."""
+    from src.match import search as search_mod
+    monkeypatch.setattr(search_mod, "IS_STUB", False)
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "c.sqlite"))
+    monkeypatch.setattr(app_mod, "SourceCache", lambda: __import__("src.sources.cache", fromlist=["x"]).SourceCache(
+        tmp_path / "c.sqlite"))
+    body = client.post("/api/search", json={"query_id": "q", "text": "x"}).json()
+    discovered = body["discovered"]
+    # stub web evidence (example.org) is not in the empty cache -> dropped, contacts dropped
+    assert discovered and all(m["counterparty"]["contacts"] == {} for m in discovered)
+    assert all(e["url"].startswith("data:") for m in body["history"] for e in m["counterparty"]["evidence"])

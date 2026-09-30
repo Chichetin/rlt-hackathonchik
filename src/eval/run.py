@@ -24,6 +24,8 @@ SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 RESULTS = ROOT / "eval" / "results"
 # Files whose bytes define the evaluated configuration (sha256 for eval-final).
 CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
+# Code that defines the method (not UI/API): its committed tree enters the hash.
+METHOD_PATHS = ("src/contracts.py", "src/ingest", "src/match", "src/sources", "src/enrich", "src/eval", "src/llm")
 
 
 class GitError(RuntimeError):
@@ -46,7 +48,7 @@ def git(*args: str, root: Path | None = None, strict: bool = False) -> str:
 
 
 def config_sha256(root: Path | None = None) -> str:
-    """sha256 of the evaluated configuration: config files + the committed tree of src/.
+    """sha256 of the evaluated configuration: config files + the committed method code (METHOD_PATHS).
 
     The code tree makes the hash name the method, not only its YAML; without git (no .git) the
     hash cannot be computed and eval-final refuses.
@@ -55,7 +57,7 @@ def config_sha256(root: Path | None = None) -> str:
     h = hashlib.sha256()
     for rel in CONFIG_FILES:
         h.update(rel.encode() + b"\0" + (root / rel).read_bytes() + b"\0")
-    h.update(b"src-tree\0" + git("rev-parse", "HEAD:src", root=root, strict=True).encode())
+    h.update(b"method-tree\0" + git("ls-tree", "-r", "HEAD", "--", *METHOD_PATHS, root=root, strict=True).encode())
     return h.hexdigest()
 
 

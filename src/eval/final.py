@@ -2,7 +2,7 @@
 
 Gate (as `make eval-test` in FloodValue):
 1. EVAL_FINAL_CONFIRM equals sha256 of the frozen configuration (configs/search.yaml +
-   configs/split.yaml + the committed src/ tree) — without CONFIRM it prints the current hash;
+   configs/split.yaml + committed method code, run.METHOD_PATHS) — without CONFIRM it prints the current hash;
 2. the tree is clean for FROZEN_PATHS: the configuration is reproducible from the commit;
 3. this configuration hash has not been run on holdout before (a rerun after changes is a new
    experiment on dev, not a second look at holdout) — checked in eval/final-log.md AND in a

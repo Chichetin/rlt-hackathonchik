@@ -118,3 +118,8 @@ def test_unknown_field_is_rejected():
 @pytest.mark.parametrize("inn", ["²²²²²²²²²²", "٧٧٠٧٠٨٣٨٩٣"])
 def test_non_ascii_digits_are_not_an_inn(inn):
     assert not inn_is_valid(inn)
+
+
+def test_bare_inn_is_not_a_phone():
+    assert not value_in_page("phone", "7707083893", "ИНН 7707083893")
+    assert value_in_page("phone", "88120000001", PAGE)  # 11 digits with prefix 8, page has +7 (812) 000-00-01

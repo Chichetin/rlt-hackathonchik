@@ -20,8 +20,11 @@ log = logging.getLogger("worker")
 def run(once: bool = False, pause_s: float = 1.0) -> int:
     eng = engine_from_env()
     requeue_stale(eng)
-    done = 0
+    done, last_requeue = 0, time.monotonic()
     while True:
+        if time.monotonic() - last_requeue > 60:  # a sibling worker may have crashed meanwhile
+            requeue_stale(eng)
+            last_requeue = time.monotonic()
         task = claim(eng, "enrich")
         if task is None:
             if once:
