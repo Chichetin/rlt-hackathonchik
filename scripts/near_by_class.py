@@ -1,5 +1,5 @@
 """Where real winners come from, by OKPD2 class: the basis of purchase_type.REMOTE_CLASSES and of the share of
-winners that «Может работать у заказчика» = auto hides (#242, D-092).
+winners that «Может работать у заказчика» = auto hides (#242, D-094).
 
 Wins of customers with INN 78 / 47 in data/processed (organizers' data). The supplier's region is its KPP (a 00…
 stub is not a region), an ИП without a KPP — its INN, else unknown; «far» — neither the customer's region nor its
