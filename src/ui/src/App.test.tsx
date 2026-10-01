@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { buildQuery, type Counterparty, filterNotes, regionLabel, type SearchResponse } from "./api";
+import { buildQuery, type Counterparty, filterNotes, regionLabel, rnpLabel, type SearchResponse } from "./api";
 
 const match = (name: string, origin: "history" | "discovered", kind = "manufacturer") => ({
   counterparty: {
@@ -126,6 +126,17 @@ test("regionLabel: registry region first, then KPP prefix, else unknown", () => 
   expect(regionLabel({ region: null, kpp: "470101001" })).toBe("Ленинградская область (по КПП)");
   expect(regionLabel({ region: null, kpp: "770101001" })).toBe("регион не указан");
   expect(regionLabel({ region: null, kpp: null })).toBe("регион не указан");
+});
+
+test("rnpLabel shows the dated Evidence fact instead of a bare нет, and не проверено for None", () => {
+  type RnpInput = Pick<Counterparty, "in_rnp" | "evidence">;
+  const dated = { fact: "Не найдена в РНП ЕИС на 01.10.2026: поиск по ИНН 7804428656 записей не дал", field: "rnp" };
+  expect(rnpLabel({ in_rnp: false, evidence: [dated] } as RnpInput)).toBe(dated.fact);
+  const inRnp = { fact: "В РНП ЕИС: реестровая запись № Р2621504, включено 01.10.2026", field: "rnp" };
+  expect(rnpLabel({ in_rnp: true, evidence: [inRnp] } as RnpInput)).toBe(inRnp.fact);
+  expect(rnpLabel({ in_rnp: null, evidence: [] } as RnpInput)).toBe("не проверено");
+  // no rnp Evidence at all (not yet checked, strip_unverified would have already cleared in_rnp too)
+  expect(rnpLabel({ in_rnp: null, evidence: [{ fact: "x", field: "status" }] } as RnpInput)).toBe("не проверено");
 });
 
 test("filterNotes counts candidates hidden for an unknown attribute", () => {

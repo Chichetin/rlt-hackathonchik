@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from src.api import app as app_mod
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, ScoreComponent
 from src.match import search as search_mod
-from src.sources import bo_nalog, pb_nalog, rmsp
+from src.sources import bo_nalog, eis_rnp, pb_nalog, rmsp
 from src.sources.cache import SourceCache
 from src.worker.queue import engine_from_env, tasks
 
@@ -18,6 +18,10 @@ FIX = Path(__file__).resolve().parents[1] / "fixtures" / "pb_nalog"
 CACHED = "7804428656"  # card in fixtures
 UNCACHED = "7801000012"
 Q = {"query_id": "q", "text": "x"}
+
+RNP_FIX = Path(__file__).resolve().parents[1] / "fixtures" / "eis_rnp"
+RNP_POS_PAGE = (RNP_FIX / "inn_9717122721_3_entries.html").read_text(encoding="utf-8")
+RNP_IN_RNP = "9717122721"
 
 
 def _match(inn: str) -> CounterpartyMatch:
@@ -50,6 +54,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(pb_nalog, "fetch_card", no_network)
     monkeypatch.setattr(rmsp, "fetch_quick", only_offline(rmsp.fetch_quick))
     monkeypatch.setattr(bo_nalog, "fetch", only_offline(bo_nalog.fetch))
+    monkeypatch.setattr(eis_rnp, "fetch", only_offline(eis_rnp.fetch))
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", no_network)
 
     def put(status_from: str | None = None, status_to: str | None = None, msp: bool = True) -> None:
@@ -88,6 +93,19 @@ def test_liquidated_cached_candidate_is_dropped(env):
     client, put, calls = env
     put("Действующая организация", "Ликвидирована")
     assert _inns(client.post("/api/search", json=Q)) == [UNCACHED]
+
+
+def test_rnp_cached_true_is_dropped_by_the_hard_filter_on_the_real_path(env):
+    """#111: `apply_filters` already drops `in_rnp is True` (src/match/filters.py); the real path is
+    `_enriched()` reading a cached РНП answer through `enrich(..., offline=True)` — no network."""
+    client, put, calls = env
+    put()
+    # a cached РНП "в реестре" page for the CACHED INN (derived from a real recorded page, same
+    # convention as tests/unit/test_eis_rnp.py: the INN is swapped, the record itself is real)
+    page = RNP_POS_PAGE.replace(RNP_IN_RNP, CACHED)
+    SourceCache().put(eis_rnp.search_url(CACHED), page)
+    assert _inns(client.post("/api/search", json=Q)) == [UNCACHED]  # CACHED is in the РНП — dropped
+    assert calls == []  # still no network: the РНП fact came from the cache
 
 
 def test_only_msp_uses_cached_flag(env):

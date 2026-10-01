@@ -31,6 +31,13 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     for mod in (bo_nalog, pb_nalog, rmsp):
         monkeypatch.setattr(mod, "_blocked_until", 0.0)
+    # eis_rnp's module-level pacing lock persists across tests in one process (#111, D-063): without
+    # this, a test that calls enrich() live (no offline/rnp_offline — the worker's own call shape)
+    # shortly after another one can hit a real 60 s Crawl-delay `time.sleep` before `no_network`
+    # above even raises. Tests of the pacing itself override this back explicitly.
+    from src.sources import eis_rnp
+
+    monkeypatch.setattr(eis_rnp, "MIN_INTERVAL_S", 0.0)
 
 
 @pytest.fixture(scope="session")

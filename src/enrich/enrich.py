@@ -7,6 +7,12 @@ own source and url. Every fact is an Evidence whose `value` literally occurs in 
 cached card text (src/enrich/evidence.py checks it; the API shows only what passes).
 Organizers' data stats (`Counterparty.stats`) come from search(), not from here.
 
+After the ФНС card, `_merge_rnp` adds РНП ЕИС (`Counterparty.in_rnp`, src/sources/eis_rnp.py),
+D-067 (#111): a failure or a captcha never turns into a guessed fact, only a logged warning.
+The Электронный магазин СПб registry is NOT a source of enrich() or discover() (D-061: an expert's
+feedback after checkpoint 1 — АИС ГЗ is the primary source, "обогащение вашими данными" reads as
+circular to the jury); `src/sources/estore.py` stays unused by this module.
+
 `ENRICH_OFFLINE=1` — cache only, no network (KeyError for an INN that is not cached).
 """
 
@@ -20,7 +26,7 @@ import httpx
 
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
 from src.enrich import role
-from src.sources import bo_nalog, pb_nalog, rmsp
+from src.sources import bo_nalog, eis_rnp, pb_nalog, rmsp
 from src.sources.cache import CachedPage, SourceCache
 
 log = logging.getLogger(__name__)
@@ -218,15 +224,56 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
     return None
 
 
-def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None) -> Counterparty:
-    """pb card from cache → pb live (unless blocked) → rmsp by INN → bo. The error of pb is raised
-    only if no fallback source answered; otherwise the source of every fact is in its Evidence.
-    `offline=True` — cache only (KeyError when nothing is cached); None — by `ENRICH_OFFLINE`."""
+def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) -> Counterparty:
+    """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-067, #111). `offline` is passed through
+    explicitly (never the `ENRICH_OFFLINE` environment variable) so the caller — not a process-wide
+    flag — decides whether a live request (paced, under lock, Crawl-delay 60 s) may happen at all:
+    the API always passes `offline=True` via `rnp_offline` below, the worker does not, and only the
+    worker is where a live РНП request is allowed to happen (research/SOURCES.md).
+    `KeyError` (offline, nothing cached yet) is the normal state of a not-yet-checked INN — quiet.
+    Any other failure (`Blocked`, HTTP, a bad INN) leaves `in_rnp` as is (None, "не проверено"),
+    never guesses `False`: a logged warning is the only effect."""
+    try:
+        res = eis_rnp.check(inn, cache, offline=offline)
+    except KeyError:
+        return cp
+    except (eis_rnp.Blocked, httpx.HTTPError, ValueError) as e:
+        log.warning("enrich %s: РНП ЕИС недоступен: %s", inn, e)
+        return cp
+    update: dict[str, object] = {}
+    if res.evidence:
+        update["evidence"] = [*cp.evidence, *res.evidence]
+    if res.in_rnp is not None:
+        update["in_rnp"] = res.in_rnp
+    return cp.model_copy(update=update) if update else cp
+
+
+def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
+           rnp_offline: bool | None = None) -> Counterparty:
+    """pb card from cache → pb live (unless blocked) → rmsp by INN → bo, then РНП ЕИС is merged in
+    (D-067, #111). The error of pb is raised only if no fallback source answered; otherwise the
+    source of every fact is in its Evidence. Электронный магазин СПб (src/sources/estore.py) is
+    NOT a source here (D-061).
+    `offline=True` — cache only (KeyError when nothing is cached); None — by `ENRICH_OFFLINE`.
+    `rnp_offline` governs the РНП step only; None follows `offline`. The API passes
+    `rnp_offline=True` explicitly on every call that is not already `offline=True`
+    (src/api/app.py `api_counterparty`), so a direct card lookup never waits on the 60 s
+    Crawl-delay pause — only the worker (`src/worker/worker.py`, `src/worker/prefetch.py`), which
+    calls `enrich(inn)` with neither flag set, may do a live РНП request."""
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
     cache = cache or SourceCache()
     if offline is None:
         offline = os.environ.get("ENRICH_OFFLINE") == "1"
+    if rnp_offline is None:
+        rnp_offline = offline
+    result = _primary(inn, cache, offline)
+    return _merge_rnp(inn, result, cache, rnp_offline)
+
+
+def _primary(inn: str, cache: SourceCache, offline: bool) -> Counterparty:
+    """pb card from cache → pb live (unless blocked) → rmsp by INN → bo (unchanged from before #111:
+    the error of pb is raised only if no fallback source answered)."""
     err: Exception
     if offline:
         page = cache.get(pb_nalog.card_url(inn), allow_stale=True)

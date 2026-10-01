@@ -10,6 +10,7 @@ import {
   KIND_LABEL,
   LotError,
   regionLabel,
+  rnpLabel,
   search,
   type SearchPage,
   STAT_LABEL,
@@ -683,7 +684,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
         <dt>МСП</dt>
         <dd>{yesNo(cp.is_msp)}</dd>
         <dt>В РНП</dt>
-        <dd>{yesNo(cp.in_rnp)}</dd>
+        <dd>{rnpLabel(cp)}</dd>
         <dt>Регион</dt>
         <dd>{regionLabel(cp)}</dd>
         {Object.entries(cp.contacts ?? {}).map(([k, v]) => [<dt key={`k-${k}`}>{k}</dt>, <dd key={`v-${k}`}>{v}</dd>])}

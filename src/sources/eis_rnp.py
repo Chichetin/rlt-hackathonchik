@@ -22,7 +22,9 @@ raises `Blocked` (or an HTTP error), and nothing is cached or turned into «not 
 robots.txt: `Crawl-delay: 60` → at most one request per MIN_INTERVAL_S (60 s, the environment can
 only raise it, never lower), blocking; for the
 final shortlist only. Pages go to SourceCache as is (Evidence values literally occur there);
-a cached answer older than MAX_AGE_S is refetched. `ENRICH_OFFLINE=1` — cache only.
+a cached answer older than MAX_AGE_S is refetched. `ENRICH_OFFLINE=1` — cache only; `enrich()`
+(D-067, #111) passes `offline` explicitly instead so the API (always offline for РНП) and the
+worker (live) do not depend on process-wide environment state.
 """
 
 from __future__ import annotations
@@ -156,11 +158,14 @@ def _get(client: httpx.Client, url: str) -> tuple[int, str]:
     return r.status_code, r.text
 
 
-def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None) -> CachedPage:
+def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None,
+          offline: bool | None = None) -> CachedPage:
+    """`offline` explicit (passed by enrich(), D-067) wins; None falls back to `ENRICH_OFFLINE`
+    (CLI / standalone use) — cache only either way, never a live request."""
     cache = cache or SourceCache()
     url = search_url(inn)
     hit = cache.get(url, allow_stale=True)
-    if os.environ.get("ENRICH_OFFLINE") == "1":
+    if offline if offline is not None else os.environ.get("ENRICH_OFFLINE") == "1":
         if hit is None:
             raise KeyError(url)
         return hit
@@ -180,10 +185,11 @@ def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | Non
     return cache.put(url, body, status)
 
 
-def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None) -> RnpResult:
+def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None,
+          offline: bool | None = None) -> RnpResult:
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
-    page = fetch(inn, cache, client)
+    page = fetch(inn, cache, client, offline=offline)
     at = datetime.fromtimestamp(page.fetched_at, tz=UTC)
     day = at.astimezone(MSK).strftime("%d.%m.%Y")
 
