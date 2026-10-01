@@ -81,7 +81,7 @@ def measure(q: Query, cache: SourceCache, processed: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description="Дистрибьюторы в блоке «Новые»: было (v0) и стало (v1)")
     ap.add_argument("--rule", choices=("v0", "v1"), required=True)
     ap.add_argument("--cases", type=Path, default=ROOT / "eval" / "cases" / "real.jsonl")
     ap.add_argument("--out", type=Path)
