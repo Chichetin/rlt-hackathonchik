@@ -1,0 +1,19 @@
+# Baselines backtest (T-08, research/EVAL.md, D-038…D-040): id эксперимента → метод и параметры.
+# `make eval EXP=B-pop` берёт запись по id; другой id с тем же методом —
+# `uv run python -m src.eval.run --exp <id> --baseline B-inc --part real`.
+# Это НЕ конфигурация продукта: её задаёт configs/search.yaml. История — только лоты до as_of кейса.
+B-pop:           # самые частые участники в группе ОКПД2 запроса (4 знака, «17.12»)
+  method: pop
+  k: 20
+  okpd_level: 4
+  count: participations   # participations | wins
+  fill: true              # меньше k — добор по классу (2 знака), затем по всем классам
+B-inc:           # инкумбент: участники у этого заказчика в этой группе, затем добор B-pop
+  method: inc
+  k: 20
+  okpd_level: 4
+  count: participations
+  fill: true
+B-bm25:          # порядок ретривера BM25 без компонентного скоринга search()
+  method: bm25
+  k: 20

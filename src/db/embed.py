@@ -1,4 +1,4 @@
-"""Embeddings of distinct normalized product names → Postgres + pgvector (D-023).
+"""Embeddings of distinct normalized product names → Postgres + pgvector (D-054).
 
     DATABASE_URL=postgresql://app:app@127.0.0.1:5432/app uv run python -m src.db.embed [--limit N]   # make db-embed
 
@@ -57,9 +57,13 @@ def _vec(v: np.ndarray) -> str:
     return "[" + ",".join(f"{x:.6g}" for x in v.tolist()) + "]"
 
 
-def embed(conn: psycopg.Connection, encode: Encoder, data_schema: str = "data", vec_schema: str = "vec",
-          batch: int = 1024, limit: int | None = None) -> dict[str, int]:
-    """Add new texts of `data_schema.items`, encode up to `limit` missing ones; returns totals."""
+def _rate(done: int, started: float) -> float:
+    """Texts per second; the clock may not tick between two calls (Windows: ~15 ms resolution)."""
+    return done / max(time.monotonic() - started, 1e-3)
+
+
+def ensure_table(conn: psycopg.Connection, data_schema: str = "data", vec_schema: str = "vec") -> None:
+    """Create `vec_schema.TABLE` if needed and add the new distinct texts of `data_schema.items`."""
     t = sql.Identifier(vec_schema, TABLE)
     conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(vec_schema)))
@@ -67,6 +71,13 @@ def embed(conn: psycopg.Connection, encode: Encoder, data_schema: str = "data", 
     norm = norm_sql(sql.Identifier("product_name"))
     conn.execute(sql.SQL("INSERT INTO {} (norm) SELECT DISTINCT {} FROM {} WHERE {} <> '' "  # '' never passes keyset
                          "ON CONFLICT DO NOTHING").format(t, norm, sql.Identifier(data_schema, "items"), norm))
+
+
+def embed(conn: psycopg.Connection, encode: Encoder, data_schema: str = "data", vec_schema: str = "vec",
+          batch: int = 1024, limit: int | None = None) -> dict[str, int]:
+    """Add new texts of `data_schema.items`, encode up to `limit` missing ones; returns totals."""
+    t = sql.Identifier(vec_schema, TABLE)
+    ensure_table(conn, data_schema, vec_schema)
     total, missing = conn.execute(sql.SQL("SELECT count(*), count(*) FILTER (WHERE emb IS NULL) FROM {}")
                                   .format(t)).fetchone()  # type: ignore[misc]
     todo = missing if limit is None else min(limit, missing)
@@ -83,7 +94,7 @@ def embed(conn: psycopg.Connection, encode: Encoder, data_schema: str = "data", 
             cur.executemany(sql.SQL("UPDATE {} SET emb = %s::vector WHERE norm = %s").format(t),
                             [(_vec(v), x) for v, x in zip(vecs, texts, strict=True)])
         done, last = done + len(texts), texts[-1]
-        rate = done / (time.monotonic() - started)
+        rate = _rate(done, started)
         log.info("%d/%d (%.0f текстов/с, осталось ≈ %.0f мин)", done, todo, rate, (todo - done) / rate / 60)
     left = conn.execute(sql.SQL("SELECT count(*) FROM {} WHERE emb IS NULL").format(t)).fetchone()[0]  # type: ignore[index]
     return {"total": total, "done": total - left}
@@ -123,33 +134,46 @@ def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000) -> i
             emb = np.asarray(encode(part), dtype=np.float16).reshape(-1)
             w.write_table(pa.table({"norm": part, "emb": pa.FixedSizeListArray.from_arrays(emb, DIM)}, schema=schema))
             done = i + len(part)
-            rate = done / (time.monotonic() - started)
+            rate = _rate(done, started)
             left = (len(texts) - done) / rate / 60
             log.info("%d/%d (%.0f текстов/с, осталось ≈ %.1f мин)", done, len(texts), rate, left)
     return len(texts)
 
 
-def import_file(conn: psycopg.Connection, path: Path, vec_schema: str = "vec") -> int:
-    """Fill rows still without a vector from vecs.parquet; returns the number of rows updated."""
+def import_file(conn: psycopg.Connection, path: Path, data_schema: str = "data", vec_schema: str = "vec",
+                batch_size: int = 20_000) -> int:
+    """Fill rows still without a vector from vecs.parquet; returns the number of rows updated.
+    Works on a fresh database too: the table is created from `data_schema.items` first."""
     meta = pq.read_schema(path).metadata or {}
     got = {k.decode(): v.decode() for k, v in meta.items() if k in (b"model", b"prefix")}
     if got != {"model": MODEL, "prefix": PASSAGE}:
         raise ValueError(f"{path}: векторы другой модели или префикса {got}, нужно {MODEL!r} и {PASSAGE!r}")
+    ensure_table(conn, data_schema, vec_schema)
     conn.execute(sql.SQL("CREATE TEMP TABLE IF NOT EXISTS import_vecs (norm text, emb vector({}))").format(DIM))
-    conn.execute("TRUNCATE import_vecs")
+    update = sql.SQL("UPDATE {} t SET emb = i.emb FROM import_vecs i WHERE t.norm = i.norm AND t.emb IS NULL").format(
+        sql.Identifier(vec_schema, TABLE))
+    pf = pq.ParquetFile(path)
+    updated, seen, started = 0, 0, time.monotonic()
     with conn.cursor() as cur:
-        for batch in pq.ParquetFile(path).iter_batches(batch_size=50_000):
+        # Batch by batch: one 1M-row UPDATE took the 7 GB laptop's Docker VM down (#48). Each batch is committed, so
+        # a rerun keeps what is done: it reads the whole file again but changes only rows with emb IS NULL.
+        for batch in pf.iter_batches(batch_size=batch_size):
+            cur.execute("TRUNCATE import_vecs")
             emb = batch.column("emb").flatten().to_numpy().reshape(-1, DIM).astype(np.float32)
             with cur.copy("COPY import_vecs (norm, emb) FROM STDIN") as cp:
                 for norm, v in zip(batch.column("norm").to_pylist(), emb, strict=True):
                     cp.write_row((norm, _vec(v)))
-        cur.execute(sql.SQL("UPDATE {} t SET emb = i.emb FROM import_vecs i WHERE t.norm = i.norm AND t.emb IS NULL")
-                    .format(sql.Identifier(vec_schema, TABLE)))
-        return cur.rowcount
+            cur.execute(update)
+            if not conn.autocommit:
+                conn.commit()
+            updated, seen = updated + cur.rowcount, seen + batch.num_rows
+            log.info("импорт %d/%d (обновлено %d, пропущено %d: уже с вектором или нет в таблице; %.0f строк/с)",
+                     seen, pf.metadata.num_rows, updated, seen - updated, _rate(seen, started))
+    return updated
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="embeddings of product names → pgvector (D-023)")
+    ap = argparse.ArgumentParser(description="embeddings of product names → pgvector (D-054)")
     ap.add_argument("--limit", type=int, help="encode at most N texts (subsample first)")
     ap.add_argument("--batch", type=int, default=1024)
     ap.add_argument("--index", action="store_true", help="build the HNSW index after the fill")

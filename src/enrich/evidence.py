@@ -20,12 +20,13 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Callable
+from functools import cached_property
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
-FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp",
+FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region",
           "contract", "contracts", "rnp"}
 MIN_TEXT = 6
 
@@ -45,34 +46,84 @@ def _digits(s: str) -> str:
     return re.sub(r"\D", "", s)
 
 
-def phones(text: str) -> set[str]:
-    """Phone numbers written as phones: with a +7/8 prefix or separators. A bare 10-digit run
-    is an INN/OGRN fragment, not a phone."""
+def _phones(norm: str) -> set[str]:
     out = set()
-    for m in _PHONE.findall(normalize(text)):
+    for m in _PHONE.findall(norm):
         d, raw = _digits(m), m.strip()
         if len(d) == 11 or re.search(r"[\s().-]", raw):
             out.add(d[-10:])
     return out
 
 
+def phones(text: str) -> set[str]:
+    """Phone numbers written as phones: with a +7/8 prefix or separators. A bare 10-digit run
+    is an INN/OGRN fragment, not a phone."""
+    return _phones(normalize(text))
+
+
 def emails(text: str) -> set[str]:
     return {e.lower().strip(".") for e in _EMAIL.findall(normalize(text))}
 
 
-def value_in_page(field: str, value: str, page: str) -> bool:
+class _Page:
+    """A cached page prepared once: normalized text, its phones and emails (computed on demand)."""
+
+    def __init__(self, text: str):
+        self.text = text
+
+    @cached_property
+    def norm(self) -> str:
+        return normalize(self.text)
+
+    @cached_property
+    def phones(self) -> set[str]:
+        return _phones(self.norm)
+
+    @cached_property
+    def emails(self) -> set[str]:
+        return {e.lower().strip(".") for e in _EMAIL.findall(self.norm)}
+
+
+class CachedPages:
+    """`page_text` that prepares every page once. Lives as long as one request: create it per call
+    (`cached_pages(cache.page_text)`) and pass it wherever a PageText is expected — no global state."""
+
+    def __init__(self, page_text: PageText):
+        self._page_text = page_text
+        self._pages: dict[str, _Page | None] = {}
+
+    def page(self, url: str) -> _Page | None:
+        if url not in self._pages:
+            text = self._page_text(url)
+            self._pages[url] = None if text is None else _Page(text)
+        return self._pages[url]
+
+    def __call__(self, url: str) -> str | None:
+        page = self.page(url)
+        return None if page is None else page.text
+
+
+def cached_pages(page_text: PageText) -> CachedPages:
+    return page_text if isinstance(page_text, CachedPages) else CachedPages(page_text)
+
+
+def _in_page(field: str, value: str, page: _Page) -> bool:
     if field == "phone":
         want = _digits(value)
-        return len(want) in (10, 11) and want[-10:] in phones(page)
+        return len(want) in (10, 11) and want[-10:] in page.phones
     if field == "email":
-        return value.strip().lower() in emails(page)
+        return value.strip().lower() in page.emails
     if field in ("inn", "ogrn", "kpp"):
         return value.isascii() and value.isdigit() and re.search(
-            rf"(?<!\d){re.escape(value)}(?!\d)", normalize(page)) is not None
+            rf"(?<!\d){re.escape(value)}(?!\d)", page.norm) is not None
     want = normalize(value)
     if len(want) < MIN_TEXT:
         return False
-    return re.search(rf"(?<!\w){re.escape(want)}(?!\w)", normalize(page)) is not None
+    return re.search(rf"(?<!\w){re.escape(want)}(?!\w)", page.norm) is not None
+
+
+def value_in_page(field: str, value: str, page: str) -> bool:
+    return _in_page(field, value, _Page(page))
 
 
 def check_evidence(ev: Evidence, page_text: PageText) -> list[str]:
@@ -91,18 +142,18 @@ def check_evidence(ev: Evidence, page_text: PageText) -> list[str]:
     if ev.field not in FIELDS:
         errors.append(f"{ev.url}: неизвестное поле {ev.field!r}")
         return errors
-    page = page_text(ev.url)
+    page = cached_pages(page_text).page(ev.url)
     if page is None:
         errors.append(f"{ev.url}: страницы нет в кеше источников — факт не подтверждён")
         return errors
-    if not value_in_page(ev.field, ev.value, page):
+    if not _in_page(ev.field, ev.value, page):
         errors.append(f"{ev.url}: {ev.field}={ev.value!r} нет в тексте страницы источника")
-    for p in phones(ev.fact) - phones(page):
+    for p in phones(ev.fact) - page.phones:
         errors.append(f"{ev.url}: телефон {p} из текста факта нет на странице")
-    for e in emails(ev.fact) - emails(page):
+    for e in emails(ev.fact) - page.emails:
         errors.append(f"{ev.url}: email {e} из текста факта нет на странице")
     for inn in set(_INN_LIKE.findall(ev.fact)):
-        if not value_in_page("inn", inn, page):
+        if not _in_page("inn", inn, page):
             errors.append(f"{ev.url}: число {inn} из текста факта нет на странице")
     return errors
 
@@ -112,6 +163,7 @@ def _backed(cp: Counterparty, field: str, value: str, page_text: PageText) -> bo
 
 
 def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
+    page_text = cached_pages(page_text)
     errors: list[str] = []
     for ev in cp.evidence:
         errors += check_evidence(ev, page_text)
@@ -125,6 +177,7 @@ def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
 
 def strip_unverified(cp: Counterparty, page_text: PageText) -> Counterparty:
     """What the user sees: only evidence that passes, only contacts backed by passing evidence."""
+    page_text = cached_pages(page_text)  # every page is read and normalized once per call
     good = [e for e in cp.evidence if not check_evidence(e, page_text)]
     contacts = {k: v for k, v in cp.contacts.items() if _backed(cp, k, v, page_text)}
     inn = cp.inn if cp.inn is None or _backed(cp, "inn", cp.inn, page_text) else None

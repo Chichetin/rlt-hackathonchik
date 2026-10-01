@@ -3,7 +3,7 @@
 # Kickoff (D-017 г): compose не на критическом пути демо (D-007); поднимается в T-13 для слайда масштабирования.
 services:
   db:
-    image: pgvector/pgvector:pg16   # Postgres 16 + pgvector (D-023): данные лотов и векторный поиск
+    image: pgvector/pgvector:pg16   # Postgres 16 + pgvector (D-054): данные лотов и векторный поиск
     ports: ["127.0.0.1:${PG_PORT:-5432}:5432"]   # загрузчик parquet → Postgres запускается с хоста (make db-load)
     shm_size: 2gb   # параллельная сборка HNSW держит maintenance_work_mem в /dev/shm (по умолчанию 64M — падает)
     environment:

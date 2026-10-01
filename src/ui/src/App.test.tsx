@@ -155,10 +155,71 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
-  expect(discovered).toHaveTextContent("Поиск в открытых источниках подключается (#16)");
+  expect(discovered).toHaveTextContent(
+    "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках",
+  );
   await userEvent.click(screen.getByLabelText("Только производители"));
   expect(await screen.findByText("Тип поставщика ещё не определён у 1 из 1 — признак появится после обогащения.")).toBeInTheDocument();
   const history = screen.getByRole("region", { name: "С опытом госзакупок" });
   expect(history).toHaveTextContent("у кандидатов этот признак ещё не известен");
   expect(history).not.toHaveTextContent("переформулировать");
+});
+
+test("history is paged on the server: total from the header, «Показать ещё» appends the next page", async () => {
+  const page = (names: string[]) => ({ ...structuredClone(response), stub: false, discovered: [], history: names.map((n) => match(n, "history")) });
+  const urls: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    urls.push(String(url));
+    const offset = Number(new URL(String(url), "http://x").searchParams.get("offset"));
+    const body = offset === 0 ? page(["ООО Альфа", "ООО Гамма"]) : page(["ООО Дельта"]);
+    return new Response(JSON.stringify(body), { status: 200, headers: { "X-Total-History": "3", "X-Total-Discovered": "0" } });
+  });
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const history = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(within(history).getByText("Показаны 2 из 3")).toBeInTheDocument();
+  expect(urls[0]).toBe("/api/search?limit=20&offset=0");
+  await userEvent.click(within(history).getByRole("button", { name: "Показать ещё" }));
+  expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
+  expect(urls[1]).toBe("/api/search?limit=20&offset=2");
+  expect(within(history).getAllByRole("listitem")).toHaveLength(3);
+  expect(within(history).queryByRole("button", { name: "Показать ещё" })).not.toBeInTheDocument();
+});
+
+// #84: «Новые» emptied by a filter. Mock: requests with the given filter get no new companies.
+async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["17.12.14.110"]) {
+  const base = structuredClone(response);
+  base.stub = false;
+  base.query.okpd2 = okpd2;
+  base.discovered[0].counterparty.kind = null;
+  const filtered = { ...structuredClone(base), discovered: [] };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    const body = JSON.parse(String((init as RequestInit).body));
+    return new Response(JSON.stringify(body.filters?.[filter] ? filtered : base), { status: 200 });
+  });
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
+  expect(await within(discovered).findByText("ООО Бета")).toBeInTheDocument();
+  return discovered;
+}
+
+test("«Новые» emptied by «Только производители» name the filter, not «nothing found» (#84)", async () => {
+  const discovered = await newBlockWith("only_manufacturers");
+  await userEvent.click(screen.getByLabelText("Только производители"));
+  expect(
+    await within(discovered).findByText(/^Под фильтр «Только производители» не попал никто из 1 новых компаний/),
+  ).toBeInTheDocument();
+  expect(discovered).not.toHaveTextContent("новых компаний по этому запросу не найдено");
+  await userEvent.click(screen.getByLabelText("Только производители"));
+  expect(await within(discovered).findByText("ООО Бета")).toBeInTheDocument();
+});
+
+test("«Новые» emptied by the region keep the general text: the region of new companies is known (#84)", async () => {
+  const discovered = await newBlockWith("region");
+  await userEvent.selectOptions(screen.getByLabelText("Регион"), "Ленинградская область");
+  expect(await within(discovered).findByText(/новых компаний по этому запросу не найдено/)).toBeInTheDocument();
+  expect(discovered).not.toHaveTextContent("Под фильтр");
 });
