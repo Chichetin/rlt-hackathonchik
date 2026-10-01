@@ -79,8 +79,8 @@ body::before { display: none; }
 .block h2 { color: #f1f1f5; font-size: 20px; }
 .block .count { color: var(--group); border-color: rgb(var(--group-rgb) / .3); background: rgb(var(--group-rgb) / .09); border-radius: 8px; }
 .block .hint { min-height: 3.4em; line-height: 1.7; }
-.block .item { border: 1px solid rgb(var(--group-rgb) / .21); border-left: 3px solid var(--group); background: rgb(var(--group-rgb) / .045); }
-.block .item:hover:not(:disabled) { border-color: var(--group); background: rgb(var(--group-rgb) / .085); }
+.block .item { border: 1px solid #ffffff20; background: rgb(var(--group-rgb) / .045); }
+.block .item:hover:not(:disabled) { border-color: #ffffff40; background: rgb(var(--group-rgb) / .085); }
 .block .score { color: var(--group); }
 .block .score-meter > span { background: var(--group); }
 .block .badge { display: inline-flex; align-items: center; gap: 6px; border-color: rgb(var(--group-rgb) / .25); background: rgb(var(--group-rgb) / .1); color: var(--group); }
