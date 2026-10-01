@@ -90,6 +90,12 @@ def test_experience_counts_lots_and_wins_in_okpd2_group(search_data):
     assert e.value > comp(m["7801000020"], "experience").value  # 1 paper lot, no paper wins
 
 
+def test_experience_ends_with_assortment_summary_not_scored(search_data):
+    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])))
+    assert comp(m["7801000012"], "experience").explanation.endswith("; узкий ассортимент: 80% лотов — класс 17")
+    assert "ассортимент" not in comp(m["7801000020"], "experience").explanation  # 3 lots: too little history
+
+
 def test_experience_before_cutoff(search_data):
     m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"], as_of=CUTOFF)))
     assert "2 лот(ов)" in comp(m["7801000012"], "experience").explanation  # lots 1, 3
