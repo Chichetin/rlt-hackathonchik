@@ -35,11 +35,11 @@ if [ -f pyproject.toml ] && [ -d tests ] && find tests -name 'test_*.py' | grep 
   RUN_PY=1
   if [ "$SELECTED" -eq 1 ]; then
     if [ ${#CHANGED[@]} -eq 0 ]; then RUN_PY=0
-    else
-      mapfile -t TARGETS < <(PYTHONUTF8=1 uv run --frozen python scripts/select_tests.py pytest "${CHANGED[@]}" | tr -d '\r' | grep -v '^$')
+    elif T_OUT="$(PYTHONUTF8=1 uv run --frozen python scripts/select_tests.py pytest "${CHANGED[@]}" 2>/dev/null)"; then
+      mapfile -t TARGETS < <(printf '%s' "$T_OUT" | tr -d '\r' | grep -v '^$')
       [ ${#TARGETS[@]} -eq 0 ] && RUN_PY=0
       [ "${TARGETS[0]:-}" = ALL ] && TARGETS=()
-    fi
+    fi  # отбор упал — TARGETS пуст, RUN_PY=1: весь pytest
   fi
   if [ "$RUN_PY" -eq 1 ]; then
     RAN=1

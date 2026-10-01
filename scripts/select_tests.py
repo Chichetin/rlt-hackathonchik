@@ -3,12 +3,15 @@
     python scripts/select_tests.py changed [base-ref]          → changed paths vs merge-base (default origin/main):
                                                                  branch commits, staged, unstaged, untracked, deleted
     python scripts/select_tests.py pytest <changed files...>   → test files, one per line; ALL = whole suite
+    python scripts/select_tests.py pyright <changed files...>  → changed .py + every src/tests module importing them
     python scripts/select_tests.py e2e <changed files...>      → exit 0 if the demo e2e is affected, 1 if not
 
 A test is affected when it, a conftest.py above it, or any src module it imports — directly or
-transitively, including imports inside functions and fixtures — changed. Inputs whose effect the
-graph cannot see (configs/, test fixtures, pytest settings) select the whole suite. Pure stdlib:
-runs the same on Windows and Linux without the project venv.
+transitively, including imports inside functions and fixtures — changed. The graph only knows .py
+files in src/ and tests/; documents, the UI, hooks and shell scripts cannot affect pytest; anything
+else (configs/, eval/cases/, fixtures, pyproject, a deleted or renamed module, a test helper) selects
+the whole suite: a missed test is worse than an extra run. Pure stdlib: runs the same on Windows and
+Linux without the project venv.
 """
 
 from __future__ import annotations
@@ -21,10 +24,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Read at runtime by code or tests in ways imports do not show → whole pytest suite.
-PYTEST_ALL_PREFIXES = ("configs/", "tests/fixtures/", "pyproject.toml", "uv.lock", "scripts/select_tests.py")
-# The demo scenario (src/ui/e2e/demo.spec.ts) runs on the ingest fixture through the API and the built UI.
-E2E_PREFIXES = ("src/ui/", "tests/fixtures/ingest/", "configs/", "pyproject.toml", "uv.lock")
+# Changes pytest cannot see: documents, the UI (tsc, vitest, e2e), hooks and shell scripts (test-hooks).
+PYTEST_NEUTRAL_PREFIXES = ("src/ui/", ".claude/", ".githooks/", ".github/", "docs/", "research/", "pitch/")
+PYTEST_NEUTRAL_SUFFIXES = (".md", ".sh")
+# The demo scenario (src/ui/e2e/demo.spec.ts) runs on the fixtures through the API and the built UI;
+# its recipe lives in the Makefile.
+E2E_PREFIXES = ("src/ui/", "tests/fixtures/", "configs/", "pyproject.toml", "uv.lock", "Makefile")
 E2E_ENTRY = "src/api/app.py"
 UI_SKIP = ("src/ui/node_modules/", "src/ui/dist/", "src/ui/test-results/")
 
@@ -150,7 +155,8 @@ def conftest_deps(rel: str) -> tuple[frozenset[str], dict[str, frozenset[str]]]:
         return resolved[name]
 
     for name, fn in funcs.items():
-        if any("autouse" in ast.unparse(d) for d in fn.decorator_list):
+        # autouse fixtures and pytest_* hooks act on every test below this conftest
+        if name.startswith("pytest_") or any("autouse" in ast.unparse(d) for d in fn.decorator_list):
             common |= deps(name)
     return frozenset(common), {name: deps(name) for name in funcs}
 
@@ -188,12 +194,24 @@ def _all_tests() -> list[str]:
     return sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "tests").rglob("test_*.py"))
 
 
+def _in_graph(path: str) -> bool:
+    """An existing src module, test file or conftest — the import graph knows who depends on it.
+
+    A deleted (or renamed-away) module leaves no file to trace importers to; a test helper or
+    tests/**/__init__.py is not modelled.
+    """
+    if not path.endswith(".py") or not (ROOT / path).is_file():
+        return False
+    if path.startswith("src/"):
+        return True
+    name = path.rsplit("/", 1)[-1]
+    return path.startswith("tests/") and (name.startswith("test_") or name == "conftest.py")
+
+
 def select_pytest(changed: list[str]) -> list[str]:
-    if any(f.startswith(PYTEST_ALL_PREFIXES) for f in changed):
-        return ["ALL"]
-    # A deleted module leaves no file to trace imports to: whoever imported it is unknown.
-    if any(f.startswith(("src/", "tests/")) and f.endswith(".py") and not (ROOT / f).exists() for f in changed):
-        return ["ALL"]
+    for f in changed:
+        if not (f.startswith(PYTEST_NEUTRAL_PREFIXES) or f.endswith(PYTEST_NEUTRAL_SUFFIXES) or _in_graph(f)):
+            return ["ALL"]
     changed_set = set(changed)
     picked: list[str] = []
     for test in _all_tests():
@@ -210,10 +228,23 @@ def select_pytest(changed: list[str]) -> list[str]:
     return picked
 
 
+def select_pyright(changed: list[str]) -> list[str]:
+    """Changed .py plus every src/tests module importing them: a changed signature breaks callers."""
+    touched = {f for f in changed if f.endswith(".py")}
+    out = {f for f in touched if (ROOT / f).is_file() and f.startswith(("src/", "tests/"))}
+    for p in [*ROOT.glob("src/**/*.py"), *ROOT.glob("tests/**/*.py")]:
+        rel = p.relative_to(ROOT).as_posix()
+        if closure(rel) & touched:
+            out.add(rel)
+    return sorted(out)
+
+
 def needs_e2e(changed: list[str]) -> bool:
     for f in changed:
         if f.startswith(E2E_PREFIXES) and not f.startswith(UI_SKIP):
             return True
+        if f.startswith("src/") and f.endswith(".py") and not (ROOT / f).exists():
+            return True  # a deleted module may be imported on the demo path
     deps = closure(E2E_ENTRY) | {E2E_ENTRY}
     return any(f in deps for f in changed)
 
@@ -228,13 +259,15 @@ def changed_files(base_ref: str = "origin/main") -> list[str]:
     base = _git("merge-base", "HEAD", base_ref)[0]
     # core.quotepath=off: Cyrillic file names come out as-is, not as octal escapes.
     q = ("-c", "core.quotepath=off")
-    paths = _git(*q, "diff", "--name-only", base) + _git(*q, "diff", "--name-only", "--cached")
+    # --no-renames: a rename must also list the old path, or its forgotten importers go unseen.
+    paths = _git(*q, "diff", "--name-only", "--no-renames", base)
+    paths += _git(*q, "diff", "--name-only", "--no-renames", "--cached")
     paths += _git(*q, "ls-files", "--others", "--exclude-standard")
     return sorted({_norm(p) for p in paths})
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[1] not in ("changed", "pytest", "e2e"):
+    if len(argv) < 2 or argv[1] not in ("changed", "pytest", "pyright", "e2e"):
         print(__doc__, file=sys.stderr)
         return 2
     if argv[1] == "changed":
@@ -247,7 +280,7 @@ def main(argv: list[str]) -> int:
     changed = [_norm(f) for f in argv[2:] if f.strip()]
     if argv[1] == "e2e":
         return 0 if needs_e2e(changed) else 1
-    print("\n".join(select_pytest(changed)))
+    print("\n".join(select_pyright(changed) if argv[1] == "pyright" else select_pytest(changed)))
     return 0
 
 
