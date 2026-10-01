@@ -363,7 +363,7 @@ def _hang(calls: list, ok_first: float | None = None):
 @pytest.mark.parametrize(("ok_first", "pacing", "expected_calls"), [
     (None, 0.0, 1),  # the very first request hangs
     (0.2, 0.0, 2),  # the first answers slowly, the second hangs: it only gets what is left
-    (0.0, 0.3, 2),  # the pause between requests is part of the budget too
+    (0.0, 0.2, 2),  # the pause between requests is part of the budget too
     (0.5, 0.0, 1),  # almost nothing left after the first answer → the second request is not started
 ])
 def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, monkeypatch, ok_first, pacing,
