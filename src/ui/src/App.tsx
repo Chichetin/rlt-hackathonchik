@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
 import "./micro.css";
-import { GlassSidebar, GlassTopbar } from "./GlassShell";
+import { GlassHeader } from "./GlassShell";
+import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
 import {
@@ -332,9 +333,9 @@ export function App() {
     <div inert={!!open}><ScrollTools /></div>
     <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
-      <GlassSidebar path={path} link={link} mark={<BrandMark />} />
+      <GlassHeader path={path} link={link} mark={<BrandMark />} />
+      {path === "/search" && <div className="search-background"><WaveField pattern="slats" /></div>}
       <div className="content">
-      <GlassTopbar path={path} link={link} />
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -570,12 +571,12 @@ export function App() {
       </motion.div>
       </AnimatePresence>
       </div>
-      <footer className="appfoot">
+      {path !== "/" && <footer className="appfoot">
         <div className="appfoot-in">
           <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
           <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
         </div>
-      </footer>
+      </footer>}
     </motion.div>
     <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} />}</AnimatePresence>
     </LayoutGroup>
