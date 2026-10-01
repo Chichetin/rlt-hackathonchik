@@ -247,6 +247,46 @@
         }
       }
     },
+    "/api/lot/{ident}/backtest": {
+      "get": {
+        "summary": "Api Lot Backtest",
+        "description": "Places of the lot's real participants and winner in our ranking, history before the cutoff (#192, D-084).",
+        "operationId": "api_lot_backtest_api_lot__ident__backtest_get",
+        "parameters": [
+          {
+            "name": "ident",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ident"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Backtest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/okpd2": {
       "get": {
         "summary": "Api Okpd2",
@@ -409,6 +449,78 @@
   },
   "components": {
     "schemas": {
+      "Backtest": {
+        "properties": {
+          "lot_id": {
+            "type": "integer",
+            "title": "Lot Id"
+          },
+          "lot_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Lot Date"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "ranked": {
+            "type": "integer",
+            "title": "Ranked"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/ParticipantRank"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "winner_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winner Rank"
+          },
+          "in_top": {
+            "type": "integer",
+            "title": "In Top"
+          },
+          "top": {
+            "type": "integer",
+            "title": "Top"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lot_id",
+          "lot_date",
+          "as_of",
+          "channel",
+          "ranked",
+          "participants",
+          "winner_rank",
+          "in_top",
+          "top"
+        ],
+        "title": "Backtest"
+      },
       "Counterparty": {
         "properties": {
           "inn": {
@@ -695,6 +807,36 @@
           "store"
         ],
         "title": "Health"
+      },
+      "ParticipantRank": {
+        "properties": {
+          "inn": {
+            "type": "string",
+            "title": "Inn"
+          },
+          "is_winner": {
+            "type": "boolean",
+            "title": "Is Winner"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inn",
+          "is_winner",
+          "rank"
+        ],
+        "title": "ParticipantRank"
       },
       "Query": {
         "properties": {
