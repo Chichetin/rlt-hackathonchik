@@ -21,3 +21,7 @@ H-15g:           # H-15f + инкумбент-сигнал 0.3
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
   signals: {incumbent: 0.3}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+H-15f-geo:       # проверка: H-15f с ненулевым весом географии и регионом ИП по ИНН
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
+  signals: {inn_region: 1.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}

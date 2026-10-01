@@ -238,9 +238,13 @@ def dump_record(rec: dict) -> str:
     return head[:-2] + ',\n  "per_query": [\n' + lines + "\n  ]\n}\n"
 
 
-def load_method_config(exp: str, baseline: str | None = None) -> dict:
+def load_method_config(exp: str, baseline: str | None = None, config_of: str | None = None) -> dict:
     """configs/baselines.yaml entry for `baseline` (default: the experiment id), else configs/search.yaml
-    with the overrides of configs/experiments.yaml for this experiment id (none — the product configuration)."""
+    with the overrides of configs/experiments.yaml for this experiment id (none — the product configuration).
+
+    `config_of`: take the overrides of another experiment id (a run of H-15f on the real cases is saved
+    as H-15f-real); an id that is not in configs/experiments.yaml is an error, never the product silently.
+    """
     known = yaml.safe_load(BASELINES_CONFIG.read_text(encoding="utf-8")) if BASELINES_CONFIG.exists() else {}
     name = baseline or exp
     if name in known:
@@ -249,8 +253,14 @@ def load_method_config(exp: str, baseline: str | None = None) -> dict:
         raise ValueError(f"baseline {baseline!r} нет в {BASELINES_CONFIG.name}: {sorted(known)}")
     cfg = yaml.safe_load(SEARCH_CONFIG.read_text(encoding="utf-8"))
     overrides = yaml.safe_load(EXPERIMENTS_CONFIG.read_text(encoding="utf-8")) if EXPERIMENTS_CONFIG.exists() else {}
-    for key, value in ((overrides or {}).get(exp) or {}).items():  # one level deep: weights, signals, options
-        cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
+    overrides = overrides or {}
+    if config_of is not None and config_of not in overrides:
+        raise ValueError(f"эксперимента {config_of!r} нет в {EXPERIMENTS_CONFIG.name}: {sorted(overrides)}")
+    applied = overrides.get(config_of or exp) or {}
+    for key, value in applied.items():  # one level deep: weights, signals, options
+        cfg[key] = {**(cfg.get(key) or {}), **value} if isinstance(value, dict) else value
+    if applied:
+        log.warning("эксперимент %s: поверх %s наложено %s", config_of or exp, SEARCH_CONFIG.name, applied)
     return cfg
 
 
@@ -261,11 +271,20 @@ def main(argv: list[str] | None = None) -> int:
                     help="dev sample (default), all dev cases or the 5–10 real cases; never holdout")
     ap.add_argument("--baseline", default=None,
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
+    ap.add_argument("--config-of", default=None,
+                    help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
         return 2
-    cfg = load_method_config(args.exp, args.baseline)
+    if args.baseline and args.config_of:
+        print("--baseline и --config-of вместе не задаются", file=sys.stderr)
+        return 2
+    try:
+        cfg = load_method_config(args.exp, args.baseline, args.config_of)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
     rec = result_record(args.exp, args.part, cfg, evaluate(load_cases(args.part, split_config()), cfg))
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"

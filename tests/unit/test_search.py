@@ -7,6 +7,7 @@ Fixture (tests/fixtures/ingest): paper lots 1 (2024-03-01), 3 (2024-11-05), 6 (2
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -259,11 +260,25 @@ def test_config_argument_without_options_equals_product(search_data):
 def test_experience_by_similar_counts_matched_lots(search_data):
     q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
     by_class = {m.counterparty.inn: m for m in search(q)}
-    for m in search(q, config=_cfg(experience_by="similar")):
-        exp = next(c for c in m.components if c.name == "experience")
+    similar = search(q, config=_cfg(experience_by="similar"))
+    assert similar and len(similar) == len(by_class)
+    for m in similar:
+        exp = comp(m, "experience")
         assert "с похожими позициями" in exp.explanation
-        other = next(c for c in by_class[m.counterparty.inn].components if c.name == "experience")
-        assert "по ОКПД2" in other.explanation
+        assert "по ОКПД2" in comp(by_class[m.counterparty.inn], "experience").explanation
+        # the value is computed from the matched lots and wins named in the explanation
+        lots, wins = (int(x) for x in re.findall(r"(\d+) лот\(ов\).*побед: (\d+)", exp.explanation)[0])
+        want = 0.5 * search_mod._sat(lots, search_mod.SAT_LOTS) + 0.5 * search_mod._sat(wins, search_mod.SAT_WINS)
+        assert exp.value == pytest.approx(want, abs=1e-4)
+
+
+def test_fit_bm25_share_changes_product_fit(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    only_text = [comp(m, "product_fit").value for m in search(q, config=_cfg(fit_bm25_share=1.0))]
+    default = [comp(m, "product_fit").value for m in search(q)]
+    assert max(only_text) == 1.0 and only_text != default  # share 1.0 = BM25 similarity alone, the best one is 1
+    only_code = [comp(m, "product_fit").value for m in search(q, config=_cfg(fit_bm25_share=0.0))]
+    assert set(only_code) <= set(search_mod.OKPD_DEPTH.values())
 
 
 def test_tie_break_bm25_orders_equal_scores_by_similarity(search_data):
