@@ -20,6 +20,10 @@ Block «Новые из открытых источников» (`origin="discov
    enrichment queue (`enqueue`), so the request itself makes no pb.nalog.ru calls.
 
 `DISCOVERY_OFFLINE=1` or `ENRICH_OFFLINE=1` — cache only, no network.
+`DISCOVERY_PREDICTED_CLASS=1` — also build the block for a query WITHOUT OKPD2, by the class search()
+predicts. Off by default: until #63 the prediction is wrong on real data («бумага офисная» → paints),
+and a wrong class would show irrelevant companies with product_fit 1.0. Without the flag such a query
+gets an empty block and no network request.
 CLI (live check, cache warm-up): `python -m src.enrich.discover "бумага офисная" --okpd2 17.12.14`;
 without `--okpd2` the class is the one search() predicts on organizers' data (as in /api/search).
 """
@@ -119,6 +123,10 @@ class Discovery:
     notes: list[str] = field(default_factory=list)
 
 
+def predicted_class_allowed() -> bool:
+    return os.environ.get("DISCOVERY_PREDICTED_CLASS") == "1"
+
+
 def offline_mode() -> bool:
     return os.environ.get("DISCOVERY_OFFLINE") == "1" or os.environ.get("ENRICH_OFFLINE") == "1"
 
@@ -210,24 +218,35 @@ def _lots_class(history: Sequence[CounterpartyMatch], processed: Path) -> str | 
     return min(votes, key=lambda c: (-votes[c], c)) if votes else None
 
 
+_SUPPLIERS: dict[tuple[str, int], frozenset[str]] = {}  # (file, mtime) → all INNs of organizers' data
+
+
+def _all_inns(path: Path) -> frozenset[str] | None:
+    """Every INN of a suppliers parquet, read once per file version (a rebuilt file is read again)."""
+    key = (str(path), path.stat().st_mtime_ns)
+    if key not in _SUPPLIERS:
+        con = duckdb.connect()
+        try:
+            rows = con.execute("SELECT DISTINCT inn FROM read_parquet(?) WHERE inn IS NOT NULL", [str(path)]).fetchall()
+        except duckdb.Error as e:
+            log.warning("discovery: %s не прочитан: %s", path.name, e)
+            return None
+        finally:
+            con.close()
+        for old in [k for k in _SUPPLIERS if k[0] == key[0]]:
+            del _SUPPLIERS[old]
+        _SUPPLIERS[key] = frozenset(r[0] for r in rows)
+    return _SUPPLIERS[key]
+
+
 def known_inns(inns: Sequence[str], as_of: date | None, processed: Path) -> set[str] | None:
     """INNs present in organizers' data (before as_of); None — the data is absent, nothing checked."""
     try:
         path = suppliers_path(as_of, processed)
-    except FileNotFoundError:
+        everyone = _all_inns(path)
+    except OSError:  # FileNotFoundError from suppliers_path or a file removed meanwhile
         return None
-    if not inns:
-        return set()
-    con = duckdb.connect()
-    try:
-        rows = con.execute("SELECT inn FROM read_parquet(?) WHERE inn IN (SELECT unnest(?))",
-                           [str(path), list(inns)]).fetchall()
-    except duckdb.Error as e:
-        log.warning("discovery: %s не прочитан: %s", path.name, e)
-        return None
-    finally:
-        con.close()
-    return {r[0] for r in rows}
+    return None if everyone is None else set(inns) & everyone
 
 
 def display_name(row: dict[str, str]) -> str | None:
@@ -331,7 +350,7 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
     if ch.relation == "class":
         role = ("вероятно производитель (по ОКВЭД)" if _is_goods_producer(okved)
                 else "основной вид деятельности соответствует предмету закупки")
-        fit_why = f"{head} совпадает с классом {cls} — {role}"
+        fit_why = f"{head} совпадает с классом {cls} — {role}; совпадение по классу ОКВЭД (4 знака), не по товару"
     else:
         fit_why = (f"{head} — оптовая торговля товарами класса {cls}, "
                    "по таблице соответствия ОКПД2 → ОКВЭД — вероятно дистрибьютор")
@@ -410,6 +429,10 @@ def discover(
     classes = okpd_classes(query.okpd2)
     codes: list[str] = [c.strip() for c in query.okpd2]
     if not classes:
+        if not predicted_class_allowed():  # D-036: off until search() predicts the class reliably (#63)
+            res.notes.append("ОКПД2 в запросе не указан — блок «Новые» не строится "
+                             "(DISCOVERY_PREDICTED_CLASS выключен)")
+            return res
         guess = predict_class(history, processed)
         if guess is None:
             res.notes.append("ОКПД2 запроса не указан и не определён по истории — поиск по ОКВЭД невозможен")

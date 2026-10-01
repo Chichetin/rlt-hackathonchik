@@ -27,6 +27,7 @@ test("демо: запрос → два блока → карточка → фи
   // ответы rmsp.nalog.ru (tests/fixtures/rmsp/e2e) в кеше источников, без сети.
   await expect(discovered.locator(".item").first()).toBeVisible();
   await expect(discovered.locator(".why").first()).toContainText("Основной ОКВЭД");
+  await expect(discovered.locator(".hint")).toContainText("первые 10 действующих записей реестра МСП");
   await expect(history.locator(".score").first()).toHaveText(/\d\.\d\d/);
   await expect(history.locator(".why").first()).not.toBeEmpty();
 
@@ -91,4 +92,8 @@ test("номер закупки не найден → понятное сооб�
   await page.getByLabel("Что нужно закупить").fill("Бумага офисная А4");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   await expect(page.getByRole("region", { name: "С опытом госзакупок" }).locator(".item").first()).toBeVisible();
+  // без ОКПД2 блок «Новые» не строится (D-041) и называет причину
+  await expect(page.getByRole("region", { name: "Новые из открытых источников" }).locator(".empty")).toContainText(
+    "Код ОКПД2 не указан — загрузите закупку по номеру",
+  );
 });

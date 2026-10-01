@@ -194,6 +194,7 @@ def test_discover_shows_only_active_new_companies_with_evidence(cache, tmp_path)
     fit = first.components[0]
     assert fit.value == 1.0 and "ОКВЭД 17.23" in fit.explanation and "классом ОКПД2 запроса 17.23" in fit.explanation
     assert "вероятно производитель" in fit.explanation and "автоматически" not in fit.explanation
+    assert fit.explanation.endswith("; совпадение по классу ОКВЭД (4 знака), не по товару")
     assert first.components[1].explanation == "В данных организаторов за 2024–2025 не встречается ни в одной закупке"
     assert "ещё не проверен" in first.components[2].explanation and first.components[2].weight == 0.0
 
@@ -233,9 +234,54 @@ def test_offline_without_cache_is_empty_and_says_why(tmp_path):
     assert res.matches == [] and res.requests and all("нет в кеше" in r for r in res.requests)
 
 
-def test_query_without_okpd2_and_history_does_not_search(cache, tmp_path):
+def test_query_without_okpd2_and_history_does_not_search(cache, tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")
     res = _run(cache, _processed(tmp_path, []), query=_query(okpd2=[]), client=_client(_no_network))
     assert res.matches == [] and res.requests == [] and "не определён" in res.notes[0]
+
+
+@pytest.mark.parametrize("flag", [None, "0", "true"])  # only "1" switches the predicted class on
+def test_predicted_class_is_off_by_default_no_block_no_network(search_data, tmp_path, monkeypatch, flag):
+    from src.match.search import search
+    if flag is None:
+        monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS", raising=False)
+    else:
+        monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", flag)
+    q = Query(query_id="q", text="бумага А4")  # no OKPD2: search() would predict 17.12
+    history = search(q)
+    assert D.stated_class(history) == "17.12"
+    c = SourceCache(tmp_path / "c.sqlite")
+    rmsp.seed(FIX / "e2e", c)  # even a warm cache is not used for a predicted class
+    res = D.discover(q, history, cache=c, weights=WEIGHTS, processed=search_data, offline=False,
+                     client=_client(_no_network))
+    assert res.matches == [] and res.requests == [] and res.okpd_classes == [] and not res.predicted
+    assert "DISCOVERY_PREDICTED_CLASS" in res.notes[0]
+    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")
+    on = D.discover(q, history, cache=c, weights=WEIGHTS, processed=search_data, offline=True)
+    assert on.predicted and on.okpd_classes == ["17.12"] and len(on.matches) == 10
+    # an explicit OKPD2 never needs the flag
+    monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS")
+    explicit = D.discover(q.model_copy(update={"okpd2": ["17.12.14.110"]}), history, cache=c, weights=WEIGHTS,
+                          processed=search_data, offline=True)
+    assert len(explicit.matches) == 10 and not explicit.predicted
+
+
+def test_known_inns_are_cached_per_file_version(tmp_path):
+    processed = _processed(tmp_path, ["7805772436"])
+    assert D.known_inns(["7805772436", "4703173460"], None, processed) == {"7805772436"}
+    assert D.known_inns([], None, processed) == set()
+    path = processed / "suppliers.parquet"
+    before = dict(D._SUPPLIERS)
+    assert D.known_inns(["4703173460"], None, processed) == set() and D._SUPPLIERS == before  # no re-read
+    con = duckdb.connect()  # the data is rebuilt: the new file is read, the old entry is dropped
+    con.execute(f"COPY (SELECT '4703173460' AS inn) TO '{path}' (FORMAT parquet)")
+    con.close()
+    import os
+    os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1_000_000))
+    assert D.known_inns(["7805772436", "4703173460"], None, processed) == {"4703173460"}
+    assert sum(k[0] == str(path) for k in D._SUPPLIERS) == 1
+    path.unlink()
+    assert D.known_inns(["4703173460"], None, processed) is None
 
 
 def test_live_requests_respect_plan_budget_and_block(tmp_path):
@@ -401,7 +447,7 @@ def test_wholesale_neighbour_region_and_ip(tmp_path):
     maker, trader = res.matches
     assert maker.counterparty.inn == "7811777270" and maker.score == 0.45
     assert trader.score == 0.29  # 0.35·0.6 + 0.1·0.8
-    assert "вероятно дистрибьютор" in trader.components[0].explanation
+    assert trader.components[0].explanation.endswith("вероятно дистрибьютор")  # no «по классу» note for trade
     assert "соседний регион — Ленинградская область" in trader.components[4].explanation
     assert trader.counterparty.region == "Ленинградская область"
 
@@ -495,6 +541,7 @@ def test_stated_class_takes_the_majority_and_ignores_short_codes():
 
 @pytest.fixture
 def api(tmp_path, monkeypatch, search_data):
+    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")  # these tests search by text, without OKPD2
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
     monkeypatch.setattr(app_mod, "_engine", None)
     c = SourceCache()  # SOURCE_CACHE of this test (conftest)
@@ -521,6 +568,32 @@ def test_api_search_fills_the_discovered_block(api):
     only_lo = api.post("/api/search", json={"query_id": "q", "text": "бумага А4",
                                             "filters": {"region": "Ленинградская область"}}).json()
     assert only_lo["discovered"] == []
+
+
+def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):
+    monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS")
+    monkeypatch.delenv("DISCOVERY_OFFLINE")  # the network is allowed — and still must not be touched
+    attempts = []
+    monkeypatch.setattr(rmsp, "_post", lambda *a, **k: attempts.append(a) or 1 / 0)
+    body = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"}).json()
+    assert body["history"] and body["discovered"] == [] and attempts == []
+    assert api.get("/api/health").json()["queue"] == {}
+    # the same request with the code from the notice fills the block without the flag
+    monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
+    with_code = api.post("/api/search", json={"query_id": "q", "text": "бумага А4", "okpd2": ["17.12.14.110"]}).json()
+    assert [m["counterparty"]["inn"] for m in with_code["discovered"]] == ["4703173460"]
+    assert "ОКПД2 запроса 17.12" in with_code["discovered"][0]["components"][0]["explanation"]
+
+
+def test_evidence_pages_are_prepared_once_per_request(cache, tmp_path):
+    from src.enrich.evidence import cached_pages, strip_unverified
+    res = _run(cache, _processed(tmp_path, []))
+    reads: list[str] = []
+    pages = cached_pages(lambda url: reads.append(url) or cache.page_text(url))
+    shown = [strip_unverified(m.counterparty, pages) for m in res.matches]
+    assert reads == [rmsp.search_url("17.23", "78")]  # 5 companies, ~30 facts, one page read
+    assert shown == [strip_unverified(m.counterparty, cache.page_text) for m in res.matches]
+    assert cached_pages(pages) is pages and pages("https://nope") is None
 
 
 def test_api_does_not_call_unchecked_companies_new(api, monkeypatch):
