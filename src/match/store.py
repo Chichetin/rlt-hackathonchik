@@ -54,6 +54,10 @@ class LotHits:
         order = np.lexsort((self.lot_id, -self.score))[:n]
         return [(int(self.lot_id[i]), float(self.score[i])) for i in order]
 
+    def without(self, lot_id: int) -> LotHits:
+        keep = self.lot_id != lot_id
+        return LotHits(self.lot_id[keep], self.score[keep], self.doc_id[keep])
+
 
 class Store(Protocol):
     name: str
@@ -67,9 +71,10 @@ class Store(Protocol):
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]: ...
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]: ...
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
-    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]: ...
-    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None,
-                           limit: int) -> list[tuple]: ...
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
+                        exclude_lot: int = -1) -> list[tuple]: ...
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]: ...
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
     def lot_names(self, lot_id: int) -> list[str]: ...
@@ -191,6 +196,7 @@ ORDER BY s.inn{c}
 _OKPD2_SUPPLIERS = """
 WITH m AS (
     SELECT DISTINCT lot_id, product_name FROM {t[items]} WHERE {col} IN (SELECT unnest(%(codes)s{text_arr}))
+      AND lot_id <> %(exclude)s  -- the notice the query was built from (#249, F-13); -1 — none
 ),
 j AS (
     SELECT supplier_inn, lot_id, is_winner, publish_date FROM {t[participants]}
@@ -219,6 +225,7 @@ _CUSTOMER_SUPPLIERS = """
 WITH j AS (
     SELECT supplier_inn, lot_id, is_winner, publish_date FROM {t[participants]}
     WHERE customer_inn = %(cust)s AND {cond}
+      AND lot_id <> %(exclude)s  -- the notice the query was built from (#249, F-13); -1 — none
       AND lot_id IN (SELECT lot_id FROM {t[items]} WHERE okpd2_l4 IN (SELECT unnest(%(groups)s{text_arr})))
 ),
 agg AS (
@@ -356,12 +363,14 @@ class ParquetStore:
                                  suppliers=self._suppliers(as_of))
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
-    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]:
-        return self._fetch(_okpd2_sql(level), {"codes": codes, "as_of": as_of, "limit": limit}, as_of=as_of)[1]
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
+                        exclude_lot: int = -1) -> list[tuple]:
+        params = {"codes": codes, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
+        return self._fetch(_okpd2_sql(level), params, as_of=as_of)[1]
 
-    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None,
-                           limit: int) -> list[tuple]:
-        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit}
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]:
+        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
         return self._fetch(_CUSTOMER_SUPPLIERS, params, as_of=as_of)[1]
 
     def lot(self, ident: str) -> tuple | None:
@@ -480,12 +489,14 @@ class PgStore:
         cols, rows = self._fetch(_SUPPLIERS, {"inns": inns, "as_of": as_of}, as_of=as_of, suppliers=table)
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
-    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]:
-        return self._fetch(_okpd2_sql(level), {"codes": codes, "as_of": as_of, "limit": limit}, as_of=as_of)[1]
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
+                        exclude_lot: int = -1) -> list[tuple]:
+        params = {"codes": codes, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
+        return self._fetch(_okpd2_sql(level), params, as_of=as_of)[1]
 
-    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None,
-                           limit: int) -> list[tuple]:
-        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit}
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]:
+        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
         return self._fetch(_CUSTOMER_SUPPLIERS, params, as_of=as_of)[1]
 
     def lot(self, ident: str) -> tuple | None:

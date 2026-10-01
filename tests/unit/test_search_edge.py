@@ -143,3 +143,9 @@ def test_extra_candidates_from_customer_history(data):
     added = [m for m in on if m.counterparty.inn not in off]
     assert "7801000020" not in off and "7801000020" in {m.counterparty.inn for m in added}
     assert all(fit(m).explanation.startswith("Не найден по названию; поставщик этого заказчика") for m in added)
+    exp = next(c for c in added[0].components if c.name == "experience").explanation
+    assert "этого заказчика в группе ОКПД2" in exp and "с похожими позициями" not in exp  # review of #246
+    # review of #246: a query built from notice 1 (the customer's only paper lot with 7801000020) does not bring
+    # 7801000020 back through the customer's history (#249)
+    own = search(q.model_copy(update={"query_id": "lot-1"}), k=50, config={**cfg, "candidates": {"customer": 10}})
+    assert own and "7801000020" not in {m.counterparty.inn for m in own}

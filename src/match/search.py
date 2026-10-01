@@ -20,9 +20,11 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import tempfile
 import threading
 from collections import defaultdict
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -39,6 +41,7 @@ from src.ingest.okpd2 import label
 from src.match import candidates, fallback
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
+from src.match.profiles import profile_overrides, profile_weights
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
@@ -110,6 +113,7 @@ def check_config(cfg: dict) -> dict:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     scoring_options(cfg)
     candidates.sizes(cfg)
+    profile_overrides(cfg)  # weights by procurement type (#104), off by default
     return cfg
 
 
@@ -139,6 +143,7 @@ class Candidate:
     class_lots: int = 0
     class_wins: int = 0
     found_by: str = ""  # fallback ladder (src/match/fallback.py): the first phrase of product_fit
+    counted: str = ""  # what n_lots / n_wins count when not lots with similar positions (#195 extra candidates)
 
 
 def _retrieve(store: Store, idx: LotIndex, lots: LotHits, as_of: date | None) -> list[Candidate]:
@@ -281,7 +286,7 @@ def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "c
         groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
-        lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
+        lots, wins, what = c.n_lots, c.n_wins, c.counted or "с похожими позициями"
     value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(wins, sat_wins)
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
@@ -366,6 +371,28 @@ def _component(name: str, value: float, weights: dict[str, float], explanation: 
                           weight=float(weights.get(name, 0.0)), explanation=explanation)
 
 
+# A query built from a notice (`/api/lot` → query_id `lot-<N>`) must not find that very lot: its own positions are an
+# exact text match, so its participants would top the list on the answer itself (#249, review #145 F-13).
+_OWN_LOT = re.compile(r"lot-(\d+)")
+_excluded: ContextVar[int | None] = ContextVar("excluded_lot", default=None)
+
+
+def own_lot(query: Query) -> int | None:
+    m = _OWN_LOT.fullmatch(query.query_id)
+    return int(m.group(1)) if m else None
+
+
+def excluded_lot() -> int | None:
+    """The lot the last search() in this context removed from its own results (None — nothing removed)."""
+    return _excluded.get()
+
+
+def _drop_own(lots: LotHits, own: int | None) -> LotHits:
+    if own is None or not (lots.lot_id == own).any():
+        return lots
+    _excluded.set(own)
+    return lots.without(own)
+
 def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
            config: dict | None = None) -> list[CounterpartyMatch]:
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
@@ -374,6 +401,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     Why the answer is empty (or found by the fallback ladder): fallback.search_note() after the call.
     """
     fallback.reset_note()
+    _excluded.set(None)
+    own = own_lot(query)
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
@@ -398,14 +427,14 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
                 raise
             log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
     codes, bad_codes = fallback.okpd2_codes(query.okpd2)
-    lots = idx.lot_hits(hits)
-    cands = _retrieve(store, idx, lots, as_of) if hits else []
+    lots = _drop_own(idx.lot_hits(hits), own)
+    cands = _retrieve(store, idx, lots, as_of) if len(lots) else []
     if not cands:  # nobody by text: the fallback ladder (src/match/fallback.py)
-        hits, cands, note = fallback.ladder(store, idx, query, tokens, codes, cfg, bad_codes)
+        hits, cands, note = fallback.ladder(store, idx, query, tokens, codes, cfg, bad_codes, own)
         fallback.set_note(note)
         if not cands:
             return []
-        lots = idx.lot_hits(hits)
+        lots = _drop_own(idx.lot_hits(hits), own)
     elif bad_codes:
         fallback.set_note(f"ОКПД2 не распознан и не учтён: {', '.join(bad_codes)}")
     predicted = False
@@ -413,8 +442,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         guess = _predict_okpd2(store, idx, hits, lots)
         codes, predicted = ([guess], True) if guess else ([], False)
     if codes:
-        cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg)  # #195
+        cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg, own)  # #195
         _class_history(store, cands, codes, as_of)
+    w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}
     if shares["incumbent"] > 0 and query.customer_inn:
         incumbent = customer_lots(store, [c.inn for c in cands], query.customer_inn, as_of)
@@ -438,6 +468,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
+        if profile_note:
+            geo_why = f"{geo_why}; {profile_note}"
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),

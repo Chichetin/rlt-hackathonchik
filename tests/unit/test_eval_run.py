@@ -69,6 +69,8 @@ def test_experiment_overrides_are_merged_over_search_config(tmp_path, monkeypatc
     with pytest.raises(ValueError, match="X-2"):
         R.load_method_config("X-2-real", config_of="X-2")
     assert R.main(["--exp", "X-2-real", "--config-of", "X-2"]) == 2
+    assert R.main(["--exp", "X-1", "--sample", "-5"]) == 2  # review of #246: no silent full run on a bad --sample
+    assert R.main(["--exp", "X-1", "--sample", "0"]) == 2
 
 
 def test_eval_passes_experiment_config_to_search(monkeypatch, tmp_path):
@@ -98,7 +100,7 @@ def test_repository_experiments_are_valid_configs():
 @pytest.mark.parametrize(("exp", "result"), [
     ("v1", "E-002"), ("H-15a-03", "H-15a-03"), ("H-15a-06", "H-15a-06"), ("H-15b", "H-15b"), ("H-15c", "H-15c"),
     ("H-15d-tie", "H-15d-tie"), ("H-15e", "H-15e"), ("H-15f", "H-15f"), ("H-15g", "H-15g"), ("H-15f-geo", "H-15f-geo"),
-    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"),
+    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"), ("v2", "v2"),
 ])
 def test_experiment_entries_reproduce_recorded_configs(exp, result):
     """The product default moved to H-15f (#174): every entry of configs/experiments.yaml still gives the

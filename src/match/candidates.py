@@ -33,8 +33,9 @@ def _groups(codes: list[str]) -> list[str]:
 
 
 def extra(store: Store, have: set[str], codes: list[str], customer_inn: str | None, as_of: date | None,
-          cfg: dict) -> list:
-    """Candidates from the customer's history and from the OKPD2 groups, not already in `have`."""
+          cfg: dict, own: int | None = None) -> list:
+    """Candidates from the customer's history and from the OKPD2 groups, not already in `have`; `own` — the lot
+    the query was built from (#249): never a source of candidates."""
     from src.match.search import Candidate
 
     n_customer, n_okpd2 = sizes(cfg)
@@ -44,20 +45,24 @@ def extra(store: Store, have: set[str], codes: list[str], customer_inn: str | No
     out: list[Candidate] = []
     seen = set(have)
 
-    def add(rows: list[tuple], why: str) -> None:
+    def add(rows: list[tuple], why: str, counted: str) -> None:
         for inn, n_lots, n_wins, lot_id, text, day in rows:
             if inn in seen:
                 continue
             seen.add(inn)
             c = Candidate(inn, 0.0, int(n_lots), int(n_wins), int(lot_id), text or "", day)
             c.found_by = why.format(n=int(n_lots))
+            c.counted = counted  # experience counts these lots, not lots with similar positions
             out.append(c)
 
     g = ", ".join(groups)
+    exclude = -1 if own is None else own
     if n_customer and customer_inn:
-        add(store.customer_suppliers(customer_inn, groups, as_of, n_customer),
-            f"Не найден по названию; поставщик этого заказчика: {{n}} лот(ов) в группе ОКПД2 {g}")
+        add(store.customer_suppliers(customer_inn, groups, as_of, n_customer, exclude),
+            f"Не найден по названию; поставщик этого заказчика: {{n}} лот(ов) в группе ОКПД2 {g}",
+            f"этого заказчика в группе ОКПД2 {g}")
     if n_okpd2:
-        add(store.okpd2_suppliers(2, groups, as_of, n_okpd2),
-            f"Не найден по названию; частый поставщик группы ОКПД2 {g}: {{n}} лот(ов)")
+        add(store.okpd2_suppliers(2, groups, as_of, n_okpd2, exclude),
+            f"Не найден по названию; частый поставщик группы ОКПД2 {g}: {{n}} лот(ов)",
+            f"в группе ОКПД2 {g}")
     return out

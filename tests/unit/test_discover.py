@@ -510,6 +510,23 @@ def test_top_ten_keeps_both_producers_and_distributors(tmp_path):
     assert "всего в реестре не сообщается" in res.requests[0]  # rowCount -1 is not shown as a number
 
 
+def test_candidates_keep_every_role_before_the_user_filters(tmp_path):
+    """#232: X-Facets of «Новые» count the candidates after the legal status but before the user filters and
+    the top-10 cut — choosing a role chip does not change the counts of the other chips."""
+    makers = ["7801000012", "7801000020", "7801000037", "7801000044"]
+    traders = ["7707049388", "7805336905"]
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("17.12", "78"),
+          rmsp.flatten("17.12", "78", "UL", _rows(makers, "17.12", "Производство бумаги и картона")))
+    c.put(rmsp.search_url("46.49.33", "78"),
+          rmsp.flatten("46.49.33", "78", "UL", _rows(traders, "46.49.33", "Торговля оптовая канцелярскими товарами")))
+    res = _run(c, _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"], filters={"kinds": "distributor"}))
+    assert sorted(m.counterparty.inn or "" for m in res.matches) == sorted(traders)
+    assert sorted(m.counterparty.inn or "" for m in res.candidates) == sorted(makers + traders)
+    assert sorted(m.counterparty.inn or "" for m in res.pool) == sorted(traders)  # pool: after the user filters
+    assert {m.counterparty.kind for m in res.candidates} == {"manufacturer", "distributor"}
+
+
 def test_second_wholesale_channel_gives_checked_distributors_only(tmp_path):
     """#108: 17.12 → 46.76.1 (paper wholesale). Its rows become distributors whose every fact passes
     src/enrich/evidence.py; a row with a checksum-failing INN never becomes a company (no guessed INN)."""
@@ -629,6 +646,32 @@ def test_api_search_fills_the_discovered_block(api):
     only_lo = api.post("/api/search", json={"query_id": "q", "text": "бумага А4",
                                             "filters": {"region": "Ленинградская область"}}).json()
     assert only_lo["discovered"] == []
+
+
+def test_api_facets_of_the_new_block_count_the_candidates(api):
+    """#232: X-Facets «discovered» — from the discovery candidates, each group after the other groups' filters."""
+    import json as _json
+    q = {"query_id": "q", "text": "бумага А4"}
+    r = api.post("/api/search", json=q)
+    disc = _json.loads(r.headers["X-Facets"])["discovered"]
+    assert disc == {"kind": {"manufacturer": 0, "distributor": 1, "dealer": 0, "unknown": 0},
+                    "entity": {"ul": 1, "ip": 0, "unknown": 0},
+                    "near": {"worked": 1, "near": 1, "any": 1}}  # registry region 78 = the customer's region (#242)
+    makers = api.post("/api/search", json={**q, "filters": {"kinds": "manufacturer"}})
+    assert makers.json()["discovered"] == [] and makers.headers["X-Total-Discovered"] == "0"
+    # the role chips keep their counts; ЮЛ/ИП and «near» are counted among manufacturers — none here
+    assert _json.loads(makers.headers["X-Facets"])["discovered"] == {
+        "kind": disc["kind"], "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0, "any": 0}}
+    # «Может работать у заказчика» reaches the block through discover() as every user filter (#242): for a customer
+    # of the Leningrad region (INN 47) the company of the registry region 78 is a neighbour, not «worked»
+    lo = {**q, "customer_inn": "4703173460"}
+    near = api.post("/api/search", json={**lo, "filters": {"near_customer": "near"}})
+    assert near.headers["X-Total-Discovered"] == "1"
+    worked = api.post("/api/search", json={**lo, "filters": {"near_customer": "worked"}})
+    assert worked.json()["discovered"] == [] and worked.headers["X-Total-Discovered"] == "0"
+    assert _json.loads(worked.headers["X-Facets"])["discovered"] == {
+        "kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 0},
+        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 1, "any": 1}}
 
 
 def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):

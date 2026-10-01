@@ -20,19 +20,19 @@ from pathlib import Path
 import yaml
 
 from src.contracts import Query
-from src.enrich.evidence import strip_unverified
 from src.eval import baselines
 from src.eval.metrics import METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
+from src.match import pipeline
 from src.match import search as search_mod
-from src.sources.cache import SourceCache
+from src.match.profiles import procurement_type
 
 log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 # Baselines (T-08): experiment id -> method and its parameters; configs/search.yaml stays the product method.
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
-# Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
 SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
+# Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
 EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
 RANKED_LIMIT = 5000  # per-case top-k lists are stored for parts up to this size
 RESULTS = ROOT / "eval" / "results"
@@ -91,13 +91,13 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
 
 
 def _rank_search(query: Query, cfg: dict) -> list[str]:
-    """What the user sees: search() + strip_unverified(), as /api/search (D-015)."""
-    matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"), config=cfg)
-    if not getattr(search_mod, "IS_STUB", False):
-        cache = SourceCache()
-        matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
-                   for m in matches]
-    return [m.counterparty.inn for m in matches if m.origin == "history" and m.counterparty.inn]
+    """What the user sees: the history block of /api/search — the same pipeline (src/match/pipeline.py, #220)
+    in its backtest mode: user filters on organizers' data and the Evidence check, top-k as on screen; no
+    «Новые» (never relevant) and nothing from the cache — status, РНП, МСП, role there are today's facts,
+    a leak in a backtest (D-097)."""
+    picked = pipeline.pick(query, config=cfg, backtest=True)
+    shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
+    return [m.counterparty.inn for m in shown if m.counterparty.inn]
 
 
 def _summary(rows: list[dict]) -> dict:
@@ -133,10 +133,12 @@ def winner_novelty(cases: list[EvalCase], cutoff: date) -> list[bool | None] | N
 
 
 def slice_names(q: dict) -> list[str]:
-    """Slices a per_query row belongs to: channel, winner novelty and their combination."""
+    """Slices a per_query row belongs to: channel, winner novelty, their combination and procurement
+    type by the case's OKPD2 (#104: goods | services | unknown; rows of older results have no type)."""
     ch = f"channel={q['channel']}" if q.get("channel") else None
     nov = {True: "winner=new", False: "winner=known"}.get(q.get("winner_new"))  # type: ignore[arg-type]
-    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None) if name]
+    kind = f"type={q['type']}" if q.get("type") else None
+    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind) if name]
 
 
 def slices(per_query: list[dict]) -> dict:
@@ -158,6 +160,7 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     method = cfg.get("method", "search")
     novelty = winner_novelty(cases, cutoff)
     per_query = []
+    audit = pipeline.TodayAudit() if method == "search" else None
     strict, search_mod.STRICT_RETRIEVER = search_mod.STRICT_RETRIEVER, True  # unavailable retriever fails the run
     started = time.monotonic()
     try:
@@ -165,8 +168,10 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             query = with_cutoff(case.query, cutoff)
             ranked = _rank_search(query, cfg) if method == "search" else baselines.rank(query, cfg)
             rel = set(case.relevant_inns)
+            if audit is not None:
+                audit.add(ranked, rel)
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
-                         "channel": case.query.channel}
+                         "channel": case.query.channel, "type": procurement_type(case.query.okpd2) or "unknown"}
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:
@@ -178,8 +183,11 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
                             el / (i + 1) * (len(cases) - i - 1) / 60)
     finally:
         search_mod.STRICT_RETRIEVER = strict
-    return {"n_queries": len(per_query), "elapsed_s": round(time.monotonic() - started, 1),
-            "metrics": _summary(per_query), "slices": slices(per_query), "per_query": per_query}
+    out = {"n_queries": len(per_query), "elapsed_s": round(time.monotonic() - started, 1),
+           "metrics": _summary(per_query), "slices": slices(per_query)}
+    if audit is not None:
+        out["today_filters"] = audit.record()
+    return {**out, "per_query": per_query}
 
 
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
@@ -290,6 +298,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.baseline and args.config_of:
         print("--baseline и --config-of вместе не задаются", file=sys.stderr)
+        return 2
+    if args.sample is not None and args.sample <= 0:
+        print("--sample: нужно число кейсов > 0", file=sys.stderr)
         return 2
     try:
         cfg = load_method_config(args.exp, args.baseline, args.config_of)

@@ -48,11 +48,22 @@ C-195-cg:        # заказчик 30 + группа ОКПД2 30
 C-195-cgi:       # то же + инкумбент-сигнал 0.3 (как H-15g): поставщикам заказчика есть чем подняться
   candidates: {customer: 30, okpd2: 30}
   signals: {incumbent: 0.3}
-v2: {}           # текущий дефолт продукта (H-15f, D-077) как есть — парная база для отбора на подвыборке (--sample)
+v2:              # формула D-077 (H-15f, нормированные веса), заморожена явно — парная база для --sample и C-195-*
+  weights: {product_fit: 0.762, experience: 0.19, reliability: 0.0, activity: 0.048, geography: 0.0, price: 0.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
 H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (география от заказчика); не прогоняется — см. EXPERIMENTS
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+# Профили весов по типу закупки (#104, src/match/profiles.py, weights_by_type). Сравнение — по срезам type=.
+H-104b:          # H-15f + профиль: для товаров география 0.05 и регион ИП по ИНН, для услуг 0 (как в H-15f)
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
+  signals: {inn_region: 1.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+  weights_by_type: {goods: {geography: 0.05}}
+H-104g:          # дефолт D-077 + профиль: для товаров география 0.048 (= 0.05 / 1.05) и регион ИП по ИНН, для услуг 0
+  signals: {inn_region: 1.0}
+  weights_by_type: {goods: {geography: 0.048}}
 # #196: потолки насыщения experience поверх дефолта H-15f (в дефолте 20 лотов / 10 побед).
 H-196-sat100:
   options: {sat_lots: 100, sat_wins: 50}
