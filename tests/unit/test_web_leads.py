@@ -9,7 +9,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from src.contracts import Query, inn_is_valid
+from src.contracts import Counterparty, Query, inn_is_valid
 from src.enrich import discover as D
 from src.enrich.evidence import check_counterparty, strip_unverified
 from src.sources import pb_nalog, web_leads
@@ -19,24 +19,25 @@ WEIGHTS = {"product_fit": 0.35, "experience": 0.2, "reliability": 0.2, "activity
            "price": 0.05}
 HEADER = ";".join(web_leads.COLUMNS)
 MAKER, KNOWN, NO_CARD, OTHER, TRADER = "7805772436", "7807032363", "7811777270", "4703173460", "7810400592"
+MOSCOW = "7805336905"
 
 
 def _row(inn: str, cls: str = "17.12", url: str = "https://example.org/company") -> str:
     return f"{cls};{inn};ООО «Тест {inn}»;example.org;manufacturer;Санкт-Петербург;{url};бумага офисная ИНН;2026-10-01"
 
 
-def _card(inn: str, okved: str, okved_name: str, kpp: str = "780501001",
+def _card(inn: str, okved: str, okved_name: str | None, kpp: str = "780501001",
           status: str = "Действующая организация") -> str:  # pb_nalog.flatten format
     return "\n".join([f"search.inn: {inn}", f"vyp.ИНН: {inn}", "vyp.ОГРН: 1157847383638", f"vyp.КПП: {kpp}",
                       f'vyp.НаимЮЛСокр: ООО "ЛИД {inn[-3:]}"', f"vyp.sulst_name_ex: {status}",
-                      f"vyp.КодОКВЭД: {okved}", f"vyp.НаимОКВЭД: {okved_name}"])
+                      f"vyp.КодОКВЭД: {okved}", *([f"vyp.НаимОКВЭД: {okved_name}"] if okved_name else [])])
 
 
 @pytest.fixture
 def leads_dir(tmp_path, monkeypatch) -> Path:
     d = tmp_path / "leads"
     d.mkdir()
-    rows = [_row(MAKER), _row(KNOWN), _row(NO_CARD), _row(OTHER), _row(TRADER), _row(""),
+    rows = [_row(MAKER), _row(KNOWN), _row(NO_CARD), _row(OTHER), _row(TRADER), _row(MOSCOW), _row(""),
             _row(MAKER, cls="26.20")]
     (d / "web.csv").write_text("\n".join([HEADER, *rows]) + "\n", encoding="utf-8")
     monkeypatch.setattr(web_leads, "LEADS_DIR", d)
@@ -50,7 +51,8 @@ def cache(tmp_path) -> SourceCache:
     c.put(pb_nalog.card_url(KNOWN), _card(KNOWN, "17.12", "Производство бумаги и картона"))
     c.put(pb_nalog.card_url(OTHER), _card(OTHER, "62.01", "Разработка компьютерного программного обеспечения"))
     c.put(pb_nalog.card_url(TRADER), _card(TRADER, "46.49.33", "Торговля оптовая писчебумажными товарами",
-                                           kpp="770101001"))
+                                           kpp="470301001"))
+    c.put(pb_nalog.card_url(MOSCOW), _card(MOSCOW, "17.12", "Производство бумаги и картона", kpp="770101001"))
     return c
 
 
@@ -85,12 +87,15 @@ def test_lead_with_card_and_class_okved_is_shown_from_the_card_only(leads_dir, c
     queued: list[str] = []
     res = _discover(cache, _processed(tmp_path, [KNOWN]), enqueue=queued.append)
     by_inn = {m.counterparty.inn: m for m in res.matches}
-    assert set(by_inn) == {MAKER, TRADER}  # KNOWN is in organizers' data, OTHER's OKVED is not the class
+    # KNOWN is in organizers' data, OTHER's OKVED is not the class, MOSCOW is outside СПб / ЛО (as the registry channel)
+    assert set(by_inn) == {MAKER, TRADER}
     maker = by_inn[MAKER]
     assert maker.origin == "discovered" and maker.counterparty.name == 'ООО "ЛИД 436"'
     fit = maker.components[0]
     assert fit.name == "product_fit" and fit.value == D.FIT["class"]
-    assert fit.explanation.startswith("Найдена веб-поиском (example.org); вид деятельности — по реестру ФНС")
+    assert fit.explanation.startswith("Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: Основной "
+                                      "ОКВЭД 17.12 «Производство бумаги и картона» совпадает")
+    assert "example.org" not in fit.explanation  # nothing of the search row reaches the user
     geo = next(c for c in maker.components if c.name == "geography")
     assert geo.value == 1.0 and geo.explanation.startswith("Карточка ФНС (КПП)")
     # every shown fact is from the cached card and passes the Evidence check; nothing from the search row
@@ -99,10 +104,12 @@ def test_lead_with_card_and_class_okved_is_shown_from_the_card_only(leads_dir, c
     assert strip_unverified(maker.counterparty, cache.page_text).name == maker.counterparty.name
     trader = by_inn[TRADER]
     assert trader.components[0].value == D.FIT["wholesale"] and trader.counterparty.kind == "distributor"
-    assert next(c for c in trader.components if c.name == "geography").value == 0.0  # KPP 77 — Москва
+    trader_geo = next(c for c in trader.components if c.name == "geography")
+    assert trader_geo.value == D.NEIGHBOUR_VALUE and trader_geo.explanation.startswith("Карточка ФНС (КПП)")
     assert queued == [NO_CARD]  # no card → the queue, not the block
     (line,) = res.leads
     assert "уже в данных 1" in line and "без карточки ФНС в кеше 1" in line and "ОКВЭД не подтвердил класс 1" in line
+    assert "другой регион 1" in line and "в блок 2" in line
 
 
 def test_leads_need_the_history_check_and_can_be_switched_off(leads_dir, cache, tmp_path, monkeypatch):
@@ -113,7 +120,7 @@ def test_leads_need_the_history_check_and_can_be_switched_off(leads_dir, cache, 
 
 
 def test_repository_leads_file_is_well_formed():
-    files = sorted(web_leads.LEADS_DIR.glob("*.csv"))
+    files = sorted((web_leads.ROOT / "configs" / "leads").glob("*.csv"))
     assert files, "configs/leads/*.csv"
     for f in files:
         rows = f.read_text(encoding="utf-8").splitlines()
@@ -125,3 +132,20 @@ def test_repository_leads_file_is_well_formed():
             assert lead.inn is None or inn_is_valid(lead.inn)
         raw_inns = [r.split(";")[1] for r in rows[1:] if r.split(";")[1]]
         assert all(inn_is_valid(i) for i in raw_inns)  # no INN of the file is silently dropped
+
+
+def test_card_without_okved_name_and_fallback_without_region(leads_dir, cache, tmp_path):
+    """The OKVED name only from a «Основной ОКВЭД <code> — <name>» fact; a ГИР БО answer (no KPP, no
+    region) cannot establish the region — the lead is not shown rather than shown with service lines."""
+    cache.put(pb_nalog.card_url(MAKER), _card(MAKER, "17.12", None))
+    processed = _processed(tmp_path, [KNOWN])
+    res = _discover(cache, processed)
+    fit = next(m for m in res.matches if m.counterparty.inn == MAKER).components[0]
+    assert "Основной ОКВЭД 17.12 совпадает с классом" in fit.explanation and "«" not in fit.explanation
+    fallback = Counterparty(inn=TRADER, name="ИНН " + TRADER, okved=["46.49.33"], evidence=[])
+    real = D.enrich
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(D, "enrich", lambda inn, *a, **kw: fallback if inn == TRADER else real(inn, *a, **kw))
+        res = _discover(cache, processed)
+    assert TRADER not in {m.counterparty.inn for m in res.matches}
+    assert "другой регион 2" in res.leads[0]  # TRADER (region unknown) and MOSCOW

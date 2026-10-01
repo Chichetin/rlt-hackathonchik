@@ -40,7 +40,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
 
 import duckdb
 import httpx
@@ -422,9 +421,11 @@ def lead_matches(
 
     A lead is shown only when (1) it is absent from organizers' data before `as_of`, (2) its ФНС card (or the
     fallback registry answer) is in the cache — every shown fact comes from there with its Evidence, nothing
-    from the search result — and (3) the main OKVED of that card is the class or its wholesale code, the
-    same rule as the registry channel, so product_fit keeps its steps (D-036). Returns the matches, their
-    relation, the new INNs without a cached card (for the queue) and one line for `Discovery.requests`.
+    from the search result — (3) the main OKVED of that card is the class or its wholesale code and (4) the
+    region by KPP (or the registry) is the query's region or its neighbour, and the INN type is one of
+    DISCOVERY_NP_TYPES — the same rules as the registry channel, so product_fit keeps its steps (D-036).
+    Returns the matches, their relation, the new INNs without a cached card (for the queue) and one line
+    for `Discovery.leads`.
     """
     leads = web_leads.for_classes(list(classes), web_leads.load())
     for inn in skip:  # already found in the МСП registry: one row per company
@@ -433,12 +434,14 @@ def lead_matches(
         return [], {}, [], None
     known = known_inns(list(leads), query.as_of, processed) or set()
     plan = okved_plan(codes)
+    regions = _regions(query)
+    np_types = _np_types()
     out: list[CounterpartyMatch] = []
     relation: dict[str, Relation] = {}
     no_card: list[str] = []
-    other_okved = 0
+    other_okved = other_region = 0
     for inn, lead in leads.items():
-        if inn in known:
+        if inn in known or ("UL" if len(inn) == 10 else "IP") not in np_types:
             continue
         try:
             cp = enrich(inn, cache, offline=True)
@@ -450,24 +453,27 @@ def lead_matches(
         if ch is None:  # the registry does not confirm the category the search found it for
             other_okved += 1
             continue
-        okved_name = next((e.value for e in cp.evidence if e.field == "okved" and e.value != code), "")
         regioncode = cp.kpp[:2] if cp.kpp else REGION_CODE.get(cp.region or "", "")
+        if regioncode not in regions:  # another region, or none established (KPP 99 of the largest taxpayers)
+            other_region += 1
+            continue
+        # the OKVED name only from a fact «Основной ОКВЭД <code> — <name>» (ГИР БО gives the code alone)
+        okved_name = next((e.value for e in cp.evidence if e.field == "okved" and e.value
+                           and e.fact.startswith(f"Основной ОКВЭД {code} — ")), "")
         row = {"okved1": code, "okved1name": okved_name, "regioncode": regioncode}
-        host = urlparse(lead.source_url).netloc
         comps = []
         for c in _components(cp, row, ch, predicted, True, region, weights, region_note):
             why = c.explanation
             if c.name == "product_fit":
-                why = f"Найдена веб-поиском ({host}); вид деятельности — по реестру ФНС: {why}"
-            elif c.name == "geography":
-                why = (why.replace("Реестр МСП", "Карточка ФНС (КПП)") if regioncode
-                       else f"Регион по карточке ФНС не определён; регион запроса — {region}")
+                why = f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: {why}"
+            elif c.name == "geography" and cp.kpp:
+                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)")
             comps.append(c.model_copy(update={"explanation": why}))
         relation[inn] = ch.relation
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                      score=round(sum(c.value * c.weight for c in comps), 4)))
     line = (f"веб-лиды: по классу {len(leads)}, уже в данных {len(known)}, без карточки ФНС в кеше {len(no_card)}, "
-            f"ОКВЭД не подтвердил класс {other_okved}, в блок {len(out)}")
+            f"ОКВЭД не подтвердил класс {other_okved}, другой регион {other_region}, в блок {len(out)}")
     return out, relation, no_card, line
 
 
@@ -580,8 +586,13 @@ def discover(
                                          score=round(sum(c.value * c.weight for c in comps), 4)))
     lead_no_card: list[str] = []
     if res.history_checked and leads_enabled():  # web leads (#108): «новые» only after the history check
-        found_leads, lead_relation, lead_no_card, line = lead_matches(
-            query, codes, res.okpd_classes, set(found), cache, weights, res.predicted, processed, target, target_note)
+        try:
+            found_leads, lead_relation, lead_no_card, line = lead_matches(
+                query, codes, res.okpd_classes, set(found), cache, weights, res.predicted, processed, target,
+                target_note)
+        except Exception:  # noqa: BLE001 — a broken leads file never takes the registry channel down
+            log.exception("discovery: веб-лиды пропущены из-за ошибки")
+            found_leads, lead_relation, line = [], {}, None
         matches.extend(found_leads)
         relation.update(lead_relation)
         if line:
@@ -596,7 +607,11 @@ def discover(
             if m.counterparty.inn in no_card:
                 enqueue(m.counterparty.inn)
         for inn in lead_no_card[:MAX_SHOWN]:  # a lead is shown only with a card: get it for the next search
-            enqueue(inn)
+            try:
+                enqueue(inn)
+            except Exception:  # noqa: BLE001 — a dead queue does not empty the block
+                log.exception("discovery: лид %s не поставлен в очередь", inn)
+                break
     return res
 
 

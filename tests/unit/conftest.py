@@ -33,6 +33,10 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     for mod in (bo_nalog, pb_nalog, rmsp):
         monkeypatch.setattr(mod, "_blocked_until", 0.0)
+    # web leads (#108): no test depends on the real configs/leads; tests/unit/test_web_leads.py sets its own
+    from src.sources import web_leads
+
+    monkeypatch.setattr(web_leads, "LEADS_DIR", tmp_path / "leads-default")
 
 
 @pytest.fixture(scope="session")
