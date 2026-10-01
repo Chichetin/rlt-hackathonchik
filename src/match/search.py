@@ -36,7 +36,7 @@ import yaml
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
 from src.ingest.okpd2 import label
-from src.match import fallback
+from src.match import candidates, fallback
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
@@ -102,6 +102,7 @@ def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     scoring_options(cfg)
+    candidates.sizes(cfg)
     return cfg
 
 
@@ -388,6 +389,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         guess = _predict_okpd2(store, idx, hits, lots)
         codes, predicted = ([guess], True) if guess else ([], False)
     if codes:
+        cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg)  # #195
         _class_history(store, cands, codes, as_of)
     incumbent: dict[str, int] = {}
     if shares["incumbent"] > 0 and query.customer_inn:

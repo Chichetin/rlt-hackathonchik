@@ -68,6 +68,8 @@ class Store(Protocol):
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]: ...
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]: ...
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None,
+                           limit: int) -> list[tuple]: ...
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
     def lot_names(self, lot_id: int) -> list[str]: ...
@@ -211,6 +213,34 @@ ORDER BY agg.n_lots DESC, agg.n_wins DESC, agg.supplier_inn{c}
 """
 OKPD2_COLUMN = {4: "okpd2_code", 3: "okpd2_l6", 2: "okpd2_l4", 1: "okpd2_l2"}
 
+# Suppliers of one customer's lots in the query's OKPD2 groups before as_of, most lots first (#195):
+# (inn, lots, wins, latest lot, its position name, its date) — the same shape as _OKPD2_SUPPLIERS.
+_CUSTOMER_SUPPLIERS = """
+WITH j AS (
+    SELECT supplier_inn, lot_id, is_winner, publish_date FROM {t[participants]}
+    WHERE customer_inn = %(cust)s AND {cond}
+      AND lot_id IN (SELECT lot_id FROM {t[items]} WHERE okpd2_l4 IN (SELECT unnest(%(groups)s{text_arr})))
+),
+agg AS (
+    SELECT supplier_inn, count(DISTINCT lot_id) AS n_lots, count(DISTINCT lot_id) FILTER (WHERE is_winner) AS n_wins
+    FROM j GROUP BY supplier_inn
+    ORDER BY n_lots DESC, n_wins DESC, supplier_inn{c} LIMIT %(limit)s
+),
+best AS (
+    SELECT DISTINCT ON (j.supplier_inn) j.supplier_inn, j.lot_id, j.publish_date
+    FROM j JOIN agg USING (supplier_inn)
+    ORDER BY j.supplier_inn, j.publish_date DESC NULLS LAST, j.lot_id DESC
+),
+name AS (
+    SELECT lot_id, min(product_name{c}) AS text FROM {t[items]}
+    WHERE lot_id IN (SELECT lot_id FROM best) AND okpd2_l4 IN (SELECT unnest(%(groups)s{text_arr}))
+    GROUP BY lot_id
+)
+SELECT agg.supplier_inn, agg.n_lots, agg.n_wins, best.lot_id, name.text, best.publish_date
+FROM agg JOIN best USING (supplier_inn) LEFT JOIN name USING (lot_id)
+ORDER BY agg.n_lots DESC, agg.n_wins DESC, agg.supplier_inn{c}
+"""
+
 _LOT = """
 SELECT lot_id, subject, procedure_name, start_price, customer_inn, channel FROM {t[notices]}
 WHERE lot_id = %(lot_id)s OR reqnum = %(ident)s ORDER BY (lot_id = %(lot_id)s) DESC, lot_id LIMIT 1
@@ -328,6 +358,11 @@ class ParquetStore:
 
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]:
         return self._fetch(_okpd2_sql(level), {"codes": codes, "as_of": as_of, "limit": limit}, as_of=as_of)[1]
+
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None,
+                           limit: int) -> list[tuple]:
+        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit}
+        return self._fetch(_CUSTOMER_SUPPLIERS, params, as_of=as_of)[1]
 
     def lot(self, ident: str) -> tuple | None:
         rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})[1]
@@ -447,6 +482,11 @@ class PgStore:
 
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]:
         return self._fetch(_okpd2_sql(level), {"codes": codes, "as_of": as_of, "limit": limit}, as_of=as_of)[1]
+
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None,
+                           limit: int) -> list[tuple]:
+        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit}
+        return self._fetch(_CUSTOMER_SUPPLIERS, params, as_of=as_of)[1]
 
     def lot(self, ident: str) -> tuple | None:
         _, rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})

@@ -40,3 +40,9 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+# Шире набор кандидатов (#195): + поставщики заказчика и частые поставщики группы ОКПД2, поверх дефолта v2.
+C-195-cg:        # заказчик 30 + группа ОКПД2 30
+  candidates: {customer: 30, okpd2: 30}
+C-195-cgi:       # то же + инкумбент-сигнал 0.3 (как H-15g): поставщикам заказчика есть чем подняться
+  candidates: {customer: 30, okpd2: 30}
+  signals: {incumbent: 0.3}
