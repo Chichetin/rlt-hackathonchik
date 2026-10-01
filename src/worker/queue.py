@@ -58,18 +58,21 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def enqueue(eng: Engine, kind: str, key: str) -> int:
+def enqueue(eng: Engine, kind: str, key: str, *, retry_failed: bool = True) -> int:
+    """Idempotent by (kind, key). `retry_failed=True` (explicit request: POST /api/enrich) turns a failed
+    task back to pending with fresh attempts; False (background calls from the search, #38) leaves it
+    failed, so an unresolvable INN is not sent to the registries again on every search."""
     try:
-        return _enqueue(eng, kind, key)
+        return _enqueue(eng, kind, key, retry_failed)
     except IntegrityError:  # a concurrent enqueue of the same (kind, key) won the insert
-        return _enqueue(eng, kind, key)
+        return _enqueue(eng, kind, key, retry_failed)
 
 
-def _enqueue(eng: Engine, kind: str, key: str) -> int:
+def _enqueue(eng: Engine, kind: str, key: str, retry_failed: bool) -> int:
     with eng.begin() as c:
         row = c.execute(select(tasks.c.id, tasks.c.status).where(tasks.c.kind == kind, tasks.c.key == key)).first()
         if row is not None:
-            if row.status == "failed":
+            if row.status == "failed" and retry_failed:
                 c.execute(tasks.update().where(tasks.c.id == row.id)
                           .values(status="pending", attempts=0, error=None, updated_at=_now()))
             return row.id
@@ -121,3 +124,22 @@ def status_counts(eng: Engine) -> dict[str, int]:
     with eng.connect() as c:
         rows = c.execute(text("SELECT status, COUNT(*) FROM tasks GROUP BY status")).all()
     return {r[0]: int(r[1]) for r in rows}
+
+
+def claim_keys(eng: Engine, kind: str, keys: list[str]) -> tuple[int, str] | None:
+    """Like `claim`, but only for the given keys: a batch job must not take someone else's task."""
+    if not keys:
+        return None
+    lock = " FOR UPDATE SKIP LOCKED" if eng.dialect.name == "postgresql" else ""
+    names = {f"k{i}": k for i, k in enumerate(keys)}
+    marks = ", ".join(f":{n}" for n in names)
+    with eng.begin() as c:
+        row = c.execute(
+            text(
+                "UPDATE tasks SET status='running', attempts=attempts+1, updated_at=:now "
+                "WHERE id = (SELECT id FROM tasks WHERE kind=:kind AND status='pending' "
+                f"AND key IN ({marks}) ORDER BY id LIMIT 1{lock}) AND status='pending' RETURNING id, key"
+            ),
+            {"kind": kind, "now": _now(), **names},
+        ).first()
+    return (row.id, row.key) if row else None

@@ -177,6 +177,9 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
 
 
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
+    from src.match.text import tokenizer_name, tokenizer_version
+
+    cfg = {**cfg, "tokenizer": tokenizer_name()}  # BM25_TOKENIZER may differ from the yaml (#116)
     return {
         "exp_id": exp_id,
         "part": part,
@@ -184,6 +187,7 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "commit": git("rev-parse", "HEAD"),
         "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
         "config": cfg,
+        "tokenizer_version": tokenizer_version(),
         "config_sha256": _safe_sha(),
         "stub": bool(getattr(search_mod, "IS_STUB", False)) and cfg.get("method", "search") == "search",
         "vectors": _vectors(cfg),
