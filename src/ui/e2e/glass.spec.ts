@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("главная — один hero без общей панели и переключателей фона", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Поставщики,");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Митрандир");
   await expect(page.locator(".page")).toHaveCSS("border-top-width", "0px");
   await expect(page.locator(".landing-hero")).toHaveCSS("border-top-width", "0px");
   await expect(page.locator(".landing-section, .landing-finale, .sidebar-toggle, .wave-tools")).toHaveCount(0);

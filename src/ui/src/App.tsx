@@ -177,9 +177,26 @@ function OriginBadge({ m }: { m: CounterpartyMatch }) {
   return <span className="badge badge-history"><OriginIcon origin="history" />{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
 }
 
+// the usual short legal forms: the list stays readable in a narrow column; the full name is in the tooltip and the card
+const LEGAL_FORMS: [RegExp, string][] = [
+  [/^ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ\s+/i, "ООО "],
+  [/^ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ПАО "],
+  [/^НЕПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "НАО "],
+  [/^ЗАКРЫТОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ЗАО "],
+  [/^ОТКРЫТОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ОАО "],
+  [/^АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "АО "],
+  [/^ИНДИВИДУАЛЬНЫЙ ПРЕДПРИНИМАТЕЛЬ\s+/i, "ИП "],
+];
+
+export function shortName(name: string): string {
+  for (const [re, short] of LEGAL_FORMS) if (re.test(name)) return name.replace(re, short);
+  return name;
+}
+
 function CompanyName({ name }: { name: string }) {
   // the organizers' data has no supplier names (contracts.py): such a row is named by its INN
-  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"}>{name}</span>;
+  const short = shortName(name);
+  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={short !== name ? name : undefined}>{short}</span>;
 }
 
 export function App() {
