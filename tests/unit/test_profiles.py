@@ -31,12 +31,15 @@ ON = {"weights_by_type": {"services": {"geography": 0.0}}}
     (["17.12", "32.99.12"], GOODS),     # all positions are goods
     (["43.21", "33.12"], SERVICES),
     (["17.12", "33.12"], None),         # mixed lot -> default profile
+    (["35.11", "36.00"], None),         # electricity is goods, water supply services: mixed
     ([], None),
     ([""], None),
     (["34.10"], None),                  # class 34 does not exist in OKPD2
     (["00.10"], None),
     (["abc"], None),
     (["7"], None),
+    (["1712"], None),                   # no dot after the class: not an OKPD2 code
+    (["17.12", "1712"], None),
 ])
 def test_procurement_type_by_okpd2_class(codes, want):
     assert procurement_type(codes) == want
