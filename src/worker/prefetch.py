@@ -22,7 +22,7 @@ from sqlalchemy.engine import Engine
 
 from src.enrich.enrich import enrich
 from src.sources.pb_nalog import CaptchaRequired
-from src.worker.queue import claim, engine_from_env, enqueue, finish, release, requeue_stale, tasks
+from src.worker.queue import claim_keys, engine_from_env, enqueue, finish, release, requeue_stale, tasks
 
 log = logging.getLogger("prefetch")
 CACHE_HIT_S = 0.05  # a task faster than this was served by the cache: no source was hit, no pause
@@ -45,12 +45,12 @@ def _statuses(eng: Engine, inns: list[str]) -> dict[str, str]:
 
 
 def run(inns: list[str], eng: Engine, pause_s: float = 1.0,
-        enrich_fn: Callable[[str], object] = enrich, progress_every: int = 10) -> dict[str, object]:
+        enrich_fn: Callable[[str], object] | None = None, progress_every: int = 10) -> dict[str, object]:
     """Enqueue `inns`, drain them. Returns counters; `stopped` is set when a source stopped the run."""
+    enrich_fn = enrich_fn or enrich  # resolved at call time (tests patch `enrich`)
     requeue_stale(eng)
     for inn in inns:
         enqueue(eng, "enrich", inn)
-    want = set(inns)
     total = len(inns)
     already = sum(1 for s in _statuses(eng, inns).values() if s == "done")
     done = errors = 0
@@ -58,13 +58,10 @@ def run(inns: list[str], eng: Engine, pause_s: float = 1.0,
     t0 = time.monotonic()
     log.info("prefetch: %d INN, %d already done, %d to do", total, already, total - already)
     while True:
-        task = claim(eng, "enrich")
+        task = claim_keys(eng, "enrich", inns)  # only our keys: a foreign pending task stays untouched
         if task is None:
             break
         task_id, inn = task
-        if inn not in want:  # someone else's task in a shared queue: leave it alone
-            release(eng, task_id)
-            break
         started = time.monotonic()
         try:
             enrich_fn(inn)
@@ -75,6 +72,10 @@ def run(inns: list[str], eng: Engine, pause_s: float = 1.0,
             stopped = f"captcha on {inn}"
             log.error("captcha on %s: stop, task back in the queue", inn)
             break
+        except KeyboardInterrupt:  # Ctrl+C: do not leave the task `running` for QUEUE_STALE_RUNNING_S
+            release(eng, task_id)
+            log.warning("interrupted on %s, task back in the queue", inn)
+            raise
         except Exception as e:  # noqa: BLE001 - one INN must not kill the batch
             errors += 1
             log.warning("enrich %s failed: %s", inn, e)
@@ -96,6 +97,9 @@ def run(inns: list[str], eng: Engine, pause_s: float = 1.0,
         "stopped": stopped,
     }
     log.info("prefetch finished: %s", res)
+    if res["done_total"] != total:
+        log.warning("prefetch incomplete: %s of %d done (failed %s, stopped: %s)",
+                    res["done_total"], total, res["failed_total"], stopped)
     return res
 
 
@@ -108,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     path = args.suppliers or Path(os.environ.get("DATA_PROCESSED_DIR", "data/processed")) / "suppliers.parquet"
     res = run(top_inns(path, args.top), engine_from_env(), pause_s=args.pause)
-    return 1 if res["stopped"] else 0
+    return 0 if res["done_total"] == res["total"] else 1
 
 
 if __name__ == "__main__":

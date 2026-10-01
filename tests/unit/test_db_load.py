@@ -1,4 +1,4 @@
-"""parquet → Postgres loader (D-023) on the ingest fixture. Needs a live Postgres: TEST_DATABASE_URL
+"""parquet → Postgres loader (D-054) on the ingest fixture. Needs a live Postgres: TEST_DATABASE_URL
 (e.g. postgresql://app:app@127.0.0.1:5432/app after `docker compose up -d db`); skipped otherwise."""
 
 from __future__ import annotations

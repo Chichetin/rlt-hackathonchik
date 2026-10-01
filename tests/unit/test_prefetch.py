@@ -66,3 +66,33 @@ def test_captcha_stops_and_keeps_task(eng):
     r = prefetch.run(GOOD[:4], eng, pause_s=0, enrich_fn=fn)
     assert r["stopped"] and seen == GOOD[:2] and r["done_total"] == 1
     assert status_counts(eng) == {"done": 1, "pending": 3}
+
+
+def test_foreign_pending_task_untouched(eng):
+    from sqlalchemy import select
+
+    from src.worker.queue import enqueue, tasks
+    enqueue(eng, "enrich", "7707083893")  # foreign task, smaller id than ours
+    r = prefetch.run(GOOD[:3], eng, pause_s=0, enrich_fn=lambda inn: None)
+    assert r["done_total"] == 3 and r["done_this_run"] == 3
+    with eng.connect() as c:
+        row = c.execute(select(tasks.c.status, tasks.c.attempts).where(tasks.c.key == "7707083893")).one()
+    assert (row.status, row.attempts) == ("pending", 0)
+
+
+def test_run_after_stop_processes_the_rest(eng):
+    state = {"stop": True}
+
+    def fn(inn):
+        if inn == GOOD[1] and state["stop"]:
+            raise CaptchaRequired("captcha")
+
+    assert prefetch.run(GOOD[:4], eng, pause_s=0, enrich_fn=fn)["stopped"]
+    state["stop"] = False
+    r = prefetch.run(GOOD[:4], eng, pause_s=0, enrich_fn=fn)
+    assert r["done_total"] == 4 and r["done_this_run"] == 3 and not r["stopped"]
+
+
+def test_exit_code_nonzero_when_incomplete(eng, suppliers, monkeypatch):
+    monkeypatch.setattr(prefetch, "enrich", lambda inn: (_ for _ in ()).throw(RuntimeError("x")))
+    assert prefetch.main(["--top", "2", "--pause", "0", "--suppliers", str(suppliers)]) == 1
