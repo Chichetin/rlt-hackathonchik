@@ -59,6 +59,8 @@ test("главная и подбор — отдельные страницы, д
   await page.getByRole("link", { name: "Посмотреть возможности" }).click();
   await expect(page.locator("#possibilities")).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("navigation").getByRole("link", { name: "Главная" }).click();
+  await expect(page).toHaveURL(/\/$/);
   await page.getByRole("link", { name: "Перейти к подбору" }).click();
   await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
 });

@@ -85,7 +85,7 @@ function usePath(): [Path, (next: Path) => void] {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const go = (next: Path) => {
-    if (next !== window.location.pathname) window.history.pushState(null, "", next);
+    if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, "", next);
     setPath(next);
     window.scrollTo?.({ top: 0, behavior: "instant" });
   };
