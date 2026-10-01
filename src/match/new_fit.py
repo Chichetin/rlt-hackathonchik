@@ -14,6 +14,11 @@ Increment 1 — signals without new external sources (research/METHODOLOGY.md «
 - llm_check (signal 9) is not computed in this increment: its weight is split between the other two
   and the explanation says so.
 
+HAND-MADE HEURISTIC, NOT VALIDATED: the depth values (agree 1.0 / class 0.85 / differs 0.6), the
+word-hit contributions, text_saturation, profile_hit, the minus-word table and the minus_penalty
+(configs/discover.yaml) were chosen by hand from a look at 11 cached queries (#77) — they are not fitted
+and not checked against labels (precision@10 needs #21). That is why the default mode is shadow.
+
 Only texts that are Evidence of the company AND literally occur in the cached registry page are read
 (src/enrich/evidence.py::value_in_page); every part names the Evidence it stands on. Nothing is generated.
 
@@ -69,6 +74,9 @@ def mode(cfg: dict[str, Any] | None = None) -> Mode:
     if raw not in MODES:
         log.warning("new_fit: неизвестный режим %r — используется shadow", raw)
         return "shadow"
+    if raw == "on":
+        log.warning("new_fit: режим on — ранжирование блока «Новые» по product_fit_new; константы подобраны "
+                    "вручную и не проверены на разметке (precision@10, #21); включать только для эксперимента")
     return raw  # type: ignore[return-value]
 
 
@@ -98,8 +106,9 @@ class Profile:
     """Frequent words of organizers' positions with the query's OKPD2 code (not cut to the class)."""
 
     code: str  # the prefix actually used: the full code or a shorter level, never the class
-    positions: int  # distinct position names with this prefix
+    positions: int  # distinct position names with this prefix; at most `profile_max_names` (a LIMIT)
     terms: tuple[str, ...]
+    capped: bool = False  # True: the LIMIT was reached, so `positions` is a floor («≥ N»), not a count
 
 
 def _levels(code: str) -> list[str]:
@@ -122,6 +131,9 @@ def _profile(code: str, items: str, notices: str, as_of: date | None, mtime: int
             if as_of is not None and Path(notices).exists():
                 where += " AND i.lot_id IN (SELECT lot_id FROM read_parquet(?) WHERE publish_date < ?)"
                 args += [notices, as_of]
+            elif as_of is not None:
+                log.warning("new_fit: нет %s — профиль ОКПД2 %s строится по всем позициям без среза as_of=%s "
+                            "(возможна утечка будущих лотов)", notices, prefix, as_of)
             rows = con.execute(
                 f"SELECT i.product_name, count(*) AS n FROM read_parquet(?) i WHERE {where} "
                 "AND i.product_name IS NOT NULL GROUP BY 1 ORDER BY n DESC, 1 LIMIT ?",
@@ -134,7 +146,7 @@ def _profile(code: str, items: str, notices: str, as_of: date | None, mtime: int
                 df.update(stems(name, stop))
             terms = tuple(t for t, c in sorted(df.items(), key=lambda x: (-x[1], x[0]))
                           if c / len(rows) >= min_share)[:n_terms]
-            return Profile(code=prefix, positions=len(rows), terms=terms)
+            return Profile(code=prefix, positions=len(rows), terms=terms, capped=len(rows) >= max_names)
     except duckdb.Error as e:
         log.warning("new_fit: профиль ОКПД2 %s не построен: %s", code, e)
     finally:
@@ -270,7 +282,7 @@ def score(cp: Counterparty, *, okved: str, relation: str, base: float, codes: Se
             hits.append(f"«{s}» в ОКВЭД" + (" (профиль ОКПД2)" if from_profile else ""))
             used.add("okved")
     text = min(1.0, raw / float(cfg["text_saturation"]))
-    src = "слова запроса" + (f" и профиля ОКПД2 {profile.code} ({profile.positions} наименований позиций "
+    src = "слова запроса" + (f" и профиля ОКПД2 {profile.code} ({'≥ ' if profile.capped else ''}{profile.positions} наименований позиций "
                              "в данных АИС ГЗ)" if profile else "; профиля ОКПД2 нет")
     text_why = (f"Текст: {text:.2f} — совпали {', '.join(hits)}" if hits
                 else f"Текст: 0 — {src} не встречаются в названии и ОКВЭД по реестру МСП")

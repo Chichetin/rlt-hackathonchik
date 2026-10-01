@@ -69,6 +69,18 @@ def test_env_overrides_mode_and_unknown_falls_back_to_shadow(monkeypatch, caplog
     assert "maybe" in caplog.text
 
 
+def test_mode_on_warns_that_it_is_not_validated(monkeypatch, caplog):
+    monkeypatch.setenv("DISCOVERY_NEW_FIT", "on")
+    with caplog.at_level("WARNING", logger="src.match.new_fit"):
+        assert F.mode() == "on"
+    assert "не проверены на разметке" in caplog.text
+    caplog.clear()
+    monkeypatch.setenv("DISCOVERY_NEW_FIT", "shadow")
+    with caplog.at_level("WARNING", logger="src.match.new_fit"):
+        assert F.mode() == "shadow"
+    assert caplog.text == ""
+
+
 # ---- signal 8: depth of the main OKVED vs the full OKPD2 --------------------------------------------
 
 @pytest.mark.parametrize(("okved", "codes", "relation", "want"), [
@@ -238,6 +250,31 @@ def test_profile_respects_as_of(tmp_path):
     cfg = _cfg(profile_min_positions=20)
     assert F.code_profile(["22.19.60.110"], processed, None, cfg) is not None
     assert F.code_profile(["22.19.60.110"], processed, date(2025, 7, 1), cfg) is None  # only 10 before
+
+
+def test_profile_without_notices_warns_about_as_of(tmp_path, caplog):
+    rows = [(i, f"Перчатки нитриловые {i}", "22.19.60.110") for i in range(25)]
+    processed = _items(tmp_path, rows)  # no notices.parquet
+    with caplog.at_level("WARNING", logger="src.match.new_fit"):
+        prof = F.code_profile(["22.19.60.110"], processed, date(2025, 7, 1), _cfg(profile_min_positions=20))
+    assert prof is not None
+    assert "as_of=2025-07-01" in caplog.text and "notices.parquet" in caplog.text
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="src.match.new_fit"):  # no as_of — nothing to cut, no warning
+        F.code_profile(["22.19.60.110"], processed, None, _cfg(profile_min_positions=20))
+    assert caplog.text == ""
+
+
+def test_positions_at_the_limit_are_reported_as_a_floor(tmp_path):
+    rows = [(i, f"Перчатки нитриловые размер {i}", "22.19.60.110") for i in range(30)]
+    processed = _items(tmp_path, rows)
+    capped = F.code_profile(["22.19.60.110"], processed, None, _cfg(profile_min_positions=20, profile_max_names=25))
+    assert capped is not None and capped.positions == 25 and capped.capped
+    whole = F.code_profile(["22.19.60.110"], processed, None, _cfg(profile_min_positions=20, profile_max_names=2000))
+    assert whole is not None and whole.positions == 30 and not whole.capped
+    cp, page = _cp("Альфа", "Производство прочих изделий")
+    assert "≥ 25 наименований" in _score(cp, page, "резина", profile=capped).explanation()
+    assert "(30 наименований" in _score(cp, page, "резина", profile=whole).explanation()
 
 
 def test_query_overlap_flags_code_text_disagreement():
