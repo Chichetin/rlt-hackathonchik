@@ -26,15 +26,18 @@ def paired(a: dict, b: dict) -> dict:
         raise ValueError(f"{a['exp_id']} и {b['exp_id']}: разные наборы кейсов — парное сравнение невозможно")
     groups: dict[str, list[tuple[dict, dict]]] = {"all": []}
     for q in a["per_query"]:
-        for name in ("all", *slice_names(q)):
-            groups.setdefault(name, []).append((q, rows_b[q["query_id"]]))
+        qb = rows_b[q["query_id"]]
+        # slice fields of either run: a result from before the type slice (#104) is compared with a newer one
+        for name in ("all", *slice_names({**qb, **q})):
+            groups.setdefault(name, []).append((q, qb))
     out = {}
     for name, pairs in sorted(groups.items(), key=lambda kv: (kv[0] != "all", kv[0])):
         metrics = {}
         for m in METRICS:
             diffs = [x[m] - y[m] for x, y in pairs]
             lo, hi = bootstrap_ci(diffs)
-            metrics[m] = {"delta": sum(diffs) / len(diffs), "ci95": [lo, hi]}
+            metrics[m] = {"delta": sum(diffs) / len(diffs), "ci95": [lo, hi],
+                          "a": sum(x[m] for x, _ in pairs) / len(pairs), "b": sum(y[m] for _, y in pairs) / len(pairs)}
         out[name] = {"n_queries": len(pairs), "metrics": metrics}
     return out
 
@@ -51,10 +54,11 @@ def main(argv: list[str] | None = None, results: Path = RESULTS) -> int:
         print(e, file=sys.stderr)
         return 2
     print(f"Δ = {args.a} − {args.b} | part={a['part']} | парный bootstrap по запросам")
-    print(f"{'slice':<32} {'n':>6}  " + "  ".join(f"{'Δ ' + n + ' [95% CI]':<26}" for n in METRICS))
+    print(f"{'slice':<32} {'n':>6}  " + "  ".join(f"{n + ' b → a, Δ [95% CI]':<42}" for n in METRICS))
     for name, s in table.items():
-        cells = (f"{m['delta']:+.3f} [{m['ci95'][0]:+.3f}, {m['ci95'][1]:+.3f}]" for m in s["metrics"].values())
-        print(f"{name:<32} {s['n_queries']:>6}  " + "  ".join(f"{c:<26}" for c in cells))
+        cells = (f"{m['b']:.3f} → {m['a']:.3f}, {m['delta']:+.3f} [{m['ci95'][0]:+.3f}, {m['ci95'][1]:+.3f}]"
+                 for m in s["metrics"].values())
+        print(f"{name:<32} {s['n_queries']:>6}  " + "  ".join(f"{c:<42}" for c in cells))
     return 0
 
 
