@@ -23,7 +23,8 @@ if [ -f pyproject.toml ] && [ -d tests ] && find tests -name 'test_*.py' | grep 
   RAN=1
   if command -v uv >/dev/null 2>&1; then PYTEST=(uv run --frozen pytest -q -p no:cacheprovider)
   elif [ -x .venv/bin/pytest ]; then PYTEST=(.venv/bin/pytest -q)
-  else PYTEST=(python3 -m pytest -q); fi
+  elif command -v python3 >/dev/null 2>&1; then PYTEST=(python3 -m pytest -q)
+  else PYTEST=(py -3 -m pytest -q); fi
   OUT="$(PYTHONPATH=. "${PYTEST[@]}" 2>&1)" || STATUS=1
   OUTPUT+="== pytest"$'\n'"$OUT"$'\n'
 fi

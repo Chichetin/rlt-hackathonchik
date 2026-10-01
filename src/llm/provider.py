@@ -3,7 +3,7 @@
 LLM may EXTRACT from a page text, never GENERATE facts (section 6): whatever it returns is
 checked by src/enrich/evidence.py before it reaches a Counterparty.
 
-[ОБНОВИТЬ 01.10] allowed providers come from the rules. Model names and API URLs — from the
+[СПРОСИТЬ Q-13] allowed providers come from the rules. Model names and API URLs — from the
 provider's current docs, not from memory. Until then only LLM_PROVIDER=none is implemented.
 """
 
@@ -32,4 +32,4 @@ def get_provider() -> LLMProvider:
     name = os.environ.get("LLM_PROVIDER", "none").strip().lower()
     if name in ("", "none"):
         return NoLLM()
-    raise NotImplementedError(f"LLM_PROVIDER={name!r}: провайдер ещё не подключён ([ОБНОВИТЬ 01.10])")
+    raise NotImplementedError(f"LLM_PROVIDER={name!r}: провайдер ещё не подключён ([СПРОСИТЬ Q-13])")

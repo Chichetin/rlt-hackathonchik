@@ -12,10 +12,26 @@ closed: the check still runs).
 from __future__ import annotations
 
 import os
+import posixpath
+import re
 import shlex
 import sys
 
 SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "\n"}
+_DRIVE = re.compile(r"[A-Za-z]:[\\/]")
+
+
+def _join(base: str, path: str) -> str:
+    """Paths as the calling shell sees them. Native Windows Python must not reinterpret Git Bash
+    paths (/tmp/x, /c/Users/...): join and normalize with forward slashes."""
+    path = os.path.expanduser(path)
+    if path.startswith("/") or _DRIVE.match(path):
+        return path
+    return base.replace("\\", "/").rstrip("/") + "/" + path
+
+
+def _norm(path: str) -> str:
+    return posixpath.normpath(path.replace("\\", "/"))
 GLOBAL_WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 
 
@@ -55,14 +71,14 @@ def targets(text: str, cwd: str) -> list[str]:
         if not c:
             continue
         if c[0] == "cd" and len(c) > 1:
-            here = os.path.join(here, os.path.expanduser(c[1]))
+            here = _join(here, c[1])
             continue
         if os.path.basename(c[0]) != "git":
             continue
         i, where = 1, here
         while i < len(c) and c[i].startswith("-"):
             if c[i] == "-C" and i + 1 < len(c):
-                where = os.path.join(where, os.path.expanduser(c[i + 1]))
+                where = _join(where, c[i + 1])
             i += 2 if c[i] in GLOBAL_WITH_ARG else 1
         if i >= len(c) or c[i] not in ("commit", "push"):
             continue
@@ -70,7 +86,7 @@ def targets(text: str, cwd: str) -> list[str]:
         if c[i] == "push" and ("--delete" in rest or "-d" in rest
                                or any(a.startswith(":") for a in rest if not a.startswith("-"))):
             continue
-        found.append(os.path.normpath(where))
+        found.append(_norm(where))
     return found
 
 

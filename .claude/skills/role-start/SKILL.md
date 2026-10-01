@@ -12,7 +12,7 @@ description: Первые действия роли DATA, MATCH, SOURCES или 
 **Каждый шаг ниже — только через взятую issue**: `bash scripts/issues.sh free area:<роль>` →
 `take <N>` → worktree (скилл `orchestrate`). Нет задачи под шаг — `issues.sh create` по
 `.github/ISSUE_TEMPLATE/task.md`, потом `take`. Время — по `docs/timeline.md` (МСК, 01.10);
-`[ОБНОВИТЬ 01.10]` — после kickoff сверить с планом `docs/plans/<дата>-plan.md`.
+План после kickoff — `docs/plans/2026-10-01-plan.md` (T-01…T-17); время шагов — оттуда.
 
 Аргумент — роль. Без аргумента — спроси роль одной строкой и выведи её раздел.
 

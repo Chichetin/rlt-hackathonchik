@@ -6,14 +6,14 @@
 видно в `bash scripts/issues.sh board`. Правка чужого каталога — только в рамках задачи этой
 области.
 
-`[ОБНОВИТЬ 01.10]` основной человек каждой области — после kickoff.
+`[СПРОСИТЬ]` основной человек каждой области — решение команды после kickoff; до него любой берёт свободную P0.
 
 | area: | Роль | Основной человек | Владеет | Отвечает за |
 |---|---|---|---|---|
-| `area:data` | DATA | `[ОБНОВИТЬ 01.10]` | `src/ingest/`, `src/eval/`, `eval/`, `configs/split.yaml`, `data/processed/`, `research/DATA_DICTIONARY.md`, `research/EVAL.md`, `research/ERROR_ANALYSIS.md` | данные организаторов, смысл полей, единая схема, реальные кейсы, backtest и метрики |
-| `area:match` | MATCH | `[ОБНОВИТЬ 01.10]` | `src/match/`, `indexes/`, `configs/search.yaml`, `research/METHODOLOGY.md`, `research/EXPERIMENTS.md` | понимание запроса, кандидаты из истории, скоринг, объяснения |
-| `area:sources` | SOURCES | `[ОБНОВИТЬ 01.10]` | `src/sources/`, `src/enrich/`, `src/llm/`, `cache/`, `research/SOURCES.md` | поиск компаний в открытых источниках, сопоставление с ИНН, обогащение, проверки надёжности |
-| `area:app` | APP | `[ОБНОВИТЬ 01.10]` | `src/api/`, `src/ui/`, `src/worker/`, `deploy/`, `docker-compose.yml`, `Dockerfile`, `pitch/`, `docs/ui.md` | API, интерфейс, docker-compose, сценарий демо и его e2e, чек-поинты, презентация |
+| `area:data` | DATA | `[СПРОСИТЬ]` | `src/ingest/`, `src/eval/`, `eval/`, `configs/split.yaml`, `data/processed/`, `research/DATA_DICTIONARY.md`, `research/EVAL.md`, `research/ERROR_ANALYSIS.md` | данные организаторов, смысл полей, единая схема, реальные кейсы, backtest и метрики |
+| `area:match` | MATCH | `[СПРОСИТЬ]` | `src/match/`, `indexes/`, `configs/search.yaml`, `research/METHODOLOGY.md`, `research/EXPERIMENTS.md` | понимание запроса, кандидаты из истории, скоринг, объяснения |
+| `area:sources` | SOURCES | `[СПРОСИТЬ]` | `src/sources/`, `src/enrich/`, `src/llm/`, `cache/`, `research/SOURCES.md` | поиск компаний в открытых источниках, сопоставление с ИНН, обогащение, проверки надёжности |
+| `area:app` | APP | `[СПРОСИТЬ]` | `src/api/`, `src/ui/`, `src/worker/`, `deploy/`, `docker-compose.yml`, `Dockerfile`, `pitch/`, `docs/ui.md` | API, интерфейс, docker-compose, сценарий демо и его e2e, чек-поинты, презентация |
 
 APP одновременно ведёт интерфейс и питч; во второй день это самая нагруженная роль. После feature
 freeze (02.10, 14:00) цифры и слайды по методологии готовят DATA и MATCH, APP собирает презентацию.

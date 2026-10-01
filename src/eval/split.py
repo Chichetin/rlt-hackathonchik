@@ -6,7 +6,7 @@ Parts:
   holdout  — queries from `holdout_from`: SEALED. Read only inside `make eval-final` for the
              frozen configuration (src/eval/final.py), every run logged in eval/final-log.md.
 
-[ОБНОВИТЬ 01.10] dates in configs/split.yaml and the case builder (DATA) after data profiling:
+Dates in configs/split.yaml come from the data profile (research/PROBLEM.md); case builder — T-07:
 which date field, which outcome (winner / offers) is "relevant".
 """
 
