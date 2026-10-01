@@ -330,7 +330,7 @@ test("«Новые» with a manufacturer emptied by other filters: «Тольк�
   expect(discovered).not.toHaveTextContent("Под фильтр");
 });
 
-test("card has a «Отзывы» block: not-in-score note, links by name and INN, no rating (#106)", async () => {
+test("card keeps external reviews separate from customer ratings (#106, #251)", async () => {
   const withInn = structuredClone(response);
   withInn.history[0]!.counterparty.inn = "7804428656";
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withInn), { status: 200 }));
@@ -340,8 +340,8 @@ test("card has a «Отзывы» block: not-in-score note, links by name and IN
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
   const block = within(screen.getByRole("region", { name: "Отзывы" }));
-  expect(block.getByText(/Не влияет на оценку подбора/)).toBeInTheDocument();
-  expect(block.getByText(/Рейтинг из отзывов не показываем/)).toBeInTheDocument();
+  expect(block.getByText(/не влияет на подбор/)).toBeInTheDocument();
+  expect(block.getByText(/рейтинг не переносится в Митрандир/)).toBeInTheDocument();
   expect(block.getByRole("link", { name: "2ГИС" })).toHaveAttribute("href", expect.stringContaining(encodeURIComponent("ООО Альфа 7804428656")));
 });
 
