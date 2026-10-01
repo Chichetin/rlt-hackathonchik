@@ -62,14 +62,19 @@ test("демо: запрос → два блока → карточка → фи
   await page.getByLabel("Только производители").uncheck();
   await expect(history.locator(".item").first()).toBeVisible();
 
-  // «Регион»: по реестру, иначе по КПП (78 — СПб); остаются строки, и у всех КПП 78…
+  // «Регион»: по реестру, иначе по КПП (78 — СПб; src/match/filters.py::in_region); остаются строки,
+  // и у каждой регион из реестра — СПб, а без него КПП 78…
   const regional = page.waitForResponse(
-    (r) => r.url().endsWith("/api/search") && (r.request().postData() ?? "").includes('"region":"Санкт-Петербург"'),
+    // Query.region is always set by the UI; only filters.region marks the filtered request.
+    (r) => r.url().endsWith("/api/search") && JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
   );
   await page.getByLabel("Регион").selectOption("Санкт-Петербург");
   const body = await (await regional).json();
   expect(body.history.length).toBeGreaterThan(0);
-  for (const m of body.history) expect(m.counterparty.kpp).toMatch(/^78/);
+  for (const m of body.history) {
+    if (m.counterparty.region) expect(m.counterparty.region).toBe("Санкт-Петербург");
+    else expect(m.counterparty.kpp).toMatch(/^78/);
+  }
   await expect(history.locator(".item")).toHaveCount(body.history.length);
   for (const meta of await history.locator(".item .meta").allTextContents()) expect(meta).toContain("Санкт-Петербург");
 
