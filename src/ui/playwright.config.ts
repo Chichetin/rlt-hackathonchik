@@ -23,7 +23,8 @@ export default defineConfig({
     // stops); tests of the motion itself switch it back on with page.emulateMedia. The API answers parallel searches
     // one by one (8 at once: 1-3.5 s each on an idle server), and the machine is shared with other sessions: these
     // tests check behaviour, not latency, so assertions wait up to 15 s and a test up to 60 s; the demo's own clock
-    // checks latency.
+    // checks latency. Not checked any more: latency outside the demo scenario and bugs seen only mid-animation in the
+    // rest (the demo and the two motion tests keep the animations), D-098. The wave test (two 15 s frame polls) fits 60 s.
     { name: "rest", testIgnore: /demo\.spec\.ts/, use: { reducedMotion: "reduce" }, expect: { timeout: 15_000 },
       timeout: 60_000 },
     // Without WebGL: headless Chromium draws the background waves in software, and that, not the scenario, took the
