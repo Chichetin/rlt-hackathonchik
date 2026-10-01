@@ -19,7 +19,9 @@ import {
   type Filters,
   type Query,
   type SearchResponse,
+  type Counterparty,
 } from "./api";
+import { reviewLinks } from "./reviews";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -641,6 +643,44 @@ function Block(props: {
   );
 }
 
+function ReviewsBlock({ cp }: { cp: Counterparty }) {
+  const found = (cp.evidence ?? []).filter((e) => e.field === "rating" || e.field === "reviews");
+  const links = reviewLinks(cp.name, cp.inn);
+  return (
+    <section aria-label="Отзывы">
+      <h3>Отзывы</h3>
+      <p className="hint">Не влияет на рейтинг подбора: показываем рядом, в оценку не входит.</p>
+      {found.length > 0 ? (
+        <ul className="evidence">
+          {found.map((e, i) => (
+            <li key={i}>
+              <span className="fact">{e.fact}</span>
+              <span className="src">
+                {e.source} ·{" "}
+                <a href={e.url} target="_blank" rel="noreferrer">{e.url}</a> ·{" "}
+                {new Date(e.fetched_at).toLocaleDateString("ru-RU")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="empty">Подтверждённого рейтинга в источниках нет.</p>
+      )}
+      {links.length > 0 && (
+        <p className="review-links">
+          Искать отзывы самостоятельно:{" "}
+          {links.map((l, i) => (
+            <span key={l.url}>
+              {i > 0 && " · "}
+              <a href={l.url} target="_blank" rel="noreferrer">{l.label}</a>
+            </span>
+          ))}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
@@ -735,6 +775,8 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
           </dl>
         </>
       )}
+
+      <ReviewsBlock cp={cp} />
 
       <h3>Источники фактов</h3>
       {(cp.evidence ?? []).length === 0 && <p className="empty">Подтверждённых фактов с источником нет.</p>}

@@ -1,0 +1,4 @@
+2GIS search by INN 7804428656 (recorded page, test fixture)
+ООО "БРАСС"
+rating: 4.7
+reviews_count: 12
