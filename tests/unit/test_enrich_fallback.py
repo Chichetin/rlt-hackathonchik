@@ -102,7 +102,7 @@ def test_captcha_is_remembered_and_fallback_answers(cache, monkeypatch):
 
 
 def test_pb_blocked_flag_sends_no_request(monkeypatch):
-    monkeypatch.setattr(pb_nalog, "_blocked_until", 10**12)
+    pb_nalog.PACER.block(10**12)  # reset after the test by the autouse fixture in conftest.py
     monkeypatch.setattr(httpx.Client, "post", lambda *a, **k: pytest.fail("request to a blocked host"))
     with pytest.raises(pb_nalog.CaptchaRequired):
         pb_nalog.fetch_raw(MSP_INN)
