@@ -14,11 +14,14 @@ import duckdb
 import pytest
 
 from src.contracts import Evidence
-from src.enrich.evidence import check_evidence
+from src.enrich.enrich import enrich
+from src.enrich.evidence import check_counterparty, check_evidence
 from src.sources import fns_opendata as F
+from src.sources import pb_nalog
 from src.sources.cache import SourceCache
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "fns_opendata"
+PB = FIX.parent / "pb_nalog"
 OFFICEMAG, BRASS, DEBTOR, ROSTELECOM = "7820324037", "7804428656", "4706050392", "7707049388"
 FETCHED = 1_790_000_000.0  # archive mtime → Evidence.fetched_at
 
@@ -70,7 +73,8 @@ def test_lookup_facts_pass_evidence_check(built):
     evs = F.lookup(BRASS, cache, parquet=out)
     by = _by_field(evs)
     assert set(by) == {"employees", "income", "expenses", "tax_regime"}  # no debtam row → no debt fact
-    assert by["employees"][0].fact == "Среднесписочная численность работников за 2025 г. (сведения на 31.12.2025): 8 чел."
+    assert by["employees"][0].fact == (
+        "Среднесписочная численность работников за 2025 г. (сведения на 31.12.2025): 8 чел.")
     assert by["employees"][0].value == "СведССЧР.КолРаб: 8"
     assert by["income"][0].fact == "Доходы за 2025 г. по бухгалтерской отчётности: 17 367 000 ₽"
     assert by["expenses"][0].value == "СведДохРасх.СумРасход: 12953000.00"
@@ -132,3 +136,21 @@ def test_invalid_inn_is_valueerror(built):
 
 def test_no_parquet_gives_empty(tmp_path):
     assert F.lookup(BRASS, SourceCache(tmp_path / "s.sqlite"), parquet=tmp_path / "missing.parquet") == []
+
+
+def test_enrich_adds_fns_facts_that_pass_the_check(built, monkeypatch):
+    out, _, cache = built
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(out))
+    cache.put(pb_nalog.card_url(BRASS), (PB / f"{BRASS}.txt").read_text(encoding="utf-8"))
+    cp = enrich(BRASS, cache, offline=True)
+    fields = {e.field for e in cp.evidence}
+    assert {"inn", "name", "status", "employees", "income", "expenses", "tax_regime"} <= fields
+    assert "tax_debt" not in fields
+    assert check_counterparty(cp, cache.page_text) == []
+
+
+def test_enrich_without_fns_parquet_is_unchanged(built):
+    _, _, cache = built  # conftest points FNS_OPENDATA_PARQUET at a missing file
+    cache.put(pb_nalog.card_url(BRASS), (PB / f"{BRASS}.txt").read_text(encoding="utf-8"))
+    cp = enrich(BRASS, cache, offline=True)
+    assert all(e.url == pb_nalog.card_url(BRASS) for e in cp.evidence)

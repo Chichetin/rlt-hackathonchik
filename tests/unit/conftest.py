@@ -19,6 +19,7 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No test talks to an open source by accident: discovery is cache-only and the cache is per test."""
     monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
     monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources-default.sqlite"))
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(tmp_path / "no-fns-opendata.parquet"))  # not the dev machine's
     # no real network: only httpx.MockTransport answers (a request to a source in a test is a bug)
     import httpx
 
