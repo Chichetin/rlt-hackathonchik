@@ -50,4 +50,3 @@ def mix_incumbent(exp: float, why: str, n_lots: int, share: float) -> tuple[floa
         return exp, why
     value = (1.0 - share) * exp + share * incumbent_value(n_lots)
     return value, f"{why}; с этим заказчиком: {n_lots} лот(ов)"
-
