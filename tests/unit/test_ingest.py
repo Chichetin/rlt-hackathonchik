@@ -8,8 +8,9 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from src.enrich.evidence import check_counterparty, strip_unverified
 from src.ingest.build import build
-from src.ingest.load import counterparties
+from src.ingest.load import counterparties, suppliers_path
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
 CUTOFF = date(2025, 7, 1)
@@ -81,11 +82,19 @@ def test_counterparty_evidence_and_stats(processed: Path) -> None:
     now = counterparties([A, "0000000000"], processed=processed)
     assert set(now) == {A}  # unknown INN is absent, not invented
     cp = now[A]
-    assert cp.inn == A and cp.name == f"ИНН {A}" and cp.kpp == "780101001" and cp.region == "Санкт-Петербург"
+    assert cp.inn == A and cp.name == f"ИНН {A}" and cp.kpp == "780101001" and cp.region is None
     assert cp.stats["lots_participated"] == 5 and cp.stats["last_seen"] == "2025-10-15"
     [ev] = cp.evidence
     assert ev.url == "data:participants#7" and ev.field == "inn" and ev.value == A
+    # The API passes every card through strip_unverified(): data: Evidence must survive it.
+    assert check_counterparty(cp, lambda url: None) == []
+    assert strip_unverified(cp, lambda url: None).inn == A
 
     past = counterparties([A], as_of=CUTOFF, processed=processed)[A]
     assert past.stats["lots_participated"] == 3
     assert past.evidence[0].url == "data:participants#3"  # latest lot before the cutoff
+
+
+def test_unbuilt_as_of_is_a_clear_error(processed: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="src.ingest.build"):
+        suppliers_path(date(2025, 1, 1), processed)

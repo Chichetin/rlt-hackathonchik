@@ -4,18 +4,20 @@ Every counterparty gets `Evidence(field="inn", url="data:participants#<lot_id>")
 where this INN took part (the contract in src/contracts.py requires it: without the Evidence
 strip_unverified() shows "ИНН не подтверждён"). Organizers' data has no names: name is
 "ИНН <inn>" until enrich() (D-019). An INN that fails the checksum becomes inn=None.
+Region is not derived here: a KPP/INN prefix is the tax office, not a fact with Evidence
+(`geography` in search reads `kpp` itself). Pass a shared `con` from search() per request.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import duckdb
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
-from src.ingest.build import DEFAULT_OUT, SPB
+from src.ingest.build import DEFAULT_OUT
 
 STATS_KEYS = (
     "lots_participated",
@@ -32,15 +34,22 @@ STATS_KEYS = (
 
 def suppliers_path(as_of: date | None, processed: Path = DEFAULT_OUT) -> Path:
     """suppliers.parquet for the product, suppliers_<as_of>.parquet for eval (built for the cutoff)."""
-    return processed / (f"suppliers_{as_of.isoformat()}.parquet" if as_of else "suppliers.parquet")
+    path = processed / (f"suppliers_{as_of.isoformat()}.parquet" if as_of else "suppliers.parquet")
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not built: run `uv run python -m src.ingest.build` (as_of={as_of}; "
+            "only the split cutoff is prebuilt)"
+        )
+    return path
 
 
 def built_at(processed: Path = DEFAULT_OUT) -> datetime:
-    """fetched_at of data: Evidence — when organizers' CSV were ingested."""
+    """fetched_at of data: Evidence — when organizers' CSV were ingested (never invented)."""
+    manifest = processed / "manifest.json"
     try:
-        return datetime.fromisoformat(json.loads((processed / "manifest.json").read_text(encoding="utf-8"))["built_at"])
-    except (OSError, KeyError, ValueError):
-        return datetime.now(UTC)
+        return datetime.fromisoformat(json.loads(manifest.read_text(encoding="utf-8"))["built_at"])
+    except (OSError, KeyError, ValueError) as e:
+        raise FileNotFoundError(f"{manifest}: no built_at — rebuild with `python -m src.ingest.build`") from e
 
 
 def _stats(row: dict) -> dict[str, float | int | str]:
@@ -62,7 +71,18 @@ def counterparties(
     """Counterparty per INN found in the history before as_of; unknown INNs are absent."""
     if not inns:
         return {}
+    own = con is None
     con = con or duckdb.connect()
+    try:
+        return _counterparties(con, inns, as_of, processed)
+    finally:
+        if own:
+            con.close()
+
+
+def _counterparties(
+    con: duckdb.DuckDBPyConnection, inns: list[str], as_of: date | None, processed: Path
+) -> dict[str, Counterparty]:
     sup = str(suppliers_path(as_of, processed)).replace("\\", "/")
     part = str(processed / "participants.parquet").replace("\\", "/")
     cond = "publish_date < $2" if as_of else "TRUE"
@@ -106,7 +126,6 @@ def counterparties(
             inn=raw_inn if valid else None,
             kpp=kpp,
             name=f"ИНН {raw_inn}" if valid else f"ИНН не подтверждён ({raw_inn})",
-            region="Санкт-Петербург" if (kpp or raw_inn).startswith(SPB) else None,
             stats=_stats(row),
             evidence=evidence,
         )

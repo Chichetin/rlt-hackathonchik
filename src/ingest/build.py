@@ -35,7 +35,7 @@ from src.ingest.profile import FILES, inn_valid_sql
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "data" / "processed"
 
-# Region codes of Saint Petersburg and Leningrad oblast: first two digits of INN / KPP.
+# Region code of Saint Petersburg: first two digits of INN / KPP (customers_spb).
 SPB = "78"
 
 
@@ -111,7 +111,7 @@ def build_tables(con: duckdb.DuckDBPyConnection) -> None:
                n.publish_date, n.channel, n.customer_inn, n.start_price
         FROM (
             SELECT lot_id, supplier_inn,
-                   mode(supplier_kpp) AS supplier_kpp,
+                   max(supplier_kpp) AS supplier_kpp,  -- deterministic for the 31 duplicates
                    coalesce(bool_or(is_winner), false) AS is_winner
             FROM s WHERE lot_id IS NOT NULL AND supplier_inn IS NOT NULL
             GROUP BY lot_id, supplier_inn
@@ -161,11 +161,17 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
                 FROM groups
             ) WHERE r <= 3
             GROUP BY supplier_inn
+        ),
+        kpp AS (  -- most frequent KPP, ties broken by the KPP itself: rebuilds are identical
+            SELECT supplier_inn AS inn, arg_max(supplier_kpp, (n, supplier_kpp)) AS kpp
+            FROM (SELECT supplier_inn, supplier_kpp, count(*) AS n FROM p
+                  WHERE supplier_kpp IS NOT NULL GROUP BY ALL)
+            GROUP BY supplier_inn
         )
         SELECT a.*, top.top_okpd2
         FROM (
             SELECT supplier_inn AS inn,
-                   mode(supplier_kpp) AS kpp,
+                   kpp.kpp,
                    bool_and(inn_valid) AS inn_valid,
                    count(DISTINCT lot_id) AS lots_participated,
                    count(DISTINCT lot_id) FILTER (WHERE is_winner) AS lots_won,
@@ -176,7 +182,7 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
                    min(publish_date) AS first_seen,
                    max(publish_date) AS last_seen,
                    median(start_price) AS median_start_price
-            FROM p GROUP BY supplier_inn
+            FROM p LEFT JOIN kpp ON kpp.inn = p.supplier_inn GROUP BY supplier_inn, kpp.kpp
         ) a LEFT JOIN top ON top.supplier_inn = a.inn
         ORDER BY a.lots_participated DESC, a.inn
         """
