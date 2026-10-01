@@ -86,7 +86,10 @@ OPTIONS: dict[str, tuple] = {
     # lots / wins at which experience reaches 1.0 (#196): low caps make active suppliers indistinguishable
     "sat_lots": (SAT_LOTS, None),
     "sat_wins": (SAT_WINS, None),
+    # price (#105): none — «нет данных» (v1); scale — НМЦК запроса против медианы НМЦК лотов поставщика
+    "price": ("none", ("none", "scale")),
 }
+PRICE_DECADES = 2.0  # price = 1 − |log10(budget / median)| / 2: 0 at a 100× difference
 
 
 def scoring_options(cfg: dict) -> dict:
@@ -316,6 +319,31 @@ def _activity(cp: Counterparty, ref: date | None, as_of: date | None) -> tuple[f
     return 0.5 ** (days / HALF_LIFE_DAYS), f"Последнее участие {_fmt(date.fromisoformat(last))} — {days} дн. {anchor}"
 
 
+def _rub(x: float) -> str:
+    return f"{x:,.0f}".replace(",", " ") + " ₽"
+
+
+def _price(cp: Counterparty, budget: float | None, as_of: date | None) -> tuple[float, str] | None:
+    """Scale fit (#105): the query's НМЦК against the median НМЦК of the supplier's lots before as_of —
+    a supplier of 5 000 ₽ lots is a poor fit for a 5 000 000 ₽ lot and vice versa. 1.0 at the same scale,
+    0 at a PRICE_DECADES-decade difference. None — not computed (no budget or no history of prices)."""
+    median = cp.stats.get("median_start_price")
+    if budget is None or budget <= 0 or not isinstance(median, int | float) or median <= 0:
+        return None
+    ratio = budget / float(median)
+    value = max(0.0, 1.0 - abs(math.log10(ratio)) / PRICE_DECADES)
+    if 0.5 <= ratio <= 2:
+        how = "масштаб сопоставим"
+    elif ratio > 1:
+        how = f"закупка в {ratio:.0f} раз крупнее его типичного лота" if ratio >= 10 else \
+            f"закупка в {ratio:.1f} раза крупнее его типичного лота"
+    else:
+        how = f"закупка в {1 / ratio:.0f} раз мельче его типичного лота" if ratio <= 0.1 else \
+            f"закупка в {1 / ratio:.1f} раза мельче его типичного лота"
+    return value, (f"НМЦК запроса {_rub(budget)}; медиана НМЦК лотов поставщика {_period(as_of)} — "
+                   f"{_rub(float(median))}: {how}")
+
+
 def _inn_geography(inn: str | None, want: str | None, share: float, why: str) -> tuple[float, str]:
     """No usable KPP: 0 in v1; with signals.inn_region > 0 — region by the INN's first two digits (H-15c)."""
     if share <= 0.0 or not inn or not inn[:2].isdigit():
@@ -459,6 +487,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)
         act, act_why = _activity(cp, ref, as_of)
+        price = _price(cp, query.budget, as_of) if opts["price"] == "scale" else None
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
@@ -466,7 +495,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),
             *(ScoreComponent(name=n, value=0.0, weight=0.0, explanation=why)  # type: ignore[arg-type]
-              for n, why in UNAVAILABLE.items()),
+              for n, why in UNAVAILABLE.items() if not (n == "price" and price is not None)),
+            *([_component("price", price[0], w, price[1])] if price is not None else []),
             _component("activity", act, w, act_why),
             _component("geography", geo, w, geo_why),
         ]

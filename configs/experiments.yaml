@@ -51,3 +51,11 @@ H-196-sat100:
   options: {sat_lots: 100, sat_wins: 50}
 H-196-sat500:
   options: {sat_lots: 500, sat_wins: 250}
+# #105: компонента price — масштаб НМЦК запроса против медианы НМЦК лотов поставщика до as_of
+# (src/match/search.py::_price), поверх дефолта H-15f; вес price добавляется к сумме (баллы не нормированы).
+H-105-price05:
+  weights: {price: 0.05}
+  options: {price: scale}
+H-105-price10:
+  weights: {price: 0.10}
+  options: {price: scale}
