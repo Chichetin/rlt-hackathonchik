@@ -106,7 +106,8 @@ cat > "$TMP/gql.json" <<'JSON'
 {"data": {"viewer": {"login": "me"}, "repository": {
  "issues": {"nodes": [
   {"number": 3, "title": "BM25 по наименованиям", "createdAt": "2026-10-01T09:00:00Z", "updatedAt": "2026-10-01T11:50:00Z",
-   "assignees": {"nodes": [{"login": "me"}]}, "labels": {"nodes": [{"name": "area:match"}]}, "timelineItems": {"nodes": []}},
+   "assignees": {"nodes": [{"login": "me"}]}, "labels": {"nodes": [{"name": "area:match"}]}, "timelineItems": {"nodes": []},
+   "comments": {"nodes": [{"author": {"login": "mate"}}]}},
   {"number": 5, "title": "Карточка контрагента", "createdAt": "2026-10-01T09:00:00Z", "updatedAt": "2026-10-01T11:40:00Z",
    "assignees": {"nodes": [{"login": "mate"}]}, "labels": {"nodes": [{"name": "area:app"}]},
    "timelineItems": {"nodes": [{"createdAt": "2026-10-01T11:00:00Z"}]}},
@@ -172,6 +173,7 @@ expect_out has   "контекст: основная копия на main — п
 expect_out has   "контекст: нет remote — предупреждение, без падения" "нет remote origin"
 git remote add origin https://github.com/team/plan.git
 expect_out has   "контекст: мои задачи"                     "#3 BM25 по наименованиям"
+expect_out has   "контекст: входящее называет задачу"  "#3 BM25 по наименованиям — новый комментарий от mate"
 expect_out has   "контекст: занятая другим area: с временем" "area:app: #5 mate с 2026-10-01 11:00 UTC"
 expect_out lacks "контекст: свободная задача не занята"     "area:sources:"
 expect_out has   "контекст: blocker виден"                  "#9 Демо не поднимается"
