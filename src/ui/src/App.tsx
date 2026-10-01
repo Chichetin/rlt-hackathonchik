@@ -78,6 +78,14 @@ function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Quer
   return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
 }
 
+/** Server's reason for an empty answer (X-Search-Note, #166) as a sentence; none — the general empty text. */
+export function noteText(note: string | undefined): string | undefined {
+  const t = note?.trim();
+  if (!t) return undefined;
+  const sentence = t[0].toUpperCase() + t.slice(1);
+  return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
 type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
 
 // History API routing without a router dependency; the API serves index.html for every page path (src/api/app.py)
@@ -544,7 +552,7 @@ export function App() {
             empty={
               filterNotes(base, filters).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
-                : undefined
+                : noteText(res.note)
             }
           />
           <Block
