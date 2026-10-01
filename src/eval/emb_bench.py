@@ -232,6 +232,13 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
     meta["tokenizer"] = tokenizer_version()
     bm25_key = "bm25" if tokenizer_name() == "prefix5" else f"bm25-{tokenizer_name()}"
     results = {bm25_key: {**meta, "retriever": "bm25", "metrics": _summary(base), "slices": slices(base)}}
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def save(key: str) -> None:  # after each model: a crash later keeps what is measured
+        name = f"emb-{key}-s1{'-short' if short else ''}.json"
+        (out_dir / name).write_text(json.dumps(results[key], ensure_ascii=False, indent=2), encoding="utf-8")
+
+    save(bm25_key)
     for model in models:
         import torch
 
@@ -257,10 +264,7 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
         log.info("%s: vec %.3f, hybrid %.3f, bm25 %.3f", model, results[slug(model)]["vector"]["metrics"]
                  ["cand_recall@200"]["mean"], results[slug(model)]["hybrid_rrf"]["metrics"]["cand_recall@200"]["mean"],
                  results[bm25_key]["metrics"]["cand_recall@200"]["mean"])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for key, res in results.items():
-        name = f"emb-{key}-s1{'-short' if short else ''}.json"
-        (out_dir / name).write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+        save(slug(model))
     return results
 
 
