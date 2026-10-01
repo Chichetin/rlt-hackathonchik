@@ -36,7 +36,7 @@ test("просмотр без модального окна сохраняет �
   await expect(page.getByLabel("Регион", { exact: true })).toBeVisible();
   await page.locator(".query-refinements").getByRole("link", { name: /Фильтры/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Фильтры подбора");
-  await expect(page.getByRole("checkbox", { name: /^Только производители/ })).toHaveCount(1);
+  await expect(page.getByRole("checkbox", { name: /^Производители/ })).toHaveCount(1);
   await expect(page.getByRole("combobox", { name: /Регион/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
   await expect(page).toHaveURL(/\/search$/);

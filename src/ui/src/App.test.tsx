@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App, noteText } from "./App";
 import { reviewLinks } from "./reviews";
-import { buildQuery, type Counterparty, filterNotes, regionLabel, type SearchResponse } from "./api";
+import { buildQuery, type Counterparty, type Filters, filterNotes, NO_FILTERS, regionLabel, type SearchResponse } from "./api";
 
 const match = (name: string, origin: "history" | "discovered", kind = "manufacturer") => ({
   counterparty: {
@@ -36,13 +36,13 @@ afterEach(() => vi.restoreAllMocks());
 
 async function toggleManufacturer() {
   await userEvent.click(within(screen.getByRole("navigation")).getByRole("link", { name: "Фильтры" }));
-  await userEvent.click(await screen.findByRole("checkbox", { name: /^Только производители/ }));
+  await userEvent.click(await screen.findByRole("checkbox", { name: /Производители/ }));
   await userEvent.click(screen.getByRole("button", { name: "Готово, вернуться к подбору" }));
   await screen.findByRole("group", { name: "Группа поставщиков" });
 }
 
 test("buildQuery keeps only enabled filters", () => {
-  const q = buildQuery("  бумага ", { only_msp: true, only_manufacturers: false, region: "" });
+  const q = buildQuery("  бумага ", { ...NO_FILTERS, only_msp: true });
   expect(q.text).toBe("бумага");
   expect(q.filters).toEqual({ only_msp: true });
 });
@@ -93,7 +93,7 @@ test("API error is shown, not swallowed", async () => {
 });
 
 test("buildQuery adds optional budget, customer and lot context", () => {
-  const f = { only_msp: false, only_manufacturers: false, region: "" };
+  const f = { ...NO_FILTERS, only_msp: false };
   const lot = { okpd2: ["17.12.14.110"], channel: "ЭМ" as const, customer_inn: null, budget: null };
   const q = buildQuery("бумага", f, { budget: "45 000,5", customer_inn: "7804105239", lot, query_id: "lot-1" });
   expect(q).toMatchObject({ query_id: "lot-1", budget: 45000.5, customer_inn: "7804105239", okpd2: ["17.12.14.110"], channel: "ЭМ" });
@@ -163,29 +163,29 @@ test("filterNotes counts candidates hidden for an unknown attribute", () => {
   const base = structuredClone(response);
   base.history[0].counterparty.kind = null;
   base.history[0].counterparty.is_msp = null;
-  const f = { only_msp: true, only_manufacturers: true, region: "" };
+  const f: Filters = { ...NO_FILTERS, only_msp: true, kinds: ["manufacturer"] };
   expect(filterNotes(base, f)).toEqual([
-    "Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения.",
+    "Роль ещё не определена у 1 из 2 — признак появится после обогащения; они скрыты фильтром роли.",
     "Статус МСП ещё не проверен у 1 из 2 — признак появится после обогащения.",
   ]);
-  expect(filterNotes(base, { only_msp: false, only_manufacturers: false, region: "" })).toEqual([]);
+  expect(filterNotes(base, { ...NO_FILTERS, only_msp: false })).toEqual([]);
   expect(filterNotes(response, f)).toEqual([]);
 });
 
 test("filterNotes: «unknown» is a role the rule has set (with a basis), «null» is not yet determined", () => {
-  const f = { only_msp: false, only_manufacturers: true, region: "" };
+  const f: Filters = { ...NO_FILTERS, only_msp: false, kinds: ["manufacturer"] };
   const base = structuredClone(response);
   base.history[0].counterparty.kind = "unknown";
   expect(filterNotes(base, f)).toEqual([
-    "У 1 из 2 основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).",
+    "У 1 из 2 основной ОКВЭД — не производство и не торговля: роль по нему не определяется (основание — в карточке). Чип «Роль не определена» покажет их.",
   ]);
   base.discovered[0].counterparty.kind = null;
   expect(filterNotes(base, f)).toEqual([
-    "Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения.",
-    "У 1 из 2 основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).",
+    "Роль ещё не определена у 1 из 2 — признак появится после обогащения; они скрыты фильтром роли.",
+    "У 1 из 2 основной ОКВЭД — не производство и не торговля: роль по нему не определяется (основание — в карточке). Чип «Роль не определена» покажет их.",
   ]);
   base.history[0].counterparty.kind = "distributor";
-  expect(filterNotes(base, f)).toEqual(["Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения."]);
+  expect(filterNotes(base, f)).toEqual(["Роль ещё не определена у 1 из 2 — признак появится после обогащения; они скрыты фильтром роли."]);
 });
 
 test("filter that hides unknown-type suppliers says so instead of 'nothing found'", async () => {
@@ -208,7 +208,7 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
     "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках",
   );
   await toggleManufacturer();
-  expect(await screen.findByText("Тип поставщика ещё не определён у 1 из 1 — признак появится после обогащения.")).toBeInTheDocument();
+  expect(await screen.findByText("Роль ещё не определена у 1 из 1 — признак появится после обогащения; они скрыты фильтром роли.")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /^С опытом/ }));
   const history = screen.getByRole("region", { name: "С опытом госзакупок" });
   expect(history).toHaveTextContent("у кандидатов этот признак ещё не известен");
@@ -269,7 +269,7 @@ test("«Новые» emptied by «Только производители» name
   await toggleManufacturer();
   discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(
-    await within(discovered).findByText(/^Под фильтр «Только производители» не попал никто из 1 новых компаний/),
+    await within(discovered).findByText(/^Под фильтр «Производитель» не попал никто из 1 новых компаний/),
   ).toBeInTheDocument();
   expect(discovered).not.toHaveTextContent("новых компаний по этому запросу не найдено");
   await toggleManufacturer();
@@ -290,7 +290,7 @@ test("«Новые» emptied by «Только производители»: all
   discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(
     await within(discovered).findByText(
-      "Под фильтр «Только производители» не попал никто из 1 новых компаний из реестра МСП: " +
+      "Под фильтр «Производитель» не попал никто из 1 новых компаний из реестра МСП: " +
         "по основному ОКВЭД среди них нет производителей. Снимите фильтр, чтобы их увидеть.",
     ),
   ).toBeInTheDocument();
@@ -304,7 +304,7 @@ test("«Новые» emptied by «Только производители»: rol
   discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(
     await within(discovered).findByText(
-      "Под фильтр «Только производители» не попал никто из 1 новых компаний из реестра МСП: " +
+      "Под фильтр «Производитель» не попал никто из 1 новых компаний из реестра МСП: " +
         "подтверждённых производителей среди них нет — у 1 из 1 роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
     ),
   ).toBeInTheDocument();
@@ -316,7 +316,7 @@ test("«Новые» emptied by «Только производители»: one
   discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(
     await within(discovered).findByText(
-      "Под фильтр «Только производители» не попал никто из 2 новых компаний из реестра МСП: " +
+      "Под фильтр «Производитель» не попал никто из 2 новых компаний из реестра МСП: " +
         "подтверждённых производителей среди них нет — у 1 из 2 роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
     ),
   ).toBeInTheDocument();

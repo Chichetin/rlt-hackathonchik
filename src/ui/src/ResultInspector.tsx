@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { RelevanceTag } from "./roles";
 import { COMPONENT_LABEL, KIND_LABEL, regionLabel, type CounterpartyMatch } from "./api";
 
 /** A persistent reading pane. Full provenance and reviews remain in the full card. */
@@ -30,7 +31,7 @@ export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext
     </div>
     <div className="inspector-topline">
       <span>{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</span>
-      <span>Соответствие <strong>{match.score.toFixed(2)}</strong></span>
+      <span>Соответствие <strong>{match.score.toFixed(2)}</strong> <RelevanceTag score={match.score} /></span>
     </div>
     <h2>{cp.name}</h2>
     <p className="inspector-meta">{KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}</p>
