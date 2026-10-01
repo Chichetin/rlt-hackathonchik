@@ -369,3 +369,11 @@ test("card falls back to bare OKPD2 codes when names fail", async () => {
   await new Promise((r) => setTimeout(r, 0)); // the 500 is handled before the check
   expect(within(screen.getByRole("dialog")).getByText("17.12, 26.20")).toBeInTheDocument();
 });
+
+test("long legal forms are shortened in the list only", async () => {
+  const { shortName } = await import("./App");
+  expect(shortName('ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "КОМПЬЮТЕРНЫЕ СИСТЕМЫ"')).toBe('ООО "КОМПЬЮТЕРНЫЕ СИСТЕМЫ"');
+  expect(shortName("ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО «РОМАШКА»")).toBe("ПАО «РОМАШКА»");
+  expect(shortName("ООО «Альфа»")).toBe("ООО «Альфа»");
+  expect(shortName("ИНН 7801234567")).toBe("ИНН 7801234567");
+});

@@ -564,3 +564,9 @@ html { scroll-padding-top: 80px; }
 @keyframes glint-turn { to { --glint: 570deg; } }
 @media (prefers-reduced-motion: reduce) { .glass-diamond::after { animation: none; } }
 .hero-mark .glass-m { width: 74%; } /* beats glass.css `.hero-mark svg` */
+
+/* #203: «С опытом» and «Новые» side by side whenever the results column is wide enough —
+   measured on the column itself (container query), not the viewport, so any app shell works */
+.output { container: output / inline-size; }
+@container output (min-width: 700px) { #results.results { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+@container output (max-width: 699.98px) { #results.results { grid-template-columns: minmax(0, 1fr); } }
