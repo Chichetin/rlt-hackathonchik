@@ -22,7 +22,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@db:5432/app   # secret-scan: allow
       SOURCE_CACHE: /app/cache/sources.sqlite
-    volumes: ["./cache:/app/cache", "./data:/app/data:ro", "./indexes:/app/indexes:ro"]
+      HF_HUB_OFFLINE: "1"   # модель запроса pg_hybrid — только из кеша хоста (make models), без сети на площадке
+    volumes: ["./cache:/app/cache", "./data:/app/data:ro", "./indexes:/app/indexes:ro",
+              "${HOME}/.cache/huggingface:/root/.cache/huggingface:ro"]
     depends_on: {db: {condition: service_healthy}}
   worker:
     build: .
