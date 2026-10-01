@@ -130,8 +130,9 @@ def _okpd2_rungs(codes: list[str]) -> list[tuple[int, list[str]]]:
 
 
 def ladder(store: Store, idx: LotIndex, query: Query, tokens: list[str], codes: list[str], cfg: dict,
-           bad_codes: list[str]) -> tuple[list[tuple[int, float]], list, str]:
+           bad_codes: list[str], own: int | None = None) -> tuple[list[tuple[int, float]], list, str]:
     """Zero candidates by text → (hits, candidates, note); no candidates → note says why.
+    `own` — the notice the query was built from: no rung may find it again (#249, F-13).
 
     Vector hits come back as `hits` (search() then predicts the class and scores them as usual, BM25
     part 0); OKPD2 candidates come with `hits = []`.
@@ -150,7 +151,8 @@ def ladder(store: Store, idx: LotIndex, query: Query, tokens: list[str], codes: 
         log.info("лестница: векторная ступень не используется в eval с retriever=bm25")
     else:
         hits, skipped = _vector_hits(idx, query.text)
-        cands = s._retrieve(store, idx, idx.lot_hits(hits), as_of) if hits else []
+        lots = s._drop_own(idx.lot_hits(hits), own)
+        cands = s._retrieve(store, idx, lots, as_of) if len(lots) else []
         for c in cands:
             c.found_by = (f"{NOT_BY_NAME}; найден по смыслу названия (векторный поиск): похожие позиции в "
                           f"{c.n_lots} лот(ах), лучшее совпадение «{_short(c.best_text)}» (лот {c.best_lot})")
@@ -162,7 +164,7 @@ def ladder(store: Store, idx: LotIndex, query: Query, tokens: list[str], codes: 
         why.append("ОКПД2 не задан — уточните название или укажите код")
         return [], [], "; ".join(why)
     for level, prefixes in _okpd2_rungs(codes):
-        rows = store.okpd2_suppliers(level, prefixes, as_of, s.CANDIDATES)
+        rows = store.okpd2_suppliers(level, prefixes, as_of, s.CANDIDATES, -1 if own is None else own)
         if not rows:
             continue
         what = f"{LEVEL_WORD[level]} ОКПД2 {', '.join(prefixes)}"
