@@ -8,8 +8,9 @@ is v2 (D-077) byte for byte. One feature function (`feature_row`) serves trainin
            weights are a readable formula; contribution of a feature = w_j · z_j.
   lgbm   — LightGBM LambdaMART; contribution of a feature = pred_contrib (SHAP values of the trees).
 
-The card says which features lifted the supplier the most (product_fit explanation); the contract and
-the six components are unchanged — they keep their values and weights, the order is the model's.
+The card says which features lifted the supplier the most and which pulled it down (product_fit explanation);
+the contract and the six components are unchanged — they keep their values and weights, the order is the model's,
+the score stays on the formula's scale (rerank).
 """
 
 from __future__ import annotations
@@ -247,15 +248,16 @@ def value_text(name: str, x: float) -> str:
     return f"{label}: {v}"
 
 
-MARKER = "почему на этом месте — "  # the UI shows the text after it as the reason of the position (src/ui/src/ranker.ts)
+# The UI shows the text after it as the reason of the position (src/ui/src/ranker.ts).
+MARKER = "почему на этом месте — "
 
 
 def explain(model: Model, contrib: np.ndarray, row: np.ndarray, pro: int = 3, con: int = 1) -> str:
     """Why the model put the supplier here: the `pro` features that lifted it most and the `con` that pulled
     it down most, each with its value. The contributions are exact (tree SHAP / w·z), not a guess."""
-    order = np.argsort(-contrib, kind="stable")
-    up = [i for i in order[:pro] if contrib[i] > 0]
-    down = [i for i in order[::-1][:con] if contrib[i] < 0]
+    known = [i for i in np.argsort(-contrib, kind="stable") if not math.isnan(row[i])]  # «нет данных» is no reason
+    up = [i for i in known[:pro] if contrib[i] > 0]
+    down = [i for i in known[::-1][:con] if contrib[i] < 0]
     why = ("за — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in up) if up
            else "ни один признак не поднял выше среднего")
     if down:
@@ -264,7 +266,12 @@ def explain(model: Model, contrib: np.ndarray, row: np.ndarray, pro: int = 3, co
 
 
 def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
-    """Top-k by the model; score = sigmoid(raw) in (0, 1); the product_fit explanation gets the contributions."""
+    """Top-k in the model's order; the product_fit explanation gets the model's reason.
+
+    The score stays on the scale of the formula (Σ weight · component, D-077) — the relevance labels, the «Новые»
+    block and filters.min_score read it — capped by the score of the supplier above: it never contradicts the
+    order. The top one keeps exactly its formula score; a lower one shows min(its formula, the one above).
+    The model's raw output is not a relevance scale (LambdaMART ranks within a query)."""
     if not matches:
         return []
     x = np.asarray(rows, dtype=float)
@@ -272,11 +279,12 @@ def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float
     order = sorted(range(len(matches)), key=lambda i: (-raw[i], matches[i].counterparty.inn or "~"))[:k]
     contrib = model.contrib(x[order])
     out = []
+    cap = math.inf
     for j, i in enumerate(order):
         m = matches[i]
+        cap = min(cap, m.score)
         line = explain(model, contrib[j], x[i])
         comps = [c.model_copy(update={"explanation": f"{c.explanation}; {line}"}) if c.name == "product_fit" else c
                  for c in m.components]
-        out.append(m.model_copy(update={"score": round(1.0 / (1.0 + math.exp(-float(raw[i]))), 4),
-                                        "components": comps}))
+        out.append(m.model_copy(update={"score": round(cap, 4), "components": comps}))
     return out

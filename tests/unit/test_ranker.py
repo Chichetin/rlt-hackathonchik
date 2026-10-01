@@ -58,7 +58,11 @@ def test_model_reorders_and_explains(search_data, tmp_path):
     lots = {inn: r[ranker.NAMES.index("n_lots")] for inn, r in got}
     assert [lots[m.counterparty.inn] for m in res] == sorted(lots.values(), reverse=True)[:len(res)]
     top = lots[res[0].counterparty.inn]
-    assert res[0].score == round(1.0 / (1.0 + np.exp(-(top - 0.5) / 2.0)), 4)  # sigmoid of the standardized score
+    formula = {m.counterparty.inn: m.score for m in search(Q, config=plain_cfg, k=50)}
+    scores = [m.score for m in res]
+    assert scores == sorted(scores, reverse=True)  # the number never contradicts the order
+    assert res[0].score == formula[res[0].counterparty.inn]  # the top keeps its formula score (D-077 scale)
+    assert all(m.score <= formula[m.counterparty.inn] for m in res)
     fit = next(c for c in res[0].components if c.name == "product_fit")
     assert "почему на этом месте — модель логистическая регрессия, обученная на истории закупок" in fit.explanation
     n_top = round(math.expm1(top))
@@ -91,3 +95,7 @@ def test_value_text_reads_like_a_card():
     contrib[ranker.NAMES.index("cust_lots")], contrib[ranker.NAMES.index("days_last")] = 0.9, -0.4
     text = ranker.explain(ranker.Model("lgbm", ranker.ROOT, {}), contrib, row)
     assert text.endswith(": за — лоты у этого заказчика: 7; против — давность последнего участия: 240 дн.")
+    # a missing value is no reason: «нет данных» never shows up as «за» or «против» (review of #274)
+    row[ranker.NAMES.index("channel_share")] = math.nan
+    contrib[ranker.NAMES.index("channel_share")] = -2.0
+    assert ranker.explain(ranker.Model("lgbm", ranker.ROOT, {}), contrib, row) == text

@@ -1079,7 +1079,9 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
       {rankerReason(m) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(m)}</p>}
       <p className="hint">{rankerReason(m)
-        ? `Оценку и порядок задаёт модель; критерии ниже — её входы. По формуле «критерий × вес» вышло бы ${formulaScore(m).toFixed(2)}.`
+        ? (Math.abs(formulaScore(m) - m.score) < 0.005
+          ? "Порядок задаёт модель, критерии ниже — её входы; число — соответствие по формуле «критерий × вес»."
+          : `Порядок задаёт модель, критерии ниже — её входы. По формуле «критерий × вес» — ${formulaScore(m).toFixed(2)}; в списке число не выше, чем у стоящего выше.`)
         : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
         {m.components.map((c) => (
