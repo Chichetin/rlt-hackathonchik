@@ -48,4 +48,14 @@ fi
 if ! ISSUES_TIMEOUT=6 timeout 10 bash "$root/scripts/issues.sh" board 2>&1; then
   echo "[issues] GitHub недоступен — занятость не видна (bash scripts/issues.sh mine)."
 fi
+
+# Входящее: меня упомянули, или в моей задаче последний комментарий оставил не я (CLAUDE.md, «Связь агентов»).
+if command -v gh >/dev/null 2>&1; then
+  me="$(timeout 6 gh api user -q .login 2>/dev/null)"
+  if [ -n "$me" ]; then
+    inbox="$( { timeout 8 gh issue list --mention "$me" --state open --json number,title -q '.[] | "  #\(.number) \(.title) — тебя упомянули"' 2>/dev/null
+      timeout 8 gh issue list --assignee "$me" --state open --json number,title,comments -q ".[] | select((.comments | length) > 0 and (.comments[-1].author.login != \"$me\")) | \"  #\(.number) \(.title) — новый комментарий\"" 2>/dev/null; } | sort -u)"
+    [ -n "$inbox" ] && printf '[входящее] прочитай последние комментарии (gh issue view <N> --comments | tail -30) и ответь по правилу «Связь агентов»:\n%s\n' "$inbox"
+  fi
+fi
 exit 0
