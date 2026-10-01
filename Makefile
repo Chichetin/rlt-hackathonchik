@@ -8,8 +8,7 @@ PORT ?= 8000
 EXP ?=
 CONFIRM ?=
 
-.PHONY: help setup setup-ml models check check-changed lint typecheck test test-ui hooks-test stubs openapi openapi-check seal-check \
-        ui-build api worker ui-dev demo e2e eval eval-final up down
+.PHONY: help setup setup-ml models check check-changed lint typecheck test test-ui hooks-test stubs openapi openapi-check seal-check \n        ui-build api worker ui-dev demo e2e eval eval-final up down db-load
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -98,3 +97,6 @@ up:                ## docker-compose: api + worker + db → http://127.0.0.1:800
 
 down:
 	docker compose down
+
+db-load:           ## data/processed → Postgres из docker compose (D-023): make up (или docker compose up -d db), затем это
+	DATABASE_URL=$${DATABASE_URL:-postgresql://app:app@127.0.0.1:$${PG_PORT:-5432}/app} $(PY) python -m src.db.load   # secret-scan: allow
