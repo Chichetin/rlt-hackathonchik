@@ -99,24 +99,37 @@ test("демо: запрос → два блока → карточка → фи
   await page.getByRole("button", { name: /^С опытом/ }).click();
   await expect(history.locator(".item").first()).toBeVisible();
 
-  // «Регион»: по реестру, иначе по КПП (78 — СПб; src/match/filters.py::in_region); остаются строки,
-  // и у каждой регион из реестра — СПб, а без него КПП 78…
-  const regional = page.waitForResponse(
-    // the filtered request, not the parallel one without filters (both carry Query.region)
+  // «Может работать у заказчика» (#242): от региона ЗАКАЗЧИКА — плашка контекста называет заказчика и тип закупки;
+  // «в регионе заказчика или соседнем» оставляет поставщиков из СПб и ЛО (по реестру, иначе по КПП 78 / 47)
+  const context = page.getByRole("group", { name: "Заказчик и тип закупки" });
+  await expect(context).toContainText("Заказчик:");
+  await expect(context).toContainText("Тип закупки: товар"); // paper: goods travel — «авто» is any region
+  await expect(context).toContainText("авто: любой регион");
+  const near = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname === "/api/search" &&
-      JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
+      JSON.parse(r.request().postData() ?? "{}").filters?.near_customer === "near",
   );
-  await page.getByRole("button", { name: "Изменить закупку" }).click();
-  await page.getByLabel("Регион").selectOption("Санкт-Петербург");
-  const body = await (await regional).json();
+  // the choice sits over the results, next to the customer and the purchase type — no trip back to the form
+  await context.getByRole("combobox", { name: "Может работать у заказчика" }).selectOption("near");
+  const nearResponse = await near;
+  const body = await nearResponse.json();
   expect(body.history.length).toBeGreaterThan(0);
   for (const m of body.history) {
-    if (m.counterparty.region) expect(m.counterparty.region).toBe("Санкт-Петербург");
-    else expect(m.counterparty.kpp).toMatch(/^78/);
+    if (m.counterparty.region) expect(["Санкт-Петербург", "Ленинградская область"]).toContain(m.counterparty.region);
+    // by the KPP, a sole trader without a KPP — by the INN (src/match/filters.py, #242)
+    else if (m.counterparty.kpp && /[1-9]/.test(m.counterparty.kpp)) expect(m.counterparty.kpp).toMatch(/^(78|47)/);
+    else expect(m.counterparty.inn).toMatch(/^(78|47)\d{10}$/);
   }
   await expect(history.locator(".item")).toHaveCount(body.history.length);
-  for (const meta of await history.locator(".item .meta").allTextContents()) expect(meta).toContain("Санкт-Петербург");
+  for (const meta of await history.locator(".item .meta").allTextContents()) expect(meta).toMatch(/в регионе заказчика|соседний регион/);
+  // what the choice hides is said, and it adds up: shown = kept by «near», hidden = all − kept (X-Facets near, D-030)
+  const nf = JSON.parse(nearResponse.headers()["x-facets"]);
+  const all = nf.history.near.any + nf.discovered.near.any;
+  const kept = nf.history.near.near + nf.discovered.near.near;
+  expect(kept).toBe(Number(nearResponse.headers()["x-total-history"]) + Number(nearResponse.headers()["x-total-discovered"]));
+  if (all > kept) await expect(context.getByRole("note")).toHaveText(`скрыто ${all - kept} из ${all}: другой регион или регион не известен`);
+  else await expect(context.getByRole("note")).toHaveCount(0); // nobody hidden — nothing to say
 
   // 5. Выгрузка в Excel
   const [download] = await Promise.all([

@@ -36,7 +36,7 @@ test("рабочая область занимает экран без трет�
     expect(layout.borderColor).not.toContain("145, 186, 255");
   }
   // Editing retains a normal document flow, with every field reachable.
-  await page.getByRole("button", { name: "Изменить закупку" }).click();
+  await page.getByRole("navigation").getByRole("link", { name: "Подбор", exact: true }).click();
   await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
   await expect(page.getByLabel("ИНН заказчика", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Найти поставщиков", exact: true })).toBeVisible();

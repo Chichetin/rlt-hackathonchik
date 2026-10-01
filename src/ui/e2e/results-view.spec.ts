@@ -33,11 +33,11 @@ test("просмотр без модального окна сохраняет �
   await page.getByRole("navigation").getByRole("link", { name: "Подбор", exact: true }).click();
   await page.getByLabel("Что нужно закупить").fill("Новая закупка — мебель");
   await expect(page.getByRole("checkbox")).toHaveCount(0);
-  await expect(page.getByLabel("Регион", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Может работать у заказчика" })).toBeVisible(); // #242: instead of the region
   await page.locator(".query-refinements").getByRole("link", { name: /Фильтры/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Фильтры подбора");
   await expect(page.getByRole("checkbox", { name: /^Производители/ })).toHaveCount(1);
-  await expect(page.getByRole("combobox", { name: /Регион/ })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: /Регион|Может работать у заказчика/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
   await expect(page).toHaveURL(/\/search$/);
   await expect(page.getByLabel("Что нужно закупить")).toHaveValue("Новая закупка — мебель");

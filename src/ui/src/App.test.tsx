@@ -44,7 +44,7 @@ async function toggleManufacturer() {
 test("buildQuery keeps only enabled filters", () => {
   const q = buildQuery("  бумага ", { ...NO_FILTERS, only_msp: true });
   expect(q.text).toBe("бумага");
-  expect(q.filters).toEqual({ only_msp: true });
+  expect(q.filters).toEqual({ only_msp: true, near_customer: "auto" }); // «авто» — the server decides by the purchase type (#242)
 });
 
 test("search shows two blocks, explanation and card with sources", async () => {
@@ -202,7 +202,6 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
-  await userEvent.click(screen.getByRole("button", { name: "Изменить закупку" }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(discovered).toHaveTextContent(
     "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках",
@@ -239,7 +238,7 @@ test("history is paged on the server: total from the header, «Показать 
 });
 
 // #84: «Новые» emptied by a filter. Mock: requests with the given filter get no new companies.
-async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["17.12.14.110"], kinds: Counterparty["kind"][] = [null]) {
+async function newBlockWith(filter: "only_manufacturers" | "near_customer", okpd2 = ["17.12.14.110"], kinds: Counterparty["kind"][] = [null]) {
   const base = structuredClone(response);
   base.stub = false;
   base.query.okpd2 = okpd2;
@@ -252,13 +251,13 @@ async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["1
   const filtered = { ...structuredClone(base), discovered: [] };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
     const body = JSON.parse(String((init as RequestInit).body));
-    return new Response(JSON.stringify(body.filters?.[filter] ? filtered : base), { status: 200 });
+    const on = filter === "near_customer" ? body.filters?.near_customer === "near" : body.filters?.[filter];
+    return new Response(JSON.stringify(on ? filtered : base), { status: 200 });
   });
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
-  await userEvent.click(screen.getByRole("button", { name: "Изменить закупку" }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(await within(discovered).findByText("ООО Бета")).toBeInTheDocument();
   return discovered;
@@ -277,9 +276,9 @@ test("«Новые» emptied by «Только производители» name
   expect(await within(discovered).findByText("ООО Бета")).toBeInTheDocument();
 });
 
-test("«Новые» emptied by the region keep the general text: the region of new companies is known (#84)", async () => {
-  let discovered = await newBlockWith("region");
-  await userEvent.selectOptions(screen.getByLabelText("Регион"), "Ленинградская область");
+test("«Новые» emptied by «Может работать у заказчика» keep the general text: the region of new companies is known (#84, #242)", async () => {
+  const discovered = await newBlockWith("near_customer");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Может работать у заказчика" }), "near");
   expect(await within(discovered).findByText(/новых компаний по этому запросу не найдено/)).toBeInTheDocument();
   expect(discovered).not.toHaveTextContent("Под фильтр");
 });
@@ -415,4 +414,30 @@ test("company names retain exact supplied legal form in list and full card", asy
   expect(shortName("ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО «РОМАШКА»")).toBe("ПАО «РОМАШКА»");
   expect(shortName("ООО «Альфа»")).toBe("ООО «Альфа»");
   expect(shortName("ИНН 7801234567")).toBe("ИНН 7801234567");
+});
+
+test("works: the line over the results names the customer, the type, what «авто» applied and how many it hides (#242)", async () => {
+  const ctx = { customer_region: "Санкт-Петербург", customer_basis: "ИНН 78…", purchase_type: "works", purchase_label: "работа",
+    type_basis: ["43.39.11.000"], default_near: "near", applied_near: "near" };
+  const facets = { history: { kind: {}, entity: {}, near: { worked: 1, near: 1, any: 4 } }, discovered: { kind: {}, entity: {}, near: { worked: 0, near: 0, any: 0 } } };
+  const sent: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    if (init?.body) sent.push(JSON.parse(String(init.body)).filters?.near_customer);
+    return new Response(JSON.stringify({ ...response, stub: false }), { status: 200, headers: {
+      // ASCII JSON, as the server sends it (HTTP headers are latin-1)
+      "X-Search-Context": JSON.stringify(ctx).replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`), "X-Facets": JSON.stringify(facets), "X-Total-History": "1", "X-Total-Discovered": "1" } });
+  });
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "ремонт кровли");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const line = await screen.findByRole("group", { name: "Заказчик и тип закупки" });
+  expect(line).toHaveTextContent("Заказчик: Санкт-Петербург (ИНН 78…)");
+  expect(line).toHaveTextContent("Тип закупки: работа (ОКПД2 43.39.11.000)");
+  expect(line).toHaveTextContent("авто: в регионе заказчика или соседнем");
+  expect(within(line).getByRole("note")).toHaveTextContent("скрыто 3 из 4");
+  expect(sent).toContain("auto");
+  // the choice is right there — no «Изменить закупку» to open the form first
+  expect(screen.queryByRole("button", { name: "Изменить закупку" })).not.toBeInTheDocument();
+  await userEvent.selectOptions(within(line).getByRole("combobox", { name: "Может работать у заказчика" }), "any");
+  await waitFor(() => expect(sent.at(-1)).toBe("any"));
 });

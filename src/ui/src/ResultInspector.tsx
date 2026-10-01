@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
 import { Ratings } from "./Ratings";
 import { levelOf, RelevanceTag } from "./roles";
-import { COMPONENT_LABEL, KIND_LABEL, regionLabel, type CounterpartyMatch } from "./api";
+import { COMPONENT_LABEL, KIND_LABEL, regionLabel, relationToCustomer, type CounterpartyMatch } from "./api";
 
 /** A persistent reading pane. Full provenance and reviews remain in the full card. */
-export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext, onBack, onMore, loadingMore }: {
+export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext, onBack, onMore, loadingMore, customerRegion }: {
   match: CounterpartyMatch | null;
+  customerRegion?: string; // #242: where the supplier is relative to the customer
   onBack: () => void;
   onMore?: () => void;
   loadingMore?: boolean;
@@ -32,7 +33,7 @@ export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext
     </div>
     <p className="inspector-origin">{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</p>
     <h2>{cp.name}</h2>
-    <p className="inspector-meta">{KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}</p>
+    <p className="inspector-meta">{KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}{relationToCustomer(cp, customerRegion) && <> — {relationToCustomer(cp, customerRegion)}</>}</p>
     <p className="inspector-inn">ИНН {cp.inn ?? "не подтверждён"}</p>
     <div className="inspector-topline">
       <span className={`inspector-score score-level-${levelOf(match.score)}`}><span>Соответствие</span><strong>{match.score.toFixed(2)}</strong><RelevanceTag score={match.score} /></span>

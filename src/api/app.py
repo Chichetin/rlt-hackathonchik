@@ -6,9 +6,14 @@ pages each block, the block sizes after filters are in the X-Total-History / X-T
 headers (the frozen SearchResponse has no total). The xlsx export takes every filtered row.
 Counts for the filter chips (#232) are the X-Facets header, ASCII JSON
 `{"history": F, "discovered": F}`, F = `{"kind": {"manufacturer": n, "distributor": n, "dealer": n, "unknown": n},
-"entity": {"ul": n, "ip": n, "unknown": n}}`: every candidate of the block after the legal status (liquidation, RNP)
-and before the user filters, so a chip count is the block size when only that chip is chosen; «Новые» shows at most
-discover.MAX_SHOWN, so its counts are capped at it. Filter keys — src/match/filters.py.
+"entity": {"ul": n, "ip": n, "unknown": n}, "near": {"worked": n, "near": n, "any": n}}`: the candidates of the block
+after the legal status (liquidation, RNP), each group after the user filters of the other groups
+(filters.chip_facets), so a chip count is the block size its choice gives with the other filters on; «Новые» shows
+at most discover.MAX_SHOWN, so its counts are capped at it. Filter keys — src/match/filters.py.
+The customer and the purchase type the search assumed (#242) are the X-Search-Context header, ASCII JSON
+`{"customer_region", "customer_basis": "ИНН 78…" | "регион запроса", "purchase_type": goods | works | services |
+remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_near": near | any, "applied_near":
+worked | near | any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
 """
@@ -45,7 +50,8 @@ from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
 from src.match import pipeline
 from src.match import search as search_mod
-from src.match.filters import entity_of, kind_of, parse_filters
+from src.match.filters import entity_of, kind_of, near_of, parse_filters
+from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
 from src.match.store import get_store
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired
@@ -140,9 +146,24 @@ def _accepted(query: Query) -> None:
         raise HTTPException(422, f"Текст запроса длиннее {MAX_TEXT_CHARS:_} символов".replace("_", " ")
                                  + " — оставьте наименование позиции или фрагмент ТЗ")
     try:  # a typo in a filter is an error, not a silently disabled filter (#232, D-030)
-        parse_filters(query.filters)
+        near_of(query, parse_filters(query.filters))
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+
+
+def _context(query: Query) -> dict[str, object]:
+    """X-Search-Context (#242): the customer's region and the purchase type the search assumed, with their basis."""
+    region, inn_note = search_mod.customer_region(query)  # a note only when the region came from the customer's INN
+    kind, codes = purchase_basis(query.okpd2)
+    return {
+        "customer_region": region,
+        "customer_basis": f"ИНН {(query.customer_inn or '').strip()[:2]}…" if inn_note else "регион запроса",
+        "purchase_type": kind,
+        "purchase_label": PURCHASE_LABEL[kind] if kind else None,
+        "type_basis": codes,
+        "default_near": default_near(kind),
+        "applied_near": near_of(query).choice,
+    }
 
 
 def _found(query: Query, uncached: set[str] | None = None
@@ -193,6 +214,7 @@ def api_search(query: Query, response: Response,
     if note:
         response.headers["X-Search-Note"] = quote(note)
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
+    response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
     if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
         response.headers["X-Excluded-Lot"] = str(own)
     history = [m for m in matches if m.origin == "history"]
