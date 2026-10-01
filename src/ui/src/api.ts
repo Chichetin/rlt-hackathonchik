@@ -77,8 +77,25 @@ async function post(path: string, body: unknown): Promise<Response> {
   return r;
 }
 
-export async function search(q: Query): Promise<SearchResponse> {
-  return (await post("/api/search", q)).json();
+// Пагинация и фильтры — на сервере (D-024): страница каждого блока, размер блока после фильтров —
+// в заголовках X-Total-History / X-Total-Discovered (в замороженном SearchResponse поля total нет).
+export const PAGE = 20;
+export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
+export type Totals = { history: number; discovered: number };
+export type SearchPage = SearchResponse & { total: Totals };
+
+export async function search(q: Query, page: { limit?: number; offset?: number } = {}): Promise<SearchPage> {
+  const qs = new URLSearchParams({ limit: String(page.limit ?? PAGE), offset: String(page.offset ?? 0) });
+  const r = await post(`/api/search?${qs}`, q);
+  const body: SearchResponse = await r.json();
+  const total = (header: string, shown: number) => {
+    const v = Number(r.headers.get(header) ?? NaN);
+    return Number.isFinite(v) ? v : shown + (page.offset ?? 0);
+  };
+  return {
+    ...body,
+    total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
+  };
 }
 
 export async function exportXlsx(q: Query): Promise<void> {

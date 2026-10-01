@@ -162,3 +162,25 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
   expect(history).toHaveTextContent("у кандидатов этот признак ещё не известен");
   expect(history).not.toHaveTextContent("переформулировать");
 });
+
+test("history is paged on the server: total from the header, «Показать ещё» appends the next page", async () => {
+  const page = (names: string[]) => ({ ...structuredClone(response), stub: false, discovered: [], history: names.map((n) => match(n, "history")) });
+  const urls: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    urls.push(String(url));
+    const offset = Number(new URL(String(url), "http://x").searchParams.get("offset"));
+    const body = offset === 0 ? page(["ООО Альфа", "ООО Гамма"]) : page(["ООО Дельта"]);
+    return new Response(JSON.stringify(body), { status: 200, headers: { "X-Total-History": "3", "X-Total-Discovered": "0" } });
+  });
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const history = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(within(history).getByText("Показаны 2 из 3")).toBeInTheDocument();
+  expect(urls[0]).toBe("/api/search?limit=20&offset=0");
+  await userEvent.click(within(history).getByRole("button", { name: "Показать ещё" }));
+  expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
+  expect(urls[1]).toBe("/api/search?limit=20&offset=2");
+  expect(within(history).getAllByRole("listitem")).toHaveLength(3);
+  expect(within(history).queryByRole("button", { name: "Показать ещё" })).not.toBeInTheDocument();
+});
