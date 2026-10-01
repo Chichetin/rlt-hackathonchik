@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ALL,
   buildQuery,
@@ -25,6 +25,35 @@ import {
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
 
 const REGIONS = ["", "Санкт-Петербург", "Ленинградская область"];
+const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Компьютерное оборудование"];
+
+function SearchIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg className={className} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m16 16 4.5 4.5" />
+    </svg>
+  );
+}
+
+function BrandMark() {
+  return <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+    <path d="M32 3 60 32 32 61 4 32Z" stroke="currentColor" strokeWidth="2" />
+    <path d="M18 44V21l14 17 14-17v23M14 44h9m18 0h9" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+  </svg>;
+}
+
+function Skeleton() {
+  return (
+    <div className="skeleton" aria-hidden="true">
+      {[0, 1, 2].map((i) => (
+        <div className="skeleton-item" key={i}>
+          <i /><i /><i />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** «Новые» emptied by «Только производители», judged by the filters of the shown answer (#84): the role of
  *  a new company is set by its main OKVED (D-057), so the filter hides all of them only when none of them is a
@@ -42,9 +71,94 @@ function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Quer
   return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
 }
 
+type Path = "/" | "/results" | "/settings" | "/about" | string;
+
+// History API routing without a router dependency; the API serves index.html for every page path (src/api/app.py)
+function usePath(): [Path, (next: Path) => void] {
+  const [path, setPath] = useState<Path>(() => window.location.pathname || "/");
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname || "/");
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const go = (next: Path) => {
+    if (next !== window.location.pathname) window.history.pushState(null, "", next);
+    setPath(next);
+    window.scrollTo?.({ top: 0 });
+  };
+  return [path, go];
+}
+
+// the last query survives a reload of /results; storage may be unavailable — the page works without it
+const STORE = "mitrandir.query";
+type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string };
+function loadSaved(): Partial<Saved> {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(STORE) ?? "{}") as Partial<Saved>;
+  } catch {
+    return {};
+  }
+}
+function save(v: Saved) {
+  try {
+    window.sessionStorage.setItem(STORE, JSON.stringify(v));
+  } catch {
+    /* private mode: nothing to keep */
+  }
+}
+
+const FREE_MAIL = /^(mail|bk|inbox|list|internet|yandex|ya|gmail|rambler|outlook|hotmail|icloud)\./;
+
+/** Host for a company logo — only from a site or a corporate e-mail found in sources, never guessed. */
+function logoHost(cp: CounterpartyMatch["counterparty"]): string | null {
+  const c = cp.contacts ?? {};
+  const site = c.site ?? c["сайт"];
+  if (site) {
+    try {
+      return new URL(site.startsWith("http") ? site : `https://${site}`).hostname;
+    } catch {
+      /* not a URL: fall back to e-mail */
+    }
+  }
+  const domain = c.email?.split("@")[1]?.trim().toLowerCase();
+  return domain && !FREE_MAIL.test(domain) ? domain : null;
+}
+
+function initials(name: string): string {
+  const words = name
+    .replace(/["«»'“”]/g, " ")
+    .replace(/^\s*(ООО|АО|ПАО|ЗАО|ОАО|ИП|ГУП|ГБУ|ФГУП|МУП|НАО)\s+/i, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? "")).toUpperCase() || "?";
+}
+
+export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterparty"]; large?: boolean }) {
+  const host = logoHost(cp);
+  const [failed, setFailed] = useState(false);
+  const cls = large ? "logo logo-lg" : "logo";
+  if (host && !failed) {
+    return (
+      <span className={`${cls} logo-img`} aria-hidden="true">
+        <img src={`https://${host}/favicon.ico`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      </span>
+    );
+  }
+  // no name in the data — nothing to draw; keep the column so rows stay aligned
+  if (/^ИНН\s/.test(cp.name)) return <span className={`${cls} logo-none`} aria-hidden="true" />;
+  return <span className={cls} aria-hidden="true">{initials(cp.name)}</span>;
+}
+
+function CompanyName({ name }: { name: string }) {
+  // the organizers' data has no supplier names (contracts.py): such a row is named by its INN
+  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"}>{name}</span>;
+}
+
 export function App() {
-  const [text, setText] = useState("");
-  const [filters, setFilters] = useState<Filters>({ only_msp: false, only_manufacturers: false, region: "" });
+  const [saved] = useState(loadSaved);
+  const [path, go] = usePath();
+  const [text, setText] = useState(saved.text ?? "");
+  const [filters, setFilters] = useState<Filters>(saved.filters ?? { only_msp: false, only_manufacturers: false, region: "" });
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
   const [more, setMore] = useState(false);
@@ -53,11 +167,11 @@ export function App() {
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
   const [error, setError] = useState("");
   const [open, setOpen] = useState<CounterpartyMatch | null>(null);
-  const [lotId, setLotId] = useState("");
-  const [lot, setLot] = useState<Extra["lot"]>(null);
-  const [lotQueryId, setLotQueryId] = useState<string | undefined>();
-  const [budget, setBudget] = useState("");
-  const [customerInn, setCustomerInn] = useState("");
+  const [lotId, setLotId] = useState(saved.lotId ?? "");
+  const [lot, setLot] = useState<Extra["lot"]>(saved.lot ?? null);
+  const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
+  const [budget, setBudget] = useState(saved.budget ?? "");
+  const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
   const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [lotBusy, setLotBusy] = useState(false);
   const resetLot = () => {
@@ -117,6 +231,8 @@ export function App() {
       setShownQuery(q);
       setBase(b ?? r);
       setState("idle");
+      save({ text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
+      if (window.location.pathname === "/") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
       setError(String(e));
@@ -134,12 +250,49 @@ export function App() {
       if (seq !== runSeq.current) return;
       setRes({ ...res, history: [...res.history, ...next.history], total: next.total });
     } catch (e) {
+      if (seq !== runSeq.current) return; // a new search replaced this page
       setError(String(e));
       setState("error");
     } finally {
-      setMore(false);
+      if (seq === runSeq.current) setMore(false);
     }
   }
+
+  // a reload of /results repeats the saved query
+  useEffect(() => {
+    if (path === "/results" && !res && state === "idle" && text.trim()) void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path]);
+
+  function resetAll() {
+    try {
+      window.sessionStorage.removeItem(STORE);
+    } catch {
+      /* nothing stored */
+    }
+    runSeq.current++; // drop an answer still in flight
+    setFilters({ only_msp: false, only_manufacturers: false, region: "" });
+    setText("");
+    setLotId("");
+    setBudget("");
+    setCustomerInn("");
+    setLotMsg(null);
+    resetLot();
+    setRes(null);
+    setBase(null);
+    setShownQuery(null);
+    setState("idle");
+  }
+
+  const link = (to: Path) => ({
+    href: to,
+    "aria-current": path === to ? ("page" as const) : undefined,
+    onClick: (e: React.MouseEvent) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return; // new tab/window: let the browser do it
+      e.preventDefault();
+      go(to);
+    },
+  });
 
   function toggle(next: Filters) {
     setFilters(next);
@@ -147,10 +300,27 @@ export function App() {
   }
 
   return (
-    <div className="page">
+    <>
+    <div className="page" inert={!!open}>
+      <div className="workspace-bar">
+        <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
+          <span className="brand-mark"><BrandMark /></span>
+          митрандир
+        </a>
+        <nav className="workspace-nav" aria-label="Разделы страницы">
+          <a {...link("/")}>Подбор</a>
+          <a {...link("/results")}>Результаты</a>
+          <a {...link("/settings")}>Настройки</a>
+          <a {...link("/about")}>Как это работает</a>
+        </nav>
+      </div>
+      {path === "/about" ? <AboutPage onStart={() => go("/")} />
+      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
+      : path !== "/" && path !== "/results" ? <NotFound onHome={() => go("/")} />
+      : <>
       <header className="top">
-        <h1>Подбор поставщиков</h1>
-        <p className="sub">АИС ГЗ · Электронный магазин Санкт-Петербурга</p>
+        <h1>Подбор поставщиков для закупки</h1>
+        <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
       </header>
 
       {res?.stub && (
@@ -159,40 +329,51 @@ export function App() {
         </div>
       )}
 
+      <div className="search-workbench">
       <form
+        id="supplier-search"
         className="query"
         onSubmit={(e) => {
           e.preventDefault();
           void run();
         }}
       >
-        <label htmlFor="lot">Номер закупки (необязательно)</label>
-        <div className="lotrow">
-          <input
-            id="lot"
-            inputMode="numeric"
-            value={lotId}
-            placeholder="lot_id или реестровый номер извещения"
-            onChange={(e) => {
-              setLotId(e.target.value);
-              resetLot();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void loadLot();
-              }
-            }}
-          />
-          <button type="button" className="secondary" disabled={!lotId.trim() || lotBusy} onClick={() => void loadLot()}>
-            {lotBusy ? "Загружаем…" : "Загрузить закупку"}
-          </button>
+        <div className="section-heading">
+          <div>
+            <h2>Параметры закупки</h2>
+            <p>Загрузите извещение или опишите, что вам нужно.</p>
+          </div>
         </div>
-        {lotMsg && (
-          <p className={lotMsg.kind === "ok" ? "lotmsg" : "lotmsg lotmsg-err"} role={lotMsg.kind === "ok" ? "status" : "alert"}>
-            {lotMsg.text}
-          </p>
-        )}
+        <div className="lot-section">
+          <label htmlFor="lot">Номер закупки (необязательно)</label>
+          <div className="lotrow">
+            <input
+              id="lot"
+              inputMode="numeric"
+              value={lotId}
+              placeholder="Введите номер извещения"
+              onChange={(e) => {
+                setLotId(e.target.value);
+                resetLot();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void loadLot();
+                }
+              }}
+            />
+            <button type="button" className="secondary" disabled={!lotId.trim() || lotBusy} onClick={() => void loadLot()}>
+              {lotBusy ? "Загружаем…" : "Загрузить закупку"}
+            </button>
+          </div>
+          {lotMsg && (
+            <p className={lotMsg.kind === "ok" ? "lotmsg" : "lotmsg lotmsg-err"} role={lotMsg.kind === "ok" ? "status" : "alert"}>
+              {lotMsg.text}
+            </p>
+          )}
+        </div>
+        <div className="query-divider"><span>или введите описание</span></div>
         <label htmlFor="q">Что нужно закупить</label>
         <textarea
           id="q"
@@ -204,6 +385,16 @@ export function App() {
             resetLot();
           }}
         />
+        <div className="examples">
+          <span>Например</span>
+          {EXAMPLES.map((example) => (
+            <button type="button" key={example} onClick={() => {
+              setText(example);
+              resetLot();
+              document.getElementById("q")?.focus();
+            }}>{example}</button>
+          ))}
+        </div>
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -248,34 +439,74 @@ export function App() {
           </fieldset>
           <div className="actions">
             <button type="submit" disabled={!text.trim() || state === "loading"}>
+              <SearchIcon />
               {state === "loading" ? "Ищем…" : "Найти поставщиков"}
             </button>
             <button
               type="button"
               className="secondary"
               disabled={!res}
-              onClick={() => void exportXlsx(buildQuery(text, filters, extra())).catch((e) => setError(String(e)))}
+              onClick={() =>
+                void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch((e) => {
+                  setError(`выгрузка в Excel: ${String(e)}`);
+                  setState("error");
+                })
+              }
             >
               Выгрузить в Excel
             </button>
           </div>
         </div>
       </form>
-
+      <div className="output">
       {state === "error" && (
         <div className="error" role="alert">
           Не удалось получить подбор: {error}
         </div>
       )}
 
-      {res && filterNotes(base, filters).map((n) => (
+      {!res && state !== "error" && (
+        state === "loading" ? <Skeleton /> : path === "/results" ? (
+          <section className="getting-started" aria-label="Результаты">
+            <h2>Вы ещё не запускали подбор</h2>
+            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки слева и нажмите «Найти поставщиков».</p>
+          </section>
+        ) : (
+        <section id="about" className="getting-started" aria-label="Как работает подбор">
+          <h2>Как это работает</h2>
+          <ol className="steps">
+            <li>
+              <h3>Опишите закупку</h3>
+              <p>Номер извещения из АИС ГЗ или текст позиции из ТЗ. По номеру подтянутся ОКПД2, НМЦК и заказчик.</p>
+            </li>
+            <li>
+              <h3>Получите два списка</h3>
+              <p>Поставщики с историей госзакупок по данным АИС ГЗ и новые компании из реестра МСП ФНС.</p>
+            </li>
+            <li>
+              <h3>Проверьте и выгрузите</h3>
+              <p>В карточке — из чего сложилась оценка и источник каждого факта. Отфильтруйте и выгрузите в Excel.</p>
+            </li>
+          </ol>
+        </section>
+        )
+      )}
+
+      {res && state !== "loading" && filterNotes(base, filters).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
       ))}
 
       {res && (
-        <main className="results">
+        <main id="results" className="results" aria-busy={state === "loading"}>
+          <header className="results-heading">
+            <h2 className="results-title">Результаты подбора</h2>
+            <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
+            <span className="result-total" role="status">
+              С опытом: <strong>{res.total.history}</strong> · Новых: <strong>{res.total.discovered}</strong>
+            </span>
+          </header>
           <Block
             title="С опытом госзакупок"
             hint="Есть в данных АИС ГЗ"
@@ -305,9 +536,12 @@ export function App() {
           />
         </main>
       )}
-
-      {open && <Card m={open} onClose={() => setOpen(null)} />}
+      </div>
+      </div>
+      </>}
     </div>
+    {open && <Card m={open} onClose={() => setOpen(null)} />}
+    </>
   );
 }
 
@@ -337,13 +571,17 @@ function Block(props: {
             return (
               <li key={`${cp.inn ?? cp.name}-${i}`}>
                 <button className="item" onClick={() => props.onOpen(m)}>
-                  <span className="name">{cp.name}</span>
-                  <span className="score" title="Итоговый score">
-                    {m.score.toFixed(2)}
+                  <Logo cp={cp} />
+                  <CompanyName name={cp.name} />
+                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
+                    <span className="score-num">{m.score.toFixed(2)}</span>
+                    <span className="score-meter" aria-hidden="true">
+                      <span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%` }} />
+                    </span>
                   </span>
                   <span className="meta">
-                    {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)} · ИНН{" "}
-                    {cp.inn ?? "не подтверждён"}
+                    {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}
+                    {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
                   {top && <span className="why">{top.explanation}</span>}
                 </button>
@@ -370,12 +608,71 @@ function Block(props: {
 
 function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
   const cp = m.counterparty;
+  const cardRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    cardRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      document.body.style.overflow = overflow;
+      previous?.focus();
+    };
+  }, []);
   return (
-    <aside className="card" role="dialog" aria-label={`Карточка: ${cp.name}`}>
+    <div className="card-overlay" onClick={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+    <aside ref={cardRef} className="card" role="dialog" aria-modal="true" onKeyDown={(event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key === "Tab") {
+        const elements = cardRef.current?.querySelectorAll<HTMLElement>('button, a[href]');
+        if (!elements?.length) return;
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    }} aria-label={`Карточка: ${cp.name}`}>
       <button className="close" onClick={onClose} aria-label="Закрыть карточку">
         ×
       </button>
-      <h2>{cp.name}</h2>
+      <p className="eyebrow">Карточка поставщика</p>
+      <div className="card-title">
+        <Logo cp={cp} large />
+        <h2>{cp.name}</h2>
+      </div>
+      <div className="card-summary">
+        <span>{m.origin === "history" ? "С опытом госзакупок" : "Из открытых источников"}</span>
+        <span>Оценка <strong>{m.score.toFixed(2)}</strong></span>
+      </div>
+      <Breakdown m={m} />
+      <h3>Почему в списке</h3>
+      <p className="hint">Оценка по каждому критерию × его вес в подборе.</p>
+      <ul className="components">
+        {m.components.map((c) => (
+          <li key={c.name}>
+            <span className="cname">{COMPONENT_LABEL[c.name]}</span>
+            <span className="bar" aria-hidden>
+              <span style={{ width: `${Math.round(c.value * 100)}%` }} />
+            </span>
+            <span className="cval">
+              {c.value.toFixed(2)} × {c.weight.toFixed(2)}
+            </span>
+            <span className="cexp">{c.explanation}</span>
+          </li>
+        ))}
+      </ul>
+
+      <h3>Сведения о компании</h3>
       <dl className="facts">
         <dt>ИНН</dt>
         <dd>{cp.inn ?? "не подтверждён"}</dd>
@@ -404,22 +701,6 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
         </>
       )}
 
-      <h3>Почему в списке · score {m.score.toFixed(2)}</h3>
-      <ul className="components">
-        {m.components.map((c) => (
-          <li key={c.name}>
-            <span className="cname">{COMPONENT_LABEL[c.name]}</span>
-            <span className="bar" aria-hidden>
-              <span style={{ width: `${Math.round(c.value * 100)}%` }} />
-            </span>
-            <span className="cval">
-              {c.value.toFixed(2)} × {c.weight.toFixed(2)}
-            </span>
-            <span className="cexp">{c.explanation}</span>
-          </li>
-        ))}
-      </ul>
-
       <h3>Источники фактов</h3>
       {(cp.evidence ?? []).length === 0 && <p className="empty">Подтверждённых фактов с источником нет.</p>}
       <ul className="evidence">
@@ -441,5 +722,130 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
         ))}
       </ul>
     </aside>
+    </div>
+  );
+}
+
+const SEG_COLORS = ["#c0acf6", "#8fd3c1", "#f0c27b", "#88b4f2", "#e99bb4", "#b9c97a"];
+
+/** Score as a stacked bar: each segment is value × weight of one component, so their sum is the total. */
+function Breakdown({ m }: { m: CounterpartyMatch }) {
+  const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }));
+  return (
+    <figure className="breakdown" aria-label="Из чего сложилась оценка">
+      <div className="stack" aria-hidden="true">
+        {parts.map(({ c, v, color }) =>
+          v > 0 ? <span key={c.name} style={{ width: `${v * 100}%`, background: color }} title={`${COMPONENT_LABEL[c.name]}: +${v.toFixed(2)}`} /> : null,
+        )}
+      </div>
+      <figcaption className="legend">
+        {parts.map(({ c, v, color }) => (
+          <span key={c.name} className={v > 0 ? "" : "zero"}>
+            <i style={{ background: color }} />
+            {COMPONENT_LABEL[c.name]} <b>+{v.toFixed(2)}</b>
+          </span>
+        ))}
+      </figcaption>
+    </figure>
+  );
+}
+
+function AboutPage({ onStart }: { onStart: () => void }) {
+  return (
+    <section className="subpage" aria-labelledby="about-title">
+      <header className="top">
+        <h1 id="about-title">Как работает подбор</h1>
+        <p className="sub">Сервис ищет, кого пригласить к закупке, и объясняет каждую рекомендацию.</p>
+      </header>
+      <ol className="steps">
+        <li>
+          <h3>Опишите закупку</h3>
+          <p>Номер извещения из АИС ГЗ или текст позиции из ТЗ. По номеру подтягиваются ОКПД2, НМЦК и заказчик.</p>
+        </li>
+        <li>
+          <h3>Два списка</h3>
+          <p>«С опытом госзакупок» — участники похожих закупок по данным АИС ГЗ 2024–2025. «Новые» — компании из реестра МСП ФНС с подходящим ОКВЭД, которых нет в данных.</p>
+        </li>
+        <li>
+          <h3>Объяснимая оценка</h3>
+          <p>Итог — сумма критериев с весами. В карточке видно вклад каждого:</p>
+          <ul className="crit">
+            {Object.values(COMPONENT_LABEL).map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+        </li>
+        <li>
+          <h3>Факт — с источником</h3>
+          <p>У каждого факта в карточке — ссылка и дата получения. Факт без источника не показывается; ИНН, который не удалось подтвердить, так и помечен.</p>
+        </li>
+      </ol>
+      <button type="button" className="subpage-cta" onClick={onStart}>Перейти к подбору</button>
+    </section>
+  );
+}
+
+function SettingsPage({ filters, onChange, onReset }: { filters: Filters; onChange: (f: Filters) => void; onReset: () => void }) {
+  return (
+    <section className="subpage" aria-labelledby="settings-title">
+      <header className="top">
+        <h1 id="settings-title">Настройки подбора</h1>
+        <p className="sub">Применяются к каждому поиску и к выгрузке в Excel. Их же можно менять в форме подбора.</p>
+      </header>
+      <div className="settings">
+        <fieldset className="setting-group">
+          <legend>Кого показывать</legend>
+          <label className="setting">
+            <input type="checkbox" checked={filters.only_msp} onChange={(e) => onChange({ ...filters, only_msp: e.target.checked })} />
+            <span>
+              <strong>Только МСП</strong>
+              <small>Субъекты малого и среднего предпринимательства по реестру ФНС — для закупок у СМП.</small>
+            </span>
+          </label>
+          <label className="setting">
+            <input
+              type="checkbox"
+              checked={filters.only_manufacturers}
+              onChange={(e) => onChange({ ...filters, only_manufacturers: e.target.checked })}
+            />
+            <span>
+              <strong>Только производители</strong>
+              <small>Роль определяется по основному ОКВЭД; у кого он неизвестен — скрываются, это видно в выдаче.</small>
+            </span>
+          </label>
+        </fieldset>
+        <fieldset className="setting-group">
+          <legend>География</legend>
+          <label className="setting setting-select">
+            <span>
+              <strong>Регион поставщика</strong>
+              <small>По КПП или адресу из реестра.</small>
+            </span>
+            <select aria-label="Регион поставщика" value={filters.region} onChange={(e) => onChange({ ...filters, region: e.target.value })}>
+              {REGIONS.map((r) => (
+                <option key={r} value={r}>
+                  {r || "Любой"}
+                </option>
+              ))}
+            </select>
+          </label>
+        </fieldset>
+        <div className="settings-actions">
+          <button type="button" className="secondary" onClick={onReset}>Сбросить настройки и сохранённый запрос</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function NotFound({ onHome }: { onHome: () => void }) {
+  return (
+    <section className="subpage" aria-labelledby="nf-title">
+      <header className="top">
+        <h1 id="nf-title">Страница не найдена</h1>
+        <p className="sub">Такого раздела нет.</p>
+      </header>
+      <button type="button" className="subpage-cta" onClick={onHome}>К подбору поставщиков</button>
+    </section>
   );
 }

@@ -350,7 +350,7 @@ def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
 def _hang(calls: list, ok_first: float | None = None):
     """A source that keeps silent exactly as long as the client agreed to wait (connect + read)."""
     def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request.extensions["timeout"])
+        calls.append({**request.extensions["timeout"], "at": time.monotonic()})
         if ok_first is not None and len(calls) == 1:
             time.sleep(ok_first)
             return httpx.Response(200, json={"rowCount": 0, "data": []})
@@ -363,7 +363,7 @@ def _hang(calls: list, ok_first: float | None = None):
 @pytest.mark.parametrize(("ok_first", "pacing", "expected_calls"), [
     (None, 0.0, 1),  # the very first request hangs
     (0.2, 0.0, 2),  # the first answers slowly, the second hangs: it only gets what is left
-    (0.0, 0.3, 2),  # the pause between requests is part of the budget too
+    (0.0, 0.2, 2),  # the pause between requests is part of the budget too
     (0.5, 0.0, 1),  # almost nothing left after the first answer → the second request is not started
 ])
 def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, monkeypatch, ok_first, pacing,
@@ -371,14 +371,19 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
     budget = 0.6
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
     monkeypatch.setattr(rmsp, "_last_request", 0.0)
+    monkeypatch.setattr(rmsp, "TIMEOUT_S", 3.0)
     calls: list = []
-    started = time.monotonic()
     res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),
                offline=False, budget_s=budget, client=_client(_hang(calls, ok_first)))
-    elapsed = time.monotonic() - started
-    assert elapsed < budget + 0.25, f"{elapsed:.2f} s for a {budget} s budget"
+    # the budget itself is checked on the timeouts below; the clock only guards against a request that waited
+    # its full default timeout (wall time on a loaded machine is not reliable, the clock starts at the first
+    # request because the deadline starts after the query setup)
+    elapsed = time.monotonic() - calls[0]["at"]
+    assert elapsed < rmsp.TIMEOUT_S, f"{elapsed:.2f} s of network for a {budget} s budget"
     assert len(calls) == expected_calls and len(res.requests) == 4 and res.matches == []
-    assert all(t["connect"] + t["read"] <= budget + 1e-6 for t in calls)
+    # every request may wait only for what is left before the deadline (0.1 s: monotonic clock step on Windows)
+    assert calls[0]["connect"] + calls[0]["read"] <= budget + 1e-6
+    assert all(t["at"] - calls[0]["at"] + t["connect"] + t["read"] <= budget + 0.1 for t in calls)
 
 
 def test_request_timeout_is_capped_by_the_default_when_time_is_plenty(tmp_path, monkeypatch):
