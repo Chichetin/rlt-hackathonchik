@@ -61,7 +61,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 
 MAX_SHOWN = 10  # companies in the block and INNs sent to enrichment per query
-MAX_REQUESTS = 4  # rmsp requests per query (cached or live)
+MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wholesale codes × 2 regions
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
@@ -71,22 +71,26 @@ NEIGHBOUR_VALUE = 0.8  # as in src/match/search.py
 REGION_NAME = {v: k for k, v in REGION_CODE.items()}
 COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geography", "price")
 
-# OKPD2 prefix (longest wins) → OKVED2 wholesale code for these goods. A hand-made table, not an
-# official key (D-036). The name of the code shown to the user always comes from the registry row.
-WHOLESALE = {
-    "10": "46.3", "11": "46.34",
-    "13": "46.41", "14": "46.42", "15": "46.42",
-    "16": "46.73", "23": "46.73",
-    "17": "46.49.33",
-    "19.20": "46.71",
-    "20.41": "46.44.2", "20.42": "46.45",
-    "21": "46.46.1",
-    "22.19.60": "46.46.2", "32.50": "46.46.2",
-    "26.20": "46.51", "26.30": "46.52",
-    "27.40": "46.47.3",
-    "28.23": "46.66", "28": "46.69",
-    "31.01": "46.65", "31": "46.47.1",
-    "32.30": "46.49.43", "32.40": "46.49.42",
+# OKPD2 prefix (longest wins) → OKVED2 wholesale codes for these goods, the main one first. A hand-made
+# table, not an official key (D-036; second codes and new rows — #108). The name of the code shown to the
+# user always comes from the registry row. Every code here is «46.x except 46.1» — a distributor by
+# src/enrich/role.py.
+WHOLESALE: dict[str, tuple[str, ...]] = {
+    "10": ("46.3",), "11": ("46.34",),
+    "13": ("46.41",), "14": ("46.42",), "15": ("46.42",),
+    "16": ("46.73",), "23": ("46.73",),
+    "17": ("46.49.33",), "17.12": ("46.49.33", "46.76.1"),  # office paper: stationery and paper/board wholesale
+    "19.20": ("46.71",),
+    "20": ("46.75",),  # chemical products (disinfectants 20.20 and the rest of class 20 without a row)
+    "20.30": ("46.73.6",), "20.41": ("46.44.2",), "20.42": ("46.45",),
+    "21": ("46.46.1",),
+    "22.19.60": ("46.46.2",), "32.50": ("46.46.2",), "26.60": ("46.46.2",),
+    "25.7": ("46.74",),
+    "26.1": ("46.52",), "26.20": ("46.51", "46.66"), "26.30": ("46.52",), "26.40": ("46.43",),
+    "27.40": ("46.47.3",), "27.51": ("46.43.1",),
+    "28.23": ("46.66",), "28": ("46.69",),
+    "31.01": ("46.65",), "31": ("46.47.1",),
+    "32.30": ("46.49.43",), "32.40": ("46.49.42",),
 }
 _LEGAL_FORMS = (
     ("ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ", "ООО"),
@@ -120,6 +124,7 @@ class Discovery:
     history_checked: bool = False  # False → organizers' data absent: «новые» is NOT established
     known: int = 0  # found in the registry but already present in organizers' data
     inactive: int = 0  # found but excluded from the registry
+    pool: list[CounterpartyMatch] = field(default_factory=list)  # every candidate after filters, before top-10
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
     notes: list[str] = field(default_factory=list)
 
@@ -142,9 +147,15 @@ def okpd_classes(codes: Sequence[str]) -> list[str]:
     return out
 
 
-def wholesale_okved(okpd2: str) -> str | None:
+def wholesale_okveds(okpd2: str) -> tuple[str, ...]:
+    """Wholesale OKVED codes of the longest matching OKPD2 prefix; () when there is no row."""
     best = max((p for p in WHOLESALE if okpd2.startswith(p)), key=len, default=None)
-    return WHOLESALE[best] if best else None
+    return WHOLESALE[best] if best else ()
+
+
+def wholesale_okved(okpd2: str) -> str | None:
+    """The main wholesale code (the first of the row)."""
+    return next(iter(wholesale_okveds(okpd2)), None)
 
 
 def okved_plan(codes: Sequence[str]) -> list[Channel]:
@@ -154,9 +165,9 @@ def okved_plan(codes: Sequence[str]) -> list[Channel]:
         plan.append(Channel(cls, cls, "class"))
         # the deepest code of this class decides the wholesale row (22.19.60 vs 22.19)
         deepest = max((c.strip() for c in codes if c.strip().startswith(cls)), key=len)
-        trade = wholesale_okved(deepest)
-        if trade and all(ch.okved != trade for ch in plan):
-            plan.append(Channel(trade, cls, "wholesale"))
+        for trade in wholesale_okveds(deepest):
+            if all(ch.okved != trade for ch in plan):
+                plan.append(Channel(trade, cls, "wholesale"))
     return plan
 
 
@@ -501,6 +512,7 @@ def discover(
                                          score=round(sum(c.value * c.weight for c in comps), 4)))
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
     matches.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
+    res.pool = matches
     res.matches = _mix(matches, relation)
     if enqueue is not None:
         for m in res.matches:
