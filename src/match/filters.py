@@ -10,7 +10,8 @@ User filters (`Query.filters`, docs/ui.md; the contract is a plain dict — keys
   Empty or absent — no filter;
 - `only_manufacturers: bool` — the old switch, a synonym of `kinds="manufacturer"` (the e2e and old clients
   send it); with `kinds` both apply (AND), as any two filters;
-- `entity: "ul" | "ip"` — ЮЛ / ИП: `stats.entity_type` ("ЮЛ"/"ИП", organizers' data) for history, else the
+- `entity: "ul" | "ip"` — ЮЛ / ИП (ИП or a natural person): `stats.entity_type` ("ЮЛ"/"ИП" — derived from the
+  INN length in src/ingest/build.py, not a field of the export) for history, else the
   INN length (10 — ЮЛ, 12 — ИП); no INN — unknown, never passes (not guessed);
 - `min_score: float` — drops score < min_score, on the server weights of the answer (local weights of
   «Настройки», D-079, re-rank on the client only);

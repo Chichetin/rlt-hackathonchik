@@ -37,7 +37,7 @@ import {
 } from "./api";
 import { reviewLinks } from "./reviews";
 import { TestsetPanel } from "./TestsetPanel";
-import { KINDS, LEVELS, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
+import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
 import "./filters.css";
 import { relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
@@ -184,7 +184,8 @@ function ContextLine({ context }: { context: SearchContext }) {
 }
 
 function FilterBar({ filters, facets, context, onChange }: { filters: Filters; facets?: Facets; context?: SearchContext; onChange: (f: Filters) => void }) {
-  const entities: [Filters["entity"], string][] = [["", "Все"], ["ul", "ЮЛ"], ["ip", "ИП"]];
+  // 12 INN digits: a sole trader or a natural person — «ИП/ФЛ», not a guessed «ИП»
+  const entities: [Filters["entity"], string][] = [["", "Все"], ["ul", "ЮЛ"], ["ip", "ИП/ФЛ"]];
   return (
     <div className="filterbar" role="group" aria-label="Фильтры выдачи">
       {context && <ContextLine context={context} />}
@@ -215,7 +216,8 @@ function FilterBar({ filters, facets, context, onChange }: { filters: Filters; f
             <option value="high">только высокая</option>
           </select>
         </label>
-        <p className="legend-levels" aria-label="Уровни релевантности">
+        <p className="legend-levels">
+          <span className="sr-only">Уровни релевантности:</span>
           {LEVELS.map((l, i) => (
             <span key={l.id} className={`relevance relevance-${l.id}`}>
               <i aria-hidden="true" />
@@ -775,7 +777,7 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
@@ -803,12 +805,12 @@ export function App() {
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             rows={weights ? atLeast(rerank(res.history, weights), filters.min_level).slice(0, shown) : res.history}
-            total={res.total.history}
+            total={weights ? atLeast(rerank(res.history, weights), filters.min_level).length : res.total.history}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
             loadingMore={more}
             onOpen={setOpen}
             empty={
-              filterNotes(base, filters).length
+              filterNotes(base, filters, res.facets).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
                 : noteText(res.note)
             }
@@ -879,7 +881,7 @@ function Block(props: {
                 <motion.button className="item" whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
-                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
+                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
                     <span className="score-num">{m.score.toFixed(2)}</span>
                     <RelevanceTag score={m.score} />
                     <span className="score-meter" aria-hidden="true">

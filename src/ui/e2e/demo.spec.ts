@@ -90,8 +90,14 @@ test("демо: запрос → два блока → карточка → фи
       new URL(r.url()).pathname === "/api/search" &&
       JSON.parse(r.request().postData() ?? "{}").filters?.kinds === "distributor",
   );
-  await page.getByRole("checkbox", { name: /Дистрибьюторы/ }).check();
-  const onlyDist = await (await distributors).json();
+  // the number on the chip is honest: with only this chip chosen it equals the size of both blocks (X-Facets, #232)
+  const chip = page.getByRole("checkbox", { name: /Дистрибьюторы/ });
+  const onChip = Number(((await page.locator("label.role-chip", { has: chip }).textContent()) ?? "").match(/\d+/)?.[0]);
+  await chip.check();
+  const distResponse = await distributors;
+  const onlyDist = await distResponse.json();
+  const totals = Number(distResponse.headers()["x-total-history"]) + Number(distResponse.headers()["x-total-discovered"]);
+  expect(onChip).toBe(totals);
   expect(onlyDist.discovered.length).toBeGreaterThan(0);
   for (const m of [...onlyDist.history, ...onlyDist.discovered]) expect(m.counterparty.kind).toBe("distributor");
   await expect(discovered.locator(".item")).toHaveCount(onlyDist.discovered.length);

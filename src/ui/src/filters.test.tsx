@@ -70,3 +70,12 @@ test("the supplier relative to the customer: same region, the neighbour, another
   expect(relationToCustomer({ kpp: null, inn: "7801000012" }, "Санкт-Петербург")).toBeNull();
   expect(relationToCustomer({ kpp: "780101001" }, undefined)).toBeNull();
 });
+
+test("filterNotes for ЮЛ/ИП takes the number of unknown from the server's facets", async () => {
+  const { filterNotes } = await import("./api");
+  const base = { query: { query_id: "q", text: "x" }, history: [], discovered: [], stub: false } as never;
+  const facets = { history: { kind: {}, entity: { unknown: 2 } }, discovered: { kind: {}, entity: { unknown: 1 } } };
+  expect(filterNotes(base, { ...NO_FILTERS, entity: "ul" }, facets)).toEqual([
+    "ЮЛ или ИП/ФЛ — не известно у 3 из 0 (ИНН не подтверждён); они скрыты фильтром.",
+  ]);
+});
