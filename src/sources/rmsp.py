@@ -40,6 +40,7 @@ SOURCE = "ФНС: единый реестр субъектов МСП"
 UA = "Mozilla/5.0 (compatible; RLTHack-Discovery/0.1; hackathon, cached, paced)"
 MIN_INTERVAL_S = float(os.environ.get("RMSP_MIN_INTERVAL_S", "1.0"))
 TIMEOUT_S = float(os.environ.get("RMSP_TIMEOUT_S", "3.0"))
+QUICK_TIMEOUT_S = float(os.environ.get("RMSP_QUICK_TIMEOUT_S", "10.0"))  # enrich is not on the 4 s search budget
 BLOCK_COOLDOWN_S = 900.0
 
 NP_TYPES = ("UL", "IP")
@@ -150,30 +151,39 @@ def _post(client: httpx.Client, data: dict[str, str]) -> httpx.Response:
             _last_request = time.monotonic()
 
 
+def _checked(r: httpx.Response) -> dict[str, Any]:
+    """The JSON answer, or Blocked on 403/429/captcha/non-JSON, ValueError when `data` is not a list."""
+    if r.status_code in (403, 429):
+        raise _block(f"HTTP {r.status_code}")
+    r.raise_for_status()
+    try:
+        answer = r.json()
+    except ValueError as e:
+        raise _block("ответ не JSON (страница защиты?)") from e
+    if not isinstance(answer, dict) or answer.get("captchaRequired"):
+        raise _block("требуется капча")
+    if not isinstance(answer.get("data"), list):
+        raise ValueError(f"rmsp.nalog.ru: в ответе нет списка data (ключи: {sorted(answer)[:8]})")
+    return answer
+
+
+def _client(timeout: float | None = None) -> httpx.Client:
+    return httpx.Client(
+        timeout=timeout or TIMEOUT_S,
+        headers={"User-Agent": UA, "X-Requested-With": "XMLHttpRequest", "Referer": BASE + "/search.html"},
+    )
+
+
 def fetch_raw(okved: str, region: str, np_type: str = "UL", client: httpx.Client | None = None) -> dict[str, Any]:
     """One live POST: the first page of the extended search. Blocked on 403/429/captcha/non-JSON."""
     _check_args(okved, region, np_type)
     if blocked():
         raise Blocked("rmsp.nalog.ru: пауза после отказа источника ещё не истекла")
     own = client is None
-    client = client or httpx.Client(
-        timeout=TIMEOUT_S,
-        headers={"User-Agent": UA, "X-Requested-With": "XMLHttpRequest", "Referer": BASE + "/search.html"},
-    )
+    client = client or _client()
     try:
-        r = _post(client, {"mode": "extended", "page": "1", "region": region, "npType": np_type, "okved1": okved})
-        if r.status_code in (403, 429):
-            raise _block(f"HTTP {r.status_code}")
-        r.raise_for_status()
-        try:
-            answer = r.json()
-        except ValueError as e:
-            raise _block("ответ не JSON (страница защиты?)") from e
-        if not isinstance(answer, dict) or answer.get("captchaRequired"):
-            raise _block("требуется капча")
-        if not isinstance(answer.get("data"), list):
-            raise ValueError(f"rmsp.nalog.ru: в ответе нет списка data (ключи: {sorted(answer)[:8]})")
-        return answer
+        return _checked(_post(client, {"mode": "extended", "page": "1", "region": region, "npType": np_type,
+                                       "okved1": okved}))
     finally:
         if own:
             client.close()
@@ -199,6 +209,51 @@ def fetch_search(okved: str, region: str, np_type: str = "UL", cache: SourceCach
         return 200, flatten(okved, region, np_type, answer)
 
     return cache.fetch(url, live)
+
+
+# --- quick search by INN (#58): the fallback of enrich() while pb.nalog.ru asks for a captcha --------------
+
+def quick_url(inn: str) -> str:
+    # Cache key and Evidence url; [ПРОВЕРИТЬ] the public form is filled by the user with the same INN.
+    if not inn_is_valid(inn):
+        raise ValueError(f"rmsp: INN {inn!r} fails the checksum")
+    return f"{BASE}/search.html?mode=quick&query={inn}"
+
+
+def quick_flatten(inn: str, answer: dict[str, Any]) -> str:
+    """Answer of the quick search as flat lines. Only rows of exactly this INN are kept; their count is
+    written as `answer.inn_rows` so that «в реестре МСП не найден» is a fact that is on the page too."""
+    rows = [r for r in clean_rows(answer) if r.get("inn") == inn]
+    lines = [f"query.inn: {inn}", "query.mode: quick"]
+    lines += [f"answer.{k}: {_scalar(answer[k])}" for k in ("dtQueryEnd",) if answer.get(k) is not None]
+    lines.append(f"answer.inn_rows: {len(rows)}")
+    for row in rows:
+        lines += [f"row.{inn}.{k}: {v}" for k, v in row.items()]
+    return "\n".join(lines)
+
+
+def fetch_quick_raw(inn: str, client: httpx.Client | None = None) -> dict[str, Any]:
+    """One live POST: quick search by INN (checked 01.10: HTTP 200 JSON, no captcha)."""
+    quick_url(inn)
+    if blocked():
+        raise Blocked("rmsp.nalog.ru: пауза после отказа источника ещё не истекла")
+    own = client is None
+    client = client or _client(QUICK_TIMEOUT_S)
+    try:
+        return _checked(_post(client, {"mode": "quick", "page": "1", "query": inn, "pageSize": "10"}))
+    finally:
+        if own:
+            client.close()
+
+
+def fetch_quick(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None,
+                offline: bool = False) -> CachedPage | None:
+    """Cached quick answer (an empty one too). offline → cache only (stale is fine), None if absent."""
+    cache = cache or SourceCache()
+    url = quick_url(inn)
+    if offline:
+        return cache.get(url, allow_stale=True)
+    return cache.fetch(url, lambda _: (200, quick_flatten(inn, fetch_quick_raw(inn, client))))
 
 
 def seed(directory: Path, cache: SourceCache | None = None) -> int:
