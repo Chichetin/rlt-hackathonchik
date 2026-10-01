@@ -14,7 +14,12 @@ import {
   COMPONENT_LABEL,
   exportXlsx,
   fetchLot,
+  facetCount,
   filterNotes,
+  filtersActive,
+  NO_FILTERS,
+  normalizeFilters,
+  type Facets,
   formatStat,
   KIND_LABEL,
   LotError,
@@ -32,6 +37,8 @@ import {
 } from "./api";
 import { reviewLinks } from "./reviews";
 import { TestsetPanel } from "./TestsetPanel";
+import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
+import "./filters.css";
 import "./testset.css";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
@@ -69,20 +76,94 @@ function Skeleton() {
   );
 }
 
-/** «Новые» emptied by «Только производители», judged by the filters of the shown answer (#84): the role of
+/** «Новые» emptied by the role chip «Производитель» alone, judged by the filters of the shown answer (#84): the role of
  *  a new company is set by its main OKVED (D-057), so the filter hides all of them only when none of them is a
  *  manufacturer. If the base answer has one, other filters emptied the block: the general text. Other filters
  *  alone keep the general text too: region and МСП of new companies are known, their empty block has other reasons. */
 function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Query | null): string | undefined {
   const n = base?.discovered.length ?? 0;
-  if (res.discovered.length || !n || base === res || !shown?.filters?.only_manufacturers) return undefined;
+  if (res.discovered.length || !n || base === res || String(shown?.filters?.kinds ?? "") !== "manufacturer") return undefined;
   const kinds = base?.discovered.map((m) => m.counterparty.kind) ?? [];
   if (kinds.includes("manufacturer")) return undefined;
   const undetermined = kinds.filter((k) => !k).length;
   const why = undetermined
     ? `подтверждённых производителей среди них нет — у ${undetermined} из ${n} роль ещё не определена`
     : "по основному ОКВЭД среди них нет производителей";
-  return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+  return `Под фильтр «Производитель» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+}
+
+/** «Минимальная релевантность» on the locally re-ranked score (local weights, D-079). */
+function atLeast(rows: CounterpartyMatch[], level: MinLevel): CounterpartyMatch[] {
+  const min = minScore(level);
+  return min === undefined ? rows : rows.filter((m) => m.score >= min);
+}
+
+/** Role chips: multiple choice; a count from X-Facets when the server sends it (#232). */
+function RoleChips({ filters, onChange, facets }: { filters: Filters; onChange: (f: Filters) => void; facets?: Facets }) {
+  return (
+    <fieldset className="role-chips">
+      <legend className="sr-only">Роль</legend>
+      {KINDS.map((k) => {
+        const on = filters.kinds.includes(k);
+        const n = facetCount(facets, "kind", k);
+        return (
+          <label key={k} className={`role-chip role-${k}${on ? " is-on" : ""}`}>
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => onChange({ ...filters, kinds: e.target.checked ? [...filters.kinds, k] : filters.kinds.filter((x) => x !== k) })}
+            />
+            <RoleIcon kind={k} />
+            {ROLE[k].chip}
+            {n !== undefined && <span className="chip-count">{n}</span>}
+          </label>
+        );
+      })}
+    </fieldset>
+  );
+}
+
+/** Filters over the results (#232): role chips, ЮЛ / ИП, minimal relevance, and the legend of the levels. */
+function FilterBar({ filters, facets, onChange }: { filters: Filters; facets?: Facets; onChange: (f: Filters) => void }) {
+  // 12 INN digits: a sole trader or a natural person — «ИП/ФЛ», not a guessed «ИП»
+  const entities: [Filters["entity"], string][] = [["", "Все"], ["ul", "ЮЛ"], ["ip", "ИП/ФЛ"]];
+  return (
+    <div className="filterbar" role="group" aria-label="Фильтры выдачи">
+      <RoleChips filters={filters} onChange={onChange} facets={facets} />
+      <div className="filterbar-row">
+        <fieldset className="seg">
+          <legend>Форма</legend>
+          {entities.map(([v, label]) => {
+            const n = v ? facetCount(facets, "entity", v) : undefined;
+            return (
+              <label key={label} className={filters.entity === v ? "is-on" : ""}>
+                <input type="radio" name="entity" checked={filters.entity === v} onChange={() => onChange({ ...filters, entity: v })} />
+                {label}
+                {n !== undefined && <span className="chip-count">{n}</span>}
+              </label>
+            );
+          })}
+        </fieldset>
+        <label className="minlevel">
+          Релевантность
+          <select value={filters.min_level} onChange={(e) => onChange({ ...filters, min_level: e.target.value as MinLevel })}>
+            <option value="">любая</option>
+            <option value="mid">средняя и выше</option>
+            <option value="high">только высокая</option>
+          </select>
+        </label>
+        <p className="legend-levels">
+          <span className="sr-only">Уровни релевантности:</span>
+          {LEVELS.map((l, i) => (
+            <span key={l.id} className={`relevance relevance-${l.id}`}>
+              <i aria-hidden="true" />
+              {l.label} {i === 0 ? `≥ ${l.min.toFixed(2)}` : i === LEVELS.length - 1 ? `< ${LEVELS[i - 1].min.toFixed(2)}` : `${l.min.toFixed(2)}–${LEVELS[i - 1].min.toFixed(2)}`}
+            </span>
+          ))}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /** Server's reason for an empty answer (X-Search-Note, #166) as a sentence; none — the general empty text. */
@@ -206,7 +287,7 @@ export function App() {
   const [saved] = useState(loadSaved);
   const [path, go] = usePath();
   const [text, setText] = useState(saved.text ?? "");
-  const [filters, setFilters] = useState<Filters>(saved.filters ?? { only_msp: false, only_manufacturers: false, region: "" });
+  const [filters, setFilters] = useState<Filters>(() => normalizeFilters(saved.filters));
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
   const [more, setMore] = useState(false);
@@ -319,9 +400,10 @@ export function App() {
     setState("loading");
     setOpen(null);
     try {
-      const active = nextFilters.only_msp || nextFilters.only_manufacturers || !!nextFilters.region;
-      const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
-      const q = buildQuery(qText, nextFilters, qExtra());
+      const active = filtersActive(nextFilters);
+      const none: Filters = NO_FILTERS;
+      // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
+      const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
@@ -382,7 +464,7 @@ export function App() {
       /* nothing stored */
     }
     runSeq.current++; // drop an answer still in flight
-    setFilters({ only_msp: false, only_manufacturers: false, region: "" });
+    setFilters(NO_FILTERS);
     setText("");
     setLotId("");
     setBudget("");
@@ -560,14 +642,6 @@ export function App() {
               Только МСП
             </label>
             <label>
-              <input
-                type="checkbox"
-                checked={filters.only_manufacturers}
-                onChange={(e) => toggle({ ...filters, only_manufacturers: e.target.checked })}
-              />
-              Только производители
-            </label>
-            <label>
               Регион{" "}
               <select value={filters.region} onChange={(e) => toggle({ ...filters, region: e.target.value })}>
                 {REGIONS.map((r) => (
@@ -635,7 +709,7 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
@@ -654,19 +728,20 @@ export function App() {
             <span className="result-total" role="status">
               С опытом: <strong><RollingNumber value={res.total.history} /></strong> · Новых: <strong><RollingNumber value={res.total.discovered} /></strong>
             </span>
+            <FilterBar filters={filters} facets={res.facets} onChange={toggle} />
           </header>
           <Block
             variant="history"
             tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
-            rows={weights ? rerank(res.history, weights).slice(0, shown) : res.history}
-            total={res.total.history}
+            rows={weights ? atLeast(rerank(res.history, weights), filters.min_level).slice(0, shown) : res.history}
+            total={weights ? atLeast(rerank(res.history, weights), filters.min_level).length : res.total.history}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
             loadingMore={more}
             onOpen={setOpen}
             empty={
-              filterNotes(base, filters).length
+              filterNotes(base, filters, res.facets).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
                 : noteText(res.note)
             }
@@ -676,7 +751,7 @@ export function App() {
             tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
-            rows={rerank(res.discovered, weights)}
+            rows={weights ? atLeast(rerank(res.discovered, weights), filters.min_level) : res.discovered}
             total={res.total.discovered}
             onOpen={setOpen}
             empty={
@@ -735,17 +810,19 @@ function Block(props: {
                 <motion.button className="item" whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
-                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
+                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
                     <span className="score-num">{m.score.toFixed(2)}</span>
+                    <RelevanceTag score={m.score} />
                     <span className="score-meter" aria-hidden="true">
                       <motion.span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%`, originX: 0 }} initial={reduced ? false : { scaleX: 0 }} whileInView={{ scaleX: 1 }} viewport={{ once: true }} transition={{ duration: reduced ? 0 : 0.7, ease: easeOut }} />
                     </span>
                   </span>
                   <span className="meta">
-                    {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}
+                    {regionLabel(cp)}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
                   <span className="badges">
+                    <RoleBadge kind={cp.kind} />
                     <OriginBadge m={m} />
                   </span>
                   {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
@@ -843,8 +920,9 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
       </div>
       <div className={`card-summary card-summary-${m.origin === "history" ? "history" : "new"}`}>
         <span>{m.origin === "history" ? "С опытом госзакупок" : "Из открытых источников"}</span>
-        <span>Оценка <strong>{m.score.toFixed(2)}</strong></span>
+        <span>Оценка <strong>{m.score.toFixed(2)}</strong> <RelevanceTag score={m.score} /></span>
       </div>
+      <p className="card-role"><RoleBadge kind={cp.kind} /></p>
       <Breakdown m={m} />
       <h3>Почему в списке</h3>
       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
@@ -1095,17 +1173,13 @@ function SettingsPage({ filters, onChange, onReset, weightSet, onWeights }: {
               <small>Субъекты малого и среднего предпринимательства по реестру ФНС — для закупок у СМП.</small>
             </span>
           </label>
-          <label className="setting">
-            <input
-              type="checkbox"
-              checked={filters.only_manufacturers}
-              onChange={(e) => onChange({ ...filters, only_manufacturers: e.target.checked })}
-            />
+          <div className="setting setting-roles">
             <span>
-              <strong>Только производители</strong>
-              <small>Роль определяется по основному ОКВЭД; у кого он неизвестен — скрываются, это видно в выдаче.</small>
+              <strong>Роль поставщика</strong>
+              <small>По основному ОКВЭД (основание — в карточке). Можно выбрать несколько; ничего не выбрано — все роли.</small>
             </span>
-          </label>
+            <RoleChips filters={filters} onChange={onChange} />
+          </div>
         </fieldset>
         <fieldset className="setting-group">
           <legend>География</legend>
