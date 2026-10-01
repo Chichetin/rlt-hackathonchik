@@ -42,6 +42,11 @@ def index_root() -> Path:
     return d if d.is_absolute() else ROOT / d
 
 
+def check_processed(processed: Path) -> dict:
+    """Manifest of the ingest parquet, or FileNotFoundError with the command that builds it."""
+    return ParquetStore(processed).manifest()
+
+
 def pq_path(path: Path) -> str:
     return "'" + path.as_posix().replace("'", "''") + "'"
 
@@ -63,6 +68,8 @@ class LotIndex:
     vocab: frozenset[str]
     n_docs: int
     data_end: date | None  # latest publish_date in the indexed history
+    as_of: date | None = None
+    sidecars: dict = field(default_factory=dict, repr=False, compare=False)  # derived data loaded once (search.py)
     _cached: tuple[np.ndarray, np.ndarray, pa.Array] | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -150,7 +157,9 @@ def _load(key: str, path: Path) -> LotIndex:
     else:
         retriever, vocab = bm25s.BM25(), frozenset()
     end = meta.get("data_end")
-    return LotIndex(key, path, retriever, vocab, n_docs, date.fromisoformat(end) if end else None)
+    as_of = meta.get("as_of")
+    return LotIndex(key, path, retriever, vocab, n_docs, date.fromisoformat(end) if end else None,
+                    date.fromisoformat(as_of) if as_of else None)
 
 
 def get_index(store: Store | Path | None, as_of: date | None) -> LotIndex:
@@ -207,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["LotHits", "LotIndex", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
+__all__ = ["LotHits", "LotIndex", "check_processed", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
 
 
 if __name__ == "__main__":

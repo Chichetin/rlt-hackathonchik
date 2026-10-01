@@ -36,6 +36,8 @@ POLL_TRIES = 5
 
 _lock = threading.Lock()
 _last_request = 0.0
+_blocked_until = 0.0
+BLOCK_COOLDOWN_S = 900.0
 
 
 class CaptchaRequired(RuntimeError):
@@ -44,6 +46,17 @@ class CaptchaRequired(RuntimeError):
 
 class NotFound(KeyError):
     pass
+
+
+def blocked() -> bool:
+    """True after a captcha demand (or PB_DISABLED=1): no request goes to the host — every one extends the block."""
+    return os.environ.get("PB_DISABLED") == "1" or time.monotonic() < _blocked_until
+
+
+def _captcha(msg: str) -> CaptchaRequired:
+    global _blocked_until
+    _blocked_until = time.monotonic() + BLOCK_COOLDOWN_S
+    return CaptchaRequired(msg)
 
 
 def card_url(inn: str) -> str:
@@ -69,7 +82,7 @@ def _post(client: httpx.Client, path: str, data: dict[str, str]) -> httpx.Respon
     # not `captchaRequired` in a 200 body. Without this the worker would count it as a failed
     # task and keep knocking.
     if r.status_code == 400 and "captcha" in r.text.lower():
-        raise CaptchaRequired("pb.nalog.ru требует капчу (HTTP 400) — останавливаемся (не решаем)")
+        raise _captcha("pb.nalog.ru требует капчу (HTTP 400) — останавливаемся (не решаем)")
     return r
 
 
@@ -77,7 +90,7 @@ def _json(r: httpx.Response) -> dict[str, Any]:
     r.raise_for_status()
     j = r.json()
     if j.get("captchaRequired"):
-        raise CaptchaRequired("pb.nalog.ru требует капчу — останавливаемся (не решаем)")
+        raise _captcha("pb.nalog.ru требует капчу — останавливаемся (не решаем)")
     return j
 
 
@@ -96,6 +109,8 @@ def flatten(row: dict[str, Any], vyp: dict[str, Any]) -> str:
 
 def fetch_raw(inn: str, client: httpx.Client | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Live fetch: (search row, card). NotFound if the registry has no such INN."""
+    if blocked():
+        raise CaptchaRequired("pb.nalog.ru: капча была недавно (или PB_DISABLED=1) — запрос не отправляем")
     own = client is None
     client = client or httpx.Client(
         timeout=TIMEOUT_S,

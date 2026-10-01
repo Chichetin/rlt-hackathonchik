@@ -63,6 +63,7 @@ class Store(Protocol):
     def index_rows(self, as_of: date | None) -> tuple[list[tuple[str, list[int]]], date | None]: ...
     def candidates(self, lots: LotHits, as_of: date | None, limit: int) -> list[tuple]: ...
     def lot_codes(self, lot_ids: list[int]) -> list[tuple[int, str]]: ...
+    def text_codes(self, as_of: date | None) -> list[tuple[str, str, int]]: ...
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]: ...
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]: ...
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
@@ -121,6 +122,15 @@ _LOT_CODES = """
 SELECT lot_id, okpd2_code FROM {t[items]}
 WHERE lot_id IN (SELECT unnest(%(lots)s{bigint_arr})) AND okpd2_code IS NOT NULL
 ORDER BY lot_id, okpd2_code{c}
+"""
+
+# OKPD2 codes of the positions carrying each text, lots with participants before as_of (D-045):
+# (product_name, code, positions). Matched to the index documents by text in search.py.
+_TEXT_CODES = """
+WITH lots AS (SELECT DISTINCT lot_id FROM {t[participants]} WHERE {cond})
+SELECT i.product_name, i.okpd2_code, count(*) FROM {t[items]} i JOIN lots USING (lot_id)
+WHERE i.product_name IS NOT NULL AND i.okpd2_code IS NOT NULL
+GROUP BY i.product_name, i.okpd2_code
 """
 
 # Deepest OKPD2 match over each candidate's history (4 code … 1 class) and lots/wins in the group (level ≥ 2).
@@ -259,6 +269,9 @@ class ParquetStore:
     def lot_codes(self, lot_ids: list[int]) -> list[tuple[int, str]]:
         return self._fetch(_LOT_CODES, {"lots": lot_ids})[1]
 
+    def text_codes(self, as_of: date | None) -> list[tuple[str, str, int]]:
+        return self._fetch(_TEXT_CODES, {"as_of": as_of}, as_of=as_of)[1]
+
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]:
         _, rows = self._fetch(_CLASS_HISTORY, {"inns": inns, "as_of": as_of, **class_params(codes)}, as_of=as_of)
         return {r[0]: tuple(r[1:]) for r in rows}
@@ -364,6 +377,9 @@ class PgStore:
 
     def lot_codes(self, lot_ids: list[int]) -> list[tuple[int, str]]:
         return self._fetch(_LOT_CODES, {"lots": lot_ids})[1]
+
+    def text_codes(self, as_of: date | None) -> list[tuple[str, str, int]]:
+        return self._fetch(_TEXT_CODES, {"as_of": as_of}, as_of=as_of)[1]
 
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]:
         _, rows = self._fetch(_CLASS_HISTORY, {"inns": inns, "as_of": as_of, **class_params(codes)}, as_of=as_of)
