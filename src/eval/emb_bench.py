@@ -189,7 +189,7 @@ def _row(ranked: list[str], case) -> dict[str, float]:
 
 
 def _summary(rows: list[dict[str, float]]) -> dict:
-    out = {"n": len(rows)}
+    out: dict = {"n": len(rows)}
     for k in METRICS:
         vals = [r[k] for r in rows]
         lo, hi = bootstrap_ci(vals)
