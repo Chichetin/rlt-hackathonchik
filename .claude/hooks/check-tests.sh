@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Stop-хук: ход не считается завершённым, если тесты красные. pytest (есть pyproject.toml и
-# tests/) и vitest (src/ui с node_modules). Нет тестов или окружения — молчит. Прогон
-# пропускается, если ничего не менялось с последнего зелёного.
+# tests/) — только тесты затронутых модулей; vitest (src/ui с node_modules) — если менялся src/ui.
+# Нет тестов или окружения — молчит. Прогон пропускается, если ничего не менялось с последнего
+# зелёного.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || exit 0  # хук может стартовать из подкаталога
 
@@ -19,18 +20,43 @@ RAN=0
 OUTPUT=""
 STATUS=0
 
+# Только затронутые модули (CLAUDE.md, «Проверки»): изменения относительно origin/main и тесты,
+# которые их импортируют (scripts/select_tests.py). Нет отбора или базы — прогон целиком.
+SELECTED=0
+CHANGED=()
+if [ -f scripts/select_tests.py ] && command -v uv >/dev/null 2>&1 \
+   && CH_OUT="$(PYTHONUTF8=1 uv run --frozen python scripts/select_tests.py changed 2>/dev/null)"; then
+  SELECTED=1
+  mapfile -t CHANGED < <(printf '%s' "$CH_OUT" | tr -d '\r' | grep .)
+fi
+
 if [ -f pyproject.toml ] && [ -d tests ] && find tests -name 'test_*.py' | grep -q .; then
-  RAN=1
-  if command -v uv >/dev/null 2>&1; then PYTEST=(uv run --frozen pytest -q -p no:cacheprovider)
-  elif [ -x .venv/bin/pytest ]; then PYTEST=(.venv/bin/pytest -q)
-  elif command -v python3 >/dev/null 2>&1; then PYTEST=(python3 -m pytest -q)
-  else PYTEST=(py -3 -m pytest -q); fi
-  OUT="$(PYTHONPATH=. "${PYTEST[@]}" 2>&1)" || STATUS=1
-  OUTPUT+="== pytest"$'\n'"$OUT"$'\n'
+  TARGETS=()
+  RUN_PY=1
+  if [ "$SELECTED" -eq 1 ]; then
+    if [ ${#CHANGED[@]} -eq 0 ]; then RUN_PY=0
+    elif T_OUT="$(PYTHONUTF8=1 uv run --frozen python scripts/select_tests.py pytest "${CHANGED[@]}" 2>/dev/null)"; then
+      mapfile -t TARGETS < <(printf '%s' "$T_OUT" | tr -d '\r' | grep -v '^$')
+      [ ${#TARGETS[@]} -eq 0 ] && RUN_PY=0
+      [ "${TARGETS[0]:-}" = ALL ] && TARGETS=()
+    fi  # отбор упал — TARGETS пуст, RUN_PY=1: весь pytest
+  fi
+  if [ "$RUN_PY" -eq 1 ]; then
+    RAN=1
+    if command -v uv >/dev/null 2>&1; then PYTEST=(uv run --frozen pytest -q -p no:cacheprovider)
+    elif [ -x .venv/bin/pytest ]; then PYTEST=(.venv/bin/pytest -q)
+    elif command -v python3 >/dev/null 2>&1; then PYTEST=(python3 -m pytest -q)
+    else PYTEST=(py -3 -m pytest -q); fi
+    OUT="$(PYTHONPATH=. PYTHONUTF8=1 "${PYTEST[@]}" "${TARGETS[@]}" 2>&1)" || STATUS=1
+    OUTPUT+="== pytest ${TARGETS[*]:-(все)}"$'\n'"$OUT"$'\n'
+  fi
 fi
 
 for dir in . src/ui; do
   [ -f "$dir/package.json" ] && [ -d "$dir/node_modules" ] || continue
+  if [ "$SELECTED" -eq 1 ] && [ "$dir" = src/ui ] && ! printf '%s\n' "${CHANGED[@]}" | grep -q '^src/ui/'; then
+    continue
+  fi
   jq -e '.scripts.test and (.scripts.test | test("no test specified") | not)' "$dir/package.json" >/dev/null 2>&1 || continue
   RAN=1
   OUT="$(cd "$dir" && npm test --silent 2>&1)" || STATUS=1

@@ -100,7 +100,7 @@ Claude Code (Claude Max); субагентами пользуемся актив
 - **Шаблон задачи** — `.github/ISSUE_TEMPLATE/task.md`: цель → пункт условий → критерий приёмки
   (команда) → «Зависит от #…» → **сложность и рекомендуемая модель** (запускать ли `builder` на opus).
 - **Контракты** — `src/contracts.py`, единственная точка стыковки ролей; OpenAPI и TS-типы UI
-  генерируются из него (`make openapi`, расхождение ловит `make check`). Замораживаются 01.10 в
+  генерируются из него (`make openapi`, расхождение ловит `make openapi-check`). Замораживаются 01.10 в
   11:30 (подтверждение человека №1); дальше изменение — отдельный PR с меткой `contract` и
   перечнем потребителей (`grep -rn "<Тип>" src tests`). Молча под свой модуль не меняется.
 
@@ -110,8 +110,8 @@ Claude Code (Claude Max); субагентами пользуемся актив
   проверяет свежим субагентом (`reviewer` в режиме «решение» или скептик с контекстом только из
   diff и условий) → «принять» — строка в `research/DECISIONS.md` и дальше; «отклонить» — исправить
   и повторить; два отклонения подряд — арбитр `jury`.
-- PR вливается после вердикта `reviewer` «merge» и зелёного `make check` (и `make e2e`, если
-  затронут API или UI), по одному.
+- PR вливается после вердикта `reviewer` «merge» и зелёного `make check-changed` (он сам включает
+  `make e2e`, если задет демо-путь, и полный `make check`, если задет общий файл), по одному.
 - **Подтверждение человека — только для пяти вещей:** (1) заморозка контрактов (01.10, 11:30);
   (2) план задач после kickoff; (3) изменение методологии скоринга — формула, состав компонент
   (это слайд); (4) всё внешнее — массовый парсинг сайтов, регистрация в сервисах, платные API;
@@ -146,10 +146,29 @@ Claude Code (Claude Max); субагентами пользуемся актив
 - Тесты: pytest, Vitest, Playwright. **Один e2e — сценарий демо** (`src/ui/e2e/demo.spec.ts`,
   `docs/ui.md`): запрос → два блока → карточка с компонентами и источниками → фильтр → выгрузка.
   Растёт вместе с продуктом; **PR, ломающий его, не вливается.**
-- Команды: `make setup`, `make check` (lint, typecheck, pytest, vitest, хуки, OpenAPI, `# STUB`),
-  `make demo`, `make e2e`, `make eval EXP=<id>`, `make eval-final CONFIRM=<sha256>`, `make up`.
+- Тесты и проверки проходят **и на Windows (Git Bash), и на Linux**: пути — через `Path` и
+  `.as_posix()` в URL и SQL, файлы — с явным `encoding="utf-8"`, на переводы строк рабочей копии не
+  полагаться (`.gitattributes`: фикстуры побайтно, `.sh` в LF), кириллицу не класть в рецепты
+  Makefile — в `scripts/*.sh` (виндовый make её портит).
+- Команды: `make setup`, `make check-changed` (по умолчанию — только затронутое), `make check`
+  (всё: lint, typecheck, pytest, vitest, хуки, OpenAPI, `# STUB`), `make demo`, `make e2e`,
+  `make eval EXP=<id>`, `make eval-final CONFIRM=<sha256>`, `make up`.
 
 ## Проверки кодом, а не словами
+
+- **Тесты — только затронутых модулей** (D-053). На правку и перед push — `make check-changed`:
+  ruff по изменённым файлам, pyright — по ним и модулям, которые их импортируют; pytest — только
+  тесты, которые импортируют изменённый модуль `src` напрямую, транзитивно или через фикстуру
+  `conftest.py` (`scripts/select_tests.py`); `tsc` и vitest — если менялся `src/ui`; `make e2e` —
+  если задет демо-путь (граф импортов `src/api/app.py`, `src/ui`, фикстуры, `configs/`, Makefile).
+  Stop-хук `check-tests` отбирает так же. Документы, `src/ui`, хуки и `*.sh` pytest не трогают; всё
+  остальное, чего граф не видит (`configs/`, `eval/cases/`, фикстуры, удалённый или переименованный
+  модуль, хелпер тестов), — весь pytest; упал сам отбор — тоже всё. Полный `make check` — когда его
+  включает сам `check-changed` (Makefile, зависимости, `src/contracts.py`, сам отбор). **Страховка
+  от пропусков отбора:** полный `make check && make e2e` на свежем `main` — перед каждым
+  чек-поинтом, на feature/code freeze и в `/submission-checklist`; красный — задача `blocker`.
+  Гонять всё «на всякий случай» на каждую правку не нужно; новый тест импортирует то, что
+  проверяет, — иначе отбор его не найдёт.
 
 - **Evidence** (`src/enrich/evidence.py`, тест на честной и выдуманной карточке): у каждого
   `Evidence` есть `url` и `fetched_at`; извлечённое значение (ИНН, телефон, email, адрес) буквально
@@ -200,7 +219,7 @@ Claude Code (Claude Max); субагентами пользуемся актив
 ## Git (кратко; полностью — `GIT.md`)
 
 Задача → worktree `.claude/worktrees/<N>-<тема>` на ветке `worktree-<N>-<тема>` → PR в `main` с
-`Closes #N` → перед push `git fetch --prune && git merge origin/main` и `make check` → merge после
+`Closes #N` → перед push `git fetch --prune && git merge origin/main` и `make check-changed` → merge после
 вердикта `reviewer`, по одному (`gh pr merge <PR> --merge --delete-branch`). Не trunk-based: без
 `pull --rebase`. Пушить агент может сам, в том числе в `main` (D-016); обычный путь в `main` —
 PR. Запрещено (`permissions.deny`): force-push, `--no-verify`, удаление `main`, rebase,

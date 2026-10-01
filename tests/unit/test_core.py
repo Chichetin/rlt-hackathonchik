@@ -71,7 +71,7 @@ def test_cache_ttl_and_stale_fallback(tmp_path):
 
 
 def test_queue_idempotent_claim_retry(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     eng = Q.engine_from_env()
     a = Q.enqueue(eng, "enrich", "0000100012")
     assert Q.enqueue(eng, "enrich", "0000100012") == a
@@ -86,7 +86,7 @@ def test_queue_idempotent_claim_retry(tmp_path, monkeypatch):
 
 
 def test_requeue_only_stale_running_tasks(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     eng = Q.engine_from_env()
     Q.enqueue(eng, "enrich", "0000100012")
     Q.claim(eng, "enrich")
