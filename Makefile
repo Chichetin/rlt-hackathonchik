@@ -6,11 +6,13 @@ PY := uv run --frozen
 UI := src/ui
 PORT ?= 8000
 EXP ?=
+A ?=
+B ?=
 PART ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs openapi openapi-check \
-        seal-check ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed okpd2 data pool-load
+        seal-check ui-build api worker ui-dev demo e2e eval parity latency eval-final up down db-load db-embed okpd2 data pool-load
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -88,6 +90,9 @@ e2e: ui-build      ## e2e демо-сценария (Playwright), свой по�
 eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-часть)
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
 	$(PY) python -m src.eval.run --exp $(EXP)
+
+parity:            ## побитовое сравнение выдач (ranked) двух прогонов eval; 0 — совпали, 1 — различаются, 2 — не сравнить: make parity A=<id> B=<id>
+	$(PY) python -m src.eval.parity "$(A)" "$(B)"
 
 predict:           ## тестовая выгрузка организаторов → eval/predict/<папка>.csv: make predict CSV_DIR=<папка> [TOP=10] [OFFLINE=1]
 	@[ -n "$(CSV_DIR)" ] || { echo "нужен CSV_DIR=<папка с Извещения*.csv и ТРУ*.csv>"; exit 2; }

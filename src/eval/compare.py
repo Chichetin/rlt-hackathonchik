@@ -18,12 +18,18 @@ from src.eval.metrics import METRICS, bootstrap_ci
 from src.eval.run import RESULTS, slice_names
 
 
+def require_same_cases(a: dict, b: dict) -> None:
+    """ValueError unless both runs cover the same query ids: the pairing of `paired` and of src.eval.parity."""
+    ids_a = [q["query_id"] for q in a["per_query"]]
+    ids_b = {q["query_id"] for q in b["per_query"]}
+    if set(ids_a) != ids_b or len(ids_a) != len(ids_b):
+        raise ValueError(f"{a['exp_id']} и {b['exp_id']}: разные наборы кейсов — парное сравнение невозможно")
+
+
 def paired(a: dict, b: dict) -> dict:
     """{slice: {n_queries, metrics: {name: {delta, ci95}}}} for records a and b (delta = a - b)."""
+    require_same_cases(a, b)
     rows_b = {q["query_id"]: q for q in b["per_query"]}
-    ids_a = [q["query_id"] for q in a["per_query"]]
-    if set(ids_a) != set(rows_b) or len(ids_a) != len(rows_b):
-        raise ValueError(f"{a['exp_id']} и {b['exp_id']}: разные наборы кейсов — парное сравнение невозможно")
     groups: dict[str, list[tuple[dict, dict]]] = {"all": []}
     for q in a["per_query"]:
         qb = rows_b[q["query_id"]]
