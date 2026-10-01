@@ -14,6 +14,25 @@ FIXTURE_INGEST = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
 CUTOFF = date(2025, 7, 1)
 
 
+@pytest.fixture(autouse=True)
+def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test talks to an open source by accident: discovery is cache-only and the cache is per test."""
+    monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources-default.sqlite"))
+    # no real network: only httpx.MockTransport answers (a request to a source in a test is a bug)
+    import httpx
+
+    def no_network(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"network is closed in unit tests: {request.url}")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", no_network)
+    # a captcha / refusal seen by one test must not block the next one (module-level cooldowns)
+    from src.sources import bo_nalog, pb_nalog, rmsp
+
+    for mod in (bo_nalog, pb_nalog, rmsp):
+        monkeypatch.setattr(mod, "_blocked_until", 0.0)
+
+
 @pytest.fixture(scope="session")
 def fixture_processed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("processed-fixture")
