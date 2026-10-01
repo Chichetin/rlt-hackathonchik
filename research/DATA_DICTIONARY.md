@@ -53,7 +53,7 @@
 |---|---|---|---|
 | `Query.text` | Извещения.subject; ТРУ.product_name | в eval — subject + наименования позиций лота | `src/match/search.py`, `src/eval/` |
 | `Query.okpd2` | ТРУ.okpd2_code | список кодов позиций лота, без NULL | `src/match/search.py`, `src/eval/` |
-| `Query.budget` | Извещения.start_price | ₽; выбросы > 1 млрд — [ПРОВЕРИТЬ] (open question 13) | `src/match/search.py` (`price`, T-11) |
+| `Query.budget` | Извещения.start_price | ₽; выбросы > 1 млрд — [ПРОВЕРИТЬ] (open question 13) | `src/match/search.py` (`price` пока не реализована — «нет данных», D-029; предложение — METHODOLOGY.md) |
 | `Query.customer_inn` | Извещения.customer_inn | как есть; пусто в 1.40% — `None` | `src/match/search.py` (инкумбент, B-inc) |
 | `Query.channel` | Извещения.is_eshop_or_aisgz | `ЭМ` / `АИС ГЗ` | `src/eval/` (метрики по каналам), UI |
 | `Query.as_of` | Извещения.publish_date | в eval — cutoff split; в продукте `None` | `src/match/search.py`, `src/ingest/` |
