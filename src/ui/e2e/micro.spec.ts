@@ -30,6 +30,9 @@ test("колесо выбирает запрос с клавиатуры и со
   await expect(query).toHaveValue("Офисная мебель");
   await page.keyboard.press("End");
   await expect(query).toHaveValue("Компьютерное оборудование");
+  await page.keyboard.press("Enter");
+  await expect(query).toHaveValue("Компьютерное оборудование");
+  await expect(query).toBeFocused();
   await next.click();
   await expect(query).toHaveValue("Бумага офисная А4, 80 г/м²");
   await page.getByRole("button", { name: "Офисная мебель", exact: true }).click();

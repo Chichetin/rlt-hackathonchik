@@ -630,7 +630,7 @@ function Block(props: {
                   <span className="badges">
                     <OriginBadge m={m} />
                   </span>
-                  {top && <span className="why"><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
+                  {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
                 </motion.button>
               </motion.li>
             );

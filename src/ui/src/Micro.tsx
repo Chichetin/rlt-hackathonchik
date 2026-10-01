@@ -4,17 +4,19 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 export function ExampleWheel({ options, value, onChange, onConfirm }: { options: string[]; value: string; onChange: (value: string) => void; onConfirm: () => void }) {
   const reduced = useReducedMotion();
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const selected = options.indexOf(value);
   const [cursor, setCursor] = useState(Math.max(0, selected));
   useEffect(() => { if (selected >= 0) setCursor(selected); }, [selected]);
-  const choose = (index: number) => {
+  const choose = (index: number, focusOption = false) => {
     const next = (index + options.length) % options.length;
     setCursor(next); onChange(options[next]);
+    if (focusOption) buttons.current[next]?.focus();
   };
   return <div className="example-wheel" role="group" aria-label="Примеры закупок" onKeyDown={e => {
     const delta = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-    if (delta) { e.preventDefault(); choose(cursor + delta); }
-    if (e.key === "Home" || e.key === "End") { e.preventDefault(); choose(e.key === "Home" ? 0 : options.length - 1); }
+    if (delta) { e.preventDefault(); choose(cursor + delta, true); }
+    if (e.key === "Home" || e.key === "End") { e.preventDefault(); choose(e.key === "Home" ? 0 : options.length - 1, true); }
   }}>
     <div className="wheel-caption"><span>Попробуйте пример</span><small>Выберите тему закупки</small></div>
     <div className="wheel-window">
@@ -23,7 +25,7 @@ export function ExampleWheel({ options, value, onChange, onConfirm }: { options:
         let offset = i - cursor;
         if (offset > options.length / 2) offset -= options.length;
         if (offset < -options.length / 2) offset += options.length;
-        return <motion.button type="button" key={option} aria-pressed={option === value}
+        return <motion.button ref={el => { buttons.current[i] = el; }} type="button" key={option} aria-pressed={option === value}
           className={`wheel-option${offset === 0 ? " wheel-center" : ""}`} onClick={() => { choose(i); onConfirm(); }}
           initial={false} animate={{ y: offset * 36, scale: offset === 0 ? 1 : .91, opacity: offset === 0 ? 1 : .56, rotateX: offset * -18 }}
           transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 270, damping: 30 }}>

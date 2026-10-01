@@ -110,8 +110,11 @@ def test_store_rows_are_identical(loaded):
         for cust in ("7801000051", "7701000040", "0000000000"):
             assert pg.customer_lots(inns, cust, as_of) == pq.customer_lots(inns, cust, as_of)
         assert pq.customer_lots(inns, "7801000051", as_of)  # not vacuous
+        for level, codes in ((4, ["17.12.14.110"]), (2, ["17.12", "26.20"]), (1, ["99"])):  # #113 ladder
+            assert pg.okpd2_suppliers(level, codes, as_of, 200) == pq.okpd2_suppliers(level, codes, as_of, 200)
     assert pg.lot_codes([1, 2, 3, 6]) == pq.lot_codes([1, 2, 3, 6])
     assert pg.lot_codes([]) == pq.lot_codes([]) == []
+    assert pg.lot_names(1) == pq.lot_names(1) and pq.lot_names(1)
 
 
 @needs_pg
