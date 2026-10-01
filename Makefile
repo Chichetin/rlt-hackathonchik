@@ -8,7 +8,7 @@ PORT ?= 8000
 EXP ?=
 CONFIRM ?=
 
-.PHONY: help setup setup-ml models check check-changed lint typecheck test test-ui hooks-test stubs openapi openapi-check 
+.PHONY: help setup setup-ml models check check-changed lint typecheck test test-ui hooks-test stubs openapi openapi-check \
         seal-check ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed
 
 help:              ## список целей
