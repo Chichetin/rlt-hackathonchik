@@ -1,8 +1,8 @@
 {
   "exp_id": "v2",
   "part": "dev",
-  "created_at": "2026-10-01T21:43:58+00:00",
-  "commit": "50730f12d6ab38aee98bf20fe59f5e4b01144c62",
+  "created_at": "2026-10-01T22:25:04+00:00",
+  "commit": "8103b7cac024c07e69aec9053cfe54cdfe83385d",
   "dirty": false,
   "config": {
     "retriever": "bm25",
@@ -27,12 +27,12 @@
     }
   },
   "tokenizer_version": "prefix5-v1",
-  "config_sha256": "289f04b36242b7cc78cd8b41531db6060c61b7ae943c782ac9c9c68656453ba4",
+  "config_sha256": "2e8b990b606ae0ce7596ea70fc211b288aa5575ea2d317ce7bb5b691cfb16bed",
   "stub": false,
   "vectors": null,
   "store": "parquet",
   "n_queries": 2000,
-  "elapsed_s": 351.9,
+  "elapsed_s": 301.9,
   "metrics": {
     "recall@10": {
       "value": 0.4907479797979798,
