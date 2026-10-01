@@ -277,7 +277,7 @@ def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "c
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
 
-# Assortment summary thresholds (D-073, research/DATA_DICTIONARY.md): shown only with enough history.
+# Assortment summary thresholds (D-064, research/DATA_DICTIONARY.md): shown only with enough history.
 PROFILE_MIN_LOTS = 5
 NARROW_TOP_SHARE = 0.8
 WIDE_CLASSES, WIDE_TOP_SHARE = 5, 0.5
