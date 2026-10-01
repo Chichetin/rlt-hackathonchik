@@ -7,6 +7,7 @@ Postgres is off here (DATABASE_URL is not postgres): the vector step is skipped 
 from __future__ import annotations
 
 import threading
+from datetime import date
 from urllib.parse import unquote
 
 import pytest
@@ -77,12 +78,12 @@ def test_vector_step_when_vectors_answer(data, monkeypatch):
 
 
 @pytest.mark.parametrize(("body", "status", "note"), [
-    ({"text": "   "}, 422, None),
+    ({"text": "   "}, 422, "Пустой запрос"),
     ({"text": "и в на"}, 200, "в запросе нет слов для поиска; ОКПД2 не задан"),
     ({"text": "экскаватор"}, 200, "по названию ничего не найдено; поиск по смыслу недоступен; ОКПД2 не задан"),
     ({"text": "экскаватор", "okpd2": ["abc"]}, 200, "ОКПД2 не распознан: abc"),
     ({"text": "экскаватор", "okpd2": ["99.99.99.999"]}, 200, "по ОКПД2 99.99.99.999 нет поставщиков"),
-    ({"text": "бумага", "as_of": "2020-01-01"}, 200, "нет истории до 01.01.2020"),
+    ({"text": "бумага", "as_of": "2020-01-01"}, 422, "as_of задаётся только в backtest"),  # #145 F-01
     ({"text": "бумага", "filters": {"region": "Москва"}}, 200, "фильтры скрыли 6"),
 ])
 def test_empty_answer_says_why(data, tmp_path, monkeypatch, body, status, note):
@@ -95,11 +96,17 @@ def test_empty_answer_says_why(data, tmp_path, monkeypatch, body, status, note):
     r = TestClient(app_mod.app).post("/api/search", json={"query_id": "q", **body})
     assert r.status_code == status
     if status == 422:
-        assert r.json()["detail"] == "Пустой запрос"
+        assert note in r.json()["detail"]
         return
     assert r.json()["history"] == []
     assert note in unquote(r.headers["X-Search-Note"])
 
+
+
+def test_no_history_before_as_of_says_why(data):
+    """as_of is the backtest knob — the API refuses it (#145, F-01); search() itself explains an empty history."""
+    assert search(Query(query_id="q", text="бумага", as_of=date(2020, 1, 1))) == []
+    assert "нет истории до 01.01.2020" in (fallback.search_note() or "")
 
 def test_long_query_keeps_the_rarest_words(data):
     idx = index_mod.get_index(data, None)
