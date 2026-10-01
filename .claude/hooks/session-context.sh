@@ -48,5 +48,4 @@ fi
 if ! ISSUES_TIMEOUT=6 timeout 10 bash "$root/scripts/issues.sh" board 2>&1; then
   echo "[issues] GitHub недоступен — занятость не видна (bash scripts/issues.sh mine)."
 fi
-
 exit 0
