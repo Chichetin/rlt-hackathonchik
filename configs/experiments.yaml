@@ -68,3 +68,6 @@ H-105-fresh10:   # то же, вес activity 0.10 вместо 0.048
 # #105: доля побед (сглаженная) вместо числа побед во второй половине experience
 H-105-winrate:
   options: {experience_wins: rate}
+H-105-price05-d1:   # price обнуляется при 10× (как в предложении METHODOLOGY), вес 0.05
+  weights: {price: 0.05}
+  options: {price: scale, price_decades: 1.0}

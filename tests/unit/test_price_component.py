@@ -29,6 +29,9 @@ def test_price_scale_values_and_text():
     v_small, why_small = _price(_cp(100_000), 10_000, CUTOFF)  # type: ignore[misc]
     assert v_small == pytest.approx(0.5) and "мельче" in why_small  # symmetric in log scale
     assert _price(_cp(1_000), 1_000_000, CUTOFF)[0] == 0.0  # type: ignore[index]
+    assert _price(_cp(10_000), 100_000, CUTOFF, decades=1.0)[0] == pytest.approx(0.0)  # type: ignore[index]
+    with pytest.raises(ValueError):
+        scoring_options({"options": {"price_decades": 0}})
     assert "сопоставим" in _price(_cp(10_000), 15_000, None)[1]  # type: ignore[index]
 
 

@@ -88,6 +88,7 @@ OPTIONS: dict[str, tuple] = {
     "sat_wins": (SAT_WINS, None),
     # price (#105): none — «нет данных» (v1); scale — НМЦК запроса против медианы НМЦК лотов поставщика
     "price": ("none", ("none", "scale")),
+    "price_decades": (2.0, None),  # price reaches 0 at a 10^price_decades difference of scale
     # activity (#105): all — the last participation of any kind; similar — the last lot with similar positions
     "activity_by": ("all", ("all", "similar")),
     # experience (#105): count — 0.5·sat(lots) + 0.5·sat(wins); rate — the wins half is the smoothed win rate
@@ -107,6 +108,9 @@ def scoring_options(cfg: dict) -> dict:
         if allowed is not None and out[name] not in allowed:
             raise ValueError(f"options.{name} = {out[name]!r}: ожидается одно из {allowed}")
     out["fit_bm25_share"] = float(out["fit_bm25_share"])
+    out["price_decades"] = float(out["price_decades"])
+    if out["price_decades"] <= 0:
+        raise ValueError(f"options.price_decades = {out['price_decades']}: ожидается число > 0")
     if not 0.0 <= out["fit_bm25_share"] <= 1.0:
         raise ValueError(f"options.fit_bm25_share = {out['fit_bm25_share']}: доля должна быть в [0, 1]")
     for name in ("sat_lots", "sat_wins"):
@@ -341,7 +345,8 @@ def _rub(x: float) -> str:
     return f"{x:,.0f}".replace(",", " ") + " ₽"
 
 
-def _price(cp: Counterparty, budget: float | None, as_of: date | None) -> tuple[float, str] | None:
+def _price(cp: Counterparty, budget: float | None, as_of: date | None,
+           decades: float = PRICE_DECADES) -> tuple[float, str] | None:
     """Scale fit (#105): the query's НМЦК against the median НМЦК of the supplier's lots before as_of —
     a supplier of 5 000 ₽ lots is a poor fit for a 5 000 000 ₽ lot and vice versa. 1.0 at the same scale,
     0 at a PRICE_DECADES-decade difference. None — not computed (no budget or no history of prices)."""
@@ -349,7 +354,7 @@ def _price(cp: Counterparty, budget: float | None, as_of: date | None) -> tuple[
     if budget is None or budget <= 0 or not isinstance(median, int | float) or median <= 0:
         return None
     ratio = budget / float(median)
-    value = max(0.0, 1.0 - abs(math.log10(ratio)) / PRICE_DECADES)
+    value = max(0.0, 1.0 - abs(math.log10(ratio)) / decades)
     if 0.5 <= ratio <= 2:
         how = "масштаб сопоставим"
     elif ratio > 1:
@@ -509,7 +514,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             act, act_why = _recency(c.last_similar, ref, as_of, "Последнее участие в закупке с похожими позициями")
         else:
             act, act_why = _activity(cp, ref, as_of)
-        price = _price(cp, query.budget, as_of) if opts["price"] == "scale" else None
+        price = _price(cp, query.budget, as_of, opts["price_decades"]) if opts["price"] == "scale" else None
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
