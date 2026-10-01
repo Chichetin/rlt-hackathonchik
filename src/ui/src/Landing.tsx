@@ -32,19 +32,21 @@ function HeroMark() {
 function useScrollToSearch(onStart: () => void) {
   useEffect(() => {
     let touchY: number | null = null;
+    let wheel = 0; // trackpads start with 1–4 px steps: swallow them at the top and add up
     // the landing stays mounted ~0.2 s during the exit animation: act only while "/" is the current page
     const atTop = () => window.location.pathname === "/" && window.scrollY <= 2;
     const start = () => onStart();
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY > 8 && !e.ctrlKey && atTop()) {
-        e.preventDefault();
-        start();
-      }
+      if (e.deltaY <= 0 || e.ctrlKey || !atTop()) return;
+      e.preventDefault();
+      wheel += e.deltaY;
+      if (wheel > 8) start();
     };
-    const onTouchStart = (e: TouchEvent) => { touchY = e.touches[0]?.clientY ?? null; };
+    // decided at touchstart: by 40 px of a swipe the browser has already scrolled the page
+    const onTouchStart = (e: TouchEvent) => { touchY = atTop() ? (e.touches[0]?.clientY ?? null) : null; };
     const onTouchMove = (e: TouchEvent) => {
       const y = e.touches[0]?.clientY;
-      if (touchY != null && y != null && touchY - y > 40 && atTop()) start();
+      if (touchY != null && y != null && touchY - y > 40 && window.location.pathname === "/") start();
     };
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
