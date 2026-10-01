@@ -652,12 +652,6 @@ export function App() {
       </motion.div>
       </AnimatePresence>
       </div>
-      {path !== "/" && <footer className="appfoot">
-        <div className="appfoot-in">
-          <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
-          <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
-        </div>
-      </footer>}
     </motion.div>
     <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} />}</AnimatePresence>
     </LayoutGroup>
