@@ -36,12 +36,13 @@ def data(fixture_processed, tmp_path_factory):
         index_mod.clear_memory_cache()
 
 
-# share of the OKPD2 depth in product_fit of the product configuration (1 − options.fit_bm25_share)
-CODE_SHARE = 1.0 - search_mod.scoring_options(search_mod.load_config())["fit_bm25_share"]
-
-
 def fit(m):
     return next(c for c in m.components if c.name == "product_fit")
+
+
+def code_share() -> float:
+    """The OKPD2 part of product_fit in the product config: 0.4 in v1, 0.2 in H-15f (#174)."""
+    return 1.0 - search_mod.scoring_options(search_mod.load_config())["fit_bm25_share"]
 
 
 @pytest.mark.parametrize(("raw", "valid", "bad"), [
@@ -68,8 +69,8 @@ def test_ladder_finds_suppliers_by_okpd2_level(data, text, okpd2, what, depth):
     assert res and res[0].counterparty.inn == "7801000012"  # most lots with the code
     for m in res:
         assert fit(m).explanation.startswith(f"По названию не найдено; поставщик {what} по частоте участия")
-        assert fit(m).value <= CODE_SHARE * 1.0 + 1e-9  # BM25 part is 0
-    assert fit(res[0]).value == pytest.approx(CODE_SHARE * depth)
+        assert fit(m).value <= code_share() * 1.0 + 1e-9  # BM25 part is 0
+    assert fit(res[0]).value == pytest.approx(code_share() * depth)
     assert what in (fallback.search_note() or "")
 
 
@@ -78,7 +79,7 @@ def test_vector_step_when_vectors_answer(data, monkeypatch):
     monkeypatch.setattr(fallback, "_vector_hits", lambda idx, text: (idx.retrieve(["бумаг"], 50), ""))
     res = search(Query(query_id="q", text="bumaga"))
     assert res and all(fit(m).explanation.startswith("По названию не найдено; найден по смыслу") for m in res)
-    assert fit(res[0]).value == pytest.approx(CODE_SHARE)  # BM25 part 0 + code depth 1.0 (predicted 17.12.14.110)
+    assert fit(res[0]).value == pytest.approx(code_share())  # BM25 part 0 + code part · depth 1.0 (17.12.14.110)
     assert "по смыслу" in (fallback.search_note() or "")
 
 

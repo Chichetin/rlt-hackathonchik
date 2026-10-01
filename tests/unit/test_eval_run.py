@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -60,7 +61,7 @@ def test_experiment_overrides_are_merged_over_search_config(tmp_path, monkeypatc
     product = R.load_method_config("no-such-experiment")
     cfg = R.load_method_config("X-1")
     assert cfg["signals"]["incumbent"] == 0.3 and cfg["k"] == 10
-    assert cfg["options"] == {**(product.get("options") or {}), "tie_break": "bm25"}  # merged by key, not replaced
+    assert cfg["options"] == {**product.get("options", {}), "tie_break": "bm25"}  # merged one level deep
     assert cfg["weights"] == product["weights"]
     # the same overrides under another id (H-15f-real); an unknown id is an error, not the product config
     assert R.load_method_config("X-1-real", config_of="X-1") == cfg
@@ -92,3 +93,19 @@ def test_repository_experiments_are_valid_configs():
         cfg = S.check_config(R.load_method_config(exp))
         signal_shares(cfg)
         assert "method" not in cfg
+
+
+@pytest.mark.parametrize(("exp", "result"), [
+    ("v1", "E-002"), ("H-15a-03", "H-15a-03"), ("H-15a-06", "H-15a-06"), ("H-15b", "H-15b"), ("H-15c", "H-15c"),
+    ("H-15d-tie", "H-15d-tie"), ("H-15e", "H-15e"), ("H-15f", "H-15f"), ("H-15g", "H-15g"), ("H-15f-geo", "H-15f-geo"),
+])
+def test_experiment_entries_reproduce_recorded_configs(exp, result):
+    """The product default moved to H-15f (#174): every entry of configs/experiments.yaml still gives the
+    effective configuration stored in its result file, so `make eval EXP=<id>` reproduces the slide numbers."""
+    rec = json.loads((R.RESULTS / f"{result}.json").read_text(encoding="utf-8"))["config"]
+    cfg = R.load_method_config(exp)
+    assert cfg["weights"] == rec["weights"]
+    assert search_mod.scoring_options(cfg) == search_mod.scoring_options(rec)
+    from src.match.signals import signal_shares
+    assert signal_shares(cfg) == signal_shares(rec)
+    assert (cfg["retriever"], cfg["k"]) == (rec["retriever"], rec["k"])
