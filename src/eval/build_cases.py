@@ -30,6 +30,7 @@ import os
 import re
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -73,7 +74,7 @@ def _is_template(s: str | None) -> bool:
     return not (s or "").strip() or bool(TEMPLATE.search(s.lower()))  # type: ignore[union-attr]
 
 
-def query_text(subject: str | None, procedure_name: str | None, names: list[str | None]) -> str:
+def query_text(subject: str | None, procedure_name: str | None, names: Sequence[str | None]) -> str:
     head = next((s.strip() for s in (subject, procedure_name) if not _is_template(s)), "")  # type: ignore[union-attr]
     parts, seen = ([head], {head.casefold()}) if head else ([], set())
     for name in names:
@@ -130,10 +131,13 @@ def read_lots(processed: Path, start: date) -> list[Lot]:
     rows = duckdb.sql(
         f"""
         WITH it AS (
-            SELECT lot_id, list(struct_pack(n := product_name, c := okpd2_code) ORDER BY okpd2_code, product_name) AS items
+            SELECT lot_id,
+                   list(struct_pack(n := product_name, c := okpd2_code) ORDER BY okpd2_code, product_name) AS items
             FROM {pq("items")} GROUP BY lot_id
         ), pt AS (
-            SELECT lot_id, list(struct_pack(i := supplier_inn, w := is_winner, v := inn_valid) ORDER BY supplier_inn) AS participants
+            SELECT lot_id,
+                   list(struct_pack(i := supplier_inn, w := is_winner, v := inn_valid) ORDER BY supplier_inn)
+                       AS participants
             FROM {pq("participants")} GROUP BY lot_id
         )
         SELECT n.lot_id, n.publish_date, n.channel, n.subject, n.procedure_name, n.customer_inn,
