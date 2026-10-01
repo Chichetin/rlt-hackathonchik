@@ -50,8 +50,8 @@ test("главная и подбор — отдельные страницы, д
   await expect(nav.getByRole("link", { name: "Подбор", exact: true })).toHaveAttribute("aria-current", "page");
   await page.reload();
   await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
-  await nav.getByRole("link", { name: "Настройки" }).click();
-  await expect(page.getByRole("heading", { name: "Настройки подбора" })).toBeVisible();
+  await nav.getByRole("link", { name: "Фильтры" }).click();
+  await expect(page.getByRole("heading", { name: "Фильтры подбора" })).toBeVisible();
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   await page.setViewportSize({ width: 375, height: 812 });
