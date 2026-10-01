@@ -130,7 +130,7 @@ def test_section_shares_from_text_matches(search_data):
 
     hist = search_mod.search(Query(query_id="q", text="бумага офисная"), k=10)
     shares = P.section_shares(hist, search_data)
-    assert shares and abs(sum(shares.values()) - 1) < 1e-9 and max(shares, key=shares.get) == "17"
+    assert shares and abs(sum(shares.values()) - 1) < 1e-9 and max(shares, key=lambda k: shares[k]) == "17"
     assert P.section_shares([], search_data) == {}
 
 
@@ -339,5 +339,5 @@ def test_new_block_steps_by_basis(search_data, monkeypatch):
     monkeypatch.setattr(discover_mod, "discover", lambda *a, **k: discover_mod.Discovery(
         pool=pool, history_checked=True, relation=relation))
     rows, _, _ = P.full_recommend(P.load_testset(TESTSET).lots[0], 10, offline=True, verify_fn=_ok)
-    assert sorted(r.match.counterparty.inn for r in rows if r.match.origin == "discovered") == [
+    assert sorted(r.match.counterparty.inn or "" for r in rows if r.match.origin == "discovered") == [
         "7805772436", "7807032363"]
