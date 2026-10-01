@@ -440,13 +440,6 @@ html { scrollbar-gutter: stable; }
 .title-line > span { display: block; }
 .landing-description { color: #9da8b8; font-size: 15px; line-height: 1.8; max-width: 440px; margin: 0 0 32px; }
 .landing-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; }
-.supplier-map { position: relative; min-width: 0; aspect-ratio: 6 / 5; }
-.supplier-map svg { display: block; width: 100%; height: auto; overflow: visible; }
-.map-label { position: absolute; display: flex; align-items: center; gap: 7px; font-size: 11px; color: #b4c4e5; background: #131d2a; border: 1px solid #9db4ff26; padding: 8px 11px; border-radius: 8px; box-shadow: 0 8px 24px #0004; }
-.map-label i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.map-label-history { left: 0; top: 29%; }
-.map-label-new { right: 0; bottom: 28%; color: #a6daca; border-color: #7fd1b92b; }
-.map-caption { position: absolute; bottom: -14px; width: 100%; text-align: center; color: #8a97a9; font-size: 11px; }
 .landing-section { padding: 76px 0; border-top: 1px solid var(--line); scroll-margin-top: 36px; }
 .section-intro { margin-bottom: 36px; }
 .section-intro > p, .section-kicker { margin: 0 0 18px; color: #8294ad; font-size: 12px; }
@@ -474,7 +467,6 @@ html { scrollbar-gutter: stable; }
 @media (max-width: 1000px) {
   .landing-hero { padding: 60px 0 75px; }
   .landing h1 { font-size: 43px; letter-spacing: -1.8px; }
-  .map-label { font-size: 10px; padding: 6px 8px; }
   .landing-description { font-size: 14px; }
   .decision-section { gap: 36px; }
 }
@@ -486,7 +478,6 @@ html { scrollbar-gutter: stable; }
   .landing h1 { font-size: clamp(38px, 7.8vw, 58px); letter-spacing: -1.8px; }
   .landing-intro { margin-bottom: 22px; }
   .landing-description { max-width: 480px; }
-  .supplier-map { max-width: 490px; width: 100%; margin: 0 auto; }
   .discovery-pair, .decision-section { grid-template-columns: 1fr; }
   .landing-section { padding: 48px 0; }
   .discovery-panel { padding: 26px; }
@@ -501,8 +492,6 @@ html { scrollbar-gutter: stable; }
   .landing-description { font-size: 14px; }
   .landing-actions { align-items: flex-start; flex-direction: column; gap: 22px; }
   .primary-link { padding: 14px 18px; font-size: 13px; }
-  .map-label { font-size: 9px; }
-  .map-caption { font-size: 10px; bottom: -16px; }
   .landing h2 { font-size: 27px; }
   .discovery-panel h3 { font-size: 21px; }
   .back-to-top { right: 18px; bottom: 18px; }
@@ -542,3 +531,9 @@ html { scroll-padding-top: 80px; }
 .item .badges { margin-top: 2px; }
 .item .name-inn { font-size: 13.5px; }
 @media (max-width: 480px) { .item { padding: 14px; } }
+
+/* #168: hero shows the brand mark alone */
+.hero-mark { display: grid; place-items: center; min-width: 0; color: #dfe6f5; }
+.hero-mark svg { width: min(300px, 72%); height: auto; filter: drop-shadow(0 0 48px #9db4ff26); }
+.hero-mark path:first-child { stroke-opacity: .55; }
+@media (max-width: 760px) { .hero-mark { display: none; } }
