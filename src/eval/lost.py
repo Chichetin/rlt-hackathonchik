@@ -1,11 +1,17 @@
 """Where the scoring of search() loses relevant suppliers that another run keeps in the top-k.
 
     uv run python -m src.eval.lost E-002 B-bm25     # relevant in B-bm25 top-10, not in E-002 top-10
+    uv run python -m src.eval.lost E-002 B-bm25 --config-of v1   # the configuration of an experiments.yaml entry
 
 Reads eval/results/<id>.json (per_query.ranked) and re-runs search() with the whole candidate pool
 for the cases where the second run has the higher recall@10: the rank of every lost supplier, its
 components against the mean of the returned top-k and the component with the largest weighted
 deficit. The numbers of research/ERROR_ANALYSIS.md come from this command.
+
+search() runs on the configuration recorded in the file of the first run (`config`), not on the current
+configs/search.yaml: since D-077 the product default is H-15f, and E-002 was measured on v1 (#197).
+A component with weight 0 (geography since D-077) is still compared — it is shown in the card — but is
+never the «largest weighted deficit»; an equal score is ordered by `options.tie_break` (tie_by_inn / tie_by_bm25).
 """
 
 from __future__ import annotations
@@ -18,9 +24,10 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
-from src.eval.run import RESULTS, with_cutoff
+from src.eval.run import RESULTS, load_method_config, with_cutoff
 from src.eval.split import EvalCase, load_cases, split_config
 from src.match import search as search_mod
+from src.match.text import tokenizer_name
 
 HOME_INN = ("78", "47")  # INN prefixes of Saint Petersburg and the Leningrad region
 
@@ -39,14 +46,30 @@ def lost_relevant(a: dict, b: dict, relevant: dict[str, set[str]], k: int = 10) 
     return out
 
 
+def recorded_config(rec: dict) -> dict:
+    """The configuration a run was measured on: its `config` over configs/search.yaml. A block the record
+    does not have (options, signals) was not there yet — its defaults (v1), not the product's current block."""
+    cfg = {**search_mod.load_config(), **rec["config"]}
+    for block in ("options", "signals"):
+        cfg[block] = rec["config"].get(block) or {}
+    used = rec["config"].get("tokenizer")
+    if used and used != tokenizer_name():  # search() takes the tokenizer from configs/search.yaml or BM25_TOKENIZER
+        print(f"! прогон был на токенизаторе {used}, перезапуск — на {tokenizer_name()}: задайте BM25_TOKENIZER={used}",
+              file=sys.stderr)
+    return cfg
+
+
 def explain(lost: list[tuple[str, str]], cases: dict[str, EvalCase], cutoff: date, k: int = 10,
-            recorded: dict[str, list[str]] | None = None) -> dict:
+            recorded: dict[str, list[str]] | None = None, config: dict | None = None) -> dict:
     """Re-runs search() over the candidate pool for the lost pairs and aggregates the reasons.
 
     `recorded`: query_id -> ranked list of the stored run; a re-run whose top-k differs is counted
     in `rerun_differs` (the method changed since the run — the ranks below are not its ranks).
+    `config`: the configuration to run search() on (default: configs/search.yaml).
     """
-    weights = search_mod.load_config()["weights"]
+    cfg = search_mod.check_config(config) if config is not None else search_mod.load_config()
+    weights = cfg["weights"]
+    tie = f"tie_by_{search_mod.scoring_options(cfg)['tie_break']}"
     by_case: dict[str, list[str]] = {}
     for qid, inn in lost:
         by_case.setdefault(qid, []).append(inn)
@@ -57,10 +80,12 @@ def explain(lost: list[tuple[str, str]], cases: dict[str, EvalCase], cutoff: dat
     geo: Counter[str] = Counter()
     differs = 0
     for qid, inns in by_case.items():
-        matches = search_mod.search(with_cutoff(cases[qid].query, cutoff), k=search_mod.CANDIDATES)
+        matches = search_mod.search(with_cutoff(cases[qid].query, cutoff), k=search_mod.CANDIDATES, config=cfg)
         order = [m.counterparty.inn for m in matches]
         by_inn = {m.counterparty.inn: m for m in matches}
-        comps = {inn: {c.name: c.value for c in m.components if c.weight > 0} for inn, m in by_inn.items()}
+        # components that count, plus geography: shown in the card even with weight 0 (D-077)
+        comps = {inn: {c.name: c.value for c in m.components if c.weight > 0 or c.name == "geography"}
+                 for inn, m in by_inn.items()}
         top = order[:k]
         if recorded is not None and top != recorded.get(qid, [])[:k]:
             differs += 1
@@ -74,8 +99,8 @@ def explain(lost: list[tuple[str, str]], cases: dict[str, EvalCase], cutoff: dat
             for n, v in d.items():
                 deltas.setdefault(n, []).append(v)
             name = min(d, key=lambda n: d[n] * weights.get(n, 0.0))
-            # no component below the top-k mean: the score ties with the top-k, the order is by INN
-            worst[name if d[name] * weights.get(name, 0.0) < 0 else "tie_by_inn"] += 1
+            # no component below the top-k mean: the score ties with the top-k, the order is by tie_break
+            worst[name if d[name] * weights.get(name, 0.0) < 0 else tie] += 1
             if comps[inn].get("geography") == 0:
                 geo["zero"] += 1
                 if len(inn) == 12:  # an individual entrepreneur
@@ -105,6 +130,8 @@ def main(argv: list[str] | None = None, results: Path = RESULTS) -> int:
     ap.add_argument("a", help="experiment id of search() whose losses are explained, e.g. E-002")
     ap.add_argument("b", help="experiment id that keeps the suppliers, e.g. B-bm25")
     ap.add_argument("-k", type=int, default=10)
+    ap.add_argument("--config-of", default=None,
+                    help="run search() on this entry of configs/experiments.yaml (default: the config recorded in <a>)")
     args = ap.parse_args(argv)
     a, b = (json.loads((results / f"{x}.json").read_text(encoding="utf-8")) for x in (args.a, args.b))
     if a["part"] != b["part"] or {q["query_id"] for q in a["per_query"]} != {q["query_id"] for q in b["per_query"]}:
@@ -113,9 +140,18 @@ def main(argv: list[str] | None = None, results: Path = RESULTS) -> int:
     split = split_config()
     cases = {c.query.query_id: c for c in load_cases(a["part"], split)}
     lost = lost_relevant(a, b, {qid: set(c.relevant_inns) for qid, c in cases.items()}, args.k)
+    if args.config_of:
+        try:
+            cfg = load_method_config(args.config_of, config_of=args.config_of)
+        except ValueError as e:  # an id missing in experiments.yaml, a baseline id: a message, not a traceback
+            print(e, file=sys.stderr)
+            return 2
+        origin = f"--config-of {args.config_of}"
+    else:
+        cfg, origin = recorded_config(a), f"config из {args.a}.json"
     rec = explain(lost, cases, date.fromisoformat(str(split["cutoff"])), args.k,
-                  recorded={q["query_id"]: q["ranked"] for q in a["per_query"]})
-    print(f"В top-{args.k} у {args.b}, но не у {args.a} | part={a['part']}")
+                  recorded={q["query_id"]: q["ranked"] for q in a["per_query"]}, config=cfg)
+    print(f"В top-{args.k} у {args.b}, но не у {args.a} | part={a['part']} | конфигурация: {origin}")
     print(json.dumps(rec, ensure_ascii=False, indent=2))
     return 0
 

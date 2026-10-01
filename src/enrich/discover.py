@@ -52,7 +52,7 @@ from src.enrich.evidence import check_counterparty, strip_unverified, value_in_p
 from src.enrich.web_discover import read_pool
 from src.ingest.load import suppliers_path
 from src.match import search as search_mod
-from src.match.filters import REGION_CODE, apply_filters
+from src.match.filters import REGION_CODE, apply_filters, apply_legal
 from src.match.index import processed_dir
 from src.sources import pb_nalog, rmsp, site, yandex_search
 from src.sources.cache import CachedPage, SourceCache
@@ -126,6 +126,8 @@ class Discovery:
     known: int = 0  # found in the registry but already present in organizers' data
     inactive: int = 0  # found but excluded from the registry
     pool: list[CounterpartyMatch] = field(default_factory=list)  # every candidate after filters, before top-10
+    # after the legal status, before the user filters and top-10: X-Facets of the block in /api/search (#232)
+    candidates: list[CounterpartyMatch] = field(default_factory=list)
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
     notes: list[str] = field(default_factory=list)
 
@@ -352,7 +354,7 @@ def with_card(cp: Counterparty, cache: SourceCache) -> tuple[Counterparty, bool]
 
 
 def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: bool, has_card: bool,
-                region: str, weights: dict[str, float]) -> list[ScoreComponent]:
+                region: str, weights: dict[str, float], region_note: str | None = None) -> list[ScoreComponent]:
     okved, okved_name = row["okved1"], row.get("okved1name", "")
     head = f"Основной ОКВЭД {okved}" + (f" «{okved_name}»" if okved_name else "")
     # A predicted class is never presented as the class of the query (#63: the prediction can be wrong).
@@ -379,6 +381,8 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
         geo, geo_why = NEIGHBOUR_VALUE, f"Реестр МСП: соседний регион — {where}"
     else:
         geo, geo_why = 0.0, f"Реестр МСП: {where}; регион запроса — {region}"
+    if region_note:  # the comparison is with the customer's region, say so
+        geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {region_note}"
 
     parts: dict[str, tuple[float, float, str]] = {
         "product_fit": (FIT[ch.relation], weights.get("product_fit", 0.0), fit_why),
@@ -415,7 +419,7 @@ def web_candidates(res: Discovery, seen: set[str], query: Query, processed: Path
 
 
 def _web_components(cp: Counterparty, classes: list[str], predicted: bool, region: str,
-                    weights: dict[str, float]) -> list[ScoreComponent]:
+                    weights: dict[str, float], region_note: str | None = None) -> list[ScoreComponent]:
     found = next((e.fact for e in cp.evidence if e.source == yandex_search.SOURCE), "Найден в Яндекс Поиске")
     on_site = next((e.fact for e in cp.evidence if e.source == site.SOURCE and e.field == "inn"), None)
     cls = ", ".join(classes)
@@ -434,6 +438,8 @@ def _web_components(cp: Counterparty, classes: list[str], predicted: bool, regio
     else:
         where = cp.region or "не СПб и не ЛО (по КПП)"
         geo, geo_why = 0.0, f"Регион по реестру ФНС: {where}; регион запроса — {region}"
+    if region_note:  # the comparison is with the customer's region, as in _components (#218)
+        geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {region_note}"
     parts: dict[str, tuple[float, float, str]] = {
         "product_fit": (FIT["web"], weights.get("product_fit", 0.0), fit_why),
         "experience": (0.0, weights.get("experience", 0.0),
@@ -555,6 +561,7 @@ def discover(
     matches: list[CounterpartyMatch] = []
     relation: dict[str, Relation] = {}
     no_card: set[str] = set()
+    target, target_note = search_mod.customer_region(query)  # «География» against the customer's region (#218)
     for inn, (row, ch, page) in found.items():
         if known and inn in known:
             continue
@@ -562,14 +569,15 @@ def discover(
         if not has_card:
             no_card.add(inn)
         relation[inn] = ch.relation
-        comps = _components(cp, row, ch, res.predicted, has_card, query.region, weights)
+        comps = _components(cp, row, ch, res.predicted, has_card, target, weights, target_note)
         matches.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                          score=round(sum(c.value * c.weight for c in comps), 4)))
     for cp in web_candidates(res, set(found), query, processed, cache):
         relation[cp.inn or ""] = "web"
-        comps = _web_components(cp, res.okpd_classes, res.predicted, query.region, weights)
+        comps = _web_components(cp, res.okpd_classes, res.predicted, target, weights, target_note)
         matches.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                          score=round(sum(c.value * c.weight for c in comps), 4)))
+    res.candidates = sorted(apply_legal(matches), key=lambda m: (-m.score, m.counterparty.inn or "~"))
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
     matches.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
     res.pool = matches
