@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="utf-8"?>
+<yandexsearch version="1.0">
+<request>
+<query>поставщик вакцин оптом Санкт-Петербург</query>
+<page>0</page>
+<sortby order="descending" priority="no">rlv</sortby>
+<maxpassages>5</maxpassages>
+<groupings>
+<groupby attr="d" mode="deep" groups-on-page="10" docs-in-group="1" curcateg="-1"/>
+</groupings>
+</request>
+<response date="20261001T201012">
+<reqid>1790885411731376-1164065039501908322-balancer-l7leveler-kubr-yp-klg-27-BAL</reqid>
+<found priority="phrase">5209546</found>
+<found priority="strict">5209546</found>
+<found priority="all">5209546</found>
+<found-human>Нашлось 5 млн ответов</found-human>
+<is-local>no</is-local>
+<results>
+<grouping attr="d" mode="deep" groups-on-page="10" docs-in-group="1" curcateg="-1">
+<page first="1" last="10">0</page>
+<group>
+<categ attr="d" name="privivka.spb.ru"/>
+<doccount>12</doccount>
+<relevance priority="all"/>
+<doc id="ZB6FAF60DF72851B6">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1790140928&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//privivka.spb.ru/wholesale/&amp;l10n=ru&amp;mime=html&amp;sign=58b6678f3adf625a32db6140e7e24a80&amp;keyno=0</saved-copy-url>
+<url>https://privivka.spb.ru/wholesale/</url>
+<domain>privivka.spb.ru</domain>
+<title><hlword>Оптовая</hlword> продажа <hlword>вакцин</hlword></title>
+<modtime>20101112T221527</modtime>
+<size>1018</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage><hlword>Оптовая</hlword> продажа <hlword>вакцин</hlword>. ООО «ЭКСПРЕСС-СЕРВИС» является официальным дистрибьютором ведущих зарубежных и отечественных производителей иммунобиологических препаратов.</passage>
+<passage><hlword>Оптовая</hlword> продажа иммунобиологических препаратов. 190020, г. <hlword>Санкт</hlword>-<hlword>Петербург</hlword>, Наб. Обводного канала, д. 134-136-138, к. 425, литер А, пом.</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="vakcina.ru"/>
+<doccount>54</doccount>
+<relevance priority="all"/>
+<doc id="Z897C1470AB0E0D57">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1790169344&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//vakcina.ru/cat/vaccine-anatoksiny&amp;l10n=ru&amp;mime=html&amp;sign=40205f1f15ff242ff1ab758d9a36a388&amp;keyno=0</saved-copy-url>
+<url>https://vakcina.ru/cat/vaccine-anatoksiny</url>
+<domain>vakcina.ru</domain>
+<title><hlword>Вакцины</hlword> и анатоксины - купить в ММК Формед - <hlword>оптовые</hlword> <hlword>поставки</hlword></title>
+<modtime>20191027T111219</modtime>
+<size>8026</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage>Компания ММК Формед осуществляет <hlword>поставки</hlword> <hlword>вакцин</hlword> всех нозологий. Своя холодовая цепь. Региональные подразделения. Заказ <hlword>вакцин</hlword> через форму на сайте или по телефону.</passage>
+<passage>Спутник Лайт. - векторная <hlword>вакцина</hlword> для профилактики коронавирусной инфекции, вызываемой вирусом SARS-CoV-2. ФГБУ «НИЦЭМ им. Н.Ф. Гамалеи» Минздрава России (Филиал «Медгамал» ФГБУ «НИЦЭМ им. Н.Ф. Гамалеи» Минздрава России), Россия. Форма выпуска: 0,5 мл/1 доза/флаконы № 10 3 мл/5 доз/флаконы № 10.</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="zoovetsnab.ru"/>
+<doccount>54</doccount>
+<relevance priority="all"/>
+<doc id="ZCAA545A74B98CBF8">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1790261248&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//zoovetsnab.ru/&amp;l10n=ru&amp;mime=html&amp;sign=f960bf4890b3736488f1b8f5aaf1b0cc&amp;keyno=0</saved-copy-url>
+<url>https://zoovetsnab.ru/</url>
+<domain>zoovetsnab.ru</domain>
+<title>ООО Торговый Дом ЗООВЕТСНАБ - Зооветснаб, ветеринарная...</title>
+<headline>Торговый Дом Зооветснаб осуществляет <hlword>оптовые</hlword> <hlword>поставки</hlword> и продажу ветеринарных и биологических препаратов, витаминов и кормовых добавок, дезсредств, а также ветеринарного, зоотехнического и лабораторного оборудования и инструментов.</headline>
+<modtime>20091217T145911</modtime>
+<size>6390</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="medintorgspb.ru"/>
+<doccount>6</doccount>
+<relevance priority="all"/>
+<doc id="ZE762BAF868794216">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1789823488&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//medintorgspb.ru/&amp;l10n=ru&amp;mime=html&amp;sign=c528d84bb2103a3c69944ab996c6501e&amp;keyno=0</saved-copy-url>
+<url>https://medintorgspb.ru/</url>
+<domain>medintorgspb.ru</domain>
+<title><hlword>Поставка</hlword> <hlword>вакцин</hlword>, сывороток, иммунобиологических...</title>
+<modtime>20141113T170957</modtime>
+<size>485</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage>Помимо разовых <hlword>поставок</hlword> лекарственных и иммунобиологических препаратов, мы активно работаем в рамках ФЗ №44 и осуществляем <hlword>поставки</hlword> итогам открытых конкурсов и аукционов. Нашими покупателями стали Комитет здравоохранения <hlword>Санкт</hlword>-<hlword>Петербурга</hlword>, Комитет здравоохранения Ленинградской области, &quot;Институт медицинских исследований&quot;, Медицинская ассоциация <hlword>Санкт</hlword>-<hlword>Петербурга</hlword>, &quot;Международная клиника MEDEM, &quot; ГБОУ ВПО СЗГМУ им. И.И.Мечникова, ФГБУЗ КБ №122 им. Л.Г. Соколова...</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="fmed.ru"/>
+<doccount>4</doccount>
+<relevance priority="all"/>
+<doc id="ZE9C81FC5A5C638CF">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1790342144&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//fmed.ru/&amp;l10n=ru&amp;mime=html&amp;sign=ac6d7d6d03d6bf4e83504ebefbca1baf&amp;keyno=0</saved-copy-url>
+<url>https://fmed.ru/</url>
+<domain>fmed.ru</domain>
+<title>Многопрофильная медицинская компания Формед - надёжный...</title>
+<modtime>20130731T035409</modtime>
+<size>2586</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage>Осуществляем <hlword>поставки</hlword> иммунобиологических препаратов, экспресс-тестов и расходных материалов на основе коллагена. Имеем собственную, валидированную мировыми и отечественными производителями <hlword>вакцин</hlword>, холодовую цепь, включая парк спецтранспорта. Производим и.</passage>
+<passage>Киселёва Лариса ИвановнаДепартамент финансов. Главный бухгалтер подразделения <hlword>оптовой</hlword> торговли. Экономист-организатор. Богданова Ольга ЕвгеньевнаДепартамент финансов.</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="epidbiomed.com"/>
+<doccount>1</doccount>
+<relevance priority="all"/>
+<doc id="Z846F70D38C133D38">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1790315648&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//epidbiomed.com/&amp;l10n=ru&amp;mime=html&amp;sign=601237be01c5982298aeff29cadbf82b&amp;keyno=0</saved-copy-url>
+<url>https://epidbiomed.com/</url>
+<domain>epidbiomed.com</domain>
+<title>ЭПИДБИОМЕД</title>
+<modtime>20130125T140953</modtime>
+<size>2866</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage><hlword>Санкт</hlword>-Петербургский НИИ <hlword>вакцин</hlword> и сывороток и предприятие по производству бактерийных препаратов проведет I и II фазы клинического исследования <hlword>вакцины</hlword> для профилактики лихорадки, вызванной вирусом денге. Соответствующая информация появилась в государственном реестре лекарственных средств (ГРЛС).</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="spbniivs.ru"/>
+<doccount>350</doccount>
+<relevance priority="all"/>
+<doc id="Z25DED9F4608B43E0">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1790152448&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//spbniivs.ru/company/&amp;l10n=ru&amp;mime=html&amp;sign=e8cdaf29753ea442f618c7f524008339&amp;keyno=0</saved-copy-url>
+<url>https://spbniivs.ru/company/</url>
+<domain>spbniivs.ru</domain>
+<title>О компании</title>
+<modtime>20210126T165338</modtime>
+<size>1494</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage><hlword>Поставщик</hlword> <hlword>вакцин</hlword> для национального календаря профилактических <hlword>прививок</hlword> РФ. Единственный российский экспортер <hlword>вакцин</hlword> для профилактики гриппа в страны дальнего зарубежья. Разработчик единственной российской гриппозной <hlword>вакцины</hlword>, преквалифицированной ВОЗ. Международная кооперация. <hlword>Санкт</hlword>-Петербургский НИИ <hlword>вакцин</hlword> и сывороток взаимодействует с ведущими международными разработчиками <hlword>вакцин</hlword>, а также является членом международных организаций</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="2gis.ru"/>
+<doccount>56</doccount>
+<relevance priority="all"/>
+<doc id="ZCC3ACEF6D25DA2AB">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1789758976&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//2gis.ru/spb/firm/5348552838557896&amp;l10n=ru&amp;mime=html&amp;sign=9c22d0e4499724ea7bde79de554417f1&amp;keyno=0</saved-copy-url>
+<url>https://2gis.ru/spb/firm/5348552838557896</url>
+<domain>2gis.ru</domain>
+<title>Нфк, торговая фирма на карте, Фармацевтические компании...</title>
+<modtime>20161203T070255</modtime>
+<size>551</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage>Нфк, торговая фирма: адреса со входами на карте, отзывы, фото, номера телефонов, время работы и как доехать. <hlword>Опт</hlword>, Актуальность данных не подтверждена.</passage>
+<passage>Фармацевтическое производство ленинградская область Приморская <hlword>вакцина</hlword> <hlword>Оптовые</hlword> фармацевтические склад.</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="xn--b1aedfedwrdfl5a6k.xn--p1ai"/>
+<doccount>12</doccount>
+<relevance priority="all"/>
+<doc id="Z204F9B26B4CE21C5">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1790249856&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=https%3A//xn--b1aedfedwrdfl5a6k.xn--p1ai/producers/vakciny&amp;l10n=ru&amp;mime=html&amp;sign=f50f8a9e696684d5892315ea0f8e508d&amp;keyno=0</saved-copy-url>
+<url>https://xn--b1aedfedwrdfl5a6k.xn--p1ai/producers/vakciny</url>
+<domain>xn--b1aedfedwrdfl5a6k.xn--p1ai</domain>
+<title>Производители <hlword>вакцин</hlword> в России: заводы и фабрики, производства...</title>
+<modtime>20210915T153520</modtime>
+<size>938</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage>Производственные предприятия <hlword>вакцин</hlword>, найдено 10 изготовителей. Информация о поставляемой продукции, отзывы клиентов и контактные данные.</passage>
+<passage>Биннофарм – одна из крупнейших российских биофармацевтических компаний полного цикла с собственным R&amp;D подразделением. Компания разрабатывает и производит биотехнологические генно-инженерные лекарственные препараты, в том числе <hlword>вакцину</hlword> против гепатита В.</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="kronvet.com"/>
+<doccount>1</doccount>
+<relevance priority="all"/>
+<doc id="Z54BACB6B42559D28">
+<relevance priority="all"/>
+<saved-copy-url>http://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790885411&amp;tld=ru&amp;lang=ru&amp;la=1790021504&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%B2%D0%B0%D0%BA%D1%86%D0%B8%D0%BD+%D0%BE%D0%BF%D1%82%D0%BE%D0%BC+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&amp;url=http%3A//kronvet.com/o_kompanii&amp;l10n=ru&amp;mime=html&amp;sign=3867d16895e95a787d91fdec93b7c8fc&amp;keyno=0</saved-copy-url>
+<url>http://kronvet.com/o_kompanii</url>
+<domain>kronvet.com</domain>
+<title>О компании ООО Кронвет г. <hlword>Санкт</hlword>-<hlword>Петербург</hlword></title>
+<modtime>20160618T052511</modtime>
+<size>443</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage>Мы – Группа Компаний «Кронвет» из прекрасного города <hlword>Санкт</hlword>-<hlword>Петербурга</hlword>. С 1992 года ГК Кронвет является производителем <hlword>вакцин</hlword> для промышленного птицеводства, эффективно применяемых на птицефабриках Российской Федерации и стран СНГ. Также мы являемся <hlword>поставщиком</hlword> ветеринарных препаратов, медицинских расходных материалов и инструментов различных брендов. В нашем ассортименте представлен большой выбор препаратов и <hlword>вакцин</hlword> для сельскохозяйственных животных, собак, кошек, птиц и грызунов.</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+</properties>
+</doc>
+</group>
+<found priority="phrase">5813</found>
+<found priority="strict">5813</found>
+<found priority="all">5813</found>
+<found-docs priority="phrase">5209546</found-docs>
+<found-docs priority="strict">5209546</found-docs>
+<found-docs priority="all">5209546</found-docs>
+<found-docs-human>нашёл 5 млн ответов</found-docs-human>
+</grouping>
+</results>
+</response>
+<resource-usage>
+<cpu-time-sum>6257449</cpu-time-sum>
+<cpu-time-max>13803</cpu-time-max>
+</resource-usage>
+</yandexsearch>

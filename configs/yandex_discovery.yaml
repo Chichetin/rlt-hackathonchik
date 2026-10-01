@@ -1,0 +1,106 @@
+# Discovery через Yandex Search API по тонким группам ОКПД2 (#194; метрика тонких групп — #122).
+# Запросы — «шаблон × товар» на группу; товары взяты из частых product_name группы в лотах ЭМ до cutoff
+# (data/processed/items.parquet), формулировки короткие, как их набрал бы человек.
+# Лимит API — 2500 запросов на весь хакатон (YANDEX_SEARCH_MAX_REQUESTS, src/sources/yandex_search.py).
+
+region: "2"            # Санкт-Петербург (идентификатор региона Яндекса)
+pages: 1               # страниц выдачи на запрос (по 10 доменов)
+max_requests_per_group: 16
+
+templates:
+  - "{p} оптом Санкт-Петербург"
+  - "{p} поставщик Санкт-Петербург"
+  - "{p} производитель"
+  - "{p} дистрибьютор"
+
+groups:
+  "21.20":   # Препараты лекарственные и материалы, применяемые в медицинских целях
+    - "лекарственные препараты"
+    - "натрия хлорид раствор для инфузий"
+    - "аптечки первой помощи"
+    - "вакцины"
+  "20.14":   # Вещества химические органические основные прочие (в ЭМ — лимонная кислота, хладоны, растворители)
+    - "кислота лимонная пищевая"
+    - "фреон хладон R134a"
+    - "ацетон технический"
+    - "спирт изопропиловый"
+  "10.51":   # Молоко и молочная продукция
+    - "молочная продукция"
+    - "масло сливочное"
+    - "сыр полутвердый"
+    - "творог"
+
+# Домены, которые не являются сайтом поставщика: агрегаторы, маркетплейсы, справочники, СМИ, госпорталы.
+# Совпадение — по самому домену и его поддоменам. ИНН с них не берём.
+skip_domains:
+  - 2gis.ru
+  - yandex.ru
+  - ya.ru
+  - avito.ru
+  - ozon.ru
+  - wildberries.ru
+  - market.yandex.ru
+  - aliexpress.ru
+  - pulscen.ru
+  - tiu.ru
+  - satom.ru
+  - flagma.ru
+  - blizko.ru
+  - spb.blizko.ru
+  - yell.ru
+  - zoon.ru
+  - orgpage.ru
+  - spravker.ru
+  - rusprofile.ru
+  - list-org.com
+  - checko.ru
+  - sbis.ru
+  - zachestnyibiznes.ru
+  - audit-it.ru
+  - focus.kontur.ru
+  - kontur.ru
+  - zakupki.gov.ru
+  - gz-spb.ru
+  - rts-tender.ru
+  - roseltorg.ru
+  - b2b-center.ru
+  - tenderguru.ru
+  - wikipedia.org
+  - youtube.com
+  - vk.com
+  - dzen.ru
+  - rbc.ru
+  - otzovik.com
+  - irecommend.ru
+  - apteka.ru
+  - eapteka.ru
+  - zdravcity.ru
+  - uteka.ru
+  - megapteka.ru
+  - aptekamos.ru
+  - vidal.ru
+  - rlsnet.ru
+  - grls.rosminzdrav.ru
+  - fabricators.ru
+  - productcenter.ru
+  - promportal.su
+  - all-pribors.ru
+  - deal.by
+  - prom.ua
+  - allbiz.ru
+  - optlist.ru
+  - optovik.ru
+  - supl.biz
+  - tradedir.ru
+  - russianfood.com
+  - vprok.ru
+  - perekrestok.ru
+  - lenta.com
+  - magnit.ru
+  - sbermegamarket.ru
+  - megamarket.ru
+  - vseinstrumenti.ru
+  - leroymerlin.ru
+  - petrovich.ru
+  - hh.ru
+  - superjob.ru

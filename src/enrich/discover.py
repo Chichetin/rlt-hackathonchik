@@ -49,11 +49,12 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, Scor
 from src.enrich import role
 from src.enrich.enrich import MSP_CATEGORY, enrich, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
+from src.enrich.web_discover import read_pool
 from src.ingest.load import suppliers_path
 from src.match import search as search_mod
 from src.match.filters import REGION_CODE, apply_filters
 from src.match.index import processed_dir
-from src.sources import pb_nalog, rmsp
+from src.sources import pb_nalog, rmsp, site, yandex_search
 from src.sources.cache import CachedPage, SourceCache
 
 log = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wh
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
-FIT = {"class": 1.0, "wholesale": 0.6}  # product_fit of a discovered company (D-036)
+FIT = {"class": 1.0, "wholesale": 0.6, "web": 0.6}  # product_fit of a discovered company (D-036; web — #194)
 NEIGHBOUR = {"78": "47", "47": "78"}
 NEIGHBOUR_VALUE = 0.8  # as in src/match/search.py
 REGION_NAME = {v: k for k, v in REGION_CODE.items()}
@@ -104,7 +105,7 @@ _OKPD_CLASS = re.compile(r"\d{2}\.\d{2}", re.ASCII)
 _LOT_URL = "data:items#"
 _PREDICTED_MARK = "ОКПД2 определён по похожим позициям"  # wording of src/match/search.py::_product_fit
 
-Relation = Literal["class", "wholesale"]
+Relation = Literal["class", "wholesale", "web"]
 
 
 @dataclass(frozen=True)
@@ -392,10 +393,59 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
             for n in COMPONENT_ORDER]
 
 
+def web_candidates(res: Discovery, seen: set[str], query: Query, processed: Path,
+                   cache: SourceCache) -> list[Counterparty]:
+    """Companies of the query's classes found by web search (#194, src/enrich/web_discover.py): read from the
+    cached pool, never a network call here; minus those the registry channel already found and those in
+    organizers' data before `query.as_of`."""
+    pool: dict[str, Counterparty] = {}
+    for cls in res.okpd_classes:
+        found = [cp for cp in read_pool(cls, cache) if cp.inn and cp.inn not in seen and cp.inn not in pool]
+        pool.update((cp.inn or "", cp) for cp in found)
+        if found:
+            res.requests.append(f"Яндекс Поиск, ОКПД2 {cls}: в пуле прошлого прогона {len(found)} компаний (кеш)")
+    known = known_inns(list(pool), query.as_of, processed) or set()
+    res.known += len(known)
+    return [cp for inn, cp in pool.items() if inn not in known]
+
+
+def _web_components(cp: Counterparty, classes: list[str], predicted: bool, region: str,
+                    weights: dict[str, float]) -> list[ScoreComponent]:
+    found = next((e.fact for e in cp.evidence if e.source == yandex_search.SOURCE), "Найден в Яндекс Поиске")
+    on_site = next((e.fact for e in cp.evidence if e.source == site.SOURCE and e.field == "inn"), None)
+    cls = ", ".join(classes)
+    cls_txt = (f"ОКПД2 {cls} (класс определён автоматически по похожим закупкам)" if predicted
+               else f"ОКПД2 запроса {cls}")
+    fit_why = (f"{found} — поиск по товарам класса {cls_txt}"
+               + (f"; {on_site}, ИНН подтверждён реестром ФНС" if on_site else "")
+               + "; соответствие товару по сайту не размечалось")
+    rel_why = (f"Статус по реестру ФНС: {cp.status} — в score не входит" if cp.status
+               else "Статус по реестру ФНС не получен — в score не входит")
+    want, code = REGION_CODE.get(region), REGION_CODE.get(cp.region or "")
+    if want is not None and code == want:
+        geo, geo_why = 1.0, f"Регион по реестру ФНС: {cp.region}"
+    elif want is not None and code is not None and NEIGHBOUR.get(want) == code:
+        geo, geo_why = NEIGHBOUR_VALUE, f"Регион по реестру ФНС: соседний — {cp.region}"
+    else:
+        where = cp.region or "не СПб и не ЛО (по КПП)"
+        geo, geo_why = 0.0, f"Регион по реестру ФНС: {where}; регион запроса — {region}"
+    parts: dict[str, tuple[float, float, str]] = {
+        "product_fit": (FIT["web"], weights.get("product_fit", 0.0), fit_why),
+        "experience": (0.0, weights.get("experience", 0.0),
+                       "В данных организаторов за 2024–2025 не встречается ни в одной закупке"),
+        "reliability": (0.0, 0.0, rel_why),
+        "activity": (0.0, weights.get("activity", 0.0), "Участий в закупках в данных организаторов нет"),
+        "geography": (geo, weights.get("geography", 0.0), geo_why),
+        "price": (0.0, 0.0, "Нет данных: в открытых источниках нет цен — в score не входит"),
+    }
+    return [ScoreComponent(name=n, value=parts[n][0], weight=float(parts[n][1]), explanation=parts[n][2])
+            for n in COMPONENT_ORDER]
+
+
 def _mix(ranked: list[CounterpartyMatch], relation: dict[str, Relation]) -> list[CounterpartyMatch]:
     """Top MAX_SHOWN with both kinds present: producers and distributors take slots in turn (best
     first within a kind), so ten producers do not hide every distributor; shown in score order."""
-    queues = [[m for m in ranked if relation[m.counterparty.inn or ""] == r] for r in ("class", "wholesale")]
+    queues = [[m for m in ranked if relation[m.counterparty.inn or ""] == r] for r in ("class", "wholesale", "web")]
     picked: list[CounterpartyMatch] = []
     while len(picked) < MAX_SHOWN and any(queues):
         for q in queues:
@@ -508,6 +558,11 @@ def discover(
             no_card.add(inn)
         relation[inn] = ch.relation
         comps = _components(cp, row, ch, res.predicted, has_card, query.region, weights)
+        matches.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
+                                         score=round(sum(c.value * c.weight for c in comps), 4)))
+    for cp in web_candidates(res, set(found), query, processed, cache):
+        relation[cp.inn or ""] = "web"
+        comps = _web_components(cp, res.okpd_classes, res.predicted, query.region, weights)
         matches.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                          score=round(sum(c.value * c.weight for c in comps), 4)))
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
