@@ -164,3 +164,25 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
   expect(history).toHaveTextContent("у кандидатов этот признак ещё не известен");
   expect(history).not.toHaveTextContent("переформулировать");
 });
+
+test("«Новые» emptied by a filter name the filter, not «nothing found» (#84)", async () => {
+  const base = structuredClone(response);
+  base.stub = false;
+  base.query.okpd2 = ["17.12.14.110"];
+  base.discovered[0].counterparty.kind = null;
+  const filtered = { ...structuredClone(base), discovered: [] };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    const body = JSON.parse(String((init as RequestInit).body));
+    return new Response(JSON.stringify(body.filters?.only_manufacturers ? filtered : base), { status: 200 });
+  });
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
+  expect(await within(discovered).findByText("ООО Бета")).toBeInTheDocument();
+  await userEvent.click(screen.getByLabelText("Только производители"));
+  expect(
+    await within(discovered).findByText(/^Под фильтр не попал никто из 1 новых компаний из реестра МСП: тип поставщика/),
+  ).toBeInTheDocument();
+  expect(discovered).not.toHaveTextContent("новых компаний по этому запросу не найдено");
+});

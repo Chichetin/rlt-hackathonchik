@@ -23,6 +23,16 @@ import {
 
 const REGIONS = ["", "Санкт-Петербург", "Ленинградская область"];
 
+/** The «Новые» block is empty only because of the filters: say so, not «nothing found» (#84). */
+function hiddenNew(res: SearchResponse, base: SearchResponse | null, f: Filters): string | undefined {
+  const n = base?.discovered.length ?? 0;
+  if (res.discovered.length || !n || base === res) return undefined;
+  const why = f.only_manufacturers
+    ? "тип поставщика у новых компаний не подтверждён — по ОКВЭД известно только «вероятно производитель»"
+    : "у новых компаний этот признак ещё не известен";
+  return `Под фильтр не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+}
+
 export function App() {
   const [text, setText] = useState("");
   const [filters, setFilters] = useState<Filters>({ only_msp: false, only_manufacturers: false, region: "" });
@@ -252,9 +262,10 @@ export function App() {
             rows={res.discovered}
             onOpen={setOpen}
             empty={
-              res.query.okpd2?.length
+              hiddenNew(res, base, filters) ??
+              (res.query.okpd2?.length
                 ? "В открытых источниках новых компаний по этому запросу не найдено: реестр МСП ФНС не ответил, в нём нет компаний с подходящим ОКВЭД в СПб и области, либо все найденные уже есть в данных АИС ГЗ."
-                : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках."
+                : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
         </main>
