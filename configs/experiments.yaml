@@ -25,3 +25,9 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+# Ступень 2 сравнения моделей (#98, ступень 1 — #115): гибрид BM25 + векторы (RRF), остальное — продукт.
+S2-hyb-e5s:      # pg_hybrid, intfloat/multilingual-e5-small (vec.names_e5_small)
+  retriever: pg_hybrid
+S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — лучший гибрид ступени 1 на коротких запросах
+  retriever: pg_hybrid
+  embedding_model: deepvk/USER-base

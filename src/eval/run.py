@@ -202,7 +202,7 @@ def _vectors(cfg: dict) -> dict | None:
         return None
     from src.match import pg_retriever
 
-    return pg_retriever.coverage()
+    return pg_retriever.coverage(cfg.get("embedding_model"))
 
 
 def _store() -> str:

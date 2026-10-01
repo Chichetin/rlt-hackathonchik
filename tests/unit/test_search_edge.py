@@ -69,7 +69,7 @@ def test_ladder_finds_suppliers_by_okpd2_level(data, text, okpd2, what, depth):
 
 def test_vector_step_when_vectors_answer(data, monkeypatch):
     """Postgres stand-in: the vector step returns the paper documents; BM25 part is 0, class predicted."""
-    monkeypatch.setattr(fallback, "_vector_hits", lambda idx, text: (idx.retrieve(["бумаг"], 50), ""))
+    monkeypatch.setattr(fallback, "_vector_hits", lambda idx, text, model=None: (idx.retrieve(["бумаг"], 50), ""))
     res = search(Query(query_id="q", text="bumaga"))
     assert res and all(fit(m).explanation.startswith("По названию не найдено; найден по смыслу") for m in res)
     assert fit(res[0]).value == pytest.approx(0.4)  # 0.6 · 0 + 0.4 · code depth 1.0 (predicted 17.12.14.110)

@@ -99,14 +99,14 @@ def no_history(as_of: date | None) -> str:
     return "в данных нет лотов с участниками"
 
 
-def _vector_hits(idx: LotIndex, text: str) -> tuple[list[tuple[int, float]], str]:
+def _vector_hits(idx: LotIndex, text: str, model: str | None = None) -> tuple[list[tuple[int, float]], str]:
     """Ladder step 1: (hits, why skipped / empty)."""
     from src.match import search as s
 
     try:
         from src.match import pg_retriever
 
-        docs = pg_retriever.vector_docs(idx, text)
+        docs = pg_retriever.vector_docs(idx, text, model=model)
     except (ImportError, RuntimeError) as e:  # VectorsUnavailable is a RuntimeError
         log.info("лестница: векторная ступень пропущена — %s", e)
         return [], "поиск по смыслу недоступен"
@@ -149,7 +149,7 @@ def ladder(store: Store, idx: LotIndex, query: Query, tokens: list[str], codes: 
     elif s.STRICT_RETRIEVER:
         log.info("лестница: векторная ступень не используется в eval с retriever=bm25")
     else:
-        hits, skipped = _vector_hits(idx, query.text)
+        hits, skipped = _vector_hits(idx, query.text, cfg.get("embedding_model"))
         cands = s._retrieve(store, idx, idx.lot_hits(hits), as_of) if hits else []
         for c in cands:
             c.found_by = (f"{NOT_BY_NAME}; найден по смыслу названия (векторный поиск): похожие позиции в "
