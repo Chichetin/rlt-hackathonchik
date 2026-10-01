@@ -590,6 +590,10 @@ def test_thin_classes_reads_the_metric_file(tmp_path, monkeypatch):
     path.write_text(json.dumps({"thin": [{"okpd2": "21.20"}, {"okpd2": "10.51"}]}), encoding="utf-8")
     assert W.thin_classes(path) == THIN
     assert W.thin_classes(tmp_path / "missing.json") == frozenset()  # no metric — no thin classes, no error
+    for broken in ('{"thin": null}', '{"thin": ["21.20"]}', '{}', 'not json'):  # a damaged file is «no metric»
+        path.write_text(broken, encoding="utf-8")
+        assert W.thin_classes(path) == frozenset()
+    path.write_text(json.dumps({"thin": [{"okpd2": "21.20"}, {"okpd2": "10.51"}]}), encoding="utf-8")
     monkeypatch.setattr(W, "THIN_RESULT", path)
     assert W.thin_classes() == THIN
 

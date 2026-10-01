@@ -330,7 +330,7 @@ def thin_classes(path: Path | None = None) -> frozenset[str]:
     """OKPD2 groups (XX.XX) of the thin categories of #122; no metric file → empty set, the order stays as it was."""
     try:
         return frozenset(g["okpd2"] for g in json.loads((path or THIN_RESULT).read_text(encoding="utf-8"))["thin"])
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
         return frozenset()
 
 
