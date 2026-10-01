@@ -76,7 +76,8 @@ def test_default_scoring_is_h15f_normalized(search_data):
     """#174 (human confirmation №3): H-15f weights normalized to 1 and its options are the product default."""
     cfg = search_mod.load_config()
     assert sum(cfg["weights"].values()) == pytest.approx(1.0) and cfg["weights"]["geography"] == 0.0
-    assert search_mod.scoring_options(cfg) == {"fit_bm25_share": 0.8, "experience_by": "similar", "tie_break": "bm25"}
+    assert search_mod.scoring_options(cfg) == {"fit_bm25_share": 0.8, "experience_by": "similar", "tie_break": "bm25",
+                                               "sat_lots": 20, "sat_wins": 10}  # caps: the default, #196 is opt-in
     m = search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]))[0]
     assert "с похожими позициями" in comp(m, "experience").explanation
     assert comp(m, "geography").weight == 0.0 and comp(m, "geography").explanation  # shown, not scored
@@ -275,8 +276,10 @@ def _cfg(**options) -> dict:
 
 def test_scoring_options_default_is_v1_and_unknown_is_an_error():
     assert search_mod.scoring_options({}) == {"fit_bm25_share": search_mod.FIT_BM25_SHARE, "experience_by": "class",
-                                              "tie_break": "inn"}
-    for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"}):
+                                              "tie_break": "inn", "sat_lots": search_mod.SAT_LOTS,
+                                              "sat_wins": search_mod.SAT_WINS}
+    for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"},
+                {"sat_lots": 0}, {"sat_wins": 2.5}, {"sat_lots": True}):
         with pytest.raises(ValueError):
             search_mod.scoring_options({"options": bad})
     with pytest.raises(ValueError, match="retriever"):
@@ -383,3 +386,52 @@ def test_geography_follows_the_customer():
     lo, _ = search_mod.customer_region(Query(query_id="t218", text="x", customer_inn="4700000003"))
     assert search_mod._geography(org47, lo)[0] == 1.0
     assert search_mod._geography(org78, lo)[0] == pytest.approx(search_mod.NEIGHBOUR_VALUE)
+
+
+def test_saturation_caps_spread_experience_of_active_suppliers(search_data):
+    """#196: with the default caps (20 lots / 10 wins) busy suppliers all get experience 1.0; higher caps
+    keep them apart, and the value follows the caps exactly."""
+    from src.match.search import Candidate, _experience, _sat
+
+    busy = Candidate("7801000012", 1.0, 40, 20, 1, "x", date(2025, 1, 1))
+    busier = Candidate("7801000020", 1.0, 400, 200, 1, "x", date(2025, 1, 1))
+    assert _experience(busy, [], None)[0] == _experience(busier, [], None)[0] == 1.0  # saturated by default
+    low, high = (_experience(c, [], None, "similar", 500, 250)[0] for c in (busy, busier))
+    assert low < high < 1.0
+    assert low == pytest.approx(0.5 * _sat(40, 500) + 0.5 * _sat(20, 250))
+    # the option reaches search(): a higher cap never raises a value and lowers the saturated ones
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    base = {m.counterparty.inn: comp(m, "experience").value for m in search(q)}
+    capped = {m.counterparty.inn: comp(m, "experience").value
+              for m in search(q, config={**search_mod.load_config(), "options": {
+                  **search_mod.load_config()["options"], "sat_lots": 500, "sat_wins": 250}})}
+    assert base and all(capped[i] <= base[i] for i in base) and any(capped[i] < base[i] for i in base)
+
+
+def test_query_from_a_notice_does_not_find_that_notice(search_data):
+    """#249 (review #145 F-13): a query built from notice 6 (`/api/lot` → `lot-6`) does not get lot 6 back — its own
+    positions would put its own participants on top. 780100000090 stays, found by its other paper lot 1."""
+    q = Query(query_id="ui-1", text="Бумага офисная А4")
+    before = by_inn(search(q))
+    assert search_mod.excluded_lot() is None
+    assert "data:items#6" in {e.url for m in before.values() for e in m.counterparty.evidence}
+    after = by_inn(search(q.model_copy(update={"query_id": "lot-6"})))
+    assert search_mod.excluded_lot() == 6
+    assert "data:items#6" not in {e.url for m in after.values() for e in m.counterparty.evidence}
+    assert "780100000090" in after  # lots 1 and 6 before; lot 1 only now
+    assert "в 2 лот(ах)" in comp(before["780100000090"], "product_fit").explanation
+    assert "в 1 лот(ах)" in comp(after["780100000090"], "product_fit").explanation
+    search(q.model_copy(update={"query_id": "lot-999999"}))  # a notice that is not in the data: nothing removed
+    assert search_mod.excluded_lot() is None
+
+
+def test_query_from_a_notice_does_not_find_it_on_the_fallback_ladder(search_data):
+    """Review of #249: lot 9 «Вода питьевая» is the only lot with its text; without it nothing is found by text, and the
+    OKPD2 rung of the fallback ladder must not bring lot 9 back («Участвовал в лоте 9» under «не входит в подбор»)."""
+    q = Query(query_id="lot-9", text="Вода питьевая", okpd2=["11.07.11.130"])
+    res = search(q)
+    assert search_mod.excluded_lot() == 9
+    assert all(e.url != "data:items#9" for m in res for e in m.counterparty.evidence)
+    assert all("(лот 9)" not in comp(m, "product_fit").explanation for m in res)
+    free = search(q.model_copy(update={"query_id": "ui-1"}))
+    assert any(e.url == "data:items#9" for m in free for e in m.counterparty.evidence)  # the leak this guards against

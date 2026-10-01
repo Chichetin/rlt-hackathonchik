@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App, noteText } from "./App";
 import { reviewLinks } from "./reviews";
-import { buildQuery, type Counterparty, filterNotes, regionLabel, type SearchResponse } from "./api";
+import { buildQuery, type Counterparty, type Filters, filterNotes, NO_FILTERS, regionLabel, type SearchResponse } from "./api";
 
 const match = (name: string, origin: "history" | "discovered", kind = "manufacturer") => ({
   counterparty: {
@@ -34,10 +34,17 @@ const response: SearchResponse = {
 beforeEach(() => window.history.replaceState(null, "", "/search"));
 afterEach(() => vi.restoreAllMocks());
 
+async function toggleManufacturer() {
+  await userEvent.click(within(screen.getByRole("navigation")).getByRole("link", { name: "Фильтры" }));
+  await userEvent.click(await screen.findByRole("checkbox", { name: /Производители/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Готово, вернуться к подбору" }));
+  await screen.findByRole("group", { name: "Группа поставщиков" });
+}
+
 test("buildQuery keeps only enabled filters", () => {
-  const q = buildQuery("  бумага ", { only_msp: true, only_manufacturers: false, region: "" });
+  const q = buildQuery("  бумага ", { ...NO_FILTERS, only_msp: true });
   expect(q.text).toBe("бумага");
-  expect(q.filters).toEqual({ only_msp: true });
+  expect(q.filters).toEqual({ only_msp: true, near_customer: "auto" }); // «авто» — the server decides by the purchase type (#242)
 });
 
 test("search shows two blocks, explanation and card with sources", async () => {
@@ -46,10 +53,13 @@ test("search shows two blocks, explanation and card with sources", async () => {
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   expect(await screen.findByRole("region", { name: "С опытом госзакупок" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^Новые/ }));
   expect(screen.getByRole("region", { name: "Новые из открытых источников" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^С опытом/ }));
   expect(screen.getByText(/Демонстрационные данные/)).toBeInTheDocument();
   expect(screen.getAllByText("5 контрактов по ОКПД2 17.12").length).toBeGreaterThan(0);
   await userEvent.click(within(screen.getByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
   const card = screen.getByRole("dialog", { name: "Карточка: ООО Альфа" });
   expect(card).toHaveTextContent("Статус: действующее");
   expect(card).toHaveTextContent("ЕГРЮЛ");
@@ -83,7 +93,7 @@ test("API error is shown, not swallowed", async () => {
 });
 
 test("buildQuery adds optional budget, customer and lot context", () => {
-  const f = { only_msp: false, only_manufacturers: false, region: "" };
+  const f = { ...NO_FILTERS, only_msp: false };
   const lot = { okpd2: ["17.12.14.110"], channel: "ЭМ" as const, customer_inn: null, budget: null };
   const q = buildQuery("бумага", f, { budget: "45 000,5", customer_inn: "7804105239", lot, query_id: "lot-1" });
   expect(q).toMatchObject({ query_id: "lot-1", budget: 45000.5, customer_inn: "7804105239", okpd2: ["17.12.14.110"], channel: "ЭМ" });
@@ -121,6 +131,7 @@ test("card shows stats and the unconfirmed INN note", async () => {
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
   const card = screen.getByRole("dialog");
   expect(card).toHaveTextContent("Побед");
   expect(card).toHaveTextContent("Доля побед");
@@ -152,29 +163,29 @@ test("filterNotes counts candidates hidden for an unknown attribute", () => {
   const base = structuredClone(response);
   base.history[0].counterparty.kind = null;
   base.history[0].counterparty.is_msp = null;
-  const f = { only_msp: true, only_manufacturers: true, region: "" };
+  const f: Filters = { ...NO_FILTERS, only_msp: true, kinds: ["manufacturer"] };
   expect(filterNotes(base, f)).toEqual([
-    "Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения.",
+    "Роль ещё не определена у 1 из 2 — признак появится после обогащения; они скрыты фильтром роли.",
     "Статус МСП ещё не проверен у 1 из 2 — признак появится после обогащения.",
   ]);
-  expect(filterNotes(base, { only_msp: false, only_manufacturers: false, region: "" })).toEqual([]);
+  expect(filterNotes(base, { ...NO_FILTERS, only_msp: false })).toEqual([]);
   expect(filterNotes(response, f)).toEqual([]);
 });
 
 test("filterNotes: «unknown» is a role the rule has set (with a basis), «null» is not yet determined", () => {
-  const f = { only_msp: false, only_manufacturers: true, region: "" };
+  const f: Filters = { ...NO_FILTERS, only_msp: false, kinds: ["manufacturer"] };
   const base = structuredClone(response);
   base.history[0].counterparty.kind = "unknown";
   expect(filterNotes(base, f)).toEqual([
-    "У 1 из 2 основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).",
+    "У 1 из 2 основной ОКВЭД — не производство и не торговля: роль по нему не определяется (основание — в карточке). Чип «Роль не определена» покажет их.",
   ]);
   base.discovered[0].counterparty.kind = null;
   expect(filterNotes(base, f)).toEqual([
-    "Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения.",
-    "У 1 из 2 основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).",
+    "Роль ещё не определена у 1 из 2 — признак появится после обогащения; они скрыты фильтром роли.",
+    "У 1 из 2 основной ОКВЭД — не производство и не торговля: роль по нему не определяется (основание — в карточке). Чип «Роль не определена» покажет их.",
   ]);
   base.history[0].counterparty.kind = "distributor";
-  expect(filterNotes(base, f)).toEqual(["Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения."]);
+  expect(filterNotes(base, f)).toEqual(["Роль ещё не определена у 1 из 2 — признак появится после обогащения; они скрыты фильтром роли."]);
 });
 
 test("filter that hides unknown-type suppliers says so instead of 'nothing found'", async () => {
@@ -190,12 +201,14 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(discovered).toHaveTextContent(
     "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках",
   );
-  await userEvent.click(screen.getByLabelText("Только производители"));
-  expect(await screen.findByText("Тип поставщика ещё не определён у 1 из 1 — признак появится после обогащения.")).toBeInTheDocument();
+  await toggleManufacturer();
+  expect(await screen.findByText("Роль ещё не определена у 1 из 1 — признак появится после обогащения; они скрыты фильтром роли.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^С опытом/ }));
   const history = screen.getByRole("region", { name: "С опытом госзакупок" });
   expect(history).toHaveTextContent("у кандидатов этот признак ещё не известен");
   expect(history).not.toHaveTextContent("переформулировать");
@@ -225,7 +238,7 @@ test("history is paged on the server: total from the header, «Показать 
 });
 
 // #84: «Новые» emptied by a filter. Mock: requests with the given filter get no new companies.
-async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["17.12.14.110"], kinds: Counterparty["kind"][] = [null]) {
+async function newBlockWith(filter: "only_manufacturers" | "near_customer", okpd2 = ["17.12.14.110"], kinds: Counterparty["kind"][] = [null]) {
   const base = structuredClone(response);
   base.stub = false;
   base.query.okpd2 = okpd2;
@@ -238,40 +251,45 @@ async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["1
   const filtered = { ...structuredClone(base), discovered: [] };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
     const body = JSON.parse(String((init as RequestInit).body));
-    return new Response(JSON.stringify(body.filters?.[filter] ? filtered : base), { status: 200 });
+    const on = filter === "near_customer" ? body.filters?.near_customer === "near" : body.filters?.[filter];
+    return new Response(JSON.stringify(on ? filtered : base), { status: 200 });
   });
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(await within(discovered).findByText("ООО Бета")).toBeInTheDocument();
   return discovered;
 }
 
 test("«Новые» emptied by «Только производители» name the filter, not «nothing found» (#84)", async () => {
-  const discovered = await newBlockWith("only_manufacturers");
-  await userEvent.click(screen.getByLabelText("Только производители"));
+  let discovered = await newBlockWith("only_manufacturers");
+  await toggleManufacturer();
+  discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(
-    await within(discovered).findByText(/^Под фильтр «Только производители» не попал никто из 1 новых компаний/),
+    await within(discovered).findByText(/^Под фильтр «Производитель» не попал никто из 1 новых компаний/),
   ).toBeInTheDocument();
   expect(discovered).not.toHaveTextContent("новых компаний по этому запросу не найдено");
-  await userEvent.click(screen.getByLabelText("Только производители"));
+  await toggleManufacturer();
+  discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(await within(discovered).findByText("ООО Бета")).toBeInTheDocument();
 });
 
-test("«Новые» emptied by the region keep the general text: the region of new companies is known (#84)", async () => {
-  const discovered = await newBlockWith("region");
-  await userEvent.selectOptions(screen.getByLabelText("Регион"), "Ленинградская область");
+test("«Новые» emptied by «Может работать у заказчика» keep the general text: the region of new companies is known (#84, #242)", async () => {
+  const discovered = await newBlockWith("near_customer");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Может работать у заказчика" }), "near");
   expect(await within(discovered).findByText(/новых компаний по этому запросу не найдено/)).toBeInTheDocument();
   expect(discovered).not.toHaveTextContent("Под фильтр");
 });
 
 test("«Новые» emptied by «Только производители»: all distributors — no manufacturers among them, not «type unconfirmed» (#102)", async () => {
-  const discovered = await newBlockWith("only_manufacturers", undefined, ["distributor"]);
-  await userEvent.click(screen.getByLabelText("Только производители"));
+  let discovered = await newBlockWith("only_manufacturers", undefined, ["distributor"]);
+  await toggleManufacturer();
+  discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(
     await within(discovered).findByText(
-      "Под фильтр «Только производители» не попал никто из 1 новых компаний из реестра МСП: " +
+      "Под фильтр «Производитель» не попал никто из 1 новых компаний из реестра МСП: " +
         "по основному ОКВЭД среди них нет производителей. Снимите фильтр, чтобы их увидеть.",
     ),
   ).toBeInTheDocument();
@@ -280,35 +298,38 @@ test("«Новые» emptied by «Только производители»: all
 });
 
 test("«Новые» emptied by «Только производители»: role of all not determined — «confirmed manufacturers», у 1 из 1 (#102)", async () => {
-  const discovered = await newBlockWith("only_manufacturers");
-  await userEvent.click(screen.getByLabelText("Только производители"));
+  let discovered = await newBlockWith("only_manufacturers");
+  await toggleManufacturer();
+  discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(
     await within(discovered).findByText(
-      "Под фильтр «Только производители» не попал никто из 1 новых компаний из реестра МСП: " +
+      "Под фильтр «Производитель» не попал никто из 1 новых компаний из реестра МСП: " +
         "подтверждённых производителей среди них нет — у 1 из 1 роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
     ),
   ).toBeInTheDocument();
 });
 
 test("«Новые» emptied by «Только производители»: one distributor, one without a role — у 1 из 2 (#102)", async () => {
-  const discovered = await newBlockWith("only_manufacturers", undefined, ["distributor", null]);
-  await userEvent.click(screen.getByLabelText("Только производители"));
+  let discovered = await newBlockWith("only_manufacturers", undefined, ["distributor", null]);
+  await toggleManufacturer();
+  discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(
     await within(discovered).findByText(
-      "Под фильтр «Только производители» не попал никто из 2 новых компаний из реестра МСП: " +
+      "Под фильтр «Производитель» не попал никто из 2 новых компаний из реестра МСП: " +
         "подтверждённых производителей среди них нет — у 1 из 2 роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
     ),
   ).toBeInTheDocument();
 });
 
 test("«Новые» with a manufacturer emptied by other filters: «Только производители» is not blamed (#102)", async () => {
-  const discovered = await newBlockWith("only_manufacturers", undefined, ["distributor", "manufacturer"]);
-  await userEvent.click(screen.getByLabelText("Только производители"));
+  let discovered = await newBlockWith("only_manufacturers", undefined, ["distributor", "manufacturer"]);
+  await toggleManufacturer();
+  discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(await within(discovered).findByText(/новых компаний по этому запросу не найдено/)).toBeInTheDocument();
   expect(discovered).not.toHaveTextContent("Под фильтр");
 });
 
-test("card has a «Отзывы» block: not-in-score note, links by name and INN, no rating (#106)", async () => {
+test("card keeps external reviews separate from customer ratings (#106, #251)", async () => {
   const withInn = structuredClone(response);
   withInn.history[0]!.counterparty.inn = "7804428656";
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withInn), { status: 200 }));
@@ -316,9 +337,10 @@ test("card has a «Отзывы» block: not-in-score note, links by name and IN
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
   const block = within(screen.getByRole("region", { name: "Отзывы" }));
-  expect(block.getByText(/Не влияет на оценку подбора/)).toBeInTheDocument();
-  expect(block.getByText(/Рейтинг из отзывов не показываем/)).toBeInTheDocument();
+  expect(block.getByText(/не влияет на подбор/)).toBeInTheDocument();
+  expect(block.getByText(/рейтинг не переносится в Митрандир/)).toBeInTheDocument();
   expect(block.getByRole("link", { name: "2ГИС" })).toHaveAttribute("href", expect.stringContaining(encodeURIComponent("ООО Альфа 7804428656")));
 });
 
@@ -353,6 +375,7 @@ test("card names the supplier's main OKPD2 classes", async () => {
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
   const card = screen.getByRole("dialog");
   expect(await within(card).findByText("17.12 «Бумага и картон», 26.20 «Компьютеры и периферийное оборудование»")).toBeInTheDocument();
 });
@@ -366,6 +389,7 @@ test("card falls back to bare OKPD2 codes when names fail", async () => {
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
   await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/okpd2")));
   await new Promise((r) => setTimeout(r, 0)); // the 500 is handled before the check
   expect(within(screen.getByRole("dialog")).getByText("17.12, 26.20")).toBeInTheDocument();
@@ -382,6 +406,7 @@ test("long legal forms are shortened in the list only", async () => {
   const row = within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText('ООО "БЕТА"');
   expect(row).toHaveAttribute("title", long);
   await userEvent.click(row);
+  await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
   expect(screen.getByRole("dialog", { name: `Карточка: ${long}` })).toBeInTheDocument();
 
   const { shortName } = await import("./App");
@@ -389,4 +414,30 @@ test("long legal forms are shortened in the list only", async () => {
   expect(shortName("ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО «РОМАШКА»")).toBe("ПАО «РОМАШКА»");
   expect(shortName("ООО «Альфа»")).toBe("ООО «Альфа»");
   expect(shortName("ИНН 7801234567")).toBe("ИНН 7801234567");
+});
+
+test("works: the line over the results names the customer, the type, what «авто» applied and how many it hides (#242)", async () => {
+  const ctx = { customer_region: "Санкт-Петербург", customer_basis: "ИНН 78…", purchase_type: "works", purchase_label: "работа",
+    type_basis: ["43.39.11.000"], default_near: "near", applied_near: "near" };
+  const facets = { history: { kind: {}, entity: {}, near: { worked: 1, near: 1, any: 4 } }, discovered: { kind: {}, entity: {}, near: { worked: 0, near: 0, any: 0 } } };
+  const sent: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    if (init?.body) sent.push(JSON.parse(String(init.body)).filters?.near_customer);
+    return new Response(JSON.stringify({ ...response, stub: false }), { status: 200, headers: {
+      // ASCII JSON, as the server sends it (HTTP headers are latin-1)
+      "X-Search-Context": JSON.stringify(ctx).replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`), "X-Facets": JSON.stringify(facets), "X-Total-History": "1", "X-Total-Discovered": "1" } });
+  });
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "ремонт кровли");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const line = await screen.findByRole("group", { name: "Заказчик и тип закупки" });
+  expect(line).toHaveTextContent("Заказчик: Санкт-Петербург (ИНН 78…)");
+  expect(line).toHaveTextContent("Тип закупки: работа (ОКПД2 43.39.11.000)");
+  expect(line).toHaveTextContent("авто: в регионе заказчика или соседнем");
+  expect(within(line).getByRole("note")).toHaveTextContent("скрыто 3 из 4");
+  expect(sent).toContain("auto");
+  // the choice is right there — no «Изменить закупку» to open the form first
+  expect(screen.queryByRole("button", { name: "Изменить закупку" })).not.toBeInTheDocument();
+  await userEvent.selectOptions(within(line).getByRole("combobox", { name: "Может работать у заказчика" }), "any");
+  await waitFor(() => expect(sent.at(-1)).toBe("any"));
 });
