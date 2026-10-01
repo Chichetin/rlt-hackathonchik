@@ -6,6 +6,7 @@ import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
+import { okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
   buildQuery,
@@ -187,6 +188,7 @@ export function App() {
   const [open, setOpen] = useState<CounterpartyMatch | null>(null);
   const [lotId, setLotId] = useState(saved.lotId ?? "");
   const [lot, setLot] = useState<Extra["lot"]>(saved.lot ?? null);
+  const lotLabels = useOkpd2Labels(lot?.okpd2 ?? []);
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
@@ -429,7 +431,7 @@ export function App() {
         {(lot?.channel || lot?.okpd2?.length) && (
           <div className="chips">
             {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
-            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
+            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {okpd2Text(lot.okpd2, lotLabels)}</span> : null}
           </div>
         )}
         <div className="row">
@@ -681,6 +683,8 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
   const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
+  const topOkpd2 = String(cp.stats?.top_okpd2 ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+  const okpd2Labels = useOkpd2Labels(topOkpd2);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overflow = document.body.style.overflow;
@@ -767,7 +771,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
           <dl className="facts stats">
             {Object.entries(cp.stats ?? {}).map(([k, v]) => [
               <dt key={`k-${k}`}>{STAT_LABEL[k] ?? k}</dt>,
-              <dd key={`v-${k}`}>{formatStat(k, v)}</dd>,
+              <dd key={`v-${k}`}>{k === "top_okpd2" ? okpd2Text(topOkpd2, okpd2Labels) : formatStat(k, v)}</dd>,
             ])}
           </dl>
         </>
