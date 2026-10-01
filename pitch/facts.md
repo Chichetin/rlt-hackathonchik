@@ -47,7 +47,7 @@
 
 ## Качество подбора (backtest, блок A)
 
-Наш метод — **v2** (D-074, дефолт `configs/search.yaml` с 01.10), прогон `E-003`: часть `dev`, 2 000 запросов,
+Наш метод — **v2** (D-077, дефолт `configs/search.yaml` с 01.10), прогон `E-003`: часть `dev`, 2 000 запросов,
 `as_of` = 2025-07-01, `retriever: bm25`, 95% bootstrap-интервалы. Команда: `make eval EXP=E-003`;
 файл `eval/results/E-003.json` (commit и `config_sha256` — в файле). Прежний метод v1 — `E-002` / `bm25-dev-v1` / `V1`.
 
