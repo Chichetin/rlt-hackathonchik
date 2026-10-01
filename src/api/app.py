@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 
+from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
@@ -215,6 +216,22 @@ def api_lot(ident: str) -> Query:
         raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
     except LotDataUnavailable as e:
         raise HTTPException(503, str(e)) from e
+
+
+@app.get("/api/lot/{ident}/backtest", response_model=Backtest)
+def api_lot_backtest(ident: str) -> Backtest:
+    """Places of the lot's real participants and winner in our ranking, history before the cutoff (#192, D-084)."""
+    if not ident.strip().isdigit():
+        raise HTTPException(422, "номер закупки — только цифры (lot_id или реестровый номер)")
+    try:
+        return lot_backtest(ident)
+    except LotNotFound as e:
+        raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
+    except NotBacktestable as e:
+        raise HTTPException(422, str(e)) from e
+    except FileNotFoundError as e:
+        log.warning("backtest: %s", e)
+        raise HTTPException(503, "данные организаторов недоступны: не загружены или база не отвечает") from e
 
 
 OKPD2_LABELS_MAX = 50

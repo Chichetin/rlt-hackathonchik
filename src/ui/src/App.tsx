@@ -37,6 +37,7 @@ import {
   type Counterparty,
 } from "./api";
 import { reviewLinks } from "./reviews";
+import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
 import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
 import "./filters.css";
@@ -645,6 +646,7 @@ export function App() {
               {lotMsg.text}
             </p>
           )}
+          {lot && lotMsg?.kind === "ok" && <BacktestPanel key={lotQueryId} ident={lotId} />}
         </div>
         <div className="query-divider"><span>или введите описание</span></div>
         <label htmlFor="q">Что нужно закупить</label>
