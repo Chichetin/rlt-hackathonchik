@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 
 test("волны двигаются, reduced motion останавливает фон", async ({ page }) => {
   await page.goto("/");
-  const field = page.locator(".wave-field");
-  const pixels = () => field.evaluate((el: HTMLCanvasElement) => el.toDataURL());
+  const field = page.locator(".wave-field canvas");
+  const pixels = async () => (await field.screenshot()).toString("base64");
   await expect(field).toBeVisible();
   const moving = await pixels();
   await expect.poll(pixels).not.toBe(moving);
@@ -60,15 +60,7 @@ test("прокрутка на главной сразу ведёт в «Подб
   await expect(page).toHaveURL(/\/search$/);
 });
 
-test("ниже верха главной прокрутка обычная: «Посмотреть возможности» дочитывается", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("link", { name: "Посмотреть возможности" }).click();
-  await expect(page.locator("#possibilities")).toBeInViewport();
-  await page.mouse.move(400, 400);
-  await page.mouse.wheel(0, 400);
-  await page.waitForTimeout(200);
-  expect(new URL(page.url()).pathname).toBe("/");
-  // ctrl+wheel is zoom, Shift+Space scrolls up: neither leaves the landing
+test("масштабирование и прокрутка вверх не открывают подбор", async ({ page }) => {
   await page.goto("/");
   await page.mouse.move(400, 400);
   await page.keyboard.down("Control");

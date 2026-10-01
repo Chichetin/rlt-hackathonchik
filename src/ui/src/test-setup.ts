@@ -7,6 +7,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
   window.sessionStorage.clear();
   resetOkpd2Labels();
+  window.localStorage.clear(); // local scoring weights (#179)
 });
 
 // jsdom has no media queries; behavior tests use the accessible, instant-motion preference.
