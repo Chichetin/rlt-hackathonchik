@@ -43,7 +43,6 @@ from typing import Literal
 
 import duckdb
 import httpx
-import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.enrich import role
@@ -58,7 +57,6 @@ from src.sources.cache import CachedPage, SourceCache
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
-SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 
 MAX_SHOWN = 10  # companies in the block and INNs sent to enrichment per query
 MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wholesale codes × 2 regions
@@ -512,7 +510,7 @@ def discover(
     processed = processed or processed_dir()
     offline = offline_mode() if offline is None else offline
     if weights is None:
-        weights = yaml.safe_load(SEARCH_CONFIG.read_text(encoding="utf-8"))["weights"]
+        weights = search_mod.load_config()["weights"]  # validated, as search() reads it (#220 №7)
     assert weights is not None
     res = Discovery()
 

@@ -46,6 +46,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Ratings Batch */
+        get: operations["api_ratings_batch_api_ratings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ratings/{inn}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Ratings */
+        get: operations["api_ratings_api_ratings__inn__get"];
+        put?: never;
+        /** Api Rate */
+        post: operations["api_rate_api_ratings__inn__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -147,7 +182,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Api Counterparty */
+        /**
+         * Api Counterparty
+         * @description The card by INN: from the cache at once, otherwise the registries are asked inside the request, so at most
+         *     COUNTERPARTY_LIVE_MAX of those at once (F-10).
+         */
         get: operations["api_counterparty_api_counterparty__inn__get"];
         put?: never;
         post?: never;
@@ -166,7 +205,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Api Enqueue */
+        /**
+         * Api Enqueue
+         * @description Queue the enrichment of an INN for the worker; a new INN over ENRICH_QUEUE_MAX waiting tasks is a 429 (F-10).
+         */
         post: operations["api_enqueue_api_enrich__inn__post"];
         delete?: never;
         options?: never;
@@ -360,6 +402,96 @@ export interface components {
             filters?: {
                 [key: string]: string | boolean | number;
             };
+        };
+        /** RatingDetail */
+        RatingDetail: {
+            /** Inn */
+            inn: string;
+            /**
+             * Count
+             * @description опубликованных оценок
+             */
+            count: number;
+            /**
+             * Average
+             * @description None, пока оценок меньше MIN_SHOWN
+             */
+            average: number | null;
+            /**
+             * Min Shown
+             * @default 3
+             */
+            min_shown: number;
+            /**
+             * Disclaimer
+             * @default Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены.
+             */
+            disclaimer: string;
+            /** Reviews */
+            reviews: components["schemas"]["Review"][];
+        };
+        /** RatingIn */
+        RatingIn: {
+            /**
+             * Author Inn
+             * @description ИНН заказчика, который оценивает (контрольная сумма)
+             */
+            author_inn: string;
+            /**
+             * Browser Sig
+             * @description локальный ключ браузера, не удостоверяет личность
+             */
+            browser_sig: string;
+            /** Stars */
+            stars: number;
+            /** Text */
+            text: string;
+        };
+        /** RatingSaved */
+        RatingSaved: {
+            /**
+             * Status
+             * @description published / quarantine / hidden
+             */
+            status: string;
+            summary: components["schemas"]["RatingSummary"];
+        };
+        /** RatingSummary */
+        RatingSummary: {
+            /** Inn */
+            inn: string;
+            /**
+             * Count
+             * @description опубликованных оценок
+             */
+            count: number;
+            /**
+             * Average
+             * @description None, пока оценок меньше MIN_SHOWN
+             */
+            average: number | null;
+            /**
+             * Min Shown
+             * @default 3
+             */
+            min_shown: number;
+            /**
+             * Disclaimer
+             * @default Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены.
+             */
+            disclaimer: string;
+        };
+        /** Review */
+        Review: {
+            /** Stars */
+            stars: number;
+            /** Text */
+            text: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** ScoreComponent */
         ScoreComponent: {
@@ -586,6 +718,106 @@ export interface operations {
             };
         };
     };
+    api_ratings_batch_api_ratings_get: {
+        parameters: {
+            query: {
+                /** @description ИНН через запятую */
+                inns: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["RatingSummary"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_ratings_api_ratings__inn__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inn: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_rate_api_ratings__inn__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inn: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RatingIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;
@@ -742,7 +974,10 @@ export interface operations {
     api_counterparty_api_counterparty__inn__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description ключ API, если на сервере задан API_KEY */
+                "x-api-key"?: string | null;
+            };
             path: {
                 inn: string;
             };
@@ -759,6 +994,13 @@ export interface operations {
                     "application/json": components["schemas"]["Counterparty"];
                 };
             };
+            /** @description нужен ключ API (X-API-Key), если на сервере задан API_KEY */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -768,12 +1010,22 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description лимит очереди или живых обогащений; повторите через Retry-After секунд */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     api_enqueue_api_enrich__inn__post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description ключ API, если на сервере задан API_KEY */
+                "x-api-key"?: string | null;
+            };
             path: {
                 inn: string;
             };
@@ -790,6 +1042,13 @@ export interface operations {
                     "application/json": components["schemas"]["EnqueueResult"];
                 };
             };
+            /** @description нужен ключ API (X-API-Key), если на сервере задан API_KEY */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -798,6 +1057,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description лимит очереди или живых обогащений; повторите через Retry-After секунд */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

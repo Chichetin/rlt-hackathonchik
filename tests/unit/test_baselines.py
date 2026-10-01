@@ -175,7 +175,8 @@ def test_evaluate_baseline_on_fixture(hist):
     assert (first["winner_new"], second["winner_new"]) == (False, True)
     assert (first["channel"], second["channel"]) == ("ЭМ", "АИС ГЗ")
     assert set(body["slices"]) == {"channel=ЭМ", "channel=АИС ГЗ", "winner=new", "winner=known",
-                                   "channel=ЭМ,winner=known", "channel=АИС ГЗ,winner=new"}
+                                   "channel=ЭМ,winner=known", "channel=АИС ГЗ,winner=new",
+                                   "type=goods"}  # paper, OKPD2 17 (#104)
     assert body["slices"]["winner=new"]["metrics"]["recall@10"]["value"] == 0.5
     assert body["metrics"]["recall@10"]["value"] == 0.75
     assert "ranked" not in R.evaluate(cases, {"method": "inc", "k": 20}, cutoff=CUTOFF, ranked_limit=1)["per_query"][0]
