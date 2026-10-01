@@ -17,8 +17,14 @@ make data PART=raw         # только CSV организаторов — ч�
 
 `scripts/data.sh`: нужен `gh` с доступом к репозиторию; каждый файл сверяется с `SHA256SUMS` релиза, совпавший
 не скачивается повторно, скачанное попадает на место только после сверки. Другой релиз — `DATA_TAG=<тег> make data`;
-другие каталоги — `DATA_PROCESSED_DIR`, `DATA_RAW_DIR`. В релизе нет: `processed/eval/holdout.jsonl` (собирается
-`uv run python -m src.eval.build_cases` из parquet) и `indexes/` (строится при первом поиске или
-`uv run python -m src.match.index`).
+другие каталоги — `DATA_PROCESSED_DIR`, `DATA_RAW_DIR`. В релизе нет:
+- `processed/eval/holdout.jsonl` и `processed/eval/dev_full.jsonl` — собираются `uv run python -m src.eval.build_cases`
+  из parquet; **команда заодно переписывает отслеживаемые `eval/cases/dev.jsonl`, `real.jsonl`, `build_stats.json`** —
+  после неё проверьте `git status` и не коммитьте их изменения без задачи;
+- `processed/okpd2.parquet` — справочник названий ОКПД2, `make okpd2` (без него `make db-load` не загрузит таблицу названий);
+- `indexes/` — строится при первом поиске или `uv run python -m src.match.index`.
+
+**Репозиторий приватный, и релиз тоже.** Перед публикацией репозитория или созданием зеркала релиз `data-2026-10-01`
+нужно удалить — иначе данные организаторов станут публичными (D-087).
 
 Описание полей — `research/DATA_DICTIONARY.md`. Владелец — DATA.
