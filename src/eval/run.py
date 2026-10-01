@@ -28,7 +28,8 @@ RESULTS = ROOT / "eval" / "results"
 # Files whose bytes define the evaluated configuration (sha256 for eval-final).
 CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
 # Code that defines the method (not UI/API): its committed tree enters the hash.
-METHOD_PATHS = ("src/contracts.py", "src/ingest", "src/match", "src/sources", "src/enrich", "src/eval", "src/llm")
+METHOD_PATHS = ("src/contracts.py", "src/ingest", "src/match", "src/sources", "src/enrich", "src/eval", "src/llm",
+                "src/db")  # src/db: normalization and the embedding model of retriever pg_hybrid
 
 
 class GitError(RuntimeError):
@@ -81,17 +82,21 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
 def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None) -> dict:
     cutoff = cutoff or date.fromisoformat(str(split_config()["cutoff"]))
     per_query = []
-    for case in cases:
-        query = with_cutoff(case.query, cutoff)
-        matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"))
-        if not getattr(search_mod, "IS_STUB", False):  # measure what the user sees (as /api/search)
-            cache = SourceCache()
-            matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
-                       for m in matches]
-        ranked = [m.counterparty.inn for m in matches if m.origin == "history" and m.counterparty.inn]
-        rel = set(case.relevant_inns)
-        per_query.append({"query_id": case.query.query_id,
-                          **{name: fn(ranked, rel) for name, fn in METRICS.items()}})
+    strict, search_mod.STRICT_RETRIEVER = search_mod.STRICT_RETRIEVER, True  # unavailable retriever fails the run
+    try:
+        for case in cases:
+            query = with_cutoff(case.query, cutoff)
+            matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"))
+            if not getattr(search_mod, "IS_STUB", False):  # measure what the user sees (as /api/search)
+                cache = SourceCache()
+                matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
+                           for m in matches]
+            ranked = [m.counterparty.inn for m in matches if m.origin == "history" and m.counterparty.inn]
+            rel = set(case.relevant_inns)
+            per_query.append({"query_id": case.query.query_id,
+                              **{name: fn(ranked, rel) for name, fn in METRICS.items()}})
+    finally:
+        search_mod.STRICT_RETRIEVER = strict
     metrics = {}
     for name in METRICS:
         vals = [q[name] for q in per_query]
@@ -110,8 +115,18 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "config": cfg,
         "config_sha256": _safe_sha(),
         "stub": bool(getattr(search_mod, "IS_STUB", False)),
+        "vectors": _vectors(cfg),
         **body,
     }
+
+
+def _vectors(cfg: dict) -> dict | None:
+    """Model, table and rows of the vector half (pg_hybrid) the run actually used."""
+    if cfg.get("retriever") != "pg_hybrid":
+        return None
+    from src.match import pg_retriever
+
+    return pg_retriever.coverage()
 
 
 def _safe_sha() -> str | None:

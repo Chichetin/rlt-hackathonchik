@@ -42,7 +42,8 @@ Encoder = Callable[[list[str]], np.ndarray]
 
 
 def model_encoder(prefix: str = PASSAGE, name: str = MODEL) -> Encoder:
-    from sentence_transformers import SentenceTransformer  # heavy (torch): `make setup-ml`
+    # heavy (torch), optional extra: `make setup-ml`
+    from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
 
     model = SentenceTransformer(name)  # CUDA if torch sees a GPU, else CPU
     model.max_seq_length = MAX_SEQ
