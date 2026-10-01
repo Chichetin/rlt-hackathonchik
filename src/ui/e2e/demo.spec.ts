@@ -25,6 +25,8 @@ test("демо: запрос → два блока → карточка → фи
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   const discovered = page.getByRole("region", { name: "Новые из открытых источников" });
   await expect(history.locator(".item").first()).toBeVisible();
+  // the loaded notice is in the data: it is left out of its own results and the UI says so (#249, F-13)
+  await expect(page.locator(".own-lot-note")).toHaveText(/^Закупка 6 есть в данных 2024–2025 — сама она в подбор не входит/);
   // блок «Новые» (#16): компании из реестра МСП ФНС, которых нет в данных АИС ГЗ. В e2e — записанные
   // ответы rmsp.nalog.ru (tests/fixtures/rmsp/e2e) в кеше источников, без сети.
   await page.getByRole("button", { name: /^Новые/ }).click();

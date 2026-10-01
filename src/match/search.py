@@ -20,9 +20,11 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import tempfile
 import threading
 from collections import defaultdict
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -365,6 +367,28 @@ def _component(name: str, value: float, weights: dict[str, float], explanation: 
                           weight=float(weights.get(name, 0.0)), explanation=explanation)
 
 
+# A query built from a notice (`/api/lot` → query_id `lot-<N>`) must not find that very lot: its own positions are an
+# exact text match, so its participants would top the list on the answer itself (#249, review #145 F-13).
+_OWN_LOT = re.compile(r"lot-(\d+)")
+_excluded: ContextVar[int | None] = ContextVar("excluded_lot", default=None)
+
+
+def own_lot(query: Query) -> int | None:
+    m = _OWN_LOT.fullmatch(query.query_id)
+    return int(m.group(1)) if m else None
+
+
+def excluded_lot() -> int | None:
+    """The lot the last search() in this context removed from its own results (None — nothing removed)."""
+    return _excluded.get()
+
+
+def _drop_own(lots: LotHits, own: int | None) -> LotHits:
+    if own is None or not (lots.lot_id == own).any():
+        return lots
+    _excluded.set(own)
+    return lots.without(own)
+
 def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
            config: dict | None = None) -> list[CounterpartyMatch]:
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
@@ -373,6 +397,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     Why the answer is empty (or found by the fallback ladder): fallback.search_note() after the call.
     """
     fallback.reset_note()
+    _excluded.set(None)
+    own = own_lot(query)
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
@@ -397,14 +423,14 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
                 raise
             log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
     codes, bad_codes = fallback.okpd2_codes(query.okpd2)
-    lots = idx.lot_hits(hits)
-    cands = _retrieve(store, idx, lots, as_of) if hits else []
+    lots = _drop_own(idx.lot_hits(hits), own)
+    cands = _retrieve(store, idx, lots, as_of) if len(lots) else []
     if not cands:  # nobody by text: the fallback ladder (src/match/fallback.py)
-        hits, cands, note = fallback.ladder(store, idx, query, tokens, codes, cfg, bad_codes)
+        hits, cands, note = fallback.ladder(store, idx, query, tokens, codes, cfg, bad_codes, own)
         fallback.set_note(note)
         if not cands:
             return []
-        lots = idx.lot_hits(hits)
+        lots = _drop_own(idx.lot_hits(hits), own)
     elif bad_codes:
         fallback.set_note(f"ОКПД2 не распознан и не учтён: {', '.join(bad_codes)}")
     predicted = False

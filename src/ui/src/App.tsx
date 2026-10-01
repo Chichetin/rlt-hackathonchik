@@ -826,6 +826,14 @@ export function App() {
         </p>
       ))}
 
+      {path === "/results" && res?.excludedLot && state !== "loading" && (
+        <p className="lotmsg own-lot-note" role="note">
+          Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
+          выдачу только по другим своим закупкам. Для закупок июля–сентября 2025 места участников по истории до
+          01.07.2025 — кнопка «Проверить на истории».
+        </p>
+      )}
+
       {path === "/results" && res && (
         <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
           {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
