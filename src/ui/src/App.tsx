@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
+import { ExampleWheel, RollingNumber, WarmHints } from "./Micro";
+import "./micro.css";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
 import {
@@ -322,14 +324,14 @@ export function App() {
           <span className="brand-mark"><BrandMark /></span>
           митрандир
         </a>
-        <nav className="workspace-nav" aria-label="Разделы страницы">
-          {[["/", "Главная"], ["/search", "Подбор"], ["/results", "Результаты"], ["/settings", "Настройки"], ["/about", "О сервисе"]].map(([to, label]) => (
-            <a key={to} {...link(to)}>
+        <WarmHints route={path}><nav className="workspace-nav" aria-label="Разделы страницы">
+          {[["/", "Главная", "Возможности Митрандира"], ["/search", "Подбор", "Опишите закупку или загрузите извещение"], ["/results", "Результаты", "Найденные компании и основания подбора"], ["/settings", "Настройки", "Регион и требования к поставщикам"], ["/about", "О сервисе", "Источники данных и критерии оценки"]].map(([to, label, hint]) => (
+            <a key={to} data-hint={hint} {...link(to)}>
               {path === to && <motion.span className="nav-indicator" layoutId="nav-current" transition={glide} aria-hidden="true" />}
               <span className="nav-label">{label}</span>
             </a>
           ))}
-        </nav>
+        </nav></WarmHints>
       </div>
       </header>
       <div className="content">
@@ -409,19 +411,10 @@ export function App() {
             resetLot();
           }}
         />
-        <div className="examples">
-          <span>Например</span>
-          {EXAMPLES.map((example) => (
-            <motion.button type="button" key={example} aria-pressed={text === example && !lot} whileTap={reduced ? undefined : { scale: 0.96 }} onClick={() => {
-              setText(example);
-              resetLot();
-              document.getElementById("q")?.focus();
-            }}>
-              {text === example && !lot && <motion.span className="example-indicator" layoutId="query-example" transition={glide} aria-hidden="true" />}
-              <span>{example}</span>
-            </motion.button>
-          ))}
-        </div>
+        <ExampleWheel onConfirm={() => document.getElementById("q")?.focus()} options={EXAMPLES} value={lot ? "" : text} onChange={example => {
+          setText(example);
+          resetLot();
+        }} />
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -535,7 +528,7 @@ export function App() {
             <h2 className="results-title">Результаты подбора</h2>
             <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
             <span className="result-total" role="status">
-              С опытом: <strong>{res.total.history}</strong> · Новых: <strong>{res.total.discovered}</strong>
+              С опытом: <strong><RollingNumber value={res.total.history} /></strong> · Новых: <strong><RollingNumber value={res.total.discovered} /></strong>
             </span>
           </header>
           <Block
@@ -607,7 +600,7 @@ function Block(props: {
     <section className={`block block-${props.variant}`} aria-label={props.title}>
       <span className="block-tag">{props.tag}</span>
       <h2>
-        {props.title} <span className="count">{props.total}</span>
+        {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
       {props.rows.length === 0 ? (
@@ -637,7 +630,7 @@ function Block(props: {
                   <span className="badges">
                     <OriginBadge m={m} />
                   </span>
-                  {top && <span className="why">{top.explanation}</span>}
+                  {top && <span className="why"><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
                 </motion.button>
               </motion.li>
             );

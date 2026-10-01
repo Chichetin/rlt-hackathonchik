@@ -1,5 +1,6 @@
 import type { AnchorHTMLAttributes } from "react";
 import { motion, useReducedMotion } from "motion/react";
+import { WaveField } from "./WaveField";
 import { easeOut, Reveal } from "./Motion";
 
 type LinkProps = Pick<AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "onClick">;
@@ -46,6 +47,7 @@ export function Landing({ searchLink, aboutLink }: { searchLink: LinkProps; abou
   const reduced = useReducedMotion();
   return <main className="landing">
     <section className="landing-hero" aria-labelledby="landing-title">
+      <WaveField />
       <div className="landing-copy">
         <motion.p className="landing-intro" initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>Подбор поставщиков для закупок</motion.p>
         <h1 id="landing-title">{["Поставщики,", "которых стоит", "пригласить."].map((line, i) => <span className="title-line" key={line}>
