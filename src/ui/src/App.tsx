@@ -659,7 +659,7 @@ export function App() {
       ))}
 
       {path === "/results" && res && (
-        <motion.main initial={reduced ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : 0.45, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
+        <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
           {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
             Оценка: {presetTitle(weightSet)} · только у вас
           </a>}
