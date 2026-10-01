@@ -60,3 +60,9 @@ H-196-sat100:
   options: {sat_lots: 100, sat_wins: 50}
 H-196-sat500:
   options: {sat_lots: 500, sat_wins: 250}
+# Ступень 2 сравнения моделей (#98, ступень 1 — #115): гибрид BM25 + векторы (RRF), остальное — продукт.
+S2-hyb-e5s:      # pg_hybrid, intfloat/multilingual-e5-small (vec.names_e5_small)
+  retriever: pg_hybrid
+S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — лучший гибрид ступени 1 на коротких запросах
+  retriever: pg_hybrid
+  embedding_model: deepvk/USER-base
