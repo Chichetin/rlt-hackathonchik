@@ -65,6 +65,17 @@ H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (гео�
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
   ranker: null
+# Профили весов по типу закупки (#104, src/match/profiles.py, weights_by_type). Сравнение — по срезам type=.
+H-104b:          # H-15f + профиль: для товаров география 0.05 и регион ИП по ИНН, для услуг 0 (как в H-15f)
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
+  signals: {inn_region: 1.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+  weights_by_type: {goods: {geography: 0.05}}
+  ranker: null
+H-104g:          # дефолт D-077 + профиль: для товаров география 0.048 (= 0.05 / 1.05) и регион ИП по ИНН, для услуг 0
+  signals: {inn_region: 1.0}
+  weights_by_type: {goods: {geography: 0.048}}
+  ranker: null
 # #196: потолки насыщения experience поверх дефолта H-15f (в дефолте 20 лотов / 10 побед).
 H-196-sat100:
   options: {sat_lots: 100, sat_wins: 50}
