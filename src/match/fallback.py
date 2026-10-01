@@ -116,10 +116,14 @@ def _vector_hits(idx: LotIndex, text: str) -> tuple[list[tuple[int, float]], str
 
 
 def _okpd2_rungs(codes: list[str]) -> list[tuple[int, list[str]]]:
-    """(level, prefixes) from the codes themselves up to the class: 4 code, 3 XX.XX.XX, 2 XX.XX, 1 XX."""
+    """(level, prefixes) from the codes themselves up to the class: 4 code, 3 XX.XX.XX, 2 XX.XX, 1 XX.
+
+    A code that is itself a level (17.12 — a group) starts at that level: the exact-code step would
+    find only the positions coded «17.12», not the group."""
     out = []
     for level in (4, 3, 2, 1):
-        prefixes = sorted({p for c in codes if (p := levels(c)[4 - level])}, key=str.encode)
+        prefixes = sorted({p for c in codes if (p := levels(c)[4 - level]) and (level < 4 or len(c) not in (2, 5, 8))},
+                          key=str.encode)
         if prefixes:
             out.append((level, prefixes))
     return out

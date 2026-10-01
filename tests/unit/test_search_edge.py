@@ -34,6 +34,12 @@ def test_okpd2_codes_are_normalized(raw, valid, bad):
     assert fallback.okpd2_codes(raw) == (valid, bad)
 
 
+def test_ladder_rungs_start_at_the_codes_own_level():
+    assert fallback._okpd2_rungs(["17.12.14.110"]) == [(4, ["17.12.14.110"]), (3, ["17.12.14"]), (2, ["17.12"]),
+                                                       (1, ["17"])]
+    assert fallback._okpd2_rungs(["17.12", "33.12.1"]) == [(4, ["33.12.1"]), (2, ["17.12", "33.12"]), (1, ["17", "33"])]
+
+
 @pytest.mark.parametrize(("text", "okpd2", "what", "depth"), [
     ("абракадабра", ["17.12.14.110"], "кода ОКПД2 17.12.14.110", 1.0),  # no word in the index
     ("и в на", ["1712"], "группы ОКПД2 17.12", 0.5),  # no words at all; the code normalized
@@ -48,6 +54,15 @@ def test_ladder_finds_suppliers_by_okpd2_level(search_data, text, okpd2, what, d
         assert fit(m).value <= 0.4 * 1.0 + 1e-9  # BM25 part is 0
     assert fit(res[0]).value == pytest.approx(0.4 * depth)
     assert what in (fallback.search_note() or "")
+
+
+def test_vector_step_when_vectors_answer(search_data, monkeypatch):
+    """Postgres stand-in: the vector step returns the paper documents; BM25 part is 0, class predicted."""
+    monkeypatch.setattr(fallback, "_vector_hits", lambda idx, text: (idx.retrieve(["бумаг"], 50), ""))
+    res = search(Query(query_id="q", text="bumaga"))
+    assert res and all(fit(m).explanation.startswith("По названию не найдено; найден по смыслу") for m in res)
+    assert fit(res[0]).value == pytest.approx(0.4)  # 0.6 · 0 + 0.4 · code depth 1.0 (predicted 17.12.14.110)
+    assert "по смыслу" in (fallback.search_note() or "")
 
 
 @pytest.mark.parametrize(("body", "status", "note"), [
