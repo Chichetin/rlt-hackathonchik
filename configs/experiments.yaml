@@ -40,3 +40,7 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+R-198-lr:        # обученный ранжировщик (#198): логистическая регрессия поверх кандидатов и компонент v2 (E-003)
+  ranker: {kind: logreg, model: models/ranker/R-198-lr.json}
+R-198-gbm:       # обученный ранжировщик (#198): LightGBM LambdaMART, объяснение — pred_contrib
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}
