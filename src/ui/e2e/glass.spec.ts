@@ -25,7 +25,7 @@ test("меню сверху на телефоне; на подборе рёбр�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await nav.getByRole("link", { name: "Настройки" }).click();
   await expect(page.getByRole("heading", { name: "Настройки подбора" })).toBeVisible();
-  await expect(page.locator(".wave-field")).toHaveCount(0);
+  await expect(page.locator(".wave-field-slats .micro-slats canvas")).toBeVisible();
 });
 
 // A shared wrapper regression must be caught on work pages as well as the hero.
