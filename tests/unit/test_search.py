@@ -325,6 +325,23 @@ def test_tie_break_bm25_orders_equal_scores_by_similarity(search_data):
     assert fits == sorted(fits, reverse=True)
 
 
+def test_tie_break_wins_orders_equal_scores_by_wins_then_lots_and_says_so(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    zero = {"product_fit": 0.0, "experience": 0.0, "activity": 0.0, "geography": 0.0}  # every score ties at 0
+    found = search(q, weights=zero, config=_cfg(tie_break="wins"))
+    assert len(found) > 1
+    pairs = []
+    for m in found:
+        exp = comp(m, "experience").explanation
+        assert "при равной оценке порядок решают победы" in exp
+        lots, wins = (int(x) for x in re.findall(r"(\d+) лот\(ов\).*побед: (\d+)", exp)[0])
+        pairs.append((wins, lots))
+    assert pairs == sorted(pairs, reverse=True)
+    # a unique score carries no tie note
+    alone = search(q, config=_cfg(tie_break="wins"))
+    assert any("при равной оценке" not in comp(m, "experience").explanation for m in alone) or len(alone) == 1
+
+
 def _sole_trader(kpp):
     from src.contracts import Counterparty
     return Counterparty(inn="780100000090", kpp=kpp, name="ИНН 780100000090")

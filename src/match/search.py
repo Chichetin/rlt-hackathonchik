@@ -83,7 +83,7 @@ UNAVAILABLE = {
 OPTIONS: dict[str, tuple] = {
     "fit_bm25_share": (FIT_BM25_SHARE, None),  # share of BM25 in product_fit, [0, 1]
     "experience_by": ("class", ("class", "similar")),  # lots in the OKPD2 group | lots with similar positions
-    "tie_break": ("inn", ("inn", "bm25")),  # order of equal scores
+    "tie_break": ("inn", ("inn", "bm25", "wins")),  # order of equal scores (wins: wins, lots, BM25, #278)
     # lots / wins at which experience reaches 1.0 (#196): low caps make active suppliers indistinguishable
     "sat_lots": (SAT_LOTS, None),
     "sat_wins": (SAT_WINS, None),
@@ -278,13 +278,17 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
                    f"{label(_prefix(c.okpd_code, c.okpd_level))}")
 
 
-def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class",
-                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS) -> tuple[float, str]:
+def _experience_counts(c: Candidate, codes: list[str], by: str) -> tuple[int, int, str]:
+    """(lots, wins, what) behind the experience value — the numbers its explanation and tie_break: wins use."""
     if codes and by == "class":
         groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
-        lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
-    else:
-        lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
+        return c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
+    return c.n_lots, c.n_wins, "с похожими позициями"
+
+
+def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class",
+                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS) -> tuple[float, str]:
+    lots, wins, what = _experience_counts(c, codes, by)
     value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(wins, sat_wins)
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
@@ -307,6 +311,25 @@ def _profile_note(cp: Counterparty) -> str:
     if isinstance(classes, (int, float)) and classes >= WIDE_CLASSES and share < WIDE_TOP_SHARE:
         return f"; широкий ассортимент: {int(classes)} классов ОКПД2"
     return ""
+
+
+def _explain_ties(out: list[CounterpartyMatch], counts: dict[int, tuple[int, int]]) -> list[CounterpartyMatch]:
+    """Name the order of equal scores in the experience explanation (tie_break: wins, #278).
+
+    A match whose score equals a neighbour's gets «при равной оценке порядок решают победы и лоты:
+    N побед, M лотов» — so the customer sees why the first of the equal ones is above the tenth.
+    """
+    res = list(out)
+    for i, m in enumerate(out):
+        tied = (i > 0 and out[i - 1].score == m.score) or (i + 1 < len(out) and out[i + 1].score == m.score)
+        if not tied:
+            continue
+        wins, lots = counts[id(m)]
+        note = f"; при равной оценке порядок решают победы, затем лоты: {wins} побед, {lots} лотов"
+        comps = [c.model_copy(update={"explanation": c.explanation + note}) if c.name == "experience" else c
+                 for c in m.components]
+        res[i] = m.model_copy(update={"components": comps})
+    return res
 
 
 def _activity(cp: Counterparty, ref: date | None, as_of: date | None) -> tuple[float, str]:
@@ -451,6 +474,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
+    counts_of: list[tuple[int, int]] = []  # (wins, lots) behind experience, for tie_break: wins
     target, target_note = customer_region(query)  # «География» against the customer's region (#218)
     for c in cands:
         cp = parties.get(c.inn)
@@ -485,7 +509,15 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         out.append(CounterpartyMatch(counterparty=cp, score=round(sum(x.value * x.weight for x in comps), 4),
                                      components=comps, origin="history"))
         bm25_of.append(c.bm25)
-    if opts["tie_break"] == "bm25":
+        lots_n, wins_n, _ = _experience_counts(c, codes, opts["experience_by"])
+        counts_of.append((wins_n, lots_n))
+    if opts["tie_break"] == "wins":
+        # equal score: more wins, then more lots in the same group, then BM25; INN only on a full tie (#278)
+        keys = {id(m): (w_l, s) for m, w_l, s in zip(out, counts_of, bm25_of, strict=True)}
+        out.sort(key=lambda m: (-m.score, -keys[id(m)][0][0], -keys[id(m)][0][1], -keys[id(m)][1],
+                                m.counterparty.inn or "~"))
+        out = _explain_ties(out[:k + 1], {i: v[0] for i, v in keys.items()})[:k]
+    elif opts["tie_break"] == "bm25":
         sims = {id(m): s for m, s in zip(out, bm25_of, strict=True)}
         out.sort(key=lambda m: (-m.score, -sims[id(m)], m.counterparty.inn or "~"))
     else:
