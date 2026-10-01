@@ -27,18 +27,16 @@ function HeroMark() {
   </motion.div>;
 }
 
-/** The first scroll down on the landing goes straight to the search page (#172). */
+/** The first scroll down from the top of the landing goes straight to the search page (#172).
+ *  Further down (after «Посмотреть возможности») the page scrolls as usual. */
 function useScrollToSearch(onStart: () => void) {
   useEffect(() => {
-    let done = false;
     let touchY: number | null = null;
-    const start = () => {
-      if (done) return;
-      done = true;
-      onStart();
-    };
+    // the landing stays mounted ~0.2 s during the exit animation: act only while "/" is the current page
+    const atTop = () => window.location.pathname === "/" && window.scrollY <= 2;
+    const start = () => onStart();
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY > 8 && !e.ctrlKey) {
+      if (e.deltaY > 8 && !e.ctrlKey && atTop()) {
         e.preventDefault();
         start();
       }
@@ -46,11 +44,12 @@ function useScrollToSearch(onStart: () => void) {
     const onTouchStart = (e: TouchEvent) => { touchY = e.touches[0]?.clientY ?? null; };
     const onTouchMove = (e: TouchEvent) => {
       const y = e.touches[0]?.clientY;
-      if (touchY != null && y != null && touchY - y > 40) start();
+      if (touchY != null && y != null && touchY - y > 40 && atTop()) start();
     };
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName))) return;
+      if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || !atTop()) return;
       if (["ArrowDown", "PageDown", " ", "End"].includes(e.key)) {
         e.preventDefault();
         start();
@@ -88,7 +87,7 @@ export function Landing({ searchLink, aboutLink, onStart }: { searchLink: LinkPr
           </div>
         </motion.div>
       </div>
-      <HeroMark />
+      <div className="hero-object"><div className="hero-object-glass"><HeroMark /><span>Митрандир</span></div><div className="hero-object-caption"><span />Закупка. Поиск. Совпадение.</div></div>
     </section>
 
     <section id="possibilities" className="landing-section" aria-labelledby="possibilities-title">

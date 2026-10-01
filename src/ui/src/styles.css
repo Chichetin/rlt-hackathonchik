@@ -563,3 +563,4 @@ html { scroll-padding-top: 80px; }
 .m-split-cool { stroke: #63d9ff; }
 @keyframes glint-turn { to { --glint: 570deg; } }
 @media (prefers-reduced-motion: reduce) { .glass-diamond::after { animation: none; } }
+.hero-mark .glass-m { width: 74%; filter: drop-shadow(0 0 10px #dfe8ff55); }

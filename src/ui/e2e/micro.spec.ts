@@ -8,10 +8,8 @@ test("волны двигаются, reduced motion останавливает �
   const moving = await pixels();
   await expect.poll(pixels).not.toBe(moving);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.waitForTimeout(100);
-  const reduced = await pixels();
-  await page.waitForTimeout(180);
-  expect(await pixels()).toBe(reduced);
+  // two equal frames in a row: the loop has stopped
+  await expect.poll(async () => { const a = await pixels(); await page.waitForTimeout(120); return a === await pixels(); }).toBe(true);
 });
 
 test("колесо выбирает запрос с клавиатуры и сохраняет свободный ввод", async ({ page }) => {
@@ -60,4 +58,23 @@ test("прокрутка на главной сразу ведёт в «Подб
   await page.goto("/");
   await page.locator("body").press("ArrowDown");
   await expect(page).toHaveURL(/\/search$/);
+});
+
+test("ниже верха главной прокрутка обычная: «Посмотреть возможности» дочитывается", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Посмотреть возможности" }).click();
+  await expect(page.locator("#possibilities")).toBeInViewport();
+  await page.mouse.move(400, 400);
+  await page.mouse.wheel(0, 400);
+  await page.waitForTimeout(200);
+  expect(new URL(page.url()).pathname).toBe("/");
+  // ctrl+wheel is zoom, Shift+Space scrolls up: neither leaves the landing
+  await page.goto("/");
+  await page.mouse.move(400, 400);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, 400);
+  await page.keyboard.up("Control");
+  await page.locator("body").press("Shift+Space");
+  await page.waitForTimeout(200);
+  expect(new URL(page.url()).pathname).toBe("/");
 });
