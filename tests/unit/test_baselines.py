@@ -250,3 +250,28 @@ def test_compare_is_paired_by_query_id(tmp_path, capsys):
         (tmp_path / f"{rec['exp_id']}.json").write_text(json.dumps(rec), encoding="utf-8")
     assert C.main(["A", "B"], results=tmp_path) == 0
     assert "winner=new" in capsys.readouterr().out
+
+
+def test_lost_relevant_only_where_other_run_is_better():
+    from src.eval.lost import lost_relevant
+
+    a = {"per_query": [{"query_id": "q1", "recall@10": 0.0, "ranked": ["x", "y"]},
+                       {"query_id": "q2", "recall@10": 1.0, "ranked": ["r2"]}]}
+    b = {"per_query": [{"query_id": "q1", "recall@10": 0.5, "ranked": ["r1", "x", "n1"]},
+                       {"query_id": "q2", "recall@10": 1.0, "ranked": ["r2"]}]}
+    rel = {"q1": {"r1", "missing"}, "q2": {"r2"}}
+    assert lost_relevant(a, b, rel) == [("q1", "r1")]  # n1 is not relevant, q2 is a tie
+    assert lost_relevant(b, a, rel) == []
+
+
+def test_lost_explain_on_fixture(hist):
+    from src.eval.lost import explain
+
+    c = case(6, "7801000051", {"7802000020": 2})
+    assert explain([], {c.query.query_id: c}, CUTOFF)["lost"] == 0
+    matches = R.search_mod.search(R.with_cutoff(c.query, CUTOFF), k=200)
+    last = matches[-1].counterparty.inn
+    assert last is not None
+    rec = explain([(c.query.query_id, last)], {c.query.query_id: c}, CUTOFF, k=1)
+    assert rec["cases"] == 1 and rec["rank"]["median"] == len(matches)
+    assert set(rec["component_delta"]) == {"product_fit", "experience", "activity", "geography"}
