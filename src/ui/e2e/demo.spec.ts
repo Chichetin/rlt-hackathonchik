@@ -63,7 +63,7 @@ test("демо: запрос → два блока → карточка → фи
   await expect(card.locator(".evidence .fact", { hasText: /^Роль — производитель: заявленный основной ОКВЭД 17\.12/ })).toHaveCount(1);
   await card.getByRole("button", { name: "Закрыть карточку" }).click();
 
-  // 4. Фильтры (D-030). «Только производители»: в данных организаторов тип не указан — фильтр не
+  // 4. Фильтры (D-030). Чип «Производители» (#232): в данных организаторов роль не указана — фильтр не
   // угадывает, а говорит, у скольких признак неизвестен; в блоке «Новые» роль определена по основному
   // ОКВЭД из реестра МСП (D-057) — остаются производители, дистрибьюторы скрыты.
   const makers = page.waitForResponse(
@@ -71,17 +71,32 @@ test("демо: запрос → два блока → карточка → фи
       new URL(r.url()).pathname === "/api/search" &&
       JSON.parse(r.request().postData() ?? "{}").filters?.only_manufacturers === true,
   );
-  await page.getByLabel("Только производители").check();
+  await page.getByRole("checkbox", { name: /Производители/ }).check();
   const onlyMakers = await (await makers).json();
   expect(onlyMakers.discovered.length).toBeGreaterThan(0);
   for (const m of onlyMakers.discovered) expect(m.counterparty.kind).toBe("manufacturer");
   await expect(page.locator(".filternote")).toHaveText(
-    /^Тип поставщика ещё не определён у \d+ из \d+ — признак появится после обогащения\.$/,
+    /^Роль ещё не определена у \d+ из \d+ — признак появится после обогащения; они скрыты фильтром роли\.$/,
   );
   await expect(history.locator(".empty")).toContainText("у кандидатов этот признак ещё не известен");
   await expect(discovered.locator(".item")).toHaveCount(onlyMakers.discovered.length);
-  for (const meta of await discovered.locator(".item .meta").allTextContents()) expect(meta).toMatch(/^Производитель · /);
-  await page.getByLabel("Только производители").uncheck();
+  for (const role of await discovered.locator(".item .role-badge").allTextContents()) expect(role).toBe("Производитель");
+  await page.getByRole("checkbox", { name: /Производители/ }).uncheck();
+  await expect(history.locator(".item").first()).toBeVisible();
+
+  // 4а. Роль чипами (#232): «Дистрибьюторы» — в выдаче только дистрибьюторы, бейдж роли в каждой строке
+  const distributors = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === "/api/search" &&
+      JSON.parse(r.request().postData() ?? "{}").filters?.kinds === "distributor",
+  );
+  await page.getByRole("checkbox", { name: /Дистрибьюторы/ }).check();
+  const onlyDist = await (await distributors).json();
+  expect(onlyDist.discovered.length).toBeGreaterThan(0);
+  for (const m of [...onlyDist.history, ...onlyDist.discovered]) expect(m.counterparty.kind).toBe("distributor");
+  await expect(discovered.locator(".item")).toHaveCount(onlyDist.discovered.length);
+  for (const role of await page.locator(".results .item .role-badge").allTextContents()) expect(role).toBe("Дистрибьютор");
+  await page.getByRole("checkbox", { name: /Дистрибьюторы/ }).uncheck();
   await expect(history.locator(".item").first()).toBeVisible();
 
   // «Регион»: по реестру, иначе по КПП (78 — СПб; src/match/filters.py::in_region); остаются строки,

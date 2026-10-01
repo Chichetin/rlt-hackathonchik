@@ -1,6 +1,7 @@
 // Клиент API. Типы — из OpenAPI (src/api-types.ts генерирует `make openapi` из src/contracts.py);
 // руками типы контрактов не дублируем.
 import type { components } from "./api-types";
+import { KINDS, minScore, type Kind, type MinLevel } from "./roles";
 
 export type Query = components["schemas"]["Query"];
 export type SearchResponse = components["schemas"]["SearchResponse"];
@@ -9,16 +10,40 @@ export type Counterparty = components["schemas"]["Counterparty"];
 export type Evidence = components["schemas"]["Evidence"];
 export type ScoreComponent = components["schemas"]["ScoreComponent"];
 
-export type Filters = { only_msp: boolean; only_manufacturers: boolean; region: string };
+// #232: the role is a multiple choice (chips), plus ЮЛ / ИП and the minimal relevance level
+export type Filters = { only_msp: boolean; kinds: Kind[]; entity: "" | "ul" | "ip"; min_level: MinLevel; region: string };
+export const NO_FILTERS: Filters = { only_msp: false, kinds: [], entity: "", min_level: "", region: "" };
+
+/** Filters from storage of an older version (one «Только производители» box) or partial — always complete. */
+export function normalizeFilters(raw: unknown): Filters {
+  const f = (raw ?? {}) as Partial<Filters> & { only_manufacturers?: boolean };
+  const kinds = Array.isArray(f.kinds) ? f.kinds.filter((k): k is Kind => KINDS.includes(k as Kind)) : f.only_manufacturers ? ["manufacturer" as Kind] : [];
+  return {
+    only_msp: !!f.only_msp,
+    kinds,
+    entity: f.entity === "ul" || f.entity === "ip" ? f.entity : "",
+    min_level: f.min_level === "mid" || f.min_level === "high" ? f.min_level : "",
+    region: typeof f.region === "string" ? f.region : "",
+  };
+}
+
+export function filtersActive(f: Filters): boolean {
+  return f.only_msp || f.kinds.length > 0 || !!f.entity || !!f.min_level || !!f.region;
+}
 
 // Поля закупки, которые не вводятся руками: приходят из извещения (okpd2, канал, ИНН заказчика).
 export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "budget">;
 export type Extra = { budget: string; customer_inn: string; lot: LotContext | null; query_id?: string };
 
 export function buildQuery(text: string, filters: Filters, extra?: Extra): Query {
-  const f: Record<string, string | boolean> = {};
+  const f: Record<string, string | boolean | number> = {};
   if (filters.only_msp) f.only_msp = true;
-  if (filters.only_manufacturers) f.only_manufacturers = true;
+  if (filters.kinds.length) f.kinds = filters.kinds.join(",");
+  // the old single box stays a synonym on the server (#232): only «Производитель» chosen — send both
+  if (filters.kinds.length === 1 && filters.kinds[0] === "manufacturer") f.only_manufacturers = true;
+  if (filters.entity) f.entity = filters.entity;
+  const min = minScore(filters.min_level);
+  if (min !== undefined) f.min_score = min;
   if (filters.region) f.region = filters.region;
   const q: Query = { query_id: extra?.query_id ?? `ui-${Date.now()}`, text: text.trim(), filters: f, region: "Санкт-Петербург" };
   if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
@@ -83,7 +108,7 @@ export const PAGE = 20;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
-export type SearchPage = SearchResponse & { total: Totals; note?: string };
+export type SearchPage = SearchResponse & { total: Totals; note?: string; facets?: Facets };
 
 function searchNote(r: Response): string | undefined {
   const raw = r.headers.get("X-Search-Note");
@@ -107,7 +132,28 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
     ...body,
     total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
     note: searchNote(r),
+    facets: facets(r),
   };
+}
+
+// Counts for the chips (#232): X-Facets over every candidate before the user filters, per block
+export type FacetCounts = { kind: Partial<Record<string, number>>; entity: Partial<Record<string, number>> };
+export type Facets = { history?: FacetCounts; discovered?: FacetCounts };
+
+function facets(r: Response): Facets | undefined {
+  const raw = r.headers.get("X-Facets");
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as Facets;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Chip count: the role in both blocks; undefined when the server sends no facets. */
+export function facetCount(f: Facets | undefined, group: "kind" | "entity", key: string): number | undefined {
+  if (!f) return undefined;
+  return (f.history?.[group]?.[key] ?? 0) + (f.discovered?.[group]?.[key] ?? 0);
 }
 
 export async function exportXlsx(q: Query): Promise<void> {
@@ -132,7 +178,7 @@ export const KIND_LABEL: Record<string, string> = {
   manufacturer: "Производитель",
   distributor: "Дистрибьютор",
   dealer: "Дилер",
-  unknown: "Тип не определён",
+  unknown: "Роль не определена", // the same words in the chips, the card and Excel (#232)
 };
 
 export function yesNo(v: boolean | null | undefined): string {
@@ -157,17 +203,21 @@ export function filterNotes(base: SearchResponse | null, f: Filters): string[] {
   const total = rows.length;
   const notes: string[] = [];
   const unknown = (pred: (cp: Counterparty) => boolean) => rows.filter((m) => pred(m.counterparty)).length;
-  if (f.only_manufacturers) {
+  if (f.kinds.length && !f.kinds.includes("unknown")) {
     // kind = null: no main OKVED yet, the role appears after enrichment; "unknown": the rule (D-057) was
     // applied to the main OKVED and set no role — the basis is in the card, enrichment will not change it
     const n = unknown((cp) => !cp.kind);
-    if (n) notes.push(`Тип поставщика ещё не определён у ${n} из ${total} — признак появится после обогащения.`);
+    if (n) notes.push(`Роль ещё не определена у ${n} из ${total} — признак появится после обогащения; они скрыты фильтром роли.`);
     const u = unknown((cp) => cp.kind === "unknown");
     if (u) {
       notes.push(
-        `У ${u} из ${total} основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).`,
+        `У ${u} из ${total} основной ОКВЭД — не производство и не торговля: роль по нему не определяется (основание — в карточке). Чип «Роль не определена» покажет их.`,
       );
     }
+  }
+  if (f.entity) {
+    const n = unknown((cp) => !cp.inn);
+    if (n) notes.push(`ИНН не подтверждён у ${n} из ${total} — ЮЛ это или ИП, не известно; они скрыты фильтром.`);
   }
   if (f.only_msp) {
     const n = unknown((cp) => cp.is_msp == null);
