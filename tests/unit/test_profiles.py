@@ -120,9 +120,15 @@ def test_search_off_matches_v1(search_data):
     assert all("профиль весов" not in c.explanation for m in base for c in m.components)
 
 
+def _geo_weighted() -> dict:
+    """The product config with geography weight 0.1 (D-077 has 0): the profile has something to change."""
+    cfg = search_mod.load_config()
+    return {**cfg, "weights": {**cfg["weights"], "geography": 0.1}}
+
+
 def test_search_services_profile_zeroes_geography(search_data):
     q = Query(query_id="q", text="ремонт кондиционеров", as_of=CUTOFF)  # positions vote 33.12 -> services
-    cfg = search_mod.load_config()
+    cfg = _geo_weighted()
     base = {m.counterparty.inn: m for m in search(q, config=cfg)}
     res = search(q, config={**cfg, **ON})
     assert res and set(base) == {m.counterparty.inn for m in res}
@@ -140,7 +146,7 @@ def test_search_services_profile_zeroes_geography(search_data):
 
 def test_search_goods_profile_keeps_scores(search_data):
     q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"], as_of=CUTOFF)
-    cfg = search_mod.load_config()
+    cfg = _geo_weighted()
     base = search(q, config=cfg)
     res = search(q, config={**cfg, **ON})
     assert [(m.counterparty.inn, m.score) for m in res] == [(m.counterparty.inn, m.score) for m in base]
@@ -189,3 +195,18 @@ def test_compare_slices_by_type_against_older_result_and_shows_both_values(tmp_p
     assert C.main(["NEW", "OLD"], results=tmp_path) == 0
     out = capsys.readouterr().out
     assert "type=services" in out and "0.500 → 1.000" in out
+
+
+def test_profile_experiment_reproduces_its_recorded_config():
+    """make eval EXP=H-104b gives the configuration stored in eval/results/H-104b.json (slide numbers)."""
+    import json
+
+    from src.eval import run as R
+    from src.match.signals import signal_shares
+
+    rec = json.loads((R.RESULTS / "H-104b.json").read_text(encoding="utf-8"))["config"]
+    cfg = R.load_method_config("H-104b")
+    assert cfg["weights"] == rec["weights"] and profile_overrides(cfg) == profile_overrides(rec)
+    assert search_mod.scoring_options(cfg) == search_mod.scoring_options(rec)
+    assert signal_shares(cfg) == signal_shares(rec)
+    assert profile_overrides(cfg) == {"goods": {"geography": 0.05}}
