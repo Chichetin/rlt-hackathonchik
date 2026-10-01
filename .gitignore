@@ -36,3 +36,4 @@ src/ui/playwright-report/
 
 # make predict output (INN lists, incl. individuals) — not committed
 eval/predict/
+eval/judge/
