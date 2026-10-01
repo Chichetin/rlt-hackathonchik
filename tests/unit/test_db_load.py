@@ -19,7 +19,7 @@ FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
 URL = os.environ.get("TEST_DATABASE_URL", "")
 SCHEMA = "test_load"  # never the app schema `data`
 
-pytestmark = pytest.mark.skipif(not URL.startswith("postgres"), reason="TEST_DATABASE_URL не задан")
+needs_pg = pytest.mark.skipif(not URL.startswith("postgres"), reason="TEST_DATABASE_URL не задан")
 
 
 @pytest.fixture(scope="module")
@@ -32,6 +32,8 @@ def processed(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture(scope="module", autouse=True)
 def _drop_test_schema():
     yield
+    if not URL.startswith("postgres"):
+        return
     con = duckdb.connect()
     con.execute("LOAD postgres")
     con.execute(f"ATTACH '{pg_dsn(URL)}' AS pg (TYPE postgres)")
@@ -45,6 +47,7 @@ def _pg(sql: str) -> list[tuple]:
     return con.execute(f"SELECT * FROM postgres_query('pg', $${sql}$$)").fetchall()
 
 
+@needs_pg
 def test_load_counts_match_parquet_and_rerun_is_idempotent(processed: Path) -> None:
     first = load(processed, URL, schema=SCHEMA)
     second = load(processed, URL, schema=SCHEMA)
@@ -59,6 +62,7 @@ def test_load_counts_match_parquet_and_rerun_is_idempotent(processed: Path) -> N
     assert _pg(f"SELECT count(*) FROM pg_namespace WHERE nspname = '{SCHEMA}_new'") == [(0,)]
 
 
+@needs_pg
 def test_indexes_for_filters_and_lookup(processed: Path) -> None:
     load(processed, URL, schema=SCHEMA)
     names = {r[0] for r in _pg(f"SELECT indexname FROM pg_indexes WHERE schemaname = '{SCHEMA}'")}
@@ -68,6 +72,7 @@ def test_indexes_for_filters_and_lookup(processed: Path) -> None:
     assert _pg(f"SELECT built_at IS NOT NULL FROM {SCHEMA}.manifest") == [(True,)]
 
 
+@needs_pg
 def test_count_mismatch_keeps_previous_schema(processed: Path, tmp_path: Path) -> None:
     load(processed, URL, schema=SCHEMA)
     bad = tmp_path / "bad"

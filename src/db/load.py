@@ -92,7 +92,7 @@ def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
     pg(f"INSERT INTO {new}.manifest VALUES ({_lit(manifest['built_at'])}, {_lit(json.dumps(manifest))})")
     for name in tables:
         pg(f"ANALYZE {new}.{name}")  # statistics survive the rename
-    # One simple-query string = one implicit transaction in Postgres: readers see the old or the new schema.
+    # DROP and RENAME run in one transaction (DuckDB's on the attached database): readers see the old or the new schema.
     pg(f"DROP SCHEMA IF EXISTS {schema} CASCADE; ALTER SCHEMA {new} RENAME TO {schema}")
     return counts
 
