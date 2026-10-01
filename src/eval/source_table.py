@@ -4,7 +4,8 @@
 
 Reads ONLY the SQLite cache of src/sources/cache.py (read-only, no network): every row of the table
 is something the cache holds, with the fetched_at of the answers (min / max) and, for the МСП registry,
-the date of the registry itself (`answer.dtQueryEnd`). An empty cache of a source is a row of zeros
+the registry's own timestamp of the answer (`answer.dtQueryEnd`: the data are as of this moment).
+An empty cache of a source is a row of zeros
 with a note, not an invented number.
 
 Columns:
@@ -13,7 +14,8 @@ Columns:
 - verified: found AND INN checksum valid AND the INN literally on the cached page (the Evidence rule of
   src/enrich/evidence.py) AND the source says «действующее» (rmsp is_active, pb status, bo ACTIVE);
 - dropped: the rest by reason; `new`: verified and absent from organizers' data (rmsp search only).
-estore is the primary source of the organizers' data: a row «сверка» (pages counted, not parsed), never a source of new companies (D-061).
+estore is the primary source of the organizers' data: a row «сверка» (pages counted, not parsed),
+never a source of new companies (D-061).
 """
 
 from __future__ import annotations

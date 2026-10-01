@@ -88,8 +88,9 @@ def test_pb_status_decides(cache):
 
 def test_bo_active_vs_other_vs_absent(cache):
     a, b, c = "7805772436", "7807032363", "7804428656"
-    cache.put(bo_nalog.search_url(a), bo_nalog.flatten(a, {"content": [{"inn": a, "statusCode": "ACTIVE"}]}), fetched_at=T0)
-    cache.put(bo_nalog.search_url(b), bo_nalog.flatten(b, {"content": [{"inn": b, "statusCode": "LIQUIDATED"}]}), fetched_at=T0)
+    for inn, code in ((a, "ACTIVE"), (b, "LIQUIDATED")):
+        cache.put(bo_nalog.search_url(inn), bo_nalog.flatten(inn, {"content": [{"inn": inn, "statusCode": code}]}),
+                  fetched_at=T0)
     cache.put(bo_nalog.search_url(c), bo_nalog.flatten(c, {"content": []}), fetched_at=T0)
     row = table(cache)["bo.nalog.gov.ru"]
     assert (row.requests, row.found, row.verified) == (3, 2, 1)

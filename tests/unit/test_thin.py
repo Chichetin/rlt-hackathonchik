@@ -10,6 +10,7 @@ import pytest
 
 from src.eval import thin as T
 
+
 def make_inn(base: str) -> str:
     """10-digit legal-entity INN from 9 digits: the checksum digit of the tax service."""
     w = (2, 4, 10, 3, 5, 9, 4, 6, 8)

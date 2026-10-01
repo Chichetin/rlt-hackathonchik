@@ -163,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     manifest = processed / "manifest.json"
     source = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
+    source.pop("raw_dir", None)  # a local path of the machine that built the data: not for a committed file
     rec = build_record(args.exp, groups, t, cutoff, args.channel, args.top, {"manifest": source})
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"

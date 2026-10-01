@@ -99,8 +99,8 @@ def run(groups: list[dict], cache: SourceCache, *, offline: bool, max_live: int,
     used = 0
     for g in groups:
         if not offline and used + per_group_cap > max_live:
-            print(f"! {g['okpd2']}: до лимита {max_live} живых запросов осталось < {per_group_cap}; группа не запускалась",
-                  file=sys.stderr)
+            print(f"! {g['okpd2']}: до лимита {max_live} живых запросов осталось < {per_group_cap}; "
+                  "группа не запускалась", file=sys.stderr)
             break
         r = run_group(g, cache, offline=offline, processed=processed, discover_fn=discover_fn)
         results.append(r)
@@ -119,7 +119,9 @@ def build_record(exp_id: str, thin_id: str, results: list[GroupResult], *, offli
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": git("rev-parse", "HEAD"),
         "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
-        "config": {"thin_result": thin_id, "block_cap_lifted": f"в блоке /api/search не более {D.MAX_SHOWN}, здесь считаются все", "groups": [r.okpd2 for r in results], "offline": offline,
+        "config": {"thin_result": thin_id,
+                   "block_cap_lifted": f"в блоке /api/search не более {D.MAX_SHOWN}, здесь считаются все",
+                   "groups": [r.okpd2 for r in results], "offline": offline,
                    "max_live_requests": max_live, "source": "rmsp.nalog.ru (D-036, D-037)",
                    "regions": "СПб и соседний регион запроса (ЛО), только ЮЛ"},
         "metrics": {
@@ -158,10 +160,12 @@ def main(argv: list[str] | None = None) -> int:
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print("ОКПД2  поставщиков в данных (ЭМ) | новых найдено | Evidence прошло | уже в данных | исключены | живых запросов")
+    print("ОКПД2  поставщиков в данных (ЭМ) | новых найдено | Evidence прошло | уже в данных | исключены "
+          "| живых запросов")
     for r in results:
         print(f"{r.okpd2:6} {r.suppliers_before:10} {r.new_found:18} {r.evidence_passed:14} {r.known:14} "
-              f"{r.inactive:10} {r.live_requests:8}" + ("" if r.history_checked else "  (сверка с данными не выполнена)"))
+              f"{r.inactive:10} {r.live_requests:8}"
+              + ("" if r.history_checked else "  (сверка с данными не выполнена)"))
     m = rec["metrics"]
     print(f"ИТОГО: групп {m['groups']}, новых с Evidence {m['evidence_passed']} из {m['new_found']} найденных, "
           f"живых запросов {m['live_requests']}")
