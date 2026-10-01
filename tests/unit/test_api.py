@@ -52,6 +52,30 @@ def test_search_rejects_empty_text(client):
     assert client.post("/api/search", json={"query_id": "q", "text": ""}).status_code == 422
 
 
+def test_search_rejects_client_as_of_without_building_an_index(search_client, search_data):
+    """as_of is the backtest knob (eval calls search() directly). Through the API a client date built a new BM25
+    index for that date under the global index lock: on the full data 46 s and 110 MB per date, every other
+    search waiting (40 s instead of 0.5 s), then 503 (#145, docs/REVIEW.md F-01)."""
+    import os
+    from pathlib import Path
+
+    for path in ("/api/search", "/api/export"):
+        r = search_client.post(path, json={"query_id": "q", "text": "бумага", "as_of": "2025-03-01"})
+        assert r.status_code == 422 and "as_of" in r.json()["detail"]
+    built = Path(os.environ["INDEX_DIR"])
+    assert not built.exists() or not any(built.iterdir())  # nothing was built for the client's date
+
+
+def test_search_rejects_oversized_text(search_client):
+    """Unbounded text held a worker: 1 MB — 18 s on the full data; the longest eval query is 4.5k chars (#145, F-02)."""
+    big = "бумага офисная " * 1400  # 21 000 chars
+    for path in ("/api/search", "/api/export"):
+        r = search_client.post(path, json={"query_id": "q", "text": big})
+        assert r.status_code == 422 and "символов" in r.json()["detail"]
+    fits = search_client.post("/api/search", json={"query_id": "q", "text": "бумага офисная " * 1300})  # 19 500
+    assert fits.status_code == 200 and fits.json()["history"]
+
+
 def test_search_pages_on_server_with_totals(search_client):
     q = {"query_id": "q", "text": "бумага"}
     full = search_client.post("/api/search", json=q)
@@ -126,7 +150,8 @@ def test_export_xlsx(search_client):
 
 
 def test_export_kind_column_in_russian(client, monkeypatch):
-    """«Тип» of the xlsx: the captions of the UI (KIND_LABEL in src/ui/src/api.ts), not the contract's keys (#102)."""
+    """«Роль» of the xlsx: the captions of the UI (KIND_LABEL in src/ui/src/api.ts), not the contract's keys (#102,
+    #232: the column and «не определена» are called «Роль», as the chips)."""
     from src.match import search as search_mod
     kinds = ["manufacturer", "distributor", "dealer", "unknown", None, "not-a-kind"]  # last: a code from the future
     matches = []
@@ -139,9 +164,9 @@ def test_export_kind_column_in_russian(client, monkeypatch):
     r = client.post("/api/export", json={"query_id": "q", "text": "x"})
     ws = load_workbook(io.BytesIO(r.content)).active
     assert ws is not None
-    assert [c.value for c in ws[1]][3] == "Тип"
+    assert [c.value for c in ws[1]][3] == "Роль"
     assert [ws.cell(row=row, column=4).value for row in range(2, ws.max_row + 1)] == [
-        "Производитель", "Дистрибьютор", "Дилер", "Тип не определён", "Тип не определён", "Тип не определён"]
+        "Производитель", "Дистрибьютор", "Дилер", "Роль не определена", "Роль не определена", "Роль не определена"]
 
 
 def test_openapi_has_contracts(client):
@@ -221,14 +246,20 @@ def test_lot_unparsable_price_gives_no_budget(client, monkeypatch, tmp_path):
     assert q["budget"] is None and q["customer_inn"] is None and q["okpd2"] == []
 
 
-def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path):
+@pytest.mark.parametrize(("procedure", "text"), [
+    ("Поставка картриджей", "Поставка картриджей"),
+    ("Закупка, осуществляемая в соответствии с частью 12 статьи 93", "Картридж; Тонер"),  # #113: both templates
+])
+def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path, procedure, text):
     (tmp_path / "Извещения_t.csv").write_text(
         "lot_id;reqnum;procedure_name;subject;start_price;customer_inn;is_eshop_or_aisgz\n"
-        "7;;Поставка картриджей;Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
+        f"7;;{procedure};Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
         encoding="utf-8",
     )
+    (tmp_path / "ТРУ_t.csv").write_text("lot_id;product_name;okpd2_code\n7;Тонер;20.59\n7;Картридж;26.20\n",
+                                        encoding="utf-8")
     monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
-    assert client.get("/api/lot/7").json()["text"] == "Поставка картриджей"
+    assert client.get("/api/lot/7").json()["text"] == text
 
 
 def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
@@ -252,3 +283,175 @@ def test_health_stub_flag_follows_demo_fixture_env(client, monkeypatch):
     assert client.get("/api/health").json()["stub"] is False
     monkeypatch.setenv("DEMO_FIXTURE", "1")
     assert client.get("/api/health").json()["stub"] is True
+
+
+def test_okpd2_labels_for_ui(client):
+    r = client.get("/api/okpd2", params={"codes": "17.12.14.110, 80.10.12.000,99.99.99.999,,"})
+    assert r.status_code == 200
+    assert r.json() == {"17.12.14.110": "17.12.14.110 «Бумага для печати»",
+                        "80.10.12.000": "80.10.12.000 (по 80.10.12 «Услуги охраны»)",
+                        "99.99.99.999": "99.99.99.999"}
+    assert client.get("/api/okpd2").json() == {}
+    assert client.get("/api/okpd2", params={"codes": ",".join(f"17.12.{i}" for i in range(51))}).status_code == 422
+
+
+# --- #232: role chips (kinds), ЮЛ/ИП (entity), minimum relevance (min_score), X-Facets ---------------------------
+
+ROLE_ROWS = [  # name, kind, inn (10 digits — ЮЛ, 12 — ИП), score, status, in_rnp
+    ("Завод", "manufacturer", "7801000012", 0.9, None, None),
+    ("Опт", "distributor", "780100000090", 0.7, None, None),
+    ("Дилер", "dealer", "4701000038", 0.5, None, None),
+    ("Ремонт", "unknown", "470100000088", 0.3, None, None),
+    ("Без роли", None, None, 0.2, None, None),
+    ("Ликвидирован", "manufacturer", "7801000020", 0.95, "В процессе ликвидации", None),
+    ("В РНП", "distributor", "4703173460", 0.85, None, True),
+]
+ZERO = {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 0},
+        "entity": {"ul": 0, "ip": 0, "unknown": 0}}
+
+
+def _role_rows() -> list[CounterpartyMatch]:
+    return [CounterpartyMatch(
+        counterparty=Counterparty(inn=inn, name=name, kind=kind, status=status, in_rnp=rnp),  # type: ignore[arg-type]
+        score=score, origin="history",
+        components=[ScoreComponent(name="product_fit", value=score, weight=1, explanation="x")])
+        for name, kind, inn, score, status, rnp in ROLE_ROWS]
+
+
+@pytest.fixture
+def roles_client(client, monkeypatch):
+    """The search answers ROLE_ROWS; stub path — no cache, no discovery: only the filters are under test."""
+    from src.match import search as search_mod
+    monkeypatch.setattr(search_mod, "IS_STUB", True)
+    monkeypatch.setattr(search_mod, "search", lambda q, k=20: _role_rows())
+    return client
+
+
+def _names(client, **filters) -> list[str]:
+    r = client.post("/api/search", json={"query_id": "q", "text": "x", "filters": filters})
+    assert r.status_code == 200, r.text
+    names = [m["counterparty"]["name"] for m in r.json()["history"]]
+    assert r.headers["X-Total-History"] == str(len(names))
+    return names
+
+
+def test_search_kinds_chips(roles_client):
+    assert _names(roles_client) == ["Завод", "Опт", "Дилер", "Ремонт", "Без роли"]  # liquidated / RNP — never
+    assert _names(roles_client, kinds="distributor") == ["Опт"]
+    assert _names(roles_client, kinds="manufacturer,dealer") == ["Завод", "Дилер"]
+    assert _names(roles_client, kinds="unknown") == ["Ремонт", "Без роли"]  # rule said unknown + not determined
+    assert _names(roles_client, only_manufacturers=True) == _names(roles_client, kinds="manufacturer") == ["Завод"]
+
+
+def test_search_entity_and_min_score(roles_client):
+    assert _names(roles_client, entity="ul") == ["Завод", "Дилер"]
+    assert _names(roles_client, entity="ip") == ["Опт", "Ремонт"]  # «Без роли» has no INN: not guessed
+    assert _names(roles_client, min_score=0.5) == ["Завод", "Опт", "Дилер"]  # 0.5 itself is kept
+    assert _names(roles_client, kinds="manufacturer,distributor", entity="ip", min_score=0.6) == ["Опт"]
+
+
+def test_search_entity_by_organizers_entity_type(search_client):
+    """History: stats.entity_type of organizers' data; the row with a checksum-failing INN (inn=None) is still a ЮЛ."""
+    def rows(**f):
+        body = search_client.post("/api/search", json={"query_id": "q", "text": "бумага", "filters": f}).json()
+        return [m["counterparty"]["inn"] for m in body["history"]]
+    every = rows()
+    ip = rows(entity="ip")
+    assert sorted(ip) == ["470100000088", "780100000090"]
+    assert rows(entity="ul") == [i for i in every if i not in ip] and None in rows(entity="ul")
+
+
+def test_search_min_score_on_fixture(search_client):
+    q = {"query_id": "q", "text": "бумага"}
+    scores = [m["score"] for m in search_client.post("/api/search", json=q).json()["history"]]
+    cut = scores[2]
+    kept = search_client.post("/api/search", json={**q, "filters": {"min_score": cut}})
+    got = [m["score"] for m in kept.json()["history"]]
+    assert got == [s for s in scores if s >= cut] and len(got) >= 3 and int(kept.headers["X-Total-History"]) == len(got)
+
+
+def test_search_facets_before_user_filters_after_legal_status(roles_client):
+    import json
+    q = {"query_id": "q", "text": "x", "filters": {"kinds": "distributor"}}
+    r = roles_client.post("/api/search?limit=1", json=q)
+    raw = r.headers["X-Facets"]
+    assert raw.isascii()
+    assert json.loads(raw) == {
+        "history": {"kind": {"manufacturer": 1, "distributor": 1, "dealer": 1, "unknown": 2},
+                    "entity": {"ul": 2, "ip": 2, "unknown": 1}},
+        "discovered": ZERO}
+    # facets do not depend on the filters, the page or the offset
+    other = roles_client.post("/api/search?limit=2&offset=1", json={"query_id": "q", "text": "x",
+                                                                     "filters": {"entity": "ul", "min_score": 0.8}})
+    assert json.loads(other.headers["X-Facets"]) == json.loads(raw)
+
+
+def test_search_facets_on_fixture(search_client):
+    import json
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага", "filters": {"entity": "ip"}})
+    facets = json.loads(r.headers["X-Facets"])
+    assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 6},
+                                 "entity": {"ul": 4, "ip": 2, "unknown": 0}}
+    assert r.headers["X-Total-History"] == "2"
+
+
+def test_facets_of_new_are_capped_at_the_block_size(search_client, monkeypatch):
+    """«Новые» shows at most MAX_SHOWN: a chip count is the block size when only that chip is chosen."""
+    import json
+
+    from src.enrich import discover as discover_mod
+    makers = ["7801000012", "7801000020", "7801000037", "7801000044", "7801000051", "4701000038", "7804428656",
+              "7805772436", "7807032363", "7810400592", "7811777270", "4703173460"]
+    pool = [CounterpartyMatch(counterparty=Counterparty(inn=i, name=i, kind="manufacturer"), score=0.4,
+                              origin="discovered", components=[]) for i in makers]
+    pool.append(CounterpartyMatch(counterparty=Counterparty(inn="7707049388", name="опт", kind="distributor"),
+                                  score=0.3, origin="discovered", components=[]))
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        matches=pool[:discover_mod.MAX_SHOWN], candidates=pool, history_checked=True))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert json.loads(r.headers["X-Facets"])["discovered"] == {
+        "kind": {"manufacturer": discover_mod.MAX_SHOWN, "distributor": 1, "dealer": 0, "unknown": 0},
+        "entity": {"ul": discover_mod.MAX_SHOWN, "ip": 0, "unknown": 0}}
+
+
+def test_facets_of_new_without_history_check_are_zero(search_client, monkeypatch):
+    import json
+
+    from src.enrich import discover as discover_mod
+    m = CounterpartyMatch(counterparty=Counterparty(inn="7707049388", name="опт", kind="distributor"), score=0.3,
+                          origin="discovered", components=[])
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        matches=[m], candidates=[m], history_checked=False))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.json()["discovered"] == [] and json.loads(r.headers["X-Facets"])["discovered"] == ZERO
+
+
+@pytest.mark.parametrize("filters", [{"kinds": "producer"}, {"entity": "fl"}, {"min_score": "high"}])
+def test_bad_filter_value_is_422_not_a_silent_no_filter(roles_client, filters):
+    for path in ("/api/search", "/api/export"):
+        r = roles_client.post(path, json={"query_id": "q", "text": "x", "filters": filters})
+        assert r.status_code == 422 and "filters." in r.json()["detail"]
+
+
+def _xlsx(client, **filters) -> list[dict]:
+    r = client.post("/api/export", json={"query_id": "q", "text": "x", "filters": filters})
+    assert r.status_code == 200, r.text
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    rows = list(ws.iter_rows(values_only=True))
+    return [dict(zip(rows[0], row, strict=True)) for row in rows[1:]]
+
+
+def test_export_role_and_entity_columns(roles_client):
+    rows = _xlsx(roles_client)
+    assert [(r["Наименование"], r["Роль"], r["ЮЛ/ИП"]) for r in rows] == [
+        ("Завод", "Производитель", "ЮЛ"), ("Опт", "Дистрибьютор", "ИП/ФЛ"), ("Дилер", "Дилер", "ЮЛ"),
+        ("Ремонт", "Роль не определена", "ИП/ФЛ"), ("Без роли", "Роль не определена", "не определено")]
+
+
+def test_export_takes_the_same_filters(roles_client):
+    assert [r["Наименование"] for r in _xlsx(roles_client, kinds="distributor,unknown")] == [
+        "Опт", "Ремонт", "Без роли"]
+    assert [r["Наименование"] for r in _xlsx(roles_client, entity="ip")] == ["Опт", "Ремонт"]
+    assert [r["Наименование"] for r in _xlsx(roles_client, min_score=0.5)] == ["Завод", "Опт", "Дилер"]
+    assert [r["Наименование"] for r in _xlsx(roles_client, only_manufacturers=True)] == ["Завод"]

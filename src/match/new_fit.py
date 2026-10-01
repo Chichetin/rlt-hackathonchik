@@ -171,6 +171,20 @@ def code_profile(codes: Sequence[str], processed: Path, as_of: date | None,
     return None
 
 
+def profile_gap(processed: Path, cfg: dict[str, Any] | None = None) -> str:
+    """Why `code_profile` returned None — said in the explanation, so «not computed» is not read as «0».
+
+    No `items.parquet` (a `make up` run without the organizers' parquet: the profile is read from the files,
+    not through the Store — to be moved there after the hackathon, review of #220): the profile is not built.
+    """
+    cfg = cfg or config()
+    if not (processed / "items.parquet").exists():
+        return (f"данные организаторов не загружены (нет {(processed / 'items.parquet').as_posix()}), "
+                "профиль ОКПД2 не строился")
+    return (f"в данных АИС ГЗ меньше {int(cfg['profile_min_positions'])} наименований позиций с кодом запроса и "
+            "его подгруппами (или данные не прочитались — см. лог)")
+
+
 def query_overlap(query_text: str, profile: Profile, cfg: dict[str, Any] | None = None) -> list[str]:
     """Stems shared by the query text and the OKPD2 profile. Empty — the code and the text may disagree
     (the expert's «bad case», #113): shown in the comparison, not acted upon in this increment."""
@@ -238,8 +252,12 @@ def _hit(stem: str, words: Sequence[str], compound: bool) -> bool:
 
 def score(cp: Counterparty, *, okved: str, relation: str, base: float, codes: Sequence[str],
           okpd_class: str, query_text: str, page_body: str, profile: Profile | None,
-          cfg: dict[str, Any] | None = None) -> NewFit:
-    """product_fit_new of one registry row. `base` is product_fit v0 of its relation (1.0 / 0.6)."""
+          cfg: dict[str, Any] | None = None, profile_missing: str | None = None) -> NewFit:
+    """product_fit_new of one registry row. `base` is product_fit v0 of its relation (1.0 / 0.6).
+
+    `profile_missing` — the reason the OKPD2 profile is absent (`profile_gap`): the text part then says the
+    profile was NOT computed (the value rests on the query words alone), never a bare «0».
+    """
     cfg = cfg or config()
     w = cfg["weights"]
     w_ok, w_text = float(w["okved"]), float(w["text"])
@@ -283,10 +301,13 @@ def score(cp: Counterparty, *, okved: str, relation: str, base: float, codes: Se
             used.add("okved")
     text = min(1.0, raw / float(cfg["text_saturation"]))
     floor = "≥ " if profile and profile.capped else ""
+    no_profile = f"; профиль ОКПД2 не посчитан: {profile_missing}" if profile_missing else "; профиля ОКПД2 нет"
     src = "слова запроса" + (f" и профиля ОКПД2 {profile.code} ({floor}{profile.positions} наименований "
-                             "позиций в данных АИС ГЗ)" if profile else "; профиля ОКПД2 нет")
+                             "позиций в данных АИС ГЗ)" if profile else no_profile)
     text_why = (f"Текст: {text:.2f} — совпали {', '.join(hits)}" if hits
                 else f"Текст: 0 — {src} не встречаются в названии и ОКВЭД по реестру МСП")
+    if hits and not profile and profile_missing:
+        text_why += f"; профиль ОКПД2 не посчитан: {profile_missing}"
     text_ev = tuple([*(names if "name" in used else ()), *(okved_names if "okved" in used else ())])
     text_part = Part("text_match", round(text, 4), round(w_text, 4), text_why, text_ev)
 

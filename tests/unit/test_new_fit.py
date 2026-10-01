@@ -327,6 +327,39 @@ def test_default_discover_runs_shadow(cache, tmp_path):
     assert res.fit_mode == "shadow" and res.fit_new
 
 
+def test_without_parquet_the_profile_is_not_computed_and_says_why(cache, tmp_path, caplog):
+    """`make up` without the organizers' parquet (review #220): no profile — «не посчитано» with the reason,
+    never a silent 0; the block itself is the same as with the profile off."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with caplog.at_level("WARNING", logger="src.enrich.discover"):
+        shadow = _run(cache, empty, "shadow")
+    off = _run(cache, empty, "off")
+    assert shadow.matches and _dump(off) == _dump(shadow)
+    assert shadow.profile is None and shadow.profile_gap and "items.parquet" in shadow.profile_gap
+    assert "профиль ОКПД2 не посчитан" in caplog.text
+    by_inn = {m.counterparty.inn: shadow.fit_new[m.counterparty.inn or ""] for m in shadow.matches}
+    for fit in by_inn.values():
+        assert "профиль ОКПД2 не посчитан: данные организаторов не загружены" in fit.part("text_match").explanation
+        assert fit.part("okved_match").value > 0  # the okved part is still computed: not a bare 0
+    assert by_inn["7807032363"].part("text_match").value > 0  # the query word «ПОЛИТЕХНОЛОГИЯ» is in the name
+
+
+def test_too_few_positions_is_a_different_reason(cache, tmp_path):
+    processed = _items(tmp_path, [(i, f"Папка канцелярская {i}", "17.23.13.130") for i in range(3)])
+    res = _run(cache, processed, "shadow")
+    assert res.profile is None and res.profile_gap and "меньше" in res.profile_gap
+    assert "items.parquet" not in res.profile_gap
+    gap = F.profile_gap(tmp_path / "nowhere")
+    assert "не загружены" in gap and "items.parquet" in gap
+
+
+def test_profile_present_means_no_gap(cache, tmp_path):
+    res = _run(cache, _processed(tmp_path), "shadow")
+    assert res.profile is not None and res.profile_gap is None
+    assert all("не посчитан" not in f.part("text_match").explanation for f in res.fit_new.values())
+
+
 def test_on_puts_product_fit_new_into_product_fit(cache, tmp_path):
     processed = _processed(tmp_path)
     on = _run(cache, processed, "on")

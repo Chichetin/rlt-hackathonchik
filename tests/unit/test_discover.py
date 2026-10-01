@@ -476,6 +476,14 @@ def test_wholesale_neighbour_region_and_ip(tmp_path):
     assert "соседний регион — Ленинградская область" in trader.components[4].explanation
     assert trader.counterparty.region == "Ленинградская область"
 
+    # #218: a customer from the Leningrad region — the wholesaler from 47 is local now, the maker from 78 a neighbour
+    (tmp_path / "cust").mkdir()
+    cust = _run(c, _processed(tmp_path / "cust", []), query=_query(okpd2=["17.12.14.110"], customer_inn="4700000003"))
+    geo = {m.counterparty.inn: m.components[4] for m in cust.matches}
+    assert geo[trader.counterparty.inn].value == 1.0
+    assert geo["7811777270"].value == 0.8
+    assert "ИНН заказчика выдан в Ленинградской области" in geo["7811777270"].explanation
+
 
 def _rows(inns: list[str], okved: str, name: str) -> dict:
     return {"rowCount": -1, "data": [{**ANSWER["data"][0], "inn": i, "okved1": okved, "okved1name": name}
@@ -500,6 +508,23 @@ def test_top_ten_keeps_both_producers_and_distributors(tmp_path):
     assert len(pool) == len(makers) + len(traders)
     assert sorted(cp.inn or "" for cp in pool if cp.kind == "distributor") == sorted(traders)
     assert "всего в реестре не сообщается" in res.requests[0]  # rowCount -1 is not shown as a number
+
+
+def test_candidates_keep_every_role_before_the_user_filters(tmp_path):
+    """#232: X-Facets of «Новые» count the candidates after the legal status but before the user filters and
+    the top-10 cut — choosing a role chip does not change the counts of the other chips."""
+    makers = ["7801000012", "7801000020", "7801000037", "7801000044"]
+    traders = ["7707049388", "7805336905"]
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("17.12", "78"),
+          rmsp.flatten("17.12", "78", "UL", _rows(makers, "17.12", "Производство бумаги и картона")))
+    c.put(rmsp.search_url("46.49.33", "78"),
+          rmsp.flatten("46.49.33", "78", "UL", _rows(traders, "46.49.33", "Торговля оптовая канцелярскими товарами")))
+    res = _run(c, _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"], filters={"kinds": "distributor"}))
+    assert sorted(m.counterparty.inn or "" for m in res.matches) == sorted(traders)
+    assert sorted(m.counterparty.inn or "" for m in res.candidates) == sorted(makers + traders)
+    assert sorted(m.counterparty.inn or "" for m in res.pool) == sorted(traders)  # pool: after the user filters
+    assert {m.counterparty.kind for m in res.candidates} == {"manufacturer", "distributor"}
 
 
 def test_second_wholesale_channel_gives_checked_distributors_only(tmp_path):
@@ -621,6 +646,19 @@ def test_api_search_fills_the_discovered_block(api):
     only_lo = api.post("/api/search", json={"query_id": "q", "text": "бумага А4",
                                             "filters": {"region": "Ленинградская область"}}).json()
     assert only_lo["discovered"] == []
+
+
+def test_api_facets_of_the_new_block_ignore_the_user_filters(api):
+    """#232: X-Facets «discovered» — from the discovery candidates before the user filters."""
+    import json as _json
+    q = {"query_id": "q", "text": "бумага А4"}
+    r = api.post("/api/search", json=q)
+    disc = _json.loads(r.headers["X-Facets"])["discovered"]
+    assert disc == {"kind": {"manufacturer": 0, "distributor": 1, "dealer": 0, "unknown": 0},
+                    "entity": {"ul": 1, "ip": 0, "unknown": 0}}
+    makers = api.post("/api/search", json={**q, "filters": {"kinds": "manufacturer"}})
+    assert makers.json()["discovered"] == [] and makers.headers["X-Total-Discovered"] == "0"
+    assert _json.loads(makers.headers["X-Facets"])["discovered"] == disc  # the chips keep their counts
 
 
 def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):

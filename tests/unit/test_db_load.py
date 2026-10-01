@@ -14,6 +14,7 @@ import pytest
 
 from src.db.load import load, pg_dsn
 from src.ingest.build import build
+from src.ingest.okpd2 import build_table
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
 URL = os.environ.get("TEST_DATABASE_URL", "")
@@ -93,3 +94,14 @@ def test_rejects_unsafe_schema(processed: Path, schema: str) -> None:
 
 def test_pg_dsn_drops_sqlalchemy_driver() -> None:
     assert pg_dsn("postgresql+psycopg://u:p@h:5432/d") == "postgresql://u:p@h:5432/d"
+
+
+@needs_pg
+def test_okpd2_dictionary_is_loaded_when_built(processed: Path, tmp_path: Path) -> None:
+    with_dict = tmp_path / "with_dict"
+    shutil.copytree(processed, with_dict)
+    build_table(with_dict / "items.parquet", with_dict / "okpd2.parquet")
+    want = duckdb.sql(f"SELECT count(*) FROM '{(with_dict / 'okpd2.parquet').as_posix()}'").fetchone()[0]  # type: ignore[index]
+    assert load(with_dict, URL, schema=SCHEMA)["okpd2"] == want
+    assert _pg(f"SELECT count(*) FROM {SCHEMA}.items i LEFT JOIN {SCHEMA}.okpd2 o ON o.code = i.okpd2_code "
+               "WHERE i.okpd2_code IS NOT NULL AND o.code IS NULL") == [(0,)]
