@@ -407,3 +407,11 @@ def test_old_format_file_is_moved_aside(search_data, tmp_path):
     stats = P.run(TESTSET, out, top=3, offline=True, mode="demo")
     assert stats["skipped"] == 0  # the old rows are not taken for finished lots
     assert list(_rows(out)[0]) == list(P.COLUMNS) and len(list(tmp_path.glob("o.old-*.csv"))) == 1
+
+
+def test_known_classes_before_a_date(search_data):
+    from datetime import date
+
+    every = P.known_classes(search_data)
+    early = P.known_classes(search_data, date(2000, 1, 1))
+    assert every and early == frozenset() and P.known_classes(search_data, date(2100, 1, 1)) == every

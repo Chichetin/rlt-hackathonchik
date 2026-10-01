@@ -30,6 +30,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -135,20 +136,27 @@ def recommend(lot: TestLot, top: int, offline: bool | None = None) -> tuple[list
 
 # --- full mode (#229) ---------------------------------------------------------------------------------
 
-_KNOWN: dict[tuple[str, int], frozenset[str]] = {}
+_KNOWN: dict[tuple[str, int, str], frozenset[str]] = {}
 
 
-def known_classes(processed: Path) -> frozenset[str] | None:
-    """OKPD2 classes (XX.XX) present in the training items; None when the data is absent."""
-    items = processed / "items.parquet"
-    if not items.exists():
+def known_classes(processed: Path, before: date | None = None) -> frozenset[str] | None:
+    """OKPD2 classes (XX.XX) present in the training items — of lots published before `before` (eval: the
+    split cutoff, so a dev lot does not make its own class «known»); None when the data is absent."""
+    items, notices = processed / "items.parquet", processed / "notices.parquet"
+    if not items.exists() or (before is not None and not notices.exists()):
         return None
-    key = (str(items), items.stat().st_mtime_ns)
+    key = (str(items), items.stat().st_mtime_ns, str(before))
     if key not in _KNOWN:
         con = duckdb.connect()
         try:
-            rows = con.execute("SELECT DISTINCT okpd2_l4 FROM read_parquet(?) WHERE okpd2_l4 IS NOT NULL",
-                               [str(items)]).fetchall()
+            if before is None:
+                rows = con.execute("SELECT DISTINCT okpd2_l4 FROM read_parquet(?) WHERE okpd2_l4 IS NOT NULL",
+                                   [str(items)]).fetchall()
+            else:
+                rows = con.execute(
+                    "SELECT DISTINCT i.okpd2_l4 FROM read_parquet(?) i JOIN read_parquet(?) n USING (lot_id) "
+                    "WHERE i.okpd2_l4 IS NOT NULL AND n.publish_date < ?", [str(items), str(notices), before]
+                ).fetchall()
         except duckdb.Error as e:
             log.warning("predict: items.parquet не прочитан: %s", e)
             return None

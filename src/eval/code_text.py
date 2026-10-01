@@ -22,8 +22,10 @@ import json
 import random
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
+from src.enrich import discover as discover_mod
 from src.eval.metrics import bootstrap_ci, recall_at_k
 from src.eval.run import result_record
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
@@ -53,22 +55,23 @@ def _ci(vals: list[float]) -> dict:
             "n": len(vals)}
 
 
-def evaluate(cases: list[EvalCase], processed: Path, seed: int = 0) -> dict:
+def evaluate(cases: list[EvalCase], processed: Path, cutoff: date, seed: int = 0) -> dict:
     started = time.monotonic()
     swap = _swap_codes(cases, seed)
-    known = predict_mod.known_classes(processed)
+    known = predict_mod.known_classes(processed, cutoff)  # classes of the history before the cutoff only
     per = []
     for case in cases:
         q = case.query
         rel = set(case.relevant_inns)
         by_text = search_mod.search(q.model_copy(update={"okpd2": []}), k=K)
         shares = predict_mod.section_shares(by_text, processed)
+        text_class = discover_mod.predict_class(by_text, processed)
         text_ranked = [m.counterparty.inn or "" for m in by_text]
         row: dict = {"query_id": q.query_id, "text": q.text[:120], "codes": q.okpd2, "swap": swap[q.query_id]}
         for kind, codes in (("real", q.okpd2), ("swap", swap[q.query_id])):
             by_code = search_mod.search(q.model_copy(update={"okpd2": codes}), k=K)
             code_ranked = [m.counterparty.inn or "" for m in by_code]
-            why = predict_mod.code_disagrees(codes, shares, None, known)
+            why = predict_mod.code_disagrees(codes, shares, text_class, known)
             mixed = [m.counterparty.inn or "" for m in predict_mod.interleave(by_code, by_text)] if why else code_ranked
             row[kind] = {"code": recall_at_k(code_ranked, rel, K), "text": recall_at_k(text_ranked, rel, K),
                          "adaptive": recall_at_k(text_ranked if why else code_ranked, rel, K),
@@ -91,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     split = split_config()
     cases = [c for c in load_cases("dev", split) if c.query.okpd2]
     cases = sorted(random.Random(args.seed).sample(cases, min(args.n, len(cases))), key=lambda c: c.query.query_id)
-    body = evaluate(cases, processed_dir(), args.seed)
+    body = evaluate(cases, processed_dir(), date.fromisoformat(str(split["cutoff"])), args.seed)
     cfg = {"method": "code_text", "k": K, "n": args.n, "seed": args.seed, "cutoff": str(split["cutoff"]),
            "mismatch_share": predict_mod.MISMATCH_SHARE, "vote_matches": predict_mod.VOTE_MATCHES}
     rec = result_record(args.exp, "dev", cfg, body)
