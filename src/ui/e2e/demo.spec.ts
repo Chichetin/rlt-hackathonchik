@@ -8,6 +8,9 @@ import { expect, test } from "@playwright/test";
 const DEMO_LOT = "6";
 
 test("демо: запрос → два блока → карточка → фильтр → выгрузка", async ({ page }) => {
+  // The clock measures the scenario, not the background: headless Chromium draws the WebGL waves in software —
+  // alone, one worker: 15.0–16.6 s with the waves, 4.1 s with reduced motion (#225, D-088). micro.spec checks the waves.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const started = Date.now();
   await page.goto("/");
   await page.getByRole("link", { name: "Начать подбор" }).click();
