@@ -1,6 +1,7 @@
 """API: the contract the UI and the e2e demo are built against; search on the ingest fixture."""
 
 import io
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -307,7 +308,7 @@ ROLE_ROWS = [  # name, kind, inn (10 digits — ЮЛ, 12 — ИП), score, statu
     ("В РНП", "distributor", "4703173460", 0.85, None, True),
 ]
 ZERO = {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 0},
-        "entity": {"ul": 0, "ip": 0, "unknown": 0}}
+        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0}}
 
 
 def _role_rows() -> list[CounterpartyMatch]:
@@ -378,7 +379,9 @@ def test_search_facets_before_user_filters_after_legal_status(roles_client):
     assert raw.isascii()
     assert json.loads(raw) == {
         "history": {"kind": {"manufacturer": 1, "distributor": 1, "dealer": 1, "unknown": 2},
-                    "entity": {"ul": 2, "ip": 2, "unknown": 1}},
+                    "entity": {"ul": 2, "ip": 2, "unknown": 1},
+                    # ЮЛ without a KPP: region unknown; ИП 78… and 47… by the INN — both near, only 78 worked (#242)
+                    "near": {"worked": 1, "near": 2}},
         "discovered": ZERO}
     # facets do not depend on the filters, the page or the offset
     other = roles_client.post("/api/search?limit=2&offset=1", json={"query_id": "q", "text": "x",
@@ -391,7 +394,8 @@ def test_search_facets_on_fixture(search_client):
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага", "filters": {"entity": "ip"}})
     facets = json.loads(r.headers["X-Facets"])
     assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 6},
-                                 "entity": {"ul": 4, "ip": 2, "unknown": 0}}
+                                 "entity": {"ul": 4, "ip": 2, "unknown": 0},
+                                 "near": {"worked": 6, "near": 6}}  # the fixture: KPP 78 / 47, customers 78
     assert r.headers["X-Total-History"] == "2"
 
 
@@ -411,7 +415,8 @@ def test_facets_of_new_are_capped_at_the_block_size(search_client, monkeypatch):
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
     assert json.loads(r.headers["X-Facets"])["discovered"] == {
         "kind": {"manufacturer": discover_mod.MAX_SHOWN, "distributor": 1, "dealer": 0, "unknown": 0},
-        "entity": {"ul": discover_mod.MAX_SHOWN, "ip": 0, "unknown": 0}}
+        "entity": {"ul": discover_mod.MAX_SHOWN, "ip": 0, "unknown": 0},
+        "near": {"worked": 0, "near": 0}}  # no registry region, no KPP: not guessed
 
 
 def test_facets_of_new_without_history_check_are_zero(search_client, monkeypatch):
@@ -455,3 +460,122 @@ def test_export_takes_the_same_filters(roles_client):
     assert [r["Наименование"] for r in _xlsx(roles_client, entity="ip")] == ["Опт", "Ремонт"]
     assert [r["Наименование"] for r in _xlsx(roles_client, min_score=0.5)] == ["Завод", "Опт", "Дилер"]
     assert [r["Наименование"] for r in _xlsx(roles_client, only_manufacturers=True)] == ["Завод"]
+
+
+# --- #242: «Может работать у заказчика» (near_customer), X-Search-Context, X-Facets.near ---------------------------
+
+NEAR_API_ROWS = [  # name, inn, kpp, region (registry), customers_spb
+    ("СПб", "7801000012", "780101001", None, 2),
+    ("ЛО", "4701000038", "470101001", None, 0),
+    ("Москва, работал в СПб", "7707049388", "770701001", None, 5),
+    ("Москва", "7804428656", "770401001", None, 0),
+    ("ИП СПб", "780100000090", None, None, 1),
+    ("Регион неизвестен", None, None, None, None),
+]
+
+
+def _near_rows() -> list[CounterpartyMatch]:
+    return [CounterpartyMatch(
+        counterparty=Counterparty(inn=inn, name=name, kpp=kpp, region=region,
+                                  stats={} if spb is None else {"customers_spb": spb}),
+        score=0.5, origin="history",
+        components=[ScoreComponent(name="product_fit", value=0.5, weight=1, explanation="x")])
+        for name, inn, kpp, region, spb in NEAR_API_ROWS]
+
+
+@pytest.fixture
+def near_client(client, monkeypatch):
+    """The search answers NEAR_API_ROWS; stub path — no cache, no discovery: the filter and the headers under test."""
+    from src.match import search as search_mod
+    monkeypatch.setattr(search_mod, "IS_STUB", True)
+    monkeypatch.setattr(search_mod, "search", lambda q, k=20: _near_rows())
+    return client
+
+
+def _near_search(client, **q):
+    r = client.post("/api/search", json={"query_id": "q", "text": "x", **q})
+    assert r.status_code == 200, r.text
+    return r, [m["counterparty"]["name"] for m in r.json()["history"]]
+
+
+def test_search_near_customer_choices(near_client):
+    every = [n for n, *_ in NEAR_API_ROWS]
+    assert _near_search(near_client)[1] == every
+    assert _near_search(near_client, filters={"near_customer": "any"})[1] == every
+    assert _near_search(near_client, filters={"near_customer": "near"})[1] == ["СПб", "ЛО", "ИП СПб"]
+    assert _near_search(near_client, filters={"near_customer": "worked"})[1] == [
+        "СПб", "Москва, работал в СПб", "ИП СПб"]
+    # the customer of the Leningrad region (INN 47): «worked» is its own region only
+    lo = _near_search(near_client, customer_inn="4703173460", filters={"near_customer": "worked"})
+    assert lo[1] == ["ЛО"] and lo[0].headers["X-Total-History"] == "1"
+
+
+@pytest.mark.parametrize("okpd2, applied", [(["43.39.11.000"], "near"), (["17.12.14.110"], "any")])
+def test_search_near_customer_auto(near_client, okpd2, applied):
+    r, names = _near_search(near_client, okpd2=okpd2, filters={"near_customer": "auto"})
+    assert names == _near_search(near_client, okpd2=okpd2, filters={"near_customer": applied})[1]
+    assert json.loads(r.headers["X-Search-Context"])["applied_near"] == applied
+
+
+def test_search_context_header(near_client):
+    codes = ["81.21.10.000", "17.12.14.110", "81.22.11.000", "81.29.11.000", "81.10.10.000"]
+    r, _ = _near_search(near_client, okpd2=codes, customer_inn="7804105239", filters={"near_customer": "auto"})
+    raw = r.headers["X-Search-Context"]
+    assert raw.isascii() and ", " not in raw and '": ' not in raw  # compact
+    assert json.loads(raw) == {
+        "customer_region": "Санкт-Петербург", "customer_basis": "ИНН 78…",
+        "purchase_type": "services", "purchase_label": "услуга",
+        "type_basis": ["81.21.10.000", "81.22.11.000", "81.29.11.000"],
+        "default_near": "near", "applied_near": "near"}
+
+
+def test_search_context_without_customer_inn_or_okpd2(near_client):
+    r, _ = _near_search(near_client, region="Ленинградская область")
+    assert json.loads(r.headers["X-Search-Context"]) == {
+        "customer_region": "Ленинградская область", "customer_basis": "регион запроса",
+        "purchase_type": None, "purchase_label": None, "type_basis": [],
+        "default_near": "any", "applied_near": "any"}
+    # an INN of another region (77, a federal body) does not move the customer: the query region stays
+    r, _ = _near_search(near_client, customer_inn="7707049388", okpd2=["17.12.14.110"],
+                        filters={"near_customer": "worked"})
+    ctx = json.loads(r.headers["X-Search-Context"])
+    assert (ctx["customer_region"], ctx["customer_basis"]) == ("Санкт-Петербург", "регион запроса")
+    assert (ctx["purchase_type"], ctx["default_near"], ctx["applied_near"]) == ("goods", "any", "worked")
+
+
+def test_search_facets_near_before_the_user_filters(near_client):
+    r, _ = _near_search(near_client, filters={"near_customer": "near", "entity": "ip"})
+    facets = json.loads(r.headers["X-Facets"])
+    assert facets["history"]["near"] == {"worked": 3, "near": 3}
+    assert facets["discovered"]["near"] == {"worked": 0, "near": 0}
+    lo = json.loads(_near_search(near_client, customer_inn="4703173460")[0].headers["X-Facets"])
+    assert lo["history"]["near"] == {"worked": 1, "near": 3}
+
+
+@pytest.mark.parametrize("q", [{"filters": {"near_customer": "close"}},
+                               {"region": "Москва", "filters": {"near_customer": "near"}}])
+def test_bad_near_customer_is_422(near_client, q):
+    for path in ("/api/search", "/api/export"):
+        r = near_client.post(path, json={"query_id": "q", "text": "x", **q})
+        assert r.status_code == 422 and "filters.near_customer" in r.json()["detail"]
+
+
+def test_export_takes_near_customer(near_client):
+    assert [r["Наименование"] for r in _xlsx(near_client, near_customer="near")] == ["СПб", "ЛО", "ИП СПб"]
+    r = near_client.post("/api/export", json={"query_id": "q", "text": "x", "okpd2": ["43.39.11.000"],
+                                              "filters": {"near_customer": "auto"}})
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [row[1] for row in ws.iter_rows(min_row=2, values_only=True)] == ["СПб", "ЛО", "ИП СПб"]
+
+
+def test_facets_near_of_new_count_the_candidates(search_client, monkeypatch):
+    from src.enrich import discover as discover_mod
+    pool = [CounterpartyMatch(counterparty=Counterparty(inn=i, name=i, kind="manufacturer", region=reg), score=0.4,
+                              origin="discovered", components=[])
+            for i, reg in (("7811777270", "Санкт-Петербург"), ("4703173460", "Ленинградская область"),
+                           ("7810400592", "регион 77"), ("7807032363", None))]
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        matches=pool, candidates=pool, history_checked=True))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert json.loads(r.headers["X-Facets"])["discovered"]["near"] == {"worked": 1, "near": 2}

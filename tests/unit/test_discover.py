@@ -655,10 +655,19 @@ def test_api_facets_of_the_new_block_ignore_the_user_filters(api):
     r = api.post("/api/search", json=q)
     disc = _json.loads(r.headers["X-Facets"])["discovered"]
     assert disc == {"kind": {"manufacturer": 0, "distributor": 1, "dealer": 0, "unknown": 0},
-                    "entity": {"ul": 1, "ip": 0, "unknown": 0}}
+                    "entity": {"ul": 1, "ip": 0, "unknown": 0},
+                    "near": {"worked": 1, "near": 1}}  # registry region 78 = the customer's region (#242)
     makers = api.post("/api/search", json={**q, "filters": {"kinds": "manufacturer"}})
     assert makers.json()["discovered"] == [] and makers.headers["X-Total-Discovered"] == "0"
     assert _json.loads(makers.headers["X-Facets"])["discovered"] == disc  # the chips keep their counts
+    # «Может работать у заказчика» reaches the block through discover() as every user filter (#242): for a customer
+    # of the Leningrad region (INN 47) the company of the registry region 78 is a neighbour, not «worked»
+    lo = {**q, "customer_inn": "4703173460"}
+    near = api.post("/api/search", json={**lo, "filters": {"near_customer": "near"}})
+    assert near.headers["X-Total-Discovered"] == "1"
+    worked = api.post("/api/search", json={**lo, "filters": {"near_customer": "worked"}})
+    assert worked.json()["discovered"] == [] and worked.headers["X-Total-Discovered"] == "0"
+    assert _json.loads(worked.headers["X-Facets"])["discovered"]["near"] == {"worked": 0, "near": 1}
 
 
 def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):

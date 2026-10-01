@@ -15,7 +15,15 @@ User filters (`Query.filters`, docs/ui.md; the contract is a plain dict — keys
 - `min_score: float` — drops score < min_score, on the server weights of the answer (local weights of
   «Настройки», D-079, re-rank on the client only);
 - `region: str` — `Counterparty.region` (enrich, with Evidence) when known, else the KPP prefix from
-  organizers' data (78 / 47), the same rule as the `geography` component.
+  organizers' data (78 / 47), the same rule as the `geography` component;
+- `near_customer: "worked" | "near" | "any" | "auto"` — «Может работать у заказчика» (#242). The customer's region
+  is `search.customer_region` (D-083: the customer's INN 78 / 47, else Query.region); the supplier's region is
+  `supplier_region` (registry, else KPP, an ИП without a KPP — the INN). "near": the supplier is in the customer's
+  region or the neighbour one (78 <-> 47). "worked": the supplier is in the customer's region, or the customer is in
+  St Petersburg and the supplier has bid for its customers (`stats.customers_spb > 0`, organizers' data). "any" or
+  empty — no filter. "auto" — the default of the purchase type (`purchase_type.default_near`: near for works and
+  services, any for goods and without OKPD2), any when the customer's region has no code. An unknown supplier region
+  never passes (not guessed); "worked" / "near" with a customer's region without a code is an error.
 
 A user filter keeps only confirmed matches (D-030): МСП / role / ЮЛ-ИП unknown -> dropped, and the UI says how
 many were hidden because the attribute is not known yet; `facets()` gives those counts (X-Facets of
@@ -26,11 +34,13 @@ many were hidden because the attribute is not known yet; `facets()` gives those 
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
 from src.contracts import Counterparty, CounterpartyMatch, Query
+from src.match.purchase_type import Near, default_near, purchase_type
 
 _DEAD = ("ликвид", "банкрот", "прекращ")
 REGION_CODE = {"Санкт-Петербург": "78", "Ленинградская область": "47"}
@@ -39,6 +49,9 @@ Entity = Literal["ul", "ip"]
 ENTITY_TYPE: dict[str, Entity] = {"ЮЛ": "ul", "ИП": "ip"}  # stats.entity_type of src/ingest/build.py
 ENTITIES: dict[str, Entity] = {"ul": "ul", "ip": "ip"}
 _INN_ENTITY: dict[int, Entity] = {10: "ul", 12: "ip"}
+NEAR_CHOICES = ("worked", "near", "any", "auto")  # filters.near_customer (#242)
+SPB = "78"  # stats.customers_spb counts customers with INN 78 (src/ingest/build.py)
+_REGION_N = re.compile(r"регион (\d{2})")  # Counterparty.region of a region without a name (enrich._region_by_code)
 
 
 @dataclass(frozen=True)
@@ -48,6 +61,17 @@ class UserFilters:
     region: str | None = None
     entity: Entity | None = None
     min_score: float | None = None
+    near_customer: str | None = None  # worked | near | auto; None — any
+
+
+@dataclass(frozen=True)
+class NearCustomer:
+    """«Может работать у заказчика» of one query, resolved (#242)."""
+
+    choice: Near  # applied: worked | near | any ("auto" already resolved)
+    region: str  # the customer's region: search.customer_region (D-083)
+    code: str | None  # its code (78 / 47); None — no code, nothing to compare with
+    neighbour: str | None  # the code of the neighbour region
 
 
 def in_region(cp: Counterparty, region: str) -> bool | None:
@@ -70,6 +94,62 @@ def entity_of(cp: Counterparty) -> Entity | None:
     if isinstance(stated, str) and stated in ENTITY_TYPE:
         return ENTITY_TYPE[stated]
     return _INN_ENTITY.get(len(cp.inn)) if cp.inn else None
+
+
+def supplier_region(cp: Counterparty) -> str | None:
+    """Region of the supplier for «Может работать у заказчика»: the registry region (`Counterparty.region`, enrich /
+    discovery, with Evidence) as a code; a registry region without a code stays its name (a known region that is
+    not 78 / 47); else the KPP of organizers' data or the ФНС card (a 000000000 stub is not a region); else — an ИП
+    only, it has no KPP — the first two digits of its INN. None when unknown: such a row never passes (not guessed).
+    """
+    if cp.region:
+        if cp.region in REGION_CODE:
+            return REGION_CODE[cp.region]
+        numbered = _REGION_N.fullmatch(cp.region)
+        return numbered.group(1) if numbered else cp.region
+    kpp = (cp.kpp or "").strip()
+    if kpp[:2].isdigit() and kpp[:2] != "00":
+        return kpp[:2]
+    if entity_of(cp) == "ip" and cp.inn and cp.inn[:2].isdigit():
+        return cp.inn[:2]
+    return None
+
+
+def near_marks(cp: Counterparty, nc: NearCustomer) -> tuple[bool, bool]:
+    """(worked, near) of a supplier for the customer of `nc`; both False when either region is unknown."""
+    if nc.code is None:
+        return False, False
+    own = supplier_region(cp)
+    spb = cp.stats.get("customers_spb")
+    bid_spb = nc.code == SPB and isinstance(spb, int | float) and not isinstance(spb, bool) and spb > 0
+    return own == nc.code or bid_spb, own is not None and own in (nc.code, nc.neighbour)
+
+
+def near_of(query: Query, uf: UserFilters | None = None) -> NearCustomer:
+    """Resolve filters.near_customer of the query: the customer's region and the applied choice.
+
+    ValueError: "worked" / "near" chosen while the customer's region has no code (nothing to compare with — an
+    empty list would look like «nobody nearby»).
+    """
+    from src.match.search import NEIGHBOUR, customer_region  # search imports this module: not at the top
+
+    region, _ = customer_region(query)
+    code = REGION_CODE.get(region)
+    choice = (uf if uf is not None else parse_filters(query.filters)).near_customer or "any"
+    if choice == "auto":
+        choice = default_near(purchase_type(query.okpd2)) if code is not None else "any"
+    elif choice != "any" and code is None:
+        raise ValueError(f"filters.near_customer: регион заказчика «{region}» не сопоставлен с кодом "
+                         f"(известны {', '.join(REGION_CODE)}) — выберите any")
+    return NearCustomer(choice=choice, region=region, code=code,  # type: ignore[arg-type]
+                        neighbour=NEIGHBOUR.get(code or ""))
+
+
+def passes_near(cp: Counterparty, nc: NearCustomer) -> bool:
+    if nc.choice == "any":
+        return True
+    worked, near = near_marks(cp, nc)
+    return worked if nc.choice == "worked" else near
 
 
 def legal_ok(cp: Counterparty) -> bool:
@@ -115,6 +195,10 @@ def parse_filters(f: Mapping[str, object]) -> UserFilters:
         if not math.isfinite(min_score):
             raise ValueError(f"filters.min_score: ожидается конечное число, получено {v!r}")
 
+    raw = _text(f, "near_customer")
+    if raw is not None and raw not in NEAR_CHOICES:
+        raise ValueError(f"filters.near_customer: ожидается worked, near, any или auto, получено {raw!r}")
+
     region = f.get("region")
     return UserFilters(
         only_msp=bool(f.get("only_msp")),
@@ -122,6 +206,7 @@ def parse_filters(f: Mapping[str, object]) -> UserFilters:
         region=region if isinstance(region, str) and region else None,
         entity=entity,
         min_score=min_score,
+        near_customer=None if raw in (None, "any") else raw,
     )
 
 
@@ -146,7 +231,8 @@ def apply_legal(matches: Iterable[CounterpartyMatch]) -> list[CounterpartyMatch]
 
 def apply_user_filters(matches: Iterable[CounterpartyMatch], query: Query) -> list[CounterpartyMatch]:
     uf = parse_filters(query.filters)
-    return [m for m in matches if keeps(m, uf)]
+    nc = near_of(query, uf)
+    return [m for m in matches if keeps(m, uf) and passes_near(m.counterparty, nc)]
 
 
 def apply_filters(matches: list[CounterpartyMatch], query: Query) -> list[CounterpartyMatch]:
@@ -159,4 +245,14 @@ def facets(matches: Iterable[CounterpartyMatch]) -> dict[str, dict[str, int]]:
     for m in matches:
         out["kind"][kind_of(m.counterparty)] += 1
         out["entity"][entity_of(m.counterparty) or "unknown"] += 1
+    return out
+
+
+def near_facets(matches: Iterable[CounterpartyMatch], nc: NearCustomer) -> dict[str, int]:
+    """Counts for «Может работать у заказчика»: how many rows each of worked / near keeps (call before the filters)."""
+    out = {"worked": 0, "near": 0}
+    for m in matches:
+        worked, near = near_marks(m.counterparty, nc)
+        out["worked"] += worked
+        out["near"] += near
     return out
