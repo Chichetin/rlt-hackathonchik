@@ -109,3 +109,13 @@ def test_experiment_entries_reproduce_recorded_configs(exp, result):
     from src.match.signals import signal_shares
     assert signal_shares(cfg) == signal_shares(rec)
     assert (cfg["retriever"], cfg["k"]) == (rec["retriever"], rec["k"])
+
+
+def test_saturation_summary_counts_distinct_scores():
+    from src.eval.saturation import summarize
+
+    rec = summarize([[1.0] * 10, [1.0, 0.9, 0.9, 0.5], [0.7, 0.6, 0.5, 0.4, 0.3], []])
+    assert rec == {"cases": 3, "distinct_scores_mean": 3.0, "share_le_3_distinct": 0.667, "share_all_equal": 0.333,
+                   "share_first_at_max": 0.667}
+    assert summarize([[1.0, 0.5, 0.4]], k=1)["distinct_scores_mean"] == 1.0  # only the top-k is looked at
+    assert summarize([])["cases"] == 0
