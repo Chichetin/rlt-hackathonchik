@@ -1,6 +1,6 @@
 """Full FNS MSP registry dump (opendata 7707329152-rsmp) → parquet, one part per XML member (#185).
 
-    uv run python -m src.sources.msp_dump [--zip PATH] [--out DIR] [--workers N]   # make msp-dump
+    uv run python -m src.sources.msp_dump [--zip PATH] [--out DIR] [--workers N]   # step 1 of make pool-load
     uv run python -m src.sources.msp_dump --stats                                   # coverage numbers
 
 The dump is a ZIP of ~7.5k XML files (~22.7 GB unpacked, ~6.8M records). Members are parsed
@@ -9,9 +9,13 @@ so a rerun continues where it stopped. One row per record (`Документ`): 
 `inn_valid`; a bad checksum is kept and marked, never fixed), name, region, main / additional /
 reporting OKVED, products (`СвПрод`, rare: ~0.14 % of records), licences, MSP category, headcount.
 
-Every value is copied as is from one record. `record()` returns that record's raw XML, which is
-the page an Evidence of a dump fact is checked against (src/enrich/evidence.py): the source is the
-dump file + member + `ИдДок`. Licence: FNS open data, commercial use allowed (research/SOURCES.md).
+Every value is copied as is from one record. Cached page of a record (src/sources/cache.py, url
+`page_url(inn)` — the dataset passport `#inn=<inn>`): `page()`, flat `row.<inn>.<key>: <value>` lines
+in the rmsp.nalog.ru format (same registry), so the role basis `row.<inn>.okved1` of src/enrich/role.py
+applies as is. `page()` of a parquet row equals `page_from_xml()` of the raw record (`record()`, the audit
+path: dump file + member + `ИдДок`), and `counterparty()` gives every fact an Evidence whose value is on
+that page (src/enrich/evidence.py, D-084). ИП: no locality on the page (152-ФЗ, as in rmsp.py).
+Licence: FNS open data, commercial use allowed (research/SOURCES.md).
 """
 
 from __future__ import annotations
@@ -25,18 +29,25 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.contracts import inn_is_valid
+from src.contracts import Counterparty, Evidence, inn_is_valid
+from src.enrich import role
+from src.enrich.enrich import MSP_CATEGORY
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 DATASET_URL = "https://file.nalog.ru/opendata/7707329152-rsmp/data-10092026-structure-12052026.zip"
 ZIP = ROOT / "data" / "external" / "rsmp" / DATASET_URL.rsplit("/", 1)[1]
 OUT = ROOT / "data" / "external" / "rsmp" / "parts"
+SOURCE = "ФНС: реестр МСП, выгрузка открытых данных"
+PASSPORT = "https://www.nalog.gov.ru/opendata/7707329152-rsmp/"
+AS_OF = "2026-09-10"  # date of the dump (file name, ДатаСост)
+REGION_NAME = {"78": "Санкт-Петербург", "47": "Ленинградская область"}  # names src/match/filters.py compares
 
 SCHEMA = pa.schema([
     ("inn", pa.string()), ("inn_valid", pa.bool_()), ("ogrn", pa.string()), ("entity", pa.string()),
@@ -151,6 +162,72 @@ def record(zip_path: Path, member: str, doc_id: str) -> str | None:
         return None
     end = text.find("</Документ>", start)
     return text[start:end + len("</Документ>")]
+
+
+def page_url(inn: str) -> str:
+    return f"{PASSPORT}#inn={inn}"
+
+
+def page(r: dict) -> str:
+    """Cached page of one record: `row.<inn>.<key>: <value>` lines, values verbatim, empty ones skipped."""
+    ul = r["entity"] == "ЮЛ"
+    pairs: list[tuple[str, object]] = [
+        ("inn", r["inn"]), ("ogrn", r["ogrn"]), ("nptype", "UL" if ul else "IP"), ("name_ex", r["name_full"]),
+        ("name_short", r["name"] if ul else None), ("category", r["msp_category"]), ("dtregistry", r["included"]),
+        ("dtstate", r["state_date"]), ("regioncode", r["region_code"]), ("region", r["region"]),
+        ("city", r["city"] if ul else None), ("okved1", r["okved_main"]), ("okved1name", r["okved_main_name"]),
+        *(("okved_extra", c) for c in r["okved_extra"]),
+        *(("product", f"{c} {n}".strip()) for c, n in zip(r["products"], r["product_names"], strict=True)),
+        *(("licence", x) for x in r["licences"]), ("sschr", r["employees"]),
+    ]
+    return "\n".join(f"row.{r['inn']}.{k}: {v}" for k, v in pairs if v is not None and v != "")
+
+
+def page_from_xml(raw: str, src_file: str) -> str:
+    """Page of a raw `<Документ>` (from `record()`): the check that a parquet row renders the source."""
+    return page(_record(ET.fromstring(raw), src_file))
+
+
+def counterparty(r: dict, fetched_at: datetime) -> Counterparty | None:
+    """Record → Counterparty: only what the record says, every fact an Evidence on `page(r)`.
+    None for a record whose INN fails the checksum (kept in the dump, never shown as a company)."""
+    inn = r["inn"]
+    if not r["inn_valid"]:
+        return None
+    ul, url = r["entity"] == "ЮЛ", page_url(inn)
+    ev: list[Evidence] = []
+
+    def add(fld: str, value: str | None, fact: str) -> bool:
+        if not value:
+            return False
+        ev.append(Evidence(source=SOURCE, url=url, fetched_at=fetched_at, fact=fact, field=fld, value=value))
+        return True
+
+    add("inn", inn, f"ИНН {inn} — запись в реестре МСП (выгрузка ФНС на {AS_OF})")
+    add("ogrn", r["ogrn"], f"{'ОГРН' if ul else 'ОГРНИП'} {r['ogrn']}")
+    if ul:
+        add("name", r["name"], f"Наименование: {r['name']}")
+    else:
+        add("name", r["name_full"], f"Индивидуальный предприниматель {r['name_full']}")
+    code, code_name = r["okved_main"], r["okved_main_name"]
+    if code and code_name:
+        add("okved", code_name, f"Основной ОКВЭД {code} — {code_name}")
+    elif code:
+        add("okved", f"{inn}.okved1: {code}", f"Основной ОКВЭД {code}")
+    kind = role.assign(code, code_name, f"row.{inn}.okved1: {code}", add)
+    for extra in r["okved_extra"]:
+        add("okved", f"{inn}.okved_extra: {extra}", f"Дополнительный ОКВЭД {extra} (заявлен в реестре МСП)")
+    cat = str(r["msp_category"] or "")
+    is_msp = None
+    if cat in MSP_CATEGORY:
+        is_msp = add("msp", f"{inn}.category: {cat}",
+                     f"Реестр МСП: {MSP_CATEGORY[cat]}, включено {r['included']} (выгрузка на {AS_OF})") or None
+    region = None
+    if rc := r["region_code"]:
+        region = REGION_NAME.get(rc) or r["region"] or f"регион {rc}"
+        add("region", f"{inn}.regioncode: {rc}", f"Регион по реестру МСП: {r['region'] or region} (код {rc})")
+    return Counterparty(inn=inn, name=r["name"] or f"ИНН {inn}", kind=kind, region=region, is_msp=is_msp,
+                        okved=[c for c in (code, *r["okved_extra"]) if c], evidence=ev)
 
 
 def stats(out: Path, suppliers: Path) -> dict:

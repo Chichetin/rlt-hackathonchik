@@ -9,7 +9,7 @@ EXP ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs openapi openapi-check \
-        seal-check ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed okpd2
+        seal-check ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed okpd2 pool-load
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -111,3 +111,8 @@ db-load:           ## data/processed → Postgres из docker compose (D-054): m
 
 db-embed:          ## эмбеддинги уникальных наименований → pgvector + HNSW (после db-load; нужен make setup-ml; ≈ 70 мин CPU, возобновляемо)
 	DATABASE_URL=$${DATABASE_URL:-postgresql://app:app@127.0.0.1:$${PG_PORT:-5432}/app} $(PY) python -m src.db.embed --index   # secret-scan: allow
+
+pool-load:         ## реестр МСП ФНС целиком → пул новых компаний (#185, D-084): ZIP в data/external/rsmp → parquet → схема pool; data и vec не трогает
+	$(PY) python -m src.sources.msp_dump
+	$(PY) python -m src.db.pool build
+	DATABASE_URL=$${DATABASE_URL:-postgresql://app:app@127.0.0.1:$${PG_PORT:-5432}/app} $(PY) python -m src.db.pool load   # secret-scan: allow
