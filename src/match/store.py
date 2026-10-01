@@ -1,4 +1,4 @@
-"""Where search() and /api/lot read organizers' data: Postgres (D-023) or ingest parquet. Owner: MATCH.
+"""Where search() and /api/lot read organizers' data: Postgres (D-054) or ingest parquet. Owner: MATCH.
 
 Two backends with one interface and the same SQL, row for row (tests/unit/test_store.py):
   PgStore      — schema `data` loaded by `make db-load` (src/db/load.py); the main path (`make up`).

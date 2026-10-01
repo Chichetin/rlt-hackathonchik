@@ -1,4 +1,4 @@
-"""Ingest parquet (D-026) → Postgres (D-023). DuckDB is the ETL engine (its `postgres` extension).
+"""Ingest parquet (D-026) → Postgres (D-054). DuckDB is the ETL engine (its `postgres` extension).
 
     DATABASE_URL=postgresql://app:app@127.0.0.1:5432/app uv run python -m src.db.load   # make db-load
 
@@ -98,7 +98,7 @@ def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="ingest parquet → Postgres (D-023)")
+    ap = argparse.ArgumentParser(description="ingest parquet → Postgres (D-054)")
     default = Path(os.environ.get("DATA_PROCESSED_DIR") or ROOT / "data/processed")
     ap.add_argument("--processed", type=Path, default=default)
     ap.add_argument("--schema", default="data")
