@@ -372,11 +372,15 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
     monkeypatch.setattr(rmsp, "_last_request", 0.0)
     calls: list = []
+    cache, processed = SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, [])  # fixtures are not timed
+    _run(cache, processed, query=_query(okpd2=["17.12.14.110"]), offline=True)  # warm-up: first DuckDB query
     started = time.monotonic()
-    res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),
+    res = _run(cache, processed, query=_query(okpd2=["17.12.14.110"]),
                offline=False, budget_s=budget, client=_client(_hang(calls, ok_first)))
     elapsed = time.monotonic() - started
-    assert elapsed < budget + 0.25, f"{elapsed:.2f} s for a {budget} s budget"
+    # the exact bound is the per-request check below; this one only catches a wait past the budget
+    # (without a deadline the hang lasts TIMEOUT_S = 3 s) and leaves room for DuckDB on a loaded machine
+    assert elapsed < budget + 0.6, f"{elapsed:.2f} s for a {budget} s budget"
     assert len(calls) == expected_calls and len(res.requests) == 4 and res.matches == []
     assert all(t["connect"] + t["read"] <= budget + 1e-6 for t in calls)
 
