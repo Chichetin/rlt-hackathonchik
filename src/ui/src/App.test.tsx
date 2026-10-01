@@ -47,7 +47,7 @@ test("search shows two blocks, explanation and card with sources", async () => {
   expect(screen.getByRole("region", { name: "Новые из открытых источников" })).toBeInTheDocument();
   expect(screen.getByText(/Демонстрационные данные/)).toBeInTheDocument();
   expect(screen.getAllByText("5 контрактов по ОКПД2 17.12").length).toBeGreaterThan(0);
-  await userEvent.click(screen.getByText("ООО Альфа"));
+  await userEvent.click(within(screen.getByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   const card = screen.getByRole("dialog", { name: "Карточка: ООО Альфа" });
   expect(card).toHaveTextContent("Статус: действующее");
   expect(card).toHaveTextContent("ЕГРЮЛ");
@@ -100,7 +100,7 @@ test("card shows stats and the unconfirmed INN note", async () => {
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
-  await userEvent.click(await screen.findByText("ООО Альфа"));
+  await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   const card = screen.getByRole("dialog");
   expect(card).toHaveTextContent("Побед");
   expect(card).toHaveTextContent("Доля побед");
