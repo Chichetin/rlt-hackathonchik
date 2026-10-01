@@ -39,15 +39,18 @@ try {
   if (!result.ok()) throw new Error(`Search: HTTP ${result.status()}`);
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await history.locator(".item").first().waitFor();
-  await expect(page.getByRole("button", { name: "Найти поставщиков" })).toBeEnabled();
+  await expect(page.locator("#results")).toHaveAttribute("aria-busy", "false");
   await page.screenshot({ path: `${out}/02-results.png`, animations: "disabled" });
   await history.locator(".item").first().click();
+  await page.getByRole("button", { name: /Открыть полную карточку/ }).click();
   await page.getByRole("dialog").waitFor();
   await page.screenshot({ path: `${out}/03-card.png`, animations: "disabled" });
   await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /^Новые/ }).click();
   const discovered = page.getByRole("region", { name: "Новые из открытых источников" }).locator(".item");
   if (await discovered.count()) {
     await discovered.first().click();
+    await page.getByRole("button", { name: /Открыть полную карточку/ }).click();
     await page.getByRole("dialog").waitFor();
     await page.screenshot({ path: `${out}/04-new-company.png`, animations: "disabled" });
   }

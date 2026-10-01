@@ -4,6 +4,83 @@
  */
 
 export interface paths {
+    "/api/testset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Testset */
+        get: operations["get_testset_api_testset_get"];
+        put?: never;
+        /**
+         * Upload Testset
+         * @description Test export files (CSV text) -> the active set; 422 with a message on a broken format, 413 over the limit.
+         */
+        post: operations["upload_testset_api_testset_post"];
+        /** Delete Testset */
+        delete: operations["delete_testset_api_testset_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/testset/predict.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Predict Testset
+         * @description `make predict --offline` over the active set: per lot «История» and «Новые» with score and components.
+         */
+        get: operations["predict_testset_api_testset_predict_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Ratings Batch */
+        get: operations["api_ratings_batch_api_ratings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ratings/{inn}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Ratings */
+        get: operations["api_ratings_api_ratings__inn__get"];
+        put?: never;
+        /** Api Rate */
+        post: operations["api_rate_api_ratings__inn__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -50,6 +127,46 @@ export interface paths {
          * @description Notice number (lot_id or reqnum) -> Query from the notice; 503 when organizers' data is absent.
          */
         get: operations["api_lot_api_lot__ident__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lot/{ident}/backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Lot Backtest
+         * @description Places of the lot's real participants and winner in our ranking, history before the cutoff (#192, D-084).
+         */
+        get: operations["api_lot_backtest_api_lot__ident__backtest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/okpd2": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Okpd2
+         * @description OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code.
+         */
+        get: operations["api_okpd2_api_okpd2_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -113,6 +230,33 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Backtest */
+        Backtest: {
+            /** Lot Id */
+            lot_id: number;
+            /**
+             * Lot Date
+             * Format: date
+             */
+            lot_date: string;
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+            /** Channel */
+            channel: string | null;
+            /** Ranked */
+            ranked: number;
+            /** Participants */
+            participants: components["schemas"]["ParticipantRank"][];
+            /** Winner Rank */
+            winner_rank: number | null;
+            /** In Top */
+            in_top: number;
+            /** Top */
+            top: number;
+        };
         /** Counterparty */
         Counterparty: {
             /** Inn */
@@ -209,6 +353,15 @@ export interface components {
             /** Store */
             store: string;
         };
+        /** ParticipantRank */
+        ParticipantRank: {
+            /** Inn */
+            inn: string;
+            /** Is Winner */
+            is_winner: boolean;
+            /** Rank */
+            rank: number | null;
+        };
         /**
          * Query
          * @description Customer need: an item name, a description or a fragment of the spec.
@@ -243,6 +396,96 @@ export interface components {
                 [key: string]: string | boolean | number;
             };
         };
+        /** RatingDetail */
+        RatingDetail: {
+            /** Inn */
+            inn: string;
+            /**
+             * Count
+             * @description опубликованных оценок
+             */
+            count: number;
+            /**
+             * Average
+             * @description None, пока оценок меньше MIN_SHOWN
+             */
+            average: number | null;
+            /**
+             * Min Shown
+             * @default 3
+             */
+            min_shown: number;
+            /**
+             * Disclaimer
+             * @default Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены.
+             */
+            disclaimer: string;
+            /** Reviews */
+            reviews: components["schemas"]["Review"][];
+        };
+        /** RatingIn */
+        RatingIn: {
+            /**
+             * Author Inn
+             * @description ИНН заказчика, который оценивает (контрольная сумма)
+             */
+            author_inn: string;
+            /**
+             * Browser Sig
+             * @description локальный ключ браузера, не удостоверяет личность
+             */
+            browser_sig: string;
+            /** Stars */
+            stars: number;
+            /** Text */
+            text: string;
+        };
+        /** RatingSaved */
+        RatingSaved: {
+            /**
+             * Status
+             * @description published / quarantine / hidden
+             */
+            status: string;
+            summary: components["schemas"]["RatingSummary"];
+        };
+        /** RatingSummary */
+        RatingSummary: {
+            /** Inn */
+            inn: string;
+            /**
+             * Count
+             * @description опубликованных оценок
+             */
+            count: number;
+            /**
+             * Average
+             * @description None, пока оценок меньше MIN_SHOWN
+             */
+            average: number | null;
+            /**
+             * Min Shown
+             * @default 3
+             */
+            min_shown: number;
+            /**
+             * Disclaimer
+             * @default Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены.
+             */
+            disclaimer: string;
+        };
+        /** Review */
+        Review: {
+            /** Stars */
+            stars: number;
+            /** Text */
+            text: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** ScoreComponent */
         ScoreComponent: {
             /**
@@ -273,6 +516,62 @@ export interface components {
              */
             stub: boolean;
         };
+        /** UploadTestsetRequest */
+        UploadTestsetRequest: {
+            /** Files */
+            files: components["schemas"]["UploadedCsv"][];
+        };
+        /** UploadedCsv */
+        UploadedCsv: {
+            /**
+             * Name
+             * @description имя файла, как у пользователя (Извещения*.csv, ТРУ*.csv)
+             */
+            name: string;
+            /**
+             * Text
+             * @description содержимое файла, UTF-8 текстом
+             */
+            text: string;
+        };
+        /** UploadedLot */
+        UploadedLot: {
+            /** Lot Id */
+            lot_id: string;
+            /** Reqnum */
+            reqnum: string | null;
+            /**
+             * Text
+             * @description текст запроса подбора (Query.text) — тем же правилом, что /api/lot
+             */
+            text: string;
+            /** Okpd2 */
+            okpd2: string[];
+            /**
+             * Notes
+             * @description что не так с лотом: пустой ОКПД2, предмет, НМЦК
+             */
+            notes: string[];
+        };
+        /** UploadedTestset */
+        UploadedTestset: {
+            /**
+             * Id
+             * @description sha256 содержимого Извещения + ТРУ, первые 12 знаков
+             */
+            id: string;
+            /**
+             * Files
+             * @description использованные файлы (Поставщики*.csv не используется)
+             */
+            files: string[];
+            /** Lots */
+            lots: number;
+            /** Warnings */
+            warnings: string[];
+            /** Items */
+            items: components["schemas"]["UploadedLot"][];
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -295,6 +594,223 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_testset_api_testset_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedTestset"];
+                };
+            };
+            /** @description набор не загружен */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upload_testset_api_testset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadTestsetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedTestset"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_testset_api_testset_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    predict_testset_api_testset_predict_csv_get: {
+        parameters: {
+            query?: {
+                /** @description кандидатов в каждом блоке */
+                top?: number;
+                /** @description только 1: «Новые» из кеша, без сети */
+                offline?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description выдача по каждой процедуре (CSV «;») */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description набор не загружен */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description offline=0: живой прогон по всем лотам — только make predict */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    api_ratings_batch_api_ratings_get: {
+        parameters: {
+            query: {
+                /** @description ИНН через запятую */
+                inns: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["RatingSummary"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_ratings_api_ratings__inn__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inn: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_rate_api_ratings__inn__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inn: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RatingIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;
@@ -371,6 +887,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Query"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_lot_backtest_api_lot__ident__backtest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ident: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Backtest"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_okpd2_api_okpd2_get: {
+        parameters: {
+            query?: {
+                codes?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */

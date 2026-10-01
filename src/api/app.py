@@ -4,6 +4,16 @@ Also serves the built UI (src/ui/dist) at "/", so `make demo` is one process + w
 Search is paginated, filtered and sorted on the server (D-024): `POST /api/search?limit=&offset=`
 pages each block, the block sizes after filters are in the X-Total-History / X-Total-Discovered
 headers (the frozen SearchResponse has no total). The xlsx export takes every filtered row.
+Counts for the filter chips (#232) are the X-Facets header, ASCII JSON
+`{"history": F, "discovered": F}`, F = `{"kind": {"manufacturer": n, "distributor": n, "dealer": n, "unknown": n},
+"entity": {"ul": n, "ip": n, "unknown": n}, "near": {"worked": n, "near": n, "any": n}}`: the candidates of the block
+after the legal status (liquidation, RNP), each group after the user filters of the other groups
+(filters.chip_facets), so a chip count is the block size its choice gives with the other filters on; «Новые» shows
+at most discover.MAX_SHOWN, so its counts are capped at it. Filter keys — src/match/filters.py.
+The customer and the purchase type the search assumed (#242) are the X-Search-Context header, ASCII JSON
+`{"customer_region", "customer_basis": "ИНН 78…" | "регион запроса", "purchase_type": goods | works | services |
+remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_near": near | any, "applied_near":
+worked | near | any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
 """
@@ -11,6 +21,7 @@ X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeUR
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -26,16 +37,21 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 
+from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
+from src.api.ratings import router as ratings_router
+from src.api.testset import UploadLimit
+from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
-from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
-from src.enrich.evidence import cached_pages, strip_unverified
+from src.enrich.evidence import strip_unverified
 from src.enrich.role import LABEL as ROLE_LABEL
+from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
-from src.match import fallback
+from src.match import pipeline
 from src.match import search as search_mod
-from src.match.filters import apply_filters
+from src.match.filters import entity_of, kind_of, near_of, parse_filters
+from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
 from src.match.store import get_store
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired
@@ -46,8 +62,11 @@ if os.environ.get("DEMO_FIXTURE") == "1":
     log.warning("DEMO_FIXTURE=1: synthetic fixture, not the organizers' data")
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
-# «Тип» of the xlsx: the captions of KIND_LABEL in src/ui/src/api.ts, from the role captions of D-057
-KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Тип не определён"}
+# «Роль» of the xlsx: the captions of the role chips (KIND_LABEL in src/ui/src/api.ts), from D-057 (#232)
+KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Роль не определена"}
+ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or a natural person (DATA_DICTIONARY)
+# The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
+MAX_TEXT_CHARS = 20_000
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -73,6 +92,9 @@ app = FastAPI(
     version="0.1.0",
     description="Подбор поставщиков, производителей и дистрибьюторов с объяснением и источниками фактов.",
 )
+app.add_middleware(UploadLimit)  # 413 on an oversized test export before the body is read (#207)
+app.include_router(testset_router)  # /api/testset: the test export uploaded in the UI (#207), before the SPA route
+app.include_router(ratings_router)  # /api/ratings: customer ratings 1–5★, not in the score (#233)
 _engine = None
 
 
@@ -112,81 +134,60 @@ def health() -> Health:
     return Health(status="ok", stub=_is_stub(), llm=get_provider().name, queue=status_counts(_queue()), store=store)
 
 
-def _found(query: Query, uncached: set[str] | None = None) -> tuple[list[CounterpartyMatch], str | None]:
-    """Every candidate of the query after the user filters, best first; and why history is empty (#113).
-
-    «Новые» INNs are the first in the enrichment queue because discover() queues them here, while
-    `_enriched` only collects history INNs without a cache into `uncached` and the caller queues them
-    (the visible page only) after this function returns. The hard filters run on the enriched rows
-    (status, МСП, kind). The cached card passes strip_unverified BEFORE the filters, so «только
-    производители» keeps only a role whose basis passed the check; strip_unverified does not check
-    status / is_msp / name / region, so those filters rely on the cached card as is.
-    """
+def _accepted(query: Query) -> None:
+    """422 before the search for what the product does not take: an empty text (#113); `as_of` — the eval
+    knob (search() is called directly there): through the API a client date built a new BM25 index per date
+    under the global index lock — 46 s and 110 MB on the full data, every other search waiting, then 503
+    (#145, F-01); a text over MAX_TEXT_CHARS (F-02)."""
     if not query.text.strip():
         raise HTTPException(422, "Пустой запрос")
+    if query.as_of is not None:
+        raise HTTPException(422, "as_of задаётся только в backtest (make eval): API ищет по всем данным")
+    if len(query.text) > MAX_TEXT_CHARS:
+        raise HTTPException(422, f"Текст запроса длиннее {MAX_TEXT_CHARS:_} символов".replace("_", " ")
+                                 + " — оставьте наименование позиции или фрагмент ТЗ")
+    try:  # a typo in a filter is an error, not a silently disabled filter (#232, D-030)
+        near_of(query, parse_filters(query.filters))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+def _context(query: Query) -> dict[str, object]:
+    """X-Search-Context (#242): the customer's region and the purchase type the search assumed, with their basis."""
+    region, inn_note = search_mod.customer_region(query)  # a note only when the region came from the customer's INN
+    kind, codes = purchase_basis(query.okpd2)
+    return {
+        "customer_region": region,
+        "customer_basis": f"ИНН {(query.customer_inn or '').strip()[:2]}…" if inn_note else "регион запроса",
+        "purchase_type": kind,
+        "purchase_label": PURCHASE_LABEL[kind] if kind else None,
+        "type_basis": codes,
+        "default_near": default_near(kind),
+        "applied_near": near_of(query).choice,
+    }
+
+
+def _found(query: Query, uncached: set[str] | None = None
+           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]]]:
+    """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets.
+
+    The selection itself is src/match/pipeline.py — the same for make eval and make predict (#220).
+    """
+    _accepted(query)
     try:
-        found = search_mod.search(query, k=search_mod.CANDIDATES)
+        res = pipeline.pick(query, enqueue=_enqueue_background)
     except FileNotFoundError as e:  # organizers' data not ingested / not loaded (src/match/store.py)
         log.warning("search: %s", e)  # the path goes to the log, not to the client
         raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
                                  "или база не отвечает") from e
-    note = fallback.search_note()
-    if not getattr(search_mod, "IS_STUB", False):
-        discovered = _discovered(query, found)
-        found = [*_enriched(found, uncached if uncached is not None else set()), *discovered]
-    shown = apply_filters(found, query)
-    hidden = sum(m.origin == "history" for m in found) - sum(m.origin == "history" for m in shown)
-    if hidden and not any(m.origin == "history" for m in shown):
-        note = f"фильтры скрыли {hidden}"
-        log.info("search %s: %s", query.query_id, note)
-    return shown, note
+    if uncached is not None:
+        uncached.update(res.uncached)
+    return res.matches, res.note, res.facets
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     """What the card and the xlsx show: only facts and contacts that pass the Evidence check."""
-    if getattr(search_mod, "IS_STUB", False):
-        return matches
-    pages = cached_pages(SourceCache().page_text)  # one read and one normalization per page per request
-    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in matches]
-
-
-def _enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[CounterpartyMatch]:
-    """Mix the cached enrichment (status, МСП, name, kind, ...) into history candidates BEFORE the hard filters (#38).
-
-    Cache only, never the network inside the user's request: no cache -> the INN is added to `uncached`
-    (queued later, visible page only) and the fields stay None («не проверено»). Organizers' data
-    (inn, kpp, stats) is kept.
-    """
-    cache = SourceCache()
-    pages = cached_pages(cache.page_text)  # one read and normalization per page for the whole list
-    out = []
-    for m in history:
-        cp = m.counterparty
-        if m.origin != "history" or not cp.inn or not inn_is_valid(cp.inn):
-            out.append(m)
-            continue
-        try:
-            # filters see only facts that pass the Evidence check, as the card does (strip before filters)
-            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True), pages)
-        except KeyError:  # nothing cached for this INN
-            uncached.add(cp.inn)
-            out.append(m)
-            continue
-        except Exception:  # noqa: BLE001 — a broken cached page must not break the search
-            log.exception("enrich из кеша: %s", cp.inn)
-            out.append(m)
-            continue
-        upd: dict[str, object] = {"evidence": [*cp.evidence, *card.evidence]}
-        if cp.name.startswith("ИНН ") and not card.name.startswith("ИНН "):
-            upd["name"] = card.name
-        for f in ("kind", "region", "status", "is_msp", "in_rnp"):
-            if getattr(card, f) is not None:
-                upd[f] = getattr(card, f)
-        if card.okved:
-            upd["okved"] = card.okved
-        upd["contacts"] = {**card.contacts, **cp.contacts}
-        out.append(m.model_copy(update={"counterparty": cp.model_copy(update=upd)}))
-    return out
+    return pipeline.verified(matches)
 
 
 def _queue_uncached(page: list[CounterpartyMatch], uncached: set[str]) -> None:
@@ -205,26 +206,18 @@ def _enqueue_background(inn: str) -> None:
     enqueue(_queue(), "enrich", inn, retry_failed=False)
 
 
-def _discovered(query: Query, history: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
-    """Block «Новые» (#16, D-037): open sources via the cache; a failing source never breaks the search."""
-    try:
-        res = discover_mod.discover(query, history, enqueue=_enqueue_background)
-    except Exception:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
-        log.exception("discovery: блок «Новые» пуст из-за ошибки")
-        return []
-    log.info("discovery %s: %d компаний; %s", query.query_id, len(res.matches), "; ".join(res.requests + res.notes))
-    # «новые» only when the companies were checked against organizers' data
-    return res.matches if res.history_checked else []
-
-
 @app.post("/api/search", response_model=SearchResponse)
 def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
     uncached: set[str] = set()
-    matches, note = _found(query, uncached)
+    matches, note, chips = _found(query, uncached)
     if note:
         response.headers["X-Search-Note"] = quote(note)
+    response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
+    response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
+    if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
+        response.headers["X-Excluded-Lot"] = str(own)
     history = [m for m in matches if m.origin == "history"]
     discovered = [m for m in matches if m.origin == "discovered"]
     response.headers["X-Total-History"] = str(len(history))
@@ -250,6 +243,34 @@ def api_lot(ident: str) -> Query:
         raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
     except LotDataUnavailable as e:
         raise HTTPException(503, str(e)) from e
+
+
+@app.get("/api/lot/{ident}/backtest", response_model=Backtest)
+def api_lot_backtest(ident: str) -> Backtest:
+    """Places of the lot's real participants and winner in our ranking, history before the cutoff (#192, D-084)."""
+    if not ident.strip().isdigit():
+        raise HTTPException(422, "номер закупки — только цифры (lot_id или реестровый номер)")
+    try:
+        return lot_backtest(ident)
+    except LotNotFound as e:
+        raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
+    except NotBacktestable as e:
+        raise HTTPException(422, str(e)) from e
+    except FileNotFoundError as e:
+        log.warning("backtest: %s", e)
+        raise HTTPException(503, "данные организаторов недоступны: не загружены или база не отвечает") from e
+
+
+OKPD2_LABELS_MAX = 50
+
+
+@app.get("/api/okpd2", response_model=dict[str, str])
+def api_okpd2(codes: str = "") -> dict[str, str]:
+    """OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code."""
+    items = list(dict.fromkeys(c.strip() for c in codes.split(",") if c.strip()))
+    if len(items) > OKPD2_LABELS_MAX:
+        raise HTTPException(422, f"не больше {OKPD2_LABELS_MAX} кодов за запрос")
+    return {c: okpd2_label(c) for c in items}
 
 
 @app.get("/api/counterparty/{inn}", response_model=Counterparty)
@@ -284,13 +305,14 @@ def api_export(query: Query) -> StreamingResponse:
     ws = wb.active
     assert ws is not None
     ws.title = "Поставщики"
-    ws.append(["Блок", "Наименование", "ИНН", "Тип", "Регион", "МСП", "Score", "Почему в списке", "Источники"])
+    ws.append(["Блок", "Наименование", "ИНН", "Роль", "ЮЛ/ИП", "Регион", "МСП", "Score", "Почему в списке",
+               "Источники"])
     for block, rows in (("С опытом госзакупок", res.history), ("Новые из открытых источников", res.discovered)):
         for m in rows:
             cp = m.counterparty
             ws.append([
                 block, cp.name, cp.inn or "ИНН не подтверждён",
-                KIND_LABEL.get(cp.kind or "unknown", KIND_LABEL["unknown"]), cp.region or "",
+                KIND_LABEL[kind_of(cp)], ENTITY_LABEL.get(entity_of(cp) or "", "не определено"), cp.region or "",
                 {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], round(m.score, 3),
                 "; ".join(c.explanation for c in m.components),
                 "; ".join(f"{e.source}: {e.url}" for e in cp.evidence),

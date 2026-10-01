@@ -6,6 +6,253 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/testset": {
+      "get": {
+        "summary": "Get Testset",
+        "operationId": "get_testset_api_testset_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedTestset"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "набор не загружен"
+          }
+        }
+      },
+      "post": {
+        "summary": "Upload Testset",
+        "description": "Test export files (CSV text) -> the active set; 422 with a message on a broken format, 413 over the limit.",
+        "operationId": "upload_testset_api_testset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadTestsetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedTestset"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Testset",
+        "operationId": "delete_testset_api_testset_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/api/testset/predict.csv": {
+      "get": {
+        "summary": "Predict Testset",
+        "description": "`make predict --offline` over the active set: per lot «История» and «Новые» with score and components.",
+        "operationId": "predict_testset_api_testset_predict_csv_get",
+        "parameters": [
+          {
+            "name": "top",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "кандидатов в каждом блоке",
+              "default": 10,
+              "title": "Top"
+            },
+            "description": "кандидатов в каждом блоке"
+          },
+          {
+            "name": "offline",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "только 1: «Новые» из кеша, без сети",
+              "default": true,
+              "title": "Offline"
+            },
+            "description": "только 1: «Новые» из кеша, без сети"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "выдача по каждой процедуре (CSV «;»)",
+            "content": {
+              "text/csv": {}
+            }
+          },
+          "404": {
+            "description": "набор не загружен"
+          },
+          "422": {
+            "description": "offline=0: живой прогон по всем лотам — только make predict"
+          }
+        }
+      }
+    },
+    "/api/ratings": {
+      "get": {
+        "summary": "Api Ratings Batch",
+        "operationId": "api_ratings_batch_api_ratings_get",
+        "parameters": [
+          {
+            "name": "inns",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ИНН через запятую",
+              "title": "Inns"
+            },
+            "description": "ИНН через запятую"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/RatingSummary"
+                  },
+                  "title": "Response Api Ratings Batch Api Ratings Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ratings/{inn}": {
+      "get": {
+        "summary": "Api Ratings",
+        "operationId": "api_ratings_api_ratings__inn__get",
+        "parameters": [
+          {
+            "name": "inn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Inn"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Api Rate",
+        "operationId": "api_rate_api_ratings__inn__post",
+        "parameters": [
+          {
+            "name": "inn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Inn"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RatingIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingSaved"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "summary": "Health",
@@ -114,6 +361,91 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Query"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lot/{ident}/backtest": {
+      "get": {
+        "summary": "Api Lot Backtest",
+        "description": "Places of the lot's real participants and winner in our ranking, history before the cutoff (#192, D-084).",
+        "operationId": "api_lot_backtest_api_lot__ident__backtest_get",
+        "parameters": [
+          {
+            "name": "ident",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ident"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Backtest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/okpd2": {
+      "get": {
+        "summary": "Api Okpd2",
+        "description": "OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code.",
+        "operationId": "api_okpd2_api_okpd2_get",
+        "parameters": [
+          {
+            "name": "codes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Codes"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Okpd2 Api Okpd2 Get"
                 }
               }
             }
@@ -248,6 +580,78 @@
   },
   "components": {
     "schemas": {
+      "Backtest": {
+        "properties": {
+          "lot_id": {
+            "type": "integer",
+            "title": "Lot Id"
+          },
+          "lot_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Lot Date"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "ranked": {
+            "type": "integer",
+            "title": "Ranked"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/ParticipantRank"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "winner_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winner Rank"
+          },
+          "in_top": {
+            "type": "integer",
+            "title": "In Top"
+          },
+          "top": {
+            "type": "integer",
+            "title": "Top"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lot_id",
+          "lot_date",
+          "as_of",
+          "channel",
+          "ranked",
+          "participants",
+          "winner_rank",
+          "in_top",
+          "top"
+        ],
+        "title": "Backtest"
+      },
       "Counterparty": {
         "properties": {
           "inn": {
@@ -535,6 +939,36 @@
         ],
         "title": "Health"
       },
+      "ParticipantRank": {
+        "properties": {
+          "inn": {
+            "type": "string",
+            "title": "Inn"
+          },
+          "is_winner": {
+            "type": "boolean",
+            "title": "Is Winner"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inn",
+          "is_winner",
+          "rank"
+        ],
+        "title": "ParticipantRank"
+      },
       "Query": {
         "properties": {
           "query_id": {
@@ -645,6 +1079,175 @@
         "title": "Query",
         "description": "Customer need: an item name, a description or a fragment of the spec.\n\nMirrors one notice (lot) of organizers' data (research/DATA_DICTIONARY.md): in the product\nthe user fills `text` (and optionally the rest); in backtest every field comes from the lot."
       },
+      "RatingDetail": {
+        "properties": {
+          "inn": {
+            "type": "string",
+            "title": "Inn"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "опубликованных оценок"
+          },
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average",
+            "description": "None, пока оценок меньше MIN_SHOWN"
+          },
+          "min_shown": {
+            "type": "integer",
+            "title": "Min Shown",
+            "default": 3
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer",
+            "default": "Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены."
+          },
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            },
+            "type": "array",
+            "title": "Reviews"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inn",
+          "count",
+          "average",
+          "reviews"
+        ],
+        "title": "RatingDetail"
+      },
+      "RatingIn": {
+        "properties": {
+          "author_inn": {
+            "type": "string",
+            "title": "Author Inn",
+            "description": "ИНН заказчика, который оценивает (контрольная сумма)"
+          },
+          "browser_sig": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Browser Sig",
+            "description": "локальный ключ браузера, не удостоверяет личность"
+          },
+          "stars": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Stars"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "author_inn",
+          "browser_sig",
+          "stars",
+          "text"
+        ],
+        "title": "RatingIn"
+      },
+      "RatingSaved": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "published / quarantine / hidden"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/RatingSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "summary"
+        ],
+        "title": "RatingSaved"
+      },
+      "RatingSummary": {
+        "properties": {
+          "inn": {
+            "type": "string",
+            "title": "Inn"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "опубликованных оценок"
+          },
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average",
+            "description": "None, пока оценок меньше MIN_SHOWN"
+          },
+          "min_shown": {
+            "type": "integer",
+            "title": "Min Shown",
+            "default": 3
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer",
+            "default": "Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены."
+          }
+        },
+        "type": "object",
+        "required": [
+          "inn",
+          "count",
+          "average"
+        ],
+        "title": "RatingSummary"
+      },
+      "Review": {
+        "properties": {
+          "stars": {
+            "type": "integer",
+            "title": "Stars"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stars",
+          "text",
+          "created_at"
+        ],
+        "title": "Review"
+      },
       "ScoreComponent": {
         "properties": {
           "name": {
@@ -720,6 +1323,135 @@
         ],
         "title": "SearchResponse",
         "description": "API envelope: two blocks of the result (the incumbent trap, methodology step 5)."
+      },
+      "UploadTestsetRequest": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/UploadedCsv"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "UploadTestsetRequest"
+      },
+      "UploadedCsv": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name",
+            "description": "имя файла, как у пользователя (Извещения*.csv, ТРУ*.csv)"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "содержимое файла, UTF-8 текстом"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "text"
+        ],
+        "title": "UploadedCsv"
+      },
+      "UploadedLot": {
+        "properties": {
+          "lot_id": {
+            "type": "string",
+            "title": "Lot Id"
+          },
+          "reqnum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reqnum"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "текст запроса подбора (Query.text) — тем же правилом, что /api/lot"
+          },
+          "okpd2": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Okpd2"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes",
+            "description": "что не так с лотом: пустой ОКПД2, предмет, НМЦК"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lot_id",
+          "reqnum",
+          "text",
+          "okpd2",
+          "notes"
+        ],
+        "title": "UploadedLot"
+      },
+      "UploadedTestset": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "sha256 содержимого Извещения + ТРУ, первые 12 знаков"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "использованные файлы (Поставщики*.csv не используется)"
+          },
+          "lots": {
+            "type": "integer",
+            "title": "Lots"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UploadedLot"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "files",
+          "lots",
+          "warnings",
+          "items"
+        ],
+        "title": "UploadedTestset"
       },
       "ValidationError": {
         "properties": {
