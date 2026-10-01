@@ -140,7 +140,7 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
     Columns are the keys of Counterparty.stats: lots_participated, lots_won, win_rate, customers,
     customers_spb, first_seen, last_seen, median_start_price, top_okpd2 (3 most frequent level-4
     groups, comma-separated), plus kpp (most frequent) and inn_valid, and the profile keys
-    (D-059, research/DATA_DICTIONARY.md): assortment, scale, customers, activity, channels, legal.
+    (D-061, research/DATA_DICTIONARY.md): assortment, scale, customers, activity, channels, legal.
     """
     cond = f"publish_date < DATE '{as_of.isoformat()}'" if as_of else "TRUE"
     # End of the history: lots_last_90d counts lots in [end - 90 days, end).
@@ -180,7 +180,8 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
             FROM p JOIN items i USING (lot_id) WHERE i.okpd2_l2 IS NOT NULL GROUP BY ALL
         ),
         cls_agg AS (
-            SELECT supplier_inn, count(*) AS okpd2_classes, max(n) AS top_n FROM cls GROUP BY supplier_inn
+            SELECT supplier_inn, count(*) AS okpd2_classes, max(n) AS top_n,
+                   arg_max(okpd2_l2, (n, okpd2_l2)) AS top_class FROM cls GROUP BY supplier_inn
         ),
         cls_lots AS (
             SELECT p.supplier_inn, count(DISTINCT p.lot_id) AS n
@@ -223,7 +224,7 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
         ),
         prof AS (
             SELECT l.supplier_inn,
-                   c.okpd2_classes, g.okpd2_groups,
+                   c.okpd2_classes, c.top_class, g.okpd2_groups,
                    round(c.top_n / cl.n, 4) AS top_class_share,
                    round(g.assortment_breadth, 4) AS assortment_breadth,
                    cd.distinct_codes, l.items_per_lot,
