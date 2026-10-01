@@ -65,7 +65,7 @@ DATA_STORE=parquet DATA_PROCESSED_DIR=data/processed INDEX_DIR=indexes \
 
 | Хранилище | p50 | p95 | Источник |
 |---|---|---|---|
-| parquet + BM25 (8 CPU, commit da1b44d) | 638 мс | 873 мс | эта задача, команда выше (файл `eval/results/latency-arch-parquet.json` не коммитится: каталог `eval/` вне зоны задачи) |
+| parquet + BM25 (8 CPU, commit da1b44d) | 638 мс | 873 мс | эта задача, команда выше; файл результата `eval/results/latency-arch-parquet.json` (#155) |
 | Postgres (16 ядер, commit 4162c2c) | не измерено в этой задаче | | замер #81: p50 2 300 мс, p95 4 342 мс при n = 200 (`eval/results/latency-pg-v1.json`), parquet там же 559 / 624 мс (`eval/results/latency-parquet-v1.json`); сравнивать Postgres и parquet можно только внутри замера #81 (одна машина, один commit, load average на старте 0.68 / 1.48 / 2.54 и 2.51 / 1.98 / 2.60) |
 
 Что это значит честно: на Postgres поиск медленнее в 4 раза (по данным #81 основное время —
