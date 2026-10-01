@@ -54,6 +54,7 @@ def recommend(lot: TestLot, top: int, offline: bool | None = None) -> tuple[list
     except FileNotFoundError:
         raise  # training data absent: nothing can be predicted, the caller stops
     except Exception as e:  # noqa: BLE001 — one bad lot must not stop the whole export
+        # the pipeline is one call now: a failed search leaves no «Новые» either (D-092)
         log.exception("подбор, лот %s", lot.lot_id)
         notes.append(f"ошибка подбора по истории: {type(e).__name__}")
         return [], notes
@@ -62,7 +63,8 @@ def recommend(lot: TestLot, top: int, offline: bool | None = None) -> tuple[list
         notes.append(picked.note or "в истории нет поставщиков по этому предмету")
     res = picked.discovery
     if res is None:
-        notes.append("блок «Новые» недоступен: ошибка источника")
+        if not pipeline.is_stub():
+            notes.append(f"блок «Новые» недоступен: {picked.discovery_error or 'ошибка источника'}")
     elif not res.history_checked:
         notes.append("«Новые» не установлены: нет сверки с данными организаторов")
     if res is not None and not discovered:

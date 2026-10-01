@@ -46,6 +46,7 @@ class Picked:
     facets: Facets = field(default_factory=dict)  # X-Facets of /api/search: chips before the user filters
     uncached: set[str] = field(default_factory=set)  # history INNs without a cached card (queue them)
     discovery: discover_mod.Discovery | None = None  # None — the block was not asked for or failed
+    discovery_error: str | None = None  # the exception type when discover() failed
 
     @property
     def history(self) -> list[CounterpartyMatch]:
@@ -83,7 +84,7 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
     if not is_stub() and not backtest:
         discovered: list[CounterpartyMatch] = []
         if discovery:
-            discovered, candidates, out.discovery = _discovered(query, found, enqueue, offline)
+            discovered, candidates, out.discovery, out.discovery_error = _discovered(query, found, enqueue, offline)
         found = [*enriched(found, out.uncached), *discovered]
     legal = found if backtest else apply_legal(found)
     shown = apply_user_filters(legal, query)
@@ -148,22 +149,22 @@ def enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[Count
 
 def _discovered(query: Query, history: list[CounterpartyMatch], enqueue: Callable[[str], object] | None,
                 offline: bool | None
-                ) -> tuple[list[CounterpartyMatch], list[CounterpartyMatch], discover_mod.Discovery | None]:
+                ) -> tuple[list[CounterpartyMatch], list[CounterpartyMatch], discover_mod.Discovery | None, str | None]:
     """Block «Новые» (#16, D-037): open sources via the cache; a failing source never breaks the search.
 
     Returns the block (top MAX_SHOWN), every candidate before the user filters (X-Facets) and the Discovery.
     """
     try:
         res = discover_mod.discover(query, history, enqueue=enqueue, offline=offline)
-    except Exception:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
+    except Exception as e:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
         log.exception("discovery: блок «Новые» пуст из-за ошибки")
-        return [], [], None
+        return [], [], None, type(e).__name__
     log.info("discovery %s: %d компаний; %s", query.query_id, len(res.matches), "; ".join(res.requests + res.notes))
     # «новые» only when the companies were checked against organizers' data
     if not res.history_checked:
-        return [], [], res
+        return [], [], res, None
     # matches ⊆ candidates: a Discovery built without candidates (a test double) still counts its own block
-    return res.matches, res.candidates or res.matches, res
+    return res.matches, res.candidates or res.matches, res, None
 
 
 @dataclass
@@ -174,12 +175,13 @@ class TodayAudit:
     dropped: int = 0  # the card fails legal_ok today (liquidated, bankrupt, in РНП)
     dropped_relevant: int = 0  # ... and the INN is relevant for the case
     cases_with_dropped_relevant: int = 0
+    k: int = 10  # the top-k looked at
     _cards: dict[str, bool | None] = field(default_factory=dict, repr=False)  # inn -> legal today; None — no card
 
-    def add(self, ranked: list[str], relevant: set[str], k: int = 10) -> None:
+    def add(self, ranked: list[str], relevant: set[str]) -> None:
         cache: SourceCache | None = None
         lost = 0
-        for inn in ranked[:k]:
+        for inn in ranked[: self.k]:
             if inn not in self._cards:
                 cache = cache or SourceCache()
                 try:
@@ -199,9 +201,9 @@ class TodayAudit:
         self.cases_with_dropped_relevant += lost > 0
 
     def record(self) -> dict:
-        return {"k": 10, "checked": self.checked, "cached": self.cached,
+        return {"k": self.k, "checked": self.checked, "cached": self.cached,
                 "cached_share": round(self.cached / self.checked, 4) if self.checked else None,
                 "legal_dropped": self.dropped, "legal_dropped_relevant": self.dropped_relevant,
                 "cases_with_legal_dropped_relevant": self.cases_with_dropped_relevant,
-                "note": "сегодняшний кеш ФНС/РНП по top-10 backtest; в метрики и bootstrap не входит (D-092)"}
+                "note": f"сегодняшний кеш ФНС/РНП по top-{self.k} backtest; в метрики и bootstrap не входит (D-092)"}
 
