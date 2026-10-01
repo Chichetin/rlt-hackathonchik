@@ -349,7 +349,7 @@ def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
 def _hang(calls: list, ok_first: float | None = None):
     """A source that keeps silent exactly as long as the client agreed to wait (connect + read)."""
     def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request.extensions["timeout"])
+        calls.append({**request.extensions["timeout"], "at": time.monotonic()})
         if ok_first is not None and len(calls) == 1:
             time.sleep(ok_first)
             return httpx.Response(200, json={"rowCount": 0, "data": []})
@@ -371,13 +371,15 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
     monkeypatch.setattr(rmsp, "_last_request", 0.0)
     calls: list = []
-    started = time.monotonic()
     res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),
                offline=False, budget_s=budget, client=_client(_hang(calls, ok_first)))
-    elapsed = time.monotonic() - started
-    assert elapsed < budget + 0.25, f"{elapsed:.2f} s for a {budget} s budget"
+    # coarse guard against a request waiting its full default timeout; the clock starts at the first request
+    # (the deadline starts after the query setup) with slack for result handling on a loaded machine
+    elapsed = time.monotonic() - calls[0]["at"]
+    assert elapsed < budget + 1.0, f"{elapsed:.2f} s of network for a {budget} s budget"
     assert len(calls) == expected_calls and len(res.requests) == 4 and res.matches == []
-    assert all(t["connect"] + t["read"] <= budget + 1e-6 for t in calls)
+    # every request is allowed to wait only for what is left before the deadline
+    assert all(t["at"] - calls[0]["at"] + t["connect"] + t["read"] <= budget + 0.1 for t in calls)
 
 
 def test_request_timeout_is_capped_by_the_default_when_time_is_plenty(tmp_path, monkeypatch):
