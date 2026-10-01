@@ -216,15 +216,49 @@ def load(sp: dict) -> Model:
     return model
 
 
-KIND_TEXT = {"logreg": "логистическая регрессия", "lgbm": "LightGBM LambdaMART"}
+KIND_TEXT = {"logreg": "логистическая регрессия", "lgbm": "LightGBM"}
+
+# How the card prints the value of a feature (feature_row stores counts as log1p, days as log1p(days)).
+_COUNT = {"n_lots", "n_wins", "class_lots", "class_wins", "cust_lots", "lots", "wins", "customers", *PROFILE_LOG}
+_SHARE = {"bm25_rel", "win_rate", "spb_share", "channel_share", "top_class_share", "top_customer_share",
+          "repeat_win_share"}
+_FLAG = {"region_kpp", "region_inn", "class_match", "is_ip", "channel_em", "okpd_predicted"}
 
 
-def explain(model: Model, contrib: np.ndarray, top: int = 2) -> str:
-    """'ранжировщик (…): главный вклад — X, Y' from one row of contributions; the positive ones only."""
-    order = [i for i in np.argsort(-contrib, kind="stable")[:top] if contrib[i] > 0]
-    if not order:
-        return f"ранжировщик ({KIND_TEXT[model.kind]}): ни один признак не поднял выше среднего"
-    return f"ранжировщик ({KIND_TEXT[model.kind]}): главный вклад — " + ", ".join(FEATURES[NAMES[i]] for i in order)
+def value_text(name: str, x: float) -> str:
+    """'<feature>: <value as a person reads it>' — 7 lots, 240 days, 85%, да / нет."""
+    label = FEATURES[name]
+    if math.isnan(x):
+        return f"{label}: нет данных"
+    if name in _COUNT:
+        v = str(round(math.expm1(x)))
+    elif name in ("days_last", "days_first"):
+        v = f"{round(math.expm1(x))} дн."
+    elif name in _SHARE:
+        v = f"{x:.0%}"
+    elif name in _FLAG:
+        v = "да" if x >= 0.5 else "нет"
+    elif name == "price_gap":
+        v = f"в {math.exp(x):.1f} раза"
+    elif name == "okpd_level":
+        v = str(round(x))
+    else:
+        v = f"{x:.2f}"
+    return f"{label}: {v}"
+
+
+def explain(model: Model, contrib: np.ndarray, row: np.ndarray, pro: int = 3, con: int = 1) -> str:
+    """Why the model put the supplier here: the `pro` features that lifted it most and the `con` that pulled
+    it down most, each with its value. The contributions are exact (tree SHAP / w·z), not a guess."""
+    order = np.argsort(-contrib, kind="stable")
+    up = [i for i in order[:pro] if contrib[i] > 0]
+    down = [i for i in order[::-1][:con] if contrib[i] < 0]
+    parts = [f"порядок задаёт ранжировщик ({KIND_TEXT[model.kind]}), компоненты — его входы"]
+    parts.append("за — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in up) if up
+                 else "ни один признак не поднял выше среднего")
+    if down:
+        parts.append("против — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in down))
+    return ". ".join(parts)
 
 
 def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
@@ -238,7 +272,7 @@ def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float
     out = []
     for j, i in enumerate(order):
         m = matches[i]
-        line = explain(model, contrib[j])
+        line = explain(model, contrib[j], x[i])
         comps = [c.model_copy(update={"explanation": f"{c.explanation}; {line}"}) if c.name == "product_fit" else c
                  for c in m.components]
         out.append(m.model_copy(update={"score": round(1.0 / (1.0 + math.exp(-float(raw[i]))), 4),

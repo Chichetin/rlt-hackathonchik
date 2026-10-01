@@ -18,8 +18,7 @@ Q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110
 
 
 def test_off_is_v2_and_features_are_deterministic(search_data):
-    cfg = search_mod.load_config()
-    assert "ranker" not in cfg
+    cfg = {k: v for k, v in search_mod.load_config().items() if k != "ranker"}
     plain = search(Q, config=cfg)
     got: list = []
     assert search(Q, config=cfg, features_out=got) == plain  # collecting features changes nothing
@@ -52,14 +51,43 @@ def test_model_reorders_and_explains(search_data, tmp_path):
             "coef": coef.tolist(), "intercept": 0.0}
     model.write_text(json.dumps(body), encoding="utf-8")
     cfg = {**search_mod.load_config(), "ranker": {"kind": "logreg", "model": str(model)}}
+    plain_cfg = {k: v for k, v in cfg.items() if k != "ranker"}
     got: list = []
-    search(Q, config={k: v for k, v in cfg.items() if k != "ranker"}, features_out=got)
+    search(Q, config=plain_cfg, features_out=got)
     res = search(Q, config=cfg)
     lots = {inn: r[ranker.NAMES.index("n_lots")] for inn, r in got}
     assert [lots[m.counterparty.inn] for m in res] == sorted(lots.values(), reverse=True)[:len(res)]
     top = lots[res[0].counterparty.inn]
     assert res[0].score == round(1.0 / (1.0 + np.exp(-(top - 0.5) / 2.0)), 4)  # sigmoid of the standardized score
     fit = next(c for c in res[0].components if c.name == "product_fit")
-    assert "ранжировщик (логистическая регрессия): главный вклад — лоты с похожими позициями" in fit.explanation
+    assert "порядок задаёт ранжировщик (логистическая регрессия), компоненты — его входы" in fit.explanation
+    n_top = round(math.expm1(top))
+    assert f"за — лоты с похожими позициями: {n_top}" in fit.explanation  # the value, not only the name
     with pytest.raises(ValueError, match="ranker.kind"):
         search_mod.check_config({**cfg, "ranker": {"kind": "svm", "model": "x"}})
+
+
+def test_missing_model_falls_back_to_v2(search_data, tmp_path):
+    """No model file (or no lightgbm) never breaks the demo: the v2 order and a note saying so."""
+    from src.match import fallback
+
+    plain_cfg = {k: v for k, v in search_mod.load_config().items() if k != "ranker"}
+    cfg = {**plain_cfg, "ranker": {"kind": "lgbm", "model": str(tmp_path / "absent.txt")}}
+    assert search(Q, config=cfg) == search(Q, config=plain_cfg)
+    search(Q, config=cfg)
+    assert "ранжировщик недоступен" in (fallback.search_note() or "")
+
+
+def test_value_text_reads_like_a_card():
+    assert ranker.value_text("cust_lots", math.log1p(7)) == "лоты у этого заказчика: 7"
+    assert ranker.value_text("days_last", math.log1p(240)) == "давность последнего участия: 240 дн."
+    assert ranker.value_text("top_class_share", 0.85) == "доля главного класса ОКПД2: 85%"
+    assert ranker.value_text("region_kpp", 1.0).endswith(": да")
+    assert ranker.value_text("cust_lots", math.nan).endswith(": нет данных")
+    row = np.zeros(len(ranker.NAMES))
+    row[ranker.NAMES.index("cust_lots")] = math.log1p(7)
+    row[ranker.NAMES.index("days_last")] = math.log1p(240)
+    contrib = np.zeros(len(ranker.NAMES))
+    contrib[ranker.NAMES.index("cust_lots")], contrib[ranker.NAMES.index("days_last")] = 0.9, -0.4
+    text = ranker.explain(ranker.Model("lgbm", ranker.ROOT, {}), contrib, row)
+    assert "за — лоты у этого заказчика: 7" in text and "против — давность последнего участия: 240 дн." in text

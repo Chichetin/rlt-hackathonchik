@@ -466,7 +466,15 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if features_out is not None:
         features_out.extend(zip((m.counterparty.inn for m in out), rows, strict=True))
     if rk is not None:
-        return ranker.rerank(ranker.load(rk), out, rows, k)
+        try:
+            model = ranker.load(rk)
+        except (OSError, ImportError, ValueError) as e:  # no model file, no lightgbm, stale features: v2 order
+            log.warning("ранжировщик недоступен, порядок по формуле v2: %s", e)
+            prev = fallback.search_note()
+            why = "ранжировщик недоступен — порядок по формуле v2"
+            fallback.set_note(f"{prev}; {why}" if prev else why)
+        else:
+            return ranker.rerank(model, out, rows, k)
     if opts["tie_break"] == "bm25":
         sims = {id(m): s for m, s in zip(out, bm25_of, strict=True)}
         out.sort(key=lambda m: (-m.score, -sims[id(m)], m.counterparty.inn or "~"))
