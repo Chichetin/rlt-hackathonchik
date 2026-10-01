@@ -347,3 +347,10 @@ def test_tokenizers_merge_forms_and_a4_and_switch_version(monkeypatch, name):
     assert len({tuple(tokenize(f)) for f in ("бумага", "бумаги", "бумагу")}) == 1
     assert tokenize("А4") == tokenize("A4") == ["a4"]
     assert tokenizer_version() == ("prefix5-v1" if name == "prefix5" else f"{name}-v1")
+
+
+def test_explanations_name_the_okpd2_class(search_data):
+    given = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])))["7801000012"]
+    assert "совпадает код 17.12.14.110 «Бумага для печати»" in comp(given, "product_fit").explanation
+    by_class = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]), config=v1()))["7801000012"]
+    assert "по ОКПД2 17.12 «Бумага и картон» за" in comp(by_class, "experience").explanation  # experience by class
