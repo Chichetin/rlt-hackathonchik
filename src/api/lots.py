@@ -66,10 +66,14 @@ def find_lot(ident: str) -> Query:
     except StoreUnavailable as e:  # DATA_STORE=postgres and the schema is not loaded
         raise LotDataUnavailable(str(e)) from e
     if store.name == "postgres":
-        row = store.lot(ident)
+        try:
+            row = store.lot(ident)
+            okpd2 = store.lot_okpd2(row[0]) if row else []
+        except StoreUnavailable as e:  # the database went down after it was chosen
+            raise LotDataUnavailable(str(e)) from e
         if row is None:
             raise LotNotFound(ident)
-        return _query(*row, okpd2=store.lot_okpd2(row[0]))
+        return _query(*row, okpd2=okpd2)
     n_src, i_src = _sources()
     con = duckdb.connect(":memory:")
     try:

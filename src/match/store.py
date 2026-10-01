@@ -293,6 +293,7 @@ class PgStore:
 
         self.dsn, self.schema = pg_dsn(url), schema
         self._local = threading.local()
+        self._manifest: tuple[dict, float] | None = None
         self._sql_kw = {"c": ' COLLATE "C"', "bigint_arr": "::bigint[]", "text_arr": "::text[]"}
 
     def __repr__(self) -> str:
@@ -323,15 +324,20 @@ class PgStore:
             try:
                 cur = self._conn().execute(sql.encode(), params)
                 return [d.name for d in cur.description or []], cur.fetchall()
-            except psycopg.OperationalError:
+            except psycopg.OperationalError as e:
                 self._local.conn = None
                 if attempt or fresh:  # reconnect once only if an open connection broke (server restart)
-                    raise
+                    _forget(self)  # the next request chooses the store again (auto: parquet fallback)
+                    raise StoreUnavailable(f"Postgres не отвечает ({type(e).__name__}) — "
+                                           "`docker compose up -d db`, затем `make db-load`") from e
         raise AssertionError("unreachable")
 
     def manifest(self) -> dict:
+        """Cached for MANIFEST_TTL_S: every search reads it twice (index key, Evidence date)."""
         import psycopg
 
+        if self._manifest and self._manifest[1] > time.monotonic():
+            return self._manifest[0]
         try:
             _, rows = self._fetch(f"SELECT body FROM {self.schema}.manifest LIMIT 1", {})
         except psycopg.Error as e:
@@ -340,7 +346,9 @@ class PgStore:
         if not rows:
             raise StoreUnavailable(f"Postgres: {self.schema}.manifest пуст — `make db-load`")
         body = rows[0][0]
-        return body if isinstance(body, dict) else json.loads(body)
+        body = body if isinstance(body, dict) else json.loads(body)
+        self._manifest = (body, time.monotonic() + MANIFEST_TTL_S)
+        return body
 
     def built_at(self) -> datetime:
         return datetime.fromisoformat(self.manifest()["built_at"])
@@ -388,6 +396,7 @@ def processed_dir() -> Path:
     return d if d.is_absolute() else ROOT / d
 
 
+MANIFEST_TTL_S = 30.0  # a new `make db-load` is seen by search within this time
 RETRY_PG_S = 30.0  # auto mode: how long the parquet fallback is kept before Postgres is tried again
 _stores: dict[tuple, tuple[Store, float]] = {}  # key -> (store, expires at; inf for the chosen one)
 _lock = threading.Lock()
@@ -423,6 +432,12 @@ def get_store() -> Store:
     with _lock:
         _stores[key] = (store, expires)
     return store
+
+
+def _forget(store: Store) -> None:
+    with _lock:
+        for key in [k for k, (s, _) in _stores.items() if s is store]:
+            del _stores[key]
 
 
 def clear_stores() -> None:

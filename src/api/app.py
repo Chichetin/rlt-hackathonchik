@@ -109,7 +109,8 @@ def _found(query: Query) -> list[CounterpartyMatch]:
         found = search_mod.search(query, k=search_mod.CANDIDATES)
     except FileNotFoundError as e:  # organizers' data not ingested / not loaded (src/match/store.py)
         log.warning("search: %s", e)  # the path goes to the log, not to the client
-        raise HTTPException(503, "данные организаторов не загружены (запустите src.ingest.build)") from e
+        raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
+                                 "или база не отвечает") from e
     return apply_filters(found, query)
 
 

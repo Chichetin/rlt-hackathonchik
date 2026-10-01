@@ -204,3 +204,30 @@ def test_lot_hits_keep_the_best_document_per_lot(search_data):
         == best
     assert lots.top(2) == sorted(((k, v[0]) for k, v in best.items()), key=lambda x: (-x[1], x[0]))[:2]
     assert len(idx.lot_hits([])) == 0
+
+
+@needs_pg
+def test_database_down_after_start_is_503_and_auto_falls_back(loaded, use, monkeypatch):
+    """Postgres chosen at start, then the container stops: 503 (not 500), and the next request uses parquet."""
+    import psycopg
+    from fastapi.testclient import TestClient
+
+    from src.api import app as app_mod
+
+    use("auto")
+    store = store_mod.get_store()
+    assert store.name == "postgres" and find_lot("6").query_id == "lot-6"
+    monkeypatch.setattr(app_mod, "_engine", None)
+    monkeypatch.setenv("DATABASE_URL", URL)
+
+    def refused(*a, **kw):
+        raise psycopg.OperationalError("connection refused")
+
+    store._local.conn.close()  # type: ignore[attr-defined]
+    monkeypatch.setattr(psycopg, "connect", refused)
+    client = TestClient(app_mod.app)
+    r = client.get("/api/lot/6")
+    assert r.status_code == 503 and "Postgres" in r.json()["detail"]
+    assert store_mod.get_store().name == "parquet"  # forgotten, auto re-checked and fell back
+    assert client.get("/api/lot/6").json()["query_id"] == "lot-6"
+    assert client.post("/api/search", json={"query_id": "q", "text": "бумага"}).json()["history"]
