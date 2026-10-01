@@ -5,6 +5,8 @@
 # С #174 дефолт продукта — H-15f; записи ниже измерены поверх прежнего дефолта v1, поэтому каждая задаёт
 # веса и опции явно (якоря &v1_weights, &v1_options) — `make eval EXP=<id>` воспроизводит свой результат
 # (проверка: tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs).
+# #218 (D-083): «География» с тех пор считается от региона заказчика — записи с geography > 0 сняты до #218 и
+# воспроизводятся на commit из файла результата; на HEAD различие ≤ 9 из 2000 dev-кейсов (ИНН заказчика 47…).
 v1:              # прежний дефолт продукта (D-004, D-029) — воспроизводит E-002 / bm25-dev-v1
   weights: &v1_weights {product_fit: 0.35, experience: 0.2, reliability: 0.2, activity: 0.1, geography: 0.1, price: 0.05}
   options: &v1_options {fit_bm25_share: 0.6, experience_by: class, tie_break: inn}
@@ -37,6 +39,10 @@ H-15g:           # H-15f + инкумбент-сигнал 0.3
   signals: {incumbent: 0.3}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
 H-15f-geo:       # проверка: H-15f с ненулевым весом географии и регионом ИП по ИНН
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
+  signals: {inn_region: 1.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (география от заказчика); не прогоняется — см. EXPERIMENTS
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}

@@ -65,6 +65,7 @@ SAT_LOTS, SAT_WINS = 20, 10  # experience saturates at 20 lots / 10 wins in the 
 HALF_LIFE_DAYS = 90  # activity halves every 90 days without participation
 REGION_NAME = {v: k for k, v in REGION_CODE.items()}
 REGION_IN = {"78": "в Санкт-Петербурге", "47": "в Ленинградской области"}
+REGION_PREP = {"78": "Санкт-Петербурге", "47": "Ленинградской области"}
 NEIGHBOUR = {"78": "47", "47": "78"}
 NEIGHBOUR_VALUE = 0.8
 # Components without data (D-029): shown with value 0 and weight 0, not invented.
@@ -327,6 +328,22 @@ def _inn_geography(inn: str | None, want: str | None, share: float, why: str) ->
     return 0.0, note
 
 
+def customer_region(query: Query) -> tuple[str, str | None]:
+    """The region «География» is measured against (#218): the customer's, else the query region.
+
+    The first two INN digits are the region where the INN was issued, not necessarily where the customer is
+    (the customer's KPP would be better, but Query has none). АИС ГЗ customers work in St Petersburg or the
+    Leningrad region, so only INN 78 / 47 is taken; another prefix (a federal body registered in Moscow, a
+    branch) says nothing about where the goods go — then the query region stays. The second value is the
+    note for the explanation, or None.
+    """
+    inn = (query.customer_inn or "").strip()
+    code = inn[:2] if len(inn) in (10, 12) and inn.isdigit() else ""
+    if code in REGION_NAME:
+        return REGION_NAME[code], f"ИНН заказчика выдан в {REGION_PREP[code]} — сравниваем с этим регионом"
+    return query.region, None
+
+
 def _geography(cp: Counterparty, region: str, inn_share: float = 0.0) -> tuple[float, str]:
     want = REGION_CODE.get(region)
     if not cp.kpp or len(cp.kpp) < 2 or not cp.kpp.strip("0"):  # 000000000 — a stub, not region 00
@@ -405,6 +422,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
+    target, target_note = customer_region(query)  # «География» against the customer's region (#218)
     for c in cands:
         cp = parties.get(c.inn)
         if cp is None:
@@ -415,7 +433,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)
         act, act_why = _activity(cp, ref, as_of)
-        geo, geo_why = _geography(cp, query.region, shares["inn_region"])
+        geo, geo_why = _geography(cp, target, shares["inn_region"])
+        if target_note:  # the comparison is with the customer's region, say so
+            geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),

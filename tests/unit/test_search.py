@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from src.contracts import Query, inn_is_valid
+from src.contracts import Counterparty, Query, inn_is_valid
 from src.ingest.build import build
 from src.match import index as index_mod
 from src.match import search as search_mod
@@ -149,6 +149,11 @@ def test_geography_by_kpp_region(search_data):
     assert comp(lo["7801000012"], "geography").value == pytest.approx(0.8)
     msk = by_inn(search(Query(query_id="q", text="бумага", region="Москва")))
     assert comp(msk["7801000012"], "geography").value == 0.0
+    # #218: through search() — the customer's region (INN 47…) wins over the default query region
+    cust = by_inn(search(Query(query_id="q", text="бумага", customer_inn="4700000003")))
+    assert comp(cust["4701000038"], "geography").value == 1.0
+    assert comp(cust["7801000012"], "geography").value == pytest.approx(0.8)
+    assert "ИНН заказчика выдан в Ленинградской области" in comp(cust["7801000012"], "geography").explanation
 
 
 def test_activity_decays_with_days_since_last_participation(search_data):
@@ -359,6 +364,28 @@ def test_explanations_name_the_okpd2_class(search_data):
     assert "по ОКПД2 17.12 «Бумага и картон» за" in comp(by_class, "experience").explanation  # experience by class
 
 
+# #218: «География» is measured against the customer's region, not a fixed St Petersburg
+@pytest.mark.parametrize(("customer_inn", "target", "noted"), [
+    ("4700000003", "Ленинградская область", True),    # customer in the Leningrad region (synthetic valid INN)
+    ("7800000002", "Санкт-Петербург", True),
+    ("7700000009", "Санкт-Петербург", False),         # a Moscow-registered body: INN says nothing, query region stays
+    (None, "Санкт-Петербург", False),
+])
+def test_customer_region(customer_inn, target, noted):
+    q = Query(query_id="t218", text="бумага", customer_inn=customer_inn)
+    region, note = search_mod.customer_region(q)
+    assert region == target
+    assert (note is not None) == noted
+    if noted:
+        assert note is not None and "ИНН заказчика выдан" in note
+
+
+def test_geography_follows_the_customer():
+    org47 = Counterparty(inn="4700000003", name="ООО Ленобл", kpp="470301001")
+    org78 = Counterparty(inn="7800000002", name="ООО Питер", kpp="780101001")
+    lo, _ = search_mod.customer_region(Query(query_id="t218", text="x", customer_inn="4700000003"))
+    assert search_mod._geography(org47, lo)[0] == 1.0
+    assert search_mod._geography(org78, lo)[0] == pytest.approx(search_mod.NEIGHBOUR_VALUE)
 def test_saturation_caps_spread_experience_of_active_suppliers(search_data):
     """#196: with the default caps (20 lots / 10 wins) busy suppliers all get experience 1.0; higher caps
     keep them apart, and the value follows the caps exactly."""
