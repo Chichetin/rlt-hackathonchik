@@ -1,4 +1,4 @@
-"""One «Подбор» pipeline for /api/search, make eval and make predict (#220 №1, src/match/pipeline.py, D-091).
+"""One «Подбор» pipeline for /api/search, make eval and make predict (#220 №1, src/match/pipeline.py, D-092).
 
 The fixture data of tests/fixtures/ingest; the cached ФНС card is a test double of enrich() — no network.
 """

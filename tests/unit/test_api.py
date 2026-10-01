@@ -66,6 +66,15 @@ def test_search_rejects_client_as_of_without_building_an_index(search_client, se
     assert not built.exists() or not any(built.iterdir())  # nothing was built for the client's date
 
 
+
+def test_search_from_a_notice_says_the_notice_is_left_out(search_client):
+    """#249, F-13: the UI explains why the loaded notice is not among its own results (X-Excluded-Lot)."""
+    r = search_client.post("/api/search", json={"query_id": "lot-6", "text": "Бумага офисная А4"})
+    assert r.status_code == 200 and r.headers["X-Excluded-Lot"] == "6"
+    assert all(e["url"] != "data:items#6" for m in r.json()["history"] for e in m["counterparty"]["evidence"])
+    free = search_client.post("/api/search", json={"query_id": "ui-1", "text": "Бумага офисная А4"})
+    assert "X-Excluded-Lot" not in free.headers
+
 def test_search_rejects_oversized_text(search_client):
     """Unbounded text held a worker: 1 MB — 18 s on the full data; the longest eval query is 4.5k chars (#145, F-02)."""
     big = "бумага офисная " * 1400  # 21 000 chars
