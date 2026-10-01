@@ -257,8 +257,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
         from src.match import pg_retriever
 
         try:
-            hits = pg_retriever.hybrid(idx, query.text, hits, TOP_DOCS)
-            how = " по словам и смыслу"
+            hits, by_meaning = pg_retriever.hybrid(idx, query.text, hits, TOP_DOCS)
+            how = " по словам и смыслу" if by_meaning else ""
         except pg_retriever.VectorsUnavailable as e:
             if STRICT_RETRIEVER:
                 raise

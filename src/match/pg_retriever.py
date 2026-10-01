@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 
 import pyarrow.parquet as pq
 
@@ -33,8 +34,9 @@ class VectorsUnavailable(RuntimeError):
 
 
 _lock = threading.Lock()
-_maps: dict[str, dict[str, list[int]]] = {}  # LotIndex.key -> normalized text -> doc_ids
-_state: dict = {}  # conn, encoder, coverage
+_maps: dict[str, dict[str, list[int]]] = {}  # LotIndex.key -> normalized text -> doc_ids (~1 GB each, keep 2)
+_state: dict = {}  # conn, encoder, coverage, down_until/down_why (negative cache)
+RETRY_S = 30  # unavailable vectors: fall back without re-checking the table on every request
 
 
 def norm_map(idx: LotIndex) -> dict[str, list[int]]:
@@ -45,35 +47,50 @@ def norm_map(idx: LotIndex) -> dict[str, list[int]]:
             m: dict[str, list[int]] = {}
             for d, text in zip(t.column("doc_id").to_pylist(), t.column("text").to_pylist(), strict=True):
                 m.setdefault(normalize(text), []).append(d)
-            if len(_maps) >= 4:
+            if len(_maps) >= 2:
                 _maps.pop(next(iter(_maps)))
             _maps[idx.key] = m
         return _maps[idx.key]
 
 
+def _down(why: str) -> VectorsUnavailable:
+    """Forget the connection and remember the failure for RETRY_S (the next check reconnects)."""
+    if conn := _state.pop("conn", None):
+        conn.close()
+    _state.pop("coverage", None)
+    _state["down_until"], _state["down_why"] = time.monotonic() + RETRY_S, why
+    return VectorsUnavailable(why)
+
+
 def _conn():
-    if "conn" not in _state:
-        url = os.environ.get("DATABASE_URL", "")
-        if not url.startswith("postgres"):
-            raise VectorsUnavailable("DATABASE_URL не указывает на Postgres")
-        try:
-            import psycopg
-            from psycopg import sql
+    if "conn" in _state:
+        return _state["conn"]
+    if time.monotonic() < _state.get("down_until", 0.0):
+        raise VectorsUnavailable(_state["down_why"])
+    url = os.environ.get("DATABASE_URL", "")
+    if not url.startswith("postgres"):
+        raise _down("DATABASE_URL не указывает на Postgres")
+    import psycopg
+    from psycopg import sql
 
-            from src.db.load import pg_dsn
+    from src.db.load import pg_dsn
 
-            conn = psycopg.connect(pg_dsn(url), autocommit=True)
-            total, missing = conn.execute(sql.SQL("SELECT count(*), count(*) FILTER (WHERE emb IS NULL) FROM {}")
-                                          .format(sql.Identifier(VEC_SCHEMA, TABLE))).fetchone()  # type: ignore[misc]
-        except Exception as e:  # no server, no table: the hybrid is not available
-            raise VectorsUnavailable(f"векторы недоступны: {e}") from e
-        if total == 0 or missing:
-            conn.close()
-            raise VectorsUnavailable(f"векторы заполнены не полностью: {total - missing} из {total} (make db-embed)")
+    try:
+        _state["conn"] = conn = psycopg.connect(pg_dsn(url), autocommit=True, connect_timeout=3)
+        total, missing = conn.execute(sql.SQL("SELECT count(*), count(*) FILTER (WHERE emb IS NULL) FROM {}")
+                                      .format(sql.Identifier(VEC_SCHEMA, TABLE))).fetchone()  # type: ignore[misc]
+        indexed = conn.execute("SELECT 1 FROM pg_indexes WHERE schemaname = %s AND indexname = %s",
+                               [VEC_SCHEMA, f"{TABLE}_hnsw"]).fetchone()
         conn.execute(sql.SQL("SET hnsw.ef_search = {}").format(KNN))
-        _state["coverage"] = {"model": MODEL, "table": f"{VEC_SCHEMA}.{TABLE}", "rows": total}
-        _state["conn"] = conn
-    return _state["conn"]
+    except psycopg.Error as e:  # no server, no table: the hybrid is not available
+        raise _down(f"векторы недоступны: {e}") from e
+    if total == 0 or missing:
+        raise _down(f"векторы заполнены не полностью: {total - missing} из {total} (make db-embed)")
+    if not indexed:
+        raise _down(f"нет индекса HNSW {VEC_SCHEMA}.{TABLE}_hnsw (src.db.embed --index)")
+    _state.pop("down_until", None)
+    _state["coverage"] = {"model": MODEL, "table": f"{VEC_SCHEMA}.{TABLE}", "rows": total}
+    return conn
 
 
 def _encoder() -> Encoder:
@@ -99,10 +116,15 @@ def coverage() -> dict | None:
 
 def vector_docs(idx: LotIndex, text: str, k: int = KNN) -> list[int]:
     """doc_ids of this index nearest to the query by meaning, best first."""
+    import psycopg
+
     with _lock:
         conn = _conn()
         q = _encoder()([normalize(text)])[0]
-        rows = conn.execute(*nearest(VEC_SCHEMA, q, k)).fetchall()
+        try:
+            rows = conn.execute(*nearest(VEC_SCHEMA, q, k)).fetchall()
+        except psycopg.Error as e:  # db restarted / connection lost: fall back now, reconnect later
+            raise _down(f"векторный поиск прервался: {e}") from e
     m = norm_map(idx)
     out: list[int] = []
     for norm, _sim in rows:
@@ -121,5 +143,8 @@ def rrf(bm25_hits: list[tuple[int, float]], vec: list[int], top: int) -> list[tu
     return sorted(score.items(), key=lambda x: (-x[1], x[0]))[:top]
 
 
-def hybrid(idx: LotIndex, text: str, bm25_hits: list[tuple[int, float]], top: int) -> list[tuple[int, float]]:
-    return rrf(bm25_hits, vector_docs(idx, text), top)
+def hybrid(idx: LotIndex, text: str, bm25_hits: list[tuple[int, float]],
+           top: int) -> tuple[list[tuple[int, float]], bool]:
+    """(fused hits, whether the vector half contributed any document of this index)."""
+    vec = vector_docs(idx, text)
+    return rrf(bm25_hits, vec, top), bool(vec)
