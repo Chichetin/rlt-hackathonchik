@@ -90,7 +90,8 @@ def test_gate_passes_frozen_clean_config(repo):
 def test_config_hash_changes_with_weights(repo):
     before = R.config_sha256(repo)
     p = repo / "configs" / "search.yaml"
-    p.write_text(p.read_text(encoding="utf-8").replace("product_fit: 0.35", "product_fit: 0.4"), encoding="utf-8")
+    text = p.read_text(encoding="utf-8").replace("product_fit: 0.35", "product_fit: 0.4")
+    p.write_text(text, encoding="utf-8")
     assert R.config_sha256(repo) != before
 
 
