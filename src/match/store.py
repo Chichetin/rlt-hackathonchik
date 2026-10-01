@@ -161,7 +161,7 @@ SELECT agg.supplier_inn, agg.lvl, code.okpd2_code, agg.class_lots, agg.class_win
 FROM agg JOIN code USING (supplier_inn)
 """
 
-# The same answer for Postgres from `supplier_items` (src/db/load.py, D-066): the candidates' own (lot, code) rows, no
+# The same answer for Postgres from `supplier_items` (src/db/load.py, D-073): the candidates' own (lot, code) rows, no
 # join of every lot of every candidate to `items`. Per lot: the deepest level, `<level><best code>` (bytewise max = the
 # deepest level, then the greatest code; NULL codes are skipped as NULLS LAST did) and whether a participant won;
 # then per supplier: the deepest level and its code, lots and wins in the group (level >= 2). Suppliers without
@@ -407,13 +407,13 @@ class PgStore:
         return self._fetch(_TEXT_CODES, {"as_of": as_of}, as_of=as_of)[1]
 
     def _has_supplier_items(self) -> bool:
-        """`supplier_items` exists (a schema loaded before D-066 has none); checked at most once per MANIFEST_TTL_S."""
+        """`supplier_items` exists (a schema loaded before D-073 has none); checked at most once per MANIFEST_TTL_S."""
         if self._precomputed and self._precomputed[1] > time.monotonic():
             return self._precomputed[0]
         ok = self._fetch("SELECT to_regclass(%(t)s) IS NOT NULL", {"t": f"{self.schema}.supplier_items"})[1][0][0]
         if not ok:
             log.warning("Postgres: нет %s.supplier_items — class_history читает items, в несколько раз медленнее; "
-                        "`make db-load` (D-066)", self.schema)
+                        "`make db-load` (D-073)", self.schema)
         self._precomputed = (ok, time.monotonic() + MANIFEST_TTL_S)
         return ok
 
