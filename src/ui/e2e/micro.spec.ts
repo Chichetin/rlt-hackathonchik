@@ -2,9 +2,10 @@ import { expect, test } from "@playwright/test";
 
 test("волны двигаются, reduced motion останавливает фон", async ({ page }) => {
   await page.goto("/");
-  const field = page.locator(".wave-field canvas");
+  // Reduced motion remounts the canvas; capture its stable host instead.
+  const field = page.locator(".wave-field");
   const pixels = async () => (await field.screenshot()).toString("base64");
-  await expect(field).toBeVisible();
+  await expect(field.locator("canvas")).toBeVisible();
   const moving = await pixels();
   await expect.poll(pixels).not.toBe(moving);
   await page.emulateMedia({ reducedMotion: "reduce" });
