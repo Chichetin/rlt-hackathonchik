@@ -371,9 +371,33 @@ def test_fabricated_row_value_fails_the_evidence_check(cache, tmp_path):
 def test_class_is_predicted_from_history_lots(search_data):
     from src.match.search import search
     history = search(Query(query_id="q", text="бумага А4"))
-    assert D.predict_class(history, search_data) == "17.12"
-    assert D.predict_class([], search_data) is None
-    assert D.predict_class(history, search_data / "nope") is None
+    assert D.stated_class(history) == "17.12" == D._lots_class(history, search_data)
+    assert D.predict_class([], search_data) is None and D._lots_class(history, search_data / "nope") is None
+    # lot 2 holds a cartridge (26.20) and a toner (20.59): lots alone cannot choose, search() can
+    cartridge = search(Query(query_id="q", text="Картридж лазерный"))
+    assert D.stated_class(cartridge) == "26.20" == D.predict_class(cartridge, search_data)
+    assert D._lots_class(cartridge, search_data) == "20.59"
+    # a query WITH codes states nothing; a reworded explanation falls back to the lots
+    assert D.stated_class(search(Query(query_id="q", text="бумага А4", okpd2=["17.12.14.110"]))) is None
+    reworded = [m.model_copy(update={"components": [c.model_copy(update={"explanation": "иначе"})
+                                                    for c in m.components]}) for m in history]
+    assert D.stated_class(reworded) is None and D.predict_class(reworded, search_data) == "17.12"
+
+
+def _stated(explanations: list[str]) -> list:
+    from src.contracts import Counterparty, CounterpartyMatch, ScoreComponent
+    return [CounterpartyMatch(counterparty=Counterparty(inn=None, name="x"), score=1.0, origin="history",
+                              components=[ScoreComponent(name="product_fit", value=1, weight=1, explanation=e)])
+            for e in explanations]
+
+
+def test_stated_class_takes_the_majority_and_ignores_short_codes():
+    mark = "x; ОКПД2 определён по похожим позициям"
+    assert D.stated_class(_stated([f"{mark}: совпадает только класс 17", f"{mark}: совпадает код 26.20.40.110",
+                                   f"{mark}: совпадает до группы 26.20", f"{mark} 17.12.14.110 в его истории нет"])
+                          ) == "26.20"
+    assert D.stated_class(_stated([f"{mark}: совпадает только класс 17"])) is None
+    assert D.stated_class(_stated(["Похожие позиции в лоте 26.20.40; ОКПД2 запроса: совпадает код 17.12.14"])) is None
 
 
 @pytest.fixture
@@ -422,3 +446,14 @@ def test_api_search_survives_a_broken_discovery(api, monkeypatch):
     monkeypatch.setattr(D, "discover", lambda *a, **k: 1 / 0)
     body = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"}).json()
     assert body["history"] and body["discovered"] == []
+
+
+def test_e2e_fixtures_give_the_demo_lot_a_filled_block(tmp_path):
+    """The recorded answers the Playwright demo runs on (tests/fixtures/rmsp/e2e): real rows, 01.10."""
+    c = SourceCache(tmp_path / "c.sqlite")
+    assert rmsp.seed(FIX / "e2e", c) == 2
+    res = _run(c, _processed(tmp_path, []), query=_query(text="Бумага офисная А4", okpd2=["17.12.14.110"]))
+    assert len(res.matches) == 10 and res.history_checked
+    assert sorted({m.score for m in res.matches}) == [0.31, 0.45]  # distributors and producers of СПб
+    assert all(check_counterparty(m.counterparty, c.page_text) == [] for m in res.matches)
+    assert all(m.counterparty.evidence[0].fetched_at.date().isoformat() == "2026-10-01" for m in res.matches)

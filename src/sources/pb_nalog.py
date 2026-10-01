@@ -10,7 +10,8 @@ What goes to the cache (src/sources/cache.py):
   src/enrich/evidence.py can check every extracted value against this text (D-028);
 - `raw_url(inn)` → the raw JSON answers, for audit.
 
-`captchaRequired: true` or HTTP 400 with a captcha error → CaptchaRequired: we stop, never solve captchas (research/SOURCES.md).
+`captchaRequired: true` or HTTP 400 with a captcha error → CaptchaRequired: we stop, never solve
+captchas (research/SOURCES.md).
 Requests are paced (MIN_INTERVAL_S between any two requests to the host).
 """
 

@@ -155,7 +155,7 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
-  expect(discovered).toHaveTextContent("Поиск в открытых источниках подключается (#16)");
+  expect(discovered).toHaveTextContent("В открытых источниках новых компаний по этому запросу не найдено");
   await userEvent.click(screen.getByLabelText("Только производители"));
   expect(await screen.findByText("Тип поставщика ещё не определён у 1 из 1 — признак появится после обогащения.")).toBeInTheDocument();
   const history = screen.getByRole("region", { name: "С опытом госзакупок" });

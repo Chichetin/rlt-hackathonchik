@@ -1,8 +1,10 @@
 """discover(query) -> companies from open sources that are NOT in organizers' data. Owner: SOURCES.
 
 Block «Новые из открытых источников» (`origin="discovered"`, #16, D-036, D-037):
-1. OKPD2 class of the query (first 4 digits): `Query.okpd2`, or — when empty — the class voted by
-   the lots of the top history matches (`data:items#<lot>` Evidence of search()).
+1. OKPD2 class of the query (first 4 digits): `Query.okpd2`, or — when empty — the class search()
+   itself predicted and wrote into its `product_fit` explanations (so both blocks speak about the
+   same class); if it wrote none — the class voted by the lots of the top history matches
+   (`data:items#<lot>` Evidence of search()).
 2. OKPD2 class → OKVED prefixes: the same class (OKPD2 and OKVED2 share the first four digits by
    design) and, for goods, a wholesale code from a hand-made table (WHOLESALE). There is no official
    OKPD2 → OKVED2 key (research/SOURCES.md): the mapping is our rule and is shown to the user.
@@ -87,6 +89,7 @@ _LEGAL_FORMS = (
 )
 _OKPD_CLASS = re.compile(r"\d{2}\.\d{2}", re.ASCII)
 _LOT_URL = "data:items#"
+_PREDICTED_MARK = "ОКПД2 определён по похожим позициям"  # wording of src/match/search.py::_product_fit
 
 Relation = Literal["class", "wholesale"]
 
@@ -144,8 +147,25 @@ def okved_plan(codes: Sequence[str]) -> list[Channel]:
     return plan
 
 
+def stated_class(history: Sequence[CounterpartyMatch]) -> str | None:
+    """The OKPD2 class search() predicted for the query, read from its product_fit explanations."""
+    votes: dict[str, int] = {}
+    for m in history[:VOTE_MATCHES]:
+        for comp in m.components:
+            _, mark, tail = comp.explanation.partition(_PREDICTED_MARK)
+            found = _OKPD_CLASS.search(tail) if comp.name == "product_fit" and mark else None
+            if found:
+                votes[found.group(0)] = votes.get(found.group(0), 0) + 1
+    return max(votes, key=lambda c: votes[c]) if votes else None  # ties: the higher-ranked match wins
+
+
 def predict_class(history: Sequence[CounterpartyMatch], processed: Path) -> str | None:
-    """OKPD2 class voted by the lots behind the top history matches; None when it cannot be read."""
+    """OKPD2 class of a query without codes: stated by search(), else voted by the lots behind the
+    top history matches; None when neither can be read."""
+    return stated_class(history) or _lots_class(history, processed)
+
+
+def _lots_class(history: Sequence[CounterpartyMatch], processed: Path) -> str | None:
     lots: dict[int, float] = {}
     for m in history[:VOTE_MATCHES]:
         for e in m.counterparty.evidence:
