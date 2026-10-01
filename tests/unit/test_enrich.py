@@ -152,6 +152,49 @@ def test_captcha_stops(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
+# The real refusal seen live on 01.10 after three cards: HTTP 400, not `captchaRequired` in a 200 body.
+CAPTCHA_400 = {"ERROR": "-", "ERRORS": {"pbSearchCaptcha": ["Требуется ввести цифры с картинки"]}, "STATUS": 400}
+
+
+def test_captcha_as_http_400_stops(tmp_path, monkeypatch):
+    monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.path)
+        return httpx.Response(400, json=CAPTCHA_400)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=pb_nalog.BASE)
+    with pytest.raises(pb_nalog.CaptchaRequired):
+        pb_nalog.fetch_card(UL, SourceCache(tmp_path / "c.sqlite"), client)
+    assert len(calls) == 1
+
+
+def test_captcha_400_while_waiting_for_the_card_stops_at_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
+    ok, calls = _transport()
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        if len(seen) == 4:  # the last step: card get-response
+            return httpx.Response(400, json=CAPTCHA_400)
+        return ok.post(str(req.url), content=req.content, headers={"Content-Type": req.headers["Content-Type"]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=pb_nalog.BASE)
+    with pytest.raises(pb_nalog.CaptchaRequired):
+        pb_nalog.fetch_card(UL, SourceCache(tmp_path / "c.sqlite"), client)
+    assert len(seen) == 4  # no polling after the refusal
+
+
+def test_plain_400_is_an_http_error_not_a_captcha(tmp_path, monkeypatch):
+    monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(400, json={"ERROR": "bad"})),
+                          base_url=pb_nalog.BASE)
+    with pytest.raises(httpx.HTTPStatusError):
+        pb_nalog.fetch_card(UL, SourceCache(tmp_path / "c.sqlite"), client)
+
+
 def test_not_found(tmp_path, monkeypatch):
     monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
     client, _ = _transport(rows=False)
