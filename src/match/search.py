@@ -28,6 +28,7 @@ import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import built_at, counterparties
+from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index, pq_path, processed_dir
 from src.match.text import tokenize
 
@@ -46,7 +47,6 @@ OKPD_LEVEL_TEXT = {4: "совпадает код", 3: "совпадает до �
                    1: "совпадает только класс"}
 SAT_LOTS, SAT_WINS = 20, 10  # experience saturates at 20 lots / 10 wins in the group
 HALF_LIFE_DAYS = 90  # activity halves every 90 days without participation
-REGION_CODE = {"Санкт-Петербург": "78", "Ленинградская область": "47"}
 REGION_NAME = {v: k for k, v in REGION_CODE.items()}
 REGION_IN = {"78": "в Санкт-Петербурге", "47": "в Ленинградской области"}
 NEIGHBOUR = {"78": "47", "47": "78"}

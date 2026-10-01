@@ -4,9 +4,11 @@ import {
   COMPONENT_LABEL,
   exportXlsx,
   fetchLot,
+  filterNotes,
   formatStat,
   KIND_LABEL,
   LotError,
+  regionLabel,
   search,
   STAT_LABEL,
   type Extra,
@@ -25,6 +27,8 @@ export function App() {
   const [text, setText] = useState("");
   const [filters, setFilters] = useState<Filters>({ only_msp: false, only_manufacturers: false, region: "" });
   const [res, setRes] = useState<SearchResponse | null>(null);
+  // the same query without user filters: how many candidates a filter hides for an unknown attribute
+  const [base, setBase] = useState<SearchResponse | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
   const [error, setError] = useState("");
   const [open, setOpen] = useState<CounterpartyMatch | null>(null);
@@ -76,7 +80,14 @@ export function App() {
     setState("loading");
     setOpen(null);
     try {
-      setRes(await search(buildQuery(text, nextFilters, extra())));
+      const active = nextFilters.only_msp || nextFilters.only_manufacturers || !!nextFilters.region;
+      const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
+      const [r, b] = await Promise.all([
+        search(buildQuery(text, nextFilters, extra())),
+        active ? search(buildQuery(text, none, extra())) : Promise.resolve(null),
+      ]);
+      setRes(r);
+      setBase(b ?? r);
       setState("idle");
     } catch (e) {
       setError(String(e));
@@ -211,14 +222,31 @@ export function App() {
         </div>
       )}
 
+      {res && filterNotes(base, filters).map((n) => (
+        <p key={n} className="filternote" role="note">
+          {n}
+        </p>
+      ))}
+
       {res && (
         <main className="results">
-          <Block title="С опытом госзакупок" hint="Есть в данных АИС ГЗ" rows={res.history} onOpen={setOpen} />
+          <Block
+            title="С опытом госзакупок"
+            hint="Есть в данных АИС ГЗ"
+            rows={res.history}
+            onOpen={setOpen}
+            empty={
+              filterNotes(base, filters).length
+                ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
+                : undefined
+            }
+          />
           <Block
             title="Новые из открытых источников"
             hint="Нет в данных АИС ГЗ, найдены в открытых источниках"
             rows={res.discovered}
             onOpen={setOpen}
+            empty="Поиск в открытых источниках подключается (#16): здесь появятся компании, которых нет в данных АИС ГЗ."
           />
         </main>
       )}
@@ -228,7 +256,13 @@ export function App() {
   );
 }
 
-function Block(props: { title: string; hint: string; rows: CounterpartyMatch[]; onOpen: (m: CounterpartyMatch) => void }) {
+function Block(props: {
+  title: string;
+  hint: string;
+  rows: CounterpartyMatch[];
+  onOpen: (m: CounterpartyMatch) => void;
+  empty?: string;
+}) {
   return (
     <section className="block" aria-label={props.title}>
       <h2>
@@ -236,7 +270,7 @@ function Block(props: { title: string; hint: string; rows: CounterpartyMatch[]; 
       </h2>
       <p className="hint">{props.hint}</p>
       {props.rows.length === 0 ? (
-        <p className="empty">Никого не нашли. Попробуйте переформулировать запрос или снять фильтры.</p>
+        <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
         <ol className="list">
           {props.rows.map((m, i) => {
@@ -250,7 +284,7 @@ function Block(props: { title: string; hint: string; rows: CounterpartyMatch[]; 
                     {m.score.toFixed(2)}
                   </span>
                   <span className="meta">
-                    {KIND_LABEL[cp.kind ?? "unknown"]} · {cp.region ?? "регион не указан"} · ИНН{" "}
+                    {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)} · ИНН{" "}
                     {cp.inn ?? "не подтверждён"}
                   </span>
                   {top && <span className="why">{top.explanation}</span>}
@@ -284,7 +318,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
         <dt>В РНП</dt>
         <dd>{yesNo(cp.in_rnp)}</dd>
         <dt>Регион</dt>
-        <dd>{cp.region ?? "не указан"}</dd>
+        <dd>{regionLabel(cp)}</dd>
         {Object.entries(cp.contacts ?? {}).map(([k, v]) => [<dt key={`k-${k}`}>{k}</dt>, <dd key={`v-${k}`}>{v}</dd>])}
       </dl>
 

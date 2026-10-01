@@ -26,9 +26,11 @@ def test_bootstrap_ci_brackets_mean_and_is_deterministic():
     assert bootstrap_ci([0.3]) == (0.3, 0.3)
 
 
-def _match(i: int, kind: str | None, msp: bool | None, region: str | None = None, status: str | None = None):
+def _match(i: int, kind: str | None, msp: bool | None, region: str | None = None, status: str | None = None,
+           kpp: str | None = None):
     from src.contracts import Counterparty, CounterpartyMatch, ScoreComponent
-    cp = Counterparty(inn=None, name=f"c{i}", kind=kind, is_msp=msp, region=region, status=status)  # type: ignore[arg-type]
+    cp = Counterparty(inn=None, name=f"c{i}", kind=kind, is_msp=msp, region=region, status=status,  # type: ignore[arg-type]
+                      kpp=kpp)
     return CounterpartyMatch(counterparty=cp, score=0.1, origin="history",
                              components=[ScoreComponent(name="product_fit", value=0.1, weight=1, explanation="x")])
 
@@ -43,6 +45,16 @@ def test_filters():
     assert [m.counterparty.name for m in apply_filters(res, q())] == ["c1", "c2", "c3"]  # liquidation dropped
     res[0].counterparty.in_rnp = True
     assert res[0] not in apply_filters(res, q())
+
+
+def test_region_filter_uses_registry_region_then_kpp_prefix():
+    res = [_match(1, None, None, kpp="780101001"), _match(2, None, None, kpp="470101001"),
+           _match(3, None, None), _match(4, None, None, region="Москва", kpp="780101001"),
+           _match(5, None, None, region="Санкт-Петербург", kpp="770101001")]
+    q = lambda r: Query(query_id="q", text="x", filters={"region": r})  # noqa: E731
+    assert [m.counterparty.name for m in apply_filters(res, q("Санкт-Петербург"))] == ["c1", "c5"]
+    assert [m.counterparty.name for m in apply_filters(res, q("Ленинградская область"))] == ["c2"]
+    assert [m.counterparty.name for m in apply_filters(res, q("Москва"))] == ["c4"]  # 77 has no KPP rule
 
 
 def test_cache_ttl_and_stale_fallback(tmp_path):

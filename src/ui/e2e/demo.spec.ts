@@ -39,14 +39,27 @@ test("демо: запрос → два блока → карточка → фи
   await expect(card.getByText("В РНП")).toBeVisible();
   await card.getByRole("button", { name: "Закрыть карточку" }).click();
 
-  // 4. Фильтр «только производители». Тип (производитель/дистрибьютор) в данных организаторов
-  // не указан и enrich его пока не даёт: фильтр не угадывает — список пуст, пока тип не известен.
+  // 4. Фильтры (D-030). «Только производители»: тип в данных организаторов не указан, enrich его
+  // пока не даёт — фильтр не угадывает, а говорит, у скольких признак неизвестен.
+  await expect(discovered.locator(".empty")).toHaveText(/^Поиск в открытых источниках подключается \(#16\)/);
   await page.getByLabel("Только производители").check();
-  await expect(history.locator(".item .meta").first().or(history.locator(".empty"))).toBeVisible();
-  await expect(history.locator(".item .meta").first().or(history.locator(".empty"))).toContainText(
-    /Производитель|Никого не нашли/,
+  await expect(page.locator(".filternote")).toHaveText(
+    /^Тип поставщика ещё не определён у \d+ из \d+ — признак появится после обогащения\.$/,
   );
-  for (const meta of await page.locator(".item .meta").allTextContents()) expect(meta).toContain("Производитель");
+  await expect(history.locator(".empty")).toContainText("у кандидатов этот признак ещё не известен");
+  await page.getByLabel("Только производители").uncheck();
+  await expect(history.locator(".item").first()).toBeVisible();
+
+  // «Регион»: по реестру, иначе по КПП (78 — СПб); остаются строки, и у всех КПП 78…
+  const regional = page.waitForResponse(
+    (r) => r.url().endsWith("/api/search") && (r.request().postData() ?? "").includes('"region":"Санкт-Петербург"'),
+  );
+  await page.getByLabel("Регион").selectOption("Санкт-Петербург");
+  const body = await (await regional).json();
+  expect(body.history.length).toBeGreaterThan(0);
+  for (const m of body.history) expect(m.counterparty.kpp).toMatch(/^78/);
+  await expect(history.locator(".item")).toHaveCount(body.history.length);
+  for (const meta of await history.locator(".item .meta").allTextContents()) expect(meta).toContain("Санкт-Петербург");
 
   // 5. Выгрузка в Excel
   const [download] = await Promise.all([

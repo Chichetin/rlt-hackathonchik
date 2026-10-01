@@ -44,6 +44,7 @@ def test_search_two_blocks_real_inns(search_client):
 def test_search_without_data_is_503(client):
     r = client.post("/api/search", json={"query_id": "q", "text": "бумага"})
     assert r.status_code == 503 and "src.ingest.build" in r.json()["detail"]
+    assert "no-processed" not in r.json()["detail"]  # no server path in the answer
     assert client.post("/api/export", json={"query_id": "q", "text": "бумага"}).status_code == 503
 
 
@@ -56,6 +57,16 @@ def test_search_filters(search_client):
     body = search_client.post("/api/search", json={"query_id": "q", "text": "бумага",
                                                    "filters": {"only_manufacturers": True}}).json()
     assert body["history"] == [] and body["discovered"] == []
+
+
+def test_search_region_filter_by_kpp(search_client):
+    body = search_client.post("/api/search", json={"query_id": "q", "text": "бумага",
+                                                   "filters": {"region": "Санкт-Петербург"}}).json()
+    kpps = [m["counterparty"]["kpp"] for m in body["history"]]
+    assert kpps and all(k.startswith("78") for k in kpps)
+    lo = search_client.post("/api/search", json={"query_id": "q", "text": "бумага",
+                                                 "filters": {"region": "Ленинградская область"}}).json()
+    assert [m["counterparty"]["inn"] for m in lo["history"]] == ["4701000038"]
 
 
 def test_counterparty(client, tmp_path, monkeypatch):
