@@ -72,7 +72,7 @@ export function WarmHints({ children, route }: { children: ReactNode; route: str
       anchor.current?.removeAttribute("aria-describedby"); anchor.current = el;
       el.setAttribute("aria-describedby", id);
       const rect = el.getBoundingClientRect();
-      setHint({ text: el.dataset.hint!, x: Math.max(12, Math.min(window.innerWidth - 252, rect.left + rect.width / 2 - 120)), y: rect.bottom + 12 });
+      setHint({ text: el.dataset.hint!, x: Math.max(12, Math.min(window.innerWidth - 252, rect.left + rect.width / 2 - 120)), y: rect.bottom > window.innerHeight - 100 ? Math.max(12, rect.top - 88) : rect.bottom + 12 });
       warmUntil.current = Date.now() + 1200;
     };
     if (immediate || anchor.current || Date.now() < warmUntil.current) open(); else timer.current = setTimeout(open, 400);
