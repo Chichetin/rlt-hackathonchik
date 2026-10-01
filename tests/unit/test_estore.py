@@ -1,5 +1,6 @@
 """Электронный магазин СПб, реестр контрактов: parsing, Evidence on the cached page, 152-ФЗ."""
 
+import time
 from pathlib import Path
 
 import httpx
@@ -68,6 +69,35 @@ def test_lookup_by_inn_gives_name_and_contract_count(cache, monkeypatch):
     assert check_counterparty(cp, cache.page_text) == []
 
 
+def test_discover_repeated_inn_keeps_the_first_contract_in_registry_order(cache, monkeypatch):
+    monkeypatch.setenv("ENRICH_OFFLINE", "1")
+    first = next(r for r in estore.parse(OKPD_PAGE).rows if r.supplier_inn == OFFICEMAG)
+    office = next(cp for cp in estore.discover("17.12.14", "бумага", cache) if cp.inn == OFFICEMAG)
+    contract = next(e for e in office.evidence if e.field == "contract")
+    assert contract.value == first.subject  # 7 rows of this supplier: the first one, not the last
+
+
+def test_lookup_on_a_mixed_page_takes_own_rows_and_gives_no_total(cache, monkeypatch):
+    # a page that is NOT this supplier's list (here: the product query page, 681 rows of many suppliers):
+    # name from the supplier's own row; «Всего: 681» is not his contract count
+    monkeypatch.setenv("ENRICH_OFFLINE", "1")
+    other = "7811662431"  # 5 rows on the page, not the first supplier
+    cache.put(estore.supplier_url(other), OKPD_PAGE)
+    cp = estore.lookup(other, cache)
+    assert cp is not None and cp.inn == other
+    assert cp.name == next(r for r in estore.parse(OKPD_PAGE).rows if r.supplier_inn == other).supplier_name
+    assert cp.name != 'Общество с ограниченной ответственностью "Офисмаг СПБ"'
+    assert not any(e.field == "contracts" for e in cp.evidence)
+    assert check_counterparty(cp, cache.page_text) == []
+
+
+def test_lookup_inn_not_in_registry_is_none_not_a_guess(cache, monkeypatch):
+    monkeypatch.setenv("ENRICH_OFFLINE", "1")
+    absent = "7804428656"  # valid INN, not on the page
+    cache.put(estore.supplier_url(absent), OKPD_PAGE)
+    assert estore.lookup(absent, cache) is None
+
+
 def test_lookup_individual_is_not_fetched(cache):
     assert estore.lookup("500100732259", cache) is None
 
@@ -80,6 +110,7 @@ def test_lookup_rejects_bad_checksum(cache):
 def test_forged_name_is_caught(cache, monkeypatch):
     monkeypatch.setenv("ENRICH_OFFLINE", "1")
     cp = estore.lookup(OFFICEMAG, cache)
+    assert cp is not None
     name = next(e for e in cp.evidence if e.field == "name")
     forged = name.model_copy(update={"value": 'ООО "Офисмаг Москва"'})
     assert check_evidence(forged, cache.page_text)
@@ -87,6 +118,7 @@ def test_forged_name_is_caught(cache, monkeypatch):
 
 def test_live_fetch_is_cached_and_blocked_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "s.sqlite"))
+    monkeypatch.delenv("DISCOVERY_OFFLINE", raising=False)  # tests/unit/conftest.py sets it for every test
     monkeypatch.setattr(estore, "MIN_INTERVAL_S", 0.0)
     calls = []
 
@@ -96,14 +128,34 @@ def test_live_fetch_is_cached_and_blocked_raises(tmp_path, monkeypatch):
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     c = SourceCache()
-    assert estore.lookup(OFFICEMAG, c, client=client).inn == OFFICEMAG
-    assert estore.lookup(OFFICEMAG, c, client=client).inn == OFFICEMAG
+    for _ in range(2):
+        cp = estore.lookup(OFFICEMAG, c, client=client)
+        assert cp is not None and cp.inn == OFFICEMAG
     assert len(calls) == 1 and "supplier=7820324037" in calls[0] and "limit=50" in calls[0]
 
-    blocked = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(403, text="WAF")))
+    for status in (403, 429):
+        blocked = httpx.Client(transport=httpx.MockTransport(lambda r, s=status: httpx.Response(s, text="WAF")))
+        with pytest.raises(estore.Blocked):
+            estore.discover("26.20", "ноутбук", c, client=blocked)
+        assert c.get(estore.search_url("26.20", "ноутбук"), allow_stale=True) is None  # errors not cached
+
+    # 200 but not a registry page (captcha, maintenance): stop, nothing cached, no «компаний нет»
+    foreign = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="<html>captcha</html>")))
     with pytest.raises(estore.Blocked):
-        estore.discover("26.20", "ноутбук", c, client=blocked)
-    assert c.get(estore.search_url("26.20", "ноутбук"), allow_stale=True) is None  # errors not cached
+        estore.discover("26.20", "ноутбук", c, client=foreign)
+    assert c.get(estore.search_url("26.20", "ноутбук"), allow_stale=True) is None
+
+
+def test_requests_are_paced(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "p.sqlite"))
+    monkeypatch.delenv("DISCOVERY_OFFLINE", raising=False)
+    slept: list[float] = []
+    monkeypatch.setattr(estore, "MIN_INTERVAL_S", 2.0)
+    monkeypatch.setattr(estore, "_last_request", time.monotonic())
+    monkeypatch.setattr(estore.time, "sleep", slept.append)
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=SUPPLIER_PAGE)))
+    estore.lookup(OFFICEMAG, SourceCache(), client=client)
+    assert len(slept) == 1 and 1.5 < slept[0] <= 2.0
 
 
 def test_offline_without_cache_raises(cache, monkeypatch):

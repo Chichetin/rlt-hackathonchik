@@ -4,11 +4,17 @@
 The search also matches INNs of founders and managers, so only entries whose «ИНН (аналог ИНН)»
 equals the INN count. An entry with an «Исключено» date is history, not a current listing.
 
-Answer (in_rnp, evidence):
-- an own entry without exclusion → True, Evidence = its registry number;
-- own entries, all excluded → False, Evidence «был в РНП, исключён»;
-- «Поиск не дал результатов» or no own entry on a complete page → False;
-- results do not fit one page and no own current entry is on it → None (not checked fully).
+Answer (in_rnp, evidence). False means «not found in the РНП on the date of the search» — it is
+given only on a page that is verifiably a complete answer; whenever the search may not have worked
+the answer is None («not checked»), never False:
+- an own entry with status «Размещено» → True, Evidence = its registry number;
+- own entries, all «Исключено» → False if the page is complete, Evidence «был в РНП, исключён»;
+- «Поиск не дал результатов» on a page without entries, or a complete page without own entries
+  → False «не найдена в РНП на <дата>»;
+- results do not fit one page, no total on the page, an empty entries block without
+  «Поиск не дал результатов», a contradictory page, or an own entry of unknown status → None.
+Error, captcha, 403/429 and a page that is not a РНП search page never reach the answer: `_get`
+raises `Blocked` (or an HTTP error), and nothing is cached or turned into «not in РНП».
 
 robots.txt: `Crawl-delay: 60` → at most one request per MIN_INTERVAL_S (60 s), blocking; for the
 final shortlist only. Pages go to SourceCache as is (Evidence values literally occur there);
@@ -46,7 +52,8 @@ _last_request = 0.0
 _ENTRY = re.compile(r"search-registry-entry-block.*?(?=search-registry-entry-block|$)", re.S)
 _BLOCK = re.compile(r"(?:registry-entry__body-title|data-block__title)\"?>\s*(.*?)\s*</div>\s*"
                     r"<div class=\"(?:registry-entry__body-value|data-block__value)\">\s*(.*?)\s*</div>", re.S)
-_NUMBER = re.compile(r"№\s*(\d+)")
+_STATUS = re.compile(r"registry-entry__header-mid__title[^\"]*\">\s*(.*?)\s*</div>", re.S)
+_NUMBER = re.compile(r"№\s*([^\W\d_]{0,3}\d+)")  # 44-ФЗ «№ 26011096», 223-ФЗ «№ Р2621500»
 _TOTAL = re.compile(r"Результаты поиска\s+(\d+)\s+запис\w*")
 
 
@@ -56,11 +63,20 @@ class Blocked(RuntimeError):
 
 @dataclass(frozen=True)
 class Entry:
-    number: str  # «№ 24009739» as on the page
+    number: str  # «№ 26011096» / «№ Р2621500» as on the page
     name: str
     inn: str
+    status: str  # «Размещено» (current) or «Исключено» (history)
     included: str | None
     excluded: str | None
+
+    @property
+    def current(self) -> bool:
+        return self.status == "Размещено" and not self.excluded
+
+    @property
+    def history(self) -> bool:
+        return bool(self.excluded) or self.status.startswith("Исключ")
 
 
 @dataclass(frozen=True)
@@ -88,9 +104,10 @@ def parse(body: str) -> tuple[list[Entry], int | None, str | None]:
         if not number or "ИНН (аналог ИНН)" not in fields:
             continue
         name = fields.get("Наименование (ФИО) недобросовестного поставщика", "")
+        status = _STATUS.search(block)
         entries.append(Entry(number=f"№ {number[1]}", name=name,
-                             inn=fields["ИНН (аналог ИНН)"], included=fields.get("Включено"),
-                             excluded=fields.get("Исключено")))
+                             inn=fields["ИНН (аналог ИНН)"], status=_text(status[1]) if status else "",
+                             included=fields.get("Включено"), excluded=fields.get("Исключено")))
     total = _TOTAL.search(_text(body))
     return entries, (int(total[1]) if total else None), (total[0] if total else None)
 
@@ -147,20 +164,26 @@ def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | Non
     def ev(value: str, fact: str) -> Evidence:
         return Evidence(source=SOURCE, url=page.url, fetched_at=at, fact=fact, field="rnp", value=value)
 
-    if NO_RESULTS in page.body:
-        return RnpResult(False, [ev(NO_RESULTS, f"В РНП ЕИС по ИНН {inn} записей нет (поиск {day})")])
     entries, total, total_text = parse(page.body)
+    if NO_RESULTS in page.body:
+        if entries:  # «no results» next to entries: the page is not a reliable answer
+            return RnpResult(None, [])
+        return RnpResult(False, [ev(NO_RESULTS, f"Не найдена в РНП ЕИС на {day}: поиск по ИНН {inn} записей не дал")])
     own = [e for e in entries if e.inn == inn]
-    current = [e for e in own if not e.excluded]
+    current = [e for e in own if e.current]
     if current:
         e = current[0]
         return RnpResult(True, [ev(e.number, f"В РНП ЕИС: реестровая запись {e.number}, включено {e.included}")])
+    unknown = [e for e in own if not e.history]
+    if unknown:  # status is neither «Размещено» nor «Исключено»: do not call it clean
+        e = unknown[0]
+        return RnpResult(None, [ev(e.number, f"В РНП ЕИС запись {e.number}, статус «{e.status}» — не определён")])
     complete = total is not None and total <= len(entries)
     if own:
         e = own[0]
-        fact = f"Был в РНП ЕИС: запись {e.number}, включено {e.included}, исключено {e.excluded}"
+        fact = f"Был в РНП ЕИС: запись {e.number}, включено {e.included}, исключено {e.excluded or e.status}"
         return RnpResult(False if complete else None, [ev(e.number, fact)])
     if complete:
-        return RnpResult(False, [ev(total_text or "",
-                                    f"В РНП ЕИС нет записей, где поставщик — ИНН {inn} (поиск {day})")])
+        return RnpResult(False, [ev(total_text or "", f"Не найдена в РНП ЕИС на {day}: "
+                                    f"в выдаче по ИНН {inn} нет записей с этим ИНН поставщика")])
     return RnpResult(None, [])
