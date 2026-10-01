@@ -110,6 +110,13 @@ def finish(eng: Engine, task_id: int, error: str | None = None) -> None:
         c.execute(tasks.update().where(tasks.c.id == task_id).values(status=status, error=error, updated_at=_now()))
 
 
+def release(eng: Engine, task_id: int) -> None:
+    """Back to pending without spending an attempt: the source stopped us, the task did not fail."""
+    with eng.begin() as c:
+        c.execute(tasks.update().where(tasks.c.id == task_id, tasks.c.status == "running")
+                  .values(status="pending", attempts=tasks.c.attempts - 1, updated_at=_now()))
+
+
 def status_counts(eng: Engine) -> dict[str, int]:
     with eng.connect() as c:
         rows = c.execute(text("SELECT status, COUNT(*) FROM tasks GROUP BY status")).all()

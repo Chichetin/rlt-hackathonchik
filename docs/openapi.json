@@ -28,15 +28,44 @@
       "post": {
         "summary": "Api Search",
         "operationId": "api_search_api_search_post",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "строк в каждом блоке",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "строк в каждом блоке"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "сдвиг в каждом блоке",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "сдвиг в каждом блоке"
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Query"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -45,6 +74,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lot/{ident}": {
+      "get": {
+        "summary": "Api Lot",
+        "description": "Notice number (lot_id or reqnum) -> Query from the notice; 503 when organizers' data is absent.",
+        "operationId": "api_lot_api_lot__ident__get",
+        "parameters": [
+          {
+            "name": "ident",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ident"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Query"
                 }
               }
             }
@@ -450,6 +519,10 @@
             },
             "type": "object",
             "title": "Queue"
+          },
+          "store": {
+            "type": "string",
+            "title": "Store"
           }
         },
         "type": "object",
@@ -457,7 +530,8 @@
           "status",
           "stub",
           "llm",
-          "queue"
+          "queue",
+          "store"
         ],
         "title": "Health"
       },

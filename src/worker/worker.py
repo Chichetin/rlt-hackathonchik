@@ -12,7 +12,8 @@ import logging
 import time
 
 from src.enrich.enrich import enrich
-from src.worker.queue import claim, engine_from_env, finish, requeue_stale
+from src.sources.pb_nalog import CaptchaRequired
+from src.worker.queue import claim, engine_from_env, finish, release, requeue_stale
 
 log = logging.getLogger("worker")
 
@@ -36,6 +37,11 @@ def run(once: bool = False, pause_s: float = 1.0) -> int:
             enrich(inn)
             finish(eng, task_id)
             done += 1
+        except CaptchaRequired:
+            # research/SOURCES.md: captcha → stop, never solve it, never keep hitting the host
+            release(eng, task_id)
+            log.error("captcha on %s — worker stops, task %s back in the queue", inn, task_id)
+            return done
         except Exception as e:  # noqa: BLE001 — a task failure must not kill the worker
             log.warning("task %s (%s) failed: %s", task_id, inn, e)
             finish(eng, task_id, error=str(e)[:500])

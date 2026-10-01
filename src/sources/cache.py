@@ -18,7 +18,6 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_PATH = Path(os.environ.get("SOURCE_CACHE", "cache/sources.sqlite"))
 DEFAULT_TTL_S = int(os.environ.get("SOURCE_CACHE_TTL_S", str(7 * 24 * 3600)))
 
 
@@ -31,8 +30,9 @@ class CachedPage:
 
 
 class SourceCache:
-    def __init__(self, path: Path | str = DEFAULT_PATH, ttl_s: int = DEFAULT_TTL_S):
-        self.path = Path(path)
+    def __init__(self, path: Path | str | None = None, ttl_s: int = DEFAULT_TTL_S):
+        # read at call time: tests and `make demo` point SOURCE_CACHE elsewhere after import
+        self.path = Path(path or os.environ.get("SOURCE_CACHE", "cache/sources.sqlite"))
         self.ttl_s = ttl_s
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:

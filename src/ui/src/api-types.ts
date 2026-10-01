@@ -38,6 +38,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lot/{ident}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Lot
+         * @description Notice number (lot_id or reqnum) -> Query from the notice; 503 when organizers' data is absent.
+         */
+        get: operations["api_lot_api_lot__ident__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/counterparty/{inn}": {
         parameters: {
             query?: never;
@@ -186,6 +206,8 @@ export interface components {
             queue: {
                 [key: string]: number;
             };
+            /** Store */
+            store: string;
         };
         /**
          * Query
@@ -295,7 +317,12 @@ export interface operations {
     };
     api_search_api_search_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description строк в каждом блоке */
+                limit?: number;
+                /** @description сдвиг в каждом блоке */
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -313,6 +340,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_lot_api_lot__ident__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ident: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Query"];
                 };
             };
             /** @description Validation Error */

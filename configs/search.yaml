@@ -1,6 +1,6 @@
 # Конфигурация поиска, которую оценивает `make eval` и замораживает `make eval-final`.
 # Любая правка = новая конфигурация (новый sha256). Источник: разделы 5 и 7 workflow.
-retriever: stub          # T-02 (план 01.10): stub → bm25 → bm25+okpd2 → hybrid_rrf (только через эксперимент)
+retriever: bm25          # T-02: stub → bm25 (v1, D-029) → bm25+okpd2 → hybrid_rrf (только через эксперимент)
 k: 20
 # Стартовые экспертные веса (research/DECISIONS.md D-004). Изменение состава компонент или
 # формулы — подтверждение человека №3 (CLAUDE.md): это слайд.
@@ -11,3 +11,7 @@ weights:
   activity: 0.1
   geography: 0.1
   price: 0.05
+# Сигналы экспериментов (#22, src/match/signals.py): доля в [0, 1], по умолчанию 0 = v1 без изменений.
+# incumbent — участие в лотах того же заказчика до as_of, подмешивается в experience.
+signals:
+  incumbent: 0.0

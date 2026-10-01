@@ -116,14 +116,14 @@ Claude Code (Claude Max); субагентами пользуемся актив
 каркасе» запрещено.
 
 - Python 3.12, `uv` + `uv.lock`, FastAPI, pydantic v2 (`src/contracts.py`). Основная БД — Postgres,
-  векторный поиск — pgvector + HNSW (D-023); DuckDB — только ETL и аналитика вместо pandas;
+  векторный поиск — pgvector + HNSW (D-054); DuckDB — только ETL и аналитика вместо pandas;
   поиск — `bm25s`; эмбеддинги — `sentence-transformers` (`make setup-ml`, модели — `make
   models`, e5 с префиксами `query: `/`passage: `); кеш внешних источников — SQLite с TTL
   (`src/sources/cache.py`).
 - docker-compose: `api`, `worker`, `db`; очередь обогащения — таблица задач + процесс `worker`
   (`src/worker/`), без Celery; Redis — только если замер покажет, что индексов Postgres не хватает
   (D-024). Пагинация, сортировка, фильтры и выгрузка — на сервере (D-024). `make demo` без Docker
-  (D-007) после перехода на Postgres — открыт Q-26.
+  (D-007) — запасной путь на parquet + BM25, основной — `make up` (D-035).
 - Фронт — React + Vite + TypeScript (`src/ui/`), строится против заглушки API с первого часа.
 - LLM в продукте — за интерфейсом провайдера из `.env` (`src/llm/provider.py`), **режим без LLM
   обязателен**; разрешённые провайдеры `[СПРОСИТЬ Q-13]`; названия моделей и адреса API — из

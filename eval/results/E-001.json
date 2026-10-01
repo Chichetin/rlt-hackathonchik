@@ -1,0 +1,65 @@
+{
+  "exp_id": "E-001",
+  "part": "dev",
+  "created_at": "2026-10-01T10:19:40+00:00",
+  "commit": "6b5ee1c1841869ab5adea9985d002c0a4826ff1c",
+  "dirty": false,
+  "config": {
+    "retriever": "bm25",
+    "k": 20,
+    "weights": {
+      "product_fit": 0.35,
+      "experience": 0.2,
+      "reliability": 0.2,
+      "activity": 0.1,
+      "geography": 0.1,
+      "price": 0.05
+    }
+  },
+  "config_sha256": "53fff9bd7b8a6440150c710ab3680d578529bf356ac3438578b123fd3582b1da",
+  "stub": false,
+  "n_queries": 3,
+  "metrics": {
+    "recall@10": {
+      "value": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ]
+    },
+    "mrr": {
+      "value": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ]
+    },
+    "ndcg@10": {
+      "value": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "per_query": [
+    {
+      "query_id": "stub-dev-1",
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "ndcg@10": 0.0
+    },
+    {
+      "query_id": "stub-dev-2",
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "ndcg@10": 0.0
+    },
+    {
+      "query_id": "stub-dev-3",
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "ndcg@10": 0.0
+    }
+  ]
+}

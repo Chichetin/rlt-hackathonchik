@@ -53,16 +53,26 @@
 |---|---|---|---|
 | `Query.text` | Извещения.subject; ТРУ.product_name | в eval — subject + наименования позиций лота | `src/match/search.py`, `src/eval/` |
 | `Query.okpd2` | ТРУ.okpd2_code | список кодов позиций лота, без NULL | `src/match/search.py`, `src/eval/` |
-| `Query.budget` | Извещения.start_price | ₽; выбросы > 1 млрд — [ПРОВЕРИТЬ] (open question 13) | `src/match/search.py` (`price`, T-11) |
+| `Query.budget` | Извещения.start_price | ₽; выбросы > 1 млрд — [ПРОВЕРИТЬ] (open question 13) | `src/match/search.py` (`price` пока не реализована — «нет данных», D-029; предложение — METHODOLOGY.md) |
 | `Query.customer_inn` | Извещения.customer_inn | как есть; пусто в 1.40% — `None` | `src/match/search.py` (инкумбент, B-inc) |
 | `Query.channel` | Извещения.is_eshop_or_aisgz | `ЭМ` / `АИС ГЗ` | `src/eval/` (метрики по каналам), UI |
 | `Query.as_of` | Извещения.publish_date | в eval — cutoff split; в продукте `None` | `src/match/search.py`, `src/ingest/` |
-| `Counterparty.inn` | Поставщики.supplier_inn | только валидные по контрольной сумме, иначе запись не строится | все |
+| `Counterparty.inn` | Поставщики.supplier_inn | валидный по контрольной сумме; иначе `inn=None`, имя «ИНН не подтверждён (<как в данных>)», без Evidence (`src/ingest/load.py`, 22 ИНН в данных) | все |
 | `Counterparty.kpp` | Поставщики.supplier_kpp | самый частый КПП ИНН; у 12-значных ИНН КПП — [ПРОВЕРИТЬ] | `geography` |
 | `Counterparty.name` | — (нет в данных) | «ИНН <inn>» до `enrich()` (D-019) | UI, выгрузка |
 | `Counterparty.stats` | Поставщики ⋈ Извещения ⋈ ТРУ до `as_of` | ключи — docstring контракта | `search.py` (`experience`, `activity`), UI |
 | `CounterpartyMatch.origin = history` | ИНН есть в Поставщиках | — | UI (блок «С опытом») |
-| `EvalCase.relevant_inns` | Поставщики лота | ЭМ — все оферты, АИС ГЗ — исполнитель | `src/eval/` (T-07) |
+| `EvalCase.relevant_inns` | Поставщики лота | ЭМ — все оферты, АИС ГЗ — исполнитель; только ИНН с верной контрольной суммой (`src/eval/build_cases.py`, D-032) | `src/eval/` (T-07) |
+| `EvalCase.grades` | Поставщики.is_winner | победитель 2, остальные оферты ЭМ 1 | `src/eval/` (T-07) |
+
+**Какие лоты становятся eval-кейсами** (T-07, D-032, `eval/cases/build_stats.json`). Прямой договор
+АИС ГЗ виден только по тексту: «…частью 12 статьи 93 Закона № 44-ФЗ» или «…у единственного
+поставщика…» в `subject` или `procedure_name`: во всех данных 2 532 лота АИС ГЗ (шаблон
+«осуществляемая в соответствии с частью 12…» — 2 349, «у единственного поставщика на сумму…» — 182, прочие формулировки — 1),
+в ЭМ — 0; «№ 93» в названиях учреждений правилу не соответствует. Такие лоты АИС ГЗ исключаются;
+большинство из них без участников и отсеивается раньше. dev
+(2025-07-01…09-30): 58 047 лотов → 51 599 кейсов; отсеяно без участников 6 189 (все — АИС ГЗ),
+ст.93 257, без валидного ИНН 2. holdout (с 2025-10-01): 99 053 → 88 848; 9 671 / 529 / 5.
 
 ## Требование к загрузчику (DATA → контракт, D-015)
 
@@ -70,3 +80,21 @@
 `Evidence(source="data:<таблица>", url="data:<таблица>#<ключ строки>", field="inn", value=<ИНН>)`
 и такие же Evidence для контактов, которые показываются в карточке. Без них `strip_unverified()`
 (API и `make eval`) покажет «ИНН не подтверждён» и уберёт контакты. Тест — в задаче загрузчика.
+
+Сделано в T-01: `src/ingest/load.py` `counterparties(inns, as_of)` — Evidence
+`data:participants#<lot_id>` последнего лота ИНН до `as_of`, `fetched_at` = время сборки
+(`manifest.json`); тест — `tests/unit/test_ingest.py`.
+
+## Обработанные таблицы (`data/processed/`, T-01, D-026)
+
+Сборка: `uv run python -m src.ingest.build` (каталог CSV — `--raw-dir` или `DATA_RAW_DIR`, D-020;
+полные данные — 12.5 с). Всё вне git. Синтетическая фикстура тех же CSV — `tests/fixtures/ingest/`.
+
+| Файл | Строк (полные данные) | Колонки | Обработка |
+|---|---|---|---|
+| `notices.parquet` | 604 452 | `lot_id`, `procedure_id`, `publish_date`, `start_price`, `reqnum`, `procedure_name`, `subject`, `is_smp`, `customer_inn`, `customer_kpp`, `channel` (`ЭМ` / `АИС ГЗ`), `customer_inn_valid` | типы, пустая строка → NULL, одна строка на лот |
+| `participants.parquet` | 1 010 107 | `lot_id`, `supplier_inn`, `supplier_kpp`, `is_winner`, `inn_valid`, + из лота `publish_date`, `channel`, `customer_inn`, `start_price` | 31 дубль (лот, ИНН) схлопнут: КПП — самый частый, победитель — если хоть одна строка `true`; невалидный ИНН — флаг, строка остаётся |
+| `items.parquet` | 2 550 089 | `lot_id`, `product_name`, `okpd2_code`, `okpd2_l2`, `okpd2_l4`, `okpd2_l6` | `DISTINCT` после `trim` (≈ 4.22 позиции/лот; на 9 485 строк меньше, чем `distinct` по сырым строкам — отличались только пробелами); уровень ОКПД2 есть, только если код достаточно длинный (`85.1` → только `l2`) |
+| `suppliers.parquet` | 44 196 | `inn`, `kpp`, `inn_valid`, ключи `Counterparty.stats`: `lots_participated`, `lots_won`, `win_rate`, `customers`, `customers_spb` (ИНН заказчика 78…), `first_seen`, `last_seen`, `median_start_price`, `top_okpd2` (3 частых группы `XX.XX`) | вся история (продукт) |
+| `suppliers_2025-07-01.parquet` | — | те же | только лоты с `publish_date` < cutoff (`configs/split.yaml`) — для eval без утечки |
+| `manifest.json` | — | `built_at`, `rows`, `as_of`, `cutoff`, `invalid_supplier_inns` (22) | `fetched_at` для Evidence `data:` |
