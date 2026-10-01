@@ -4,13 +4,20 @@ test("волны двигаются, reduced motion останавливает �
   await page.goto("/");
   // Reduced motion remounts the canvas; capture its stable host instead.
   const field = page.locator(".wave-field");
-  const pixels = async () => (await field.screenshot()).toString("base64");
+  // A 160×120 patch in the middle, not the whole field: a full-screen shot of the WebGL canvas took 6.3 s
+  // under `make e2e` in 4 workers — longer than the poll itself, so a second frame never came (#225).
+  const pixels = async () => {
+    const box = (await field.boundingBox())!;
+    const clip = { x: box.x + box.width / 2 - 80, y: box.y + box.height / 2 - 60, width: 160, height: 120 };
+    return (await page.screenshot({ clip })).toString("base64");
+  };
+  const frames = { timeout: 15_000 }; // a patch still took up to 4.5 s under load; the test timeout is 30 s
   await expect(field.locator("canvas")).toBeVisible();
   const moving = await pixels();
-  await expect.poll(pixels).not.toBe(moving);
+  await expect.poll(pixels, frames).not.toBe(moving);
   await page.emulateMedia({ reducedMotion: "reduce" });
   // two equal frames in a row: the loop has stopped
-  await expect.poll(async () => { const a = await pixels(); await page.waitForTimeout(120); return a === await pixels(); }).toBe(true);
+  await expect.poll(async () => { const a = await pixels(); await page.waitForTimeout(120); return a === await pixels(); }, frames).toBe(true);
 });
 
 test("колесо выбирает запрос с клавиатуры и сохраняет свободный ввод", async ({ page }) => {
