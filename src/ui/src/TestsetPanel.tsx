@@ -7,7 +7,6 @@ import { dropTestset, getTestset, PREDICT_CSV_URL, type Testset, uploadTestset }
 
 // The server predicts offline ≈ 0.6 s per procedure (review #216): the wait shown before the download.
 const TENTHS_PER_LOT = 6;
-const MANY_LOTS = 300;
 const isSuppliers = (f: File) => f.name.normalize("NFC").toLowerCase().startsWith("поставщики");
 
 function plural(n: number, one: string, few: string, many: string): string {
@@ -19,9 +18,14 @@ function plural(n: number, one: string, few: string, many: string): string {
 }
 
 /** «≈ N процедур, около M мин»: tenths of a second in integers, minutes rounded up. */
+// parquet p50 ≈ 0.6 s per search, Postgres (make up) p50 ≈ 2.3 s (eval/results/latency-*-v1.json): a range, not a promise
+const TENTHS_PER_LOT_PG = 23;
+
 export function predictEstimate(lots: number): string {
-  const minutes = Math.max(1, Math.ceil((lots * TENTHS_PER_LOT) / 600));
-  return `≈ ${lots} ${plural(lots, "процедура", "процедуры", "процедур")}, около ${minutes} мин`;
+  const low = Math.max(1, Math.ceil((lots * TENTHS_PER_LOT) / 600));
+  const high = Math.max(low, Math.ceil((lots * TENTHS_PER_LOT_PG) / 600));
+  const wait = low === high ? `около ${low} мин` : `${low}–${high} мин`;
+  return `≈ ${lots} ${plural(lots, "процедура", "процедуры", "процедур")}, ${wait}`;
 }
 
 export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => void; busyLot: string | null }) {
@@ -32,6 +36,27 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
   const [filter, setFilter] = useState("");
   const [skipped, setSkipped] = useState(false); // «Поставщики*» were picked and left in the browser
   const input = useRef<HTMLInputElement>(null);
+  const [preparing, setPreparing] = useState(false);
+
+  // a button, not <a download>: the server counts for minutes — show that it is working, then save the file
+  async function download() {
+    setPreparing(true);
+    setError("");
+    try {
+      const r = await fetch(PREDICT_CSV_URL);
+      if (!r.ok) throw new Error((await r.text()) || `${r.status}`);
+      const url = URL.createObjectURL(await r.blob());
+      const name = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") ?? "")?.[1] ?? "mitrandir-predict.csv";
+      const a = Object.assign(document.createElement("a"), { href: url, download: name });
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setState("error");
+      setError(`Прогноз не собран: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPreparing(false);
+    }
+  }
 
   // the active set survives a reload of the page (the server keeps it)
   useEffect(() => {
@@ -166,14 +191,14 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
             ))}
             {shown.length === 0 && <li className="testset-empty">Ничего не найдено</li>}
           </ul>
-          <p className="testset-estimate">
-            {predictEstimate(set.lots)}
-            {set.lots > MANY_LOTS && " — быстрее через make predict на сервере"}
+          <p className="testset-estimate">{predictEstimate(set.lots)}</p>
+          <button type="button" className="testset-download" disabled={preparing} onClick={() => void download()}>
+            {preparing ? "Готовим файл…" : "Скачать прогноз по всем процедурам (CSV)"}
+          </button>
+          <p className="testset-hint">
+            Файл собирается на сервере: на каждую процедуру — блоки «История» и «Новые», оценка и её компоненты. Чтобы
+            пересчитать после изменений — загрузите файлы заново.
           </p>
-          <a className="testset-download" href={PREDICT_CSV_URL} download>
-            Скачать прогноз по всем процедурам (CSV)
-          </a>
-          <p className="testset-hint">Файл собирается на сервере: на каждую процедуру — блоки «С опытом» и «Новые», оценка и её компоненты.</p>
         </>
       )}
     </section>

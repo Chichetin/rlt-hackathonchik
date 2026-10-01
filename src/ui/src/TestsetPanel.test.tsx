@@ -40,7 +40,7 @@ test("upload: files go as text in JSON, the procedures are listed, a click picks
 
   await userEvent.click(screen.getByRole("button", { name: /процедура 0172200001126000001/ }));
   expect(onPick).toHaveBeenCalledWith("9001");
-  expect(screen.getByRole("link", { name: /Скачать прогноз/ })).toHaveAttribute("href", "/api/testset/predict.csv?top=10&offline=1");
+  expect(screen.getByRole("button", { name: /Скачать прогноз/ })).toBeEnabled();
 });
 
 test("a broken export shows the server's message, not a stack trace", async () => {
@@ -98,22 +98,17 @@ test("only «Поставщики*»: nothing is sent", async () => {
 test("the wait before the download: 0.6 s per procedure, minutes rounded up", () => {
   expect(predictEstimate(1)).toBe("≈ 1 процедура, около 1 мин");
   expect(predictEstimate(3)).toBe("≈ 3 процедуры, около 1 мин");
-  expect(predictEstimate(100)).toBe("≈ 100 процедур, около 1 мин");
-  expect(predictEstimate(101)).toBe("≈ 101 процедура, около 2 мин");
-  expect(predictEstimate(112)).toBe("≈ 112 процедур, около 2 мин");
-  expect(predictEstimate(301)).toBe("≈ 301 процедура, около 4 мин");
+  expect(predictEstimate(100)).toBe("≈ 100 процедур, 1–4 мин");
+  expect(predictEstimate(101)).toBe("≈ 101 процедура, 2–4 мин");
+  expect(predictEstimate(301)).toBe("≈ 301 процедура, 4–12 мин");
 });
 
-test("the estimate stands before the download link; over 300 procedures — make predict", async () => {
+test("the estimate stands before the download button; no developer hints for the customer", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async () => json(SET));
-  const { unmount } = render(<TestsetPanel onPick={vi.fn()} busyLot={null} />);
-  const estimate = await screen.findByText("≈ 2 процедуры, около 1 мин");
-  const link = screen.getByRole("link", { name: /Скачать прогноз/ });
-  expect(estimate.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.queryByText(/make predict/)).toBeNull();
-  unmount();
-
-  vi.spyOn(globalThis, "fetch").mockImplementation(async () => json({ ...SET, lots: 301 }));
   render(<TestsetPanel onPick={vi.fn()} busyLot={null} />);
-  expect(await screen.findByText(/≈ 301 процедура, около 4 мин — быстрее через make predict/)).toBeInTheDocument();
+  const estimate = await screen.findByText("≈ 2 процедуры, около 1 мин");
+  const button = screen.getByRole("button", { name: /Скачать прогноз/ });
+  expect(estimate.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByText(/make predict/)).toBeNull();
+  expect(screen.getByText(/«История» и «Новые»/)).toBeInTheDocument();
 });
