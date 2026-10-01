@@ -72,11 +72,39 @@ UNAVAILABLE = {
 }
 
 
-def load_config(path: Path = SEARCH_CONFIG) -> dict:
-    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+# Scoring options of experiments (#22, `options:` in configs/search.yaml or configs/experiments.yaml).
+# The defaults are v1: without the block nothing changes.
+OPTIONS: dict[str, tuple] = {
+    "fit_bm25_share": (FIT_BM25_SHARE, None),  # share of BM25 in product_fit, [0, 1]
+    "experience_by": ("class", ("class", "similar")),  # lots in the OKPD2 group | lots with similar positions
+    "tie_break": ("inn", ("inn", "bm25")),  # order of equal scores
+}
+
+
+def scoring_options(cfg: dict) -> dict:
+    """`options:` block of the config over the v1 defaults; unknown names and values are an error."""
+    raw = cfg.get("options") or {}
+    if unknown := set(raw) - set(OPTIONS):
+        raise ValueError(f"неизвестные опции скоринга: {', '.join(sorted(unknown))}")
+    out = {name: raw.get(name, default) for name, (default, _) in OPTIONS.items()}
+    for name, (_, allowed) in OPTIONS.items():
+        if allowed is not None and out[name] not in allowed:
+            raise ValueError(f"options.{name} = {out[name]!r}: ожидается одно из {allowed}")
+    out["fit_bm25_share"] = float(out["fit_bm25_share"])
+    if not 0.0 <= out["fit_bm25_share"] <= 1.0:
+        raise ValueError(f"options.fit_bm25_share = {out['fit_bm25_share']}: доля должна быть в [0, 1]")
+    return out
+
+
+def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
+    scoring_options(cfg)
     return cfg
+
+
+def load_config(path: Path = SEARCH_CONFIG) -> dict:
+    return check_config(yaml.safe_load(path.read_text(encoding="utf-8")))
 
 
 def _fmt(d: date) -> str:
@@ -222,22 +250,22 @@ def _period(as_of: date | None) -> str:
 
 
 def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: bool,
-                 how: str = "") -> tuple[float, str]:
+                 how: str = "", share: float = FIT_BM25_SHARE) -> tuple[float, str]:
     sim = c.bm25 / top_bm25 if top_bm25 > 0 else 0.0
     best = c.best_text if len(c.best_text) <= 60 else c.best_text[:57] + "…"
     head = f"Похожие{how} позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
     if not codes:
         return sim, f"{head}; ОКПД2 запроса не определён"
     src = "ОКПД2 определён по похожим позициям" if predicted else "ОКПД2 запроса"
-    value = FIT_BM25_SHARE * sim + (1 - FIT_BM25_SHARE) * OKPD_DEPTH[c.okpd_level]
+    value = share * sim + (1 - share) * OKPD_DEPTH[c.okpd_level]
     if c.okpd_level == 0 or c.okpd_code is None:
         return value, f"{head}; {src} {', '.join(codes)} в его истории не встречается"
     return value, (f"{head}; {src}: {OKPD_LEVEL_TEXT[c.okpd_level]} "
                    f"{_prefix(c.okpd_code, c.okpd_level)}")
 
 
-def _experience(c: Candidate, codes: list[str], as_of: date | None) -> tuple[float, str]:
-    if codes:
+def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class") -> tuple[float, str]:
+    if codes and by == "class":
         groups = ", ".join(sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
@@ -290,11 +318,16 @@ def _component(name: str, value: float, weights: dict[str, float], explanation: 
                           weight=float(weights.get(name, 0.0)), explanation=explanation)
 
 
-def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -> list[CounterpartyMatch]:
-    """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built."""
-    cfg = load_config()  # every call: eval passes weights, the retriever still comes from the config
+def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
+           config: dict | None = None) -> list[CounterpartyMatch]:
+    """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
+
+    `config`: the whole configuration of an experiment (eval); by default configs/search.yaml.
+    """
+    cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
+    opts = scoring_options(cfg)  # experiment options (#22), v1 by default
     store = get_store()
     as_of = query.as_of
     idx = get_index(store, as_of)
@@ -331,12 +364,13 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
     top_bm25 = max(c.bm25 for c in cands)
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
+    bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
     for c in cands:
         cp = parties.get(c.inn)
         if cp is None:
             continue
-        fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how)
-        exp, exp_why = _experience(c, codes, as_of)
+        fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
+        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"])
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         act, act_why = _activity(cp, ref, as_of)
@@ -358,5 +392,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
         )]})
         out.append(CounterpartyMatch(counterparty=cp, score=round(sum(x.value * x.weight for x in comps), 4),
                                      components=comps, origin="history"))
-    out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
+        bm25_of.append(c.bm25)
+    if opts["tie_break"] == "bm25":
+        sims = {id(m): s for m, s in zip(out, bm25_of, strict=True)}
+        out.sort(key=lambda m: (-m.score, -sims[id(m)], m.counterparty.inn or "~"))
+    else:
+        out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
     return out[:k]
