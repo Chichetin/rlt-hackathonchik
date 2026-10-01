@@ -117,12 +117,14 @@ test("a failed POST preserves the complete draft and retry submits the same revi
   expect(screen.queryByLabelText("Ваш отзыв")).not.toBeInTheDocument();
 });
 
-test("a saved rating stays current when an older batch request finishes afterwards", async () => {
+test("local updates win over a pending batch but allow fresher subsequent batches", async () => {
   let resolveBatch!: (response: Response) => void;
   const batch = new Promise<Response>(resolve => { resolveBatch = resolve; });
   const fetch = vi.spyOn(globalThis, "fetch").mockReturnValue(batch);
   const updated = { ...BASE, count: 3, average: 4.5 };
-  const { result } = renderHook(() => useRatingSummaries([BASE.inn, BASE.inn]));
+  const { result, rerender } = renderHook(({ inns }) => useRatingSummaries(inns), {
+    initialProps: { inns: [BASE.inn, BASE.inn] },
+  });
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(fetch.mock.calls[0][0]).toBe(`/api/ratings?inns=${BASE.inn}`);
   act(() => { window.dispatchEvent(new CustomEvent("mitrandir:rating-updated", { detail: updated })); });
@@ -133,4 +135,18 @@ test("a saved rating stays current when an older batch request finishes afterwar
   });
   await waitFor(() => expect(result.current.state).toBe("ready"));
   expect(result.current.summaries[BASE.inn]).toEqual(updated);
+
+  // Loading more suppliers starts a fresh batch after our update. It may include votes
+  // from other users, so the earlier local update must no longer mask its result.
+  const nextInn = "7736050003";
+  const externalVotes = { ...BASE, count: 4, average: 4.25 };
+  fetch.mockResolvedValueOnce(json({
+    [BASE.inn]: externalVotes,
+    [nextInn]: { ...BASE, inn: nextInn, count: 0, average: null },
+  }));
+  rerender({ inns: [BASE.inn, nextInn] });
+  await waitFor(() => expect(result.current.state).toBe("ready"));
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(result.current.summaries[BASE.inn]).toEqual(externalVotes);
+  expect(result.current.summaries[nextInn].count).toBe(0);
 });
