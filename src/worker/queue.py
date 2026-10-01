@@ -113,7 +113,7 @@ def finish(eng: Engine, task_id: int, error: str | None = None) -> None:
 def release(eng: Engine, task_id: int) -> None:
     """Back to pending without spending an attempt: the source stopped us, the task did not fail."""
     with eng.begin() as c:
-        c.execute(tasks.update().where(tasks.c.id == task_id)
+        c.execute(tasks.update().where(tasks.c.id == task_id, tasks.c.status == "running")
                   .values(status="pending", attempts=tasks.c.attempts - 1, updated_at=_now()))
 
 

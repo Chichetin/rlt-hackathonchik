@@ -75,7 +75,7 @@ JSON, без ключа; ответ целиком кладём в `SourceCache`
 `GET /advanced-search/organizations/search?query=<ИНН>` (статус, ОКВЭД2, адрес, выручка; только ЮЛ)
 + **rmsp.nalog.ru** `POST /search-proc.json` (категория МСП, ОКВЭД; ЮЛ и ИП). Если pb начнёт
 требовать капчу (`captchaRequired:true`) — останавливаемся и переходим на bo+rmsp, капчу не решаем.
-Реализовано (#10, D-028): `src/sources/pb_nalog.py` + `src/enrich/enrich.py`; Ростелеком 7707049388 — `rsmpcategory: 0` (не МСП), категория МСП — только 1–3.
+Реализовано (#10, D-028): `src/sources/pb_nalog.py` + `src/enrich/enrich.py`; Ростелеком 7707049388 — `rsmpcategory: 0` (не МСП), категория МСП — только 1–3. После капчи worker останавливается сам (задачи остаются в очереди); поднять после паузы — `docker compose start worker` или `python -m src.worker.worker`.
 РНП — отдельная проверка через ЕИС, не чаще 1 запроса в минуту, только для финального шорт-листа.
 
 **(б) discovery v0 к 15:30.** **Реестр контрактов Электронного магазина**
