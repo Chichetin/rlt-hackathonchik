@@ -154,6 +154,25 @@ def from_rmsp(inn: str, page: CachedPage) -> Counterparty:
                         okved=[okved] if okved else [], evidence=ev)
 
 
+# ГИР БО statusCode is an English code; the hard filter (src/match/filters.py, _DEAD) looks for Russian
+# stems. Codes of a stopped company are mapped by stem; the list of real codes is not confirmed
+# [ПРОВЕРИТЬ] — an unknown code is kept as is (shown, not filtered), never guessed.
+_BO_DEAD = (("BANKRUPT", "банкротство"), ("LIQUIDAT", "ликвидация"), ("TERMINAT", "деятельность прекращена"),
+            ("DISSOLV", "деятельность прекращена"), ("CLOSED", "деятельность прекращена"))
+
+
+def bo_status(code: str | None) -> str | None:
+    """ГИР БО statusCode -> status text: ACTIVE -> «действующая», a stop code -> a Russian stem + the code."""
+    if not code:
+        return None
+    if code.upper() == "ACTIVE":
+        return "действующая"
+    for stem, text in _BO_DEAD:
+        if stem in code.upper():
+            return f"{text} (ГИР БО: {code})"
+    return code
+
+
 def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> Counterparty:
     """ГИР БО row → Counterparty. `msp_page`: the empty МСП answer for the same INN (is_msp False)."""
     f = bo_nalog.parse(page.body)
@@ -173,7 +192,7 @@ def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> C
         add_msp = _evidence(rmsp.SOURCE, msp_page, ev)
         add_msp("msp", "inn_rows: 0", "В реестре МСП не найден (запрос по ИНН)")
         is_msp = False
-    status = {"ACTIVE": "действующая"}.get(f.get("statusCode", ""), f.get("statusCode"))
+    status = bo_status(f.get("statusCode"))
     return Counterparty(inn=inn, name=f.get("shortName") or f"ИНН {inn}", kind=kind, region=None, status=status,
                         is_msp=is_msp, okved=[f["okved2"]] if f.get("okved2") else [], evidence=ev)
 

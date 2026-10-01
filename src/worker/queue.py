@@ -58,18 +58,21 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def enqueue(eng: Engine, kind: str, key: str) -> int:
+def enqueue(eng: Engine, kind: str, key: str, *, retry_failed: bool = True) -> int:
+    """Idempotent by (kind, key). `retry_failed=True` (explicit request: POST /api/enrich) turns a failed
+    task back to pending with fresh attempts; False (background calls from the search, #38) leaves it
+    failed, so an unresolvable INN is not sent to the registries again on every search."""
     try:
-        return _enqueue(eng, kind, key)
+        return _enqueue(eng, kind, key, retry_failed)
     except IntegrityError:  # a concurrent enqueue of the same (kind, key) won the insert
-        return _enqueue(eng, kind, key)
+        return _enqueue(eng, kind, key, retry_failed)
 
 
-def _enqueue(eng: Engine, kind: str, key: str) -> int:
+def _enqueue(eng: Engine, kind: str, key: str, retry_failed: bool) -> int:
     with eng.begin() as c:
         row = c.execute(select(tasks.c.id, tasks.c.status).where(tasks.c.kind == kind, tasks.c.key == key)).first()
         if row is not None:
-            if row.status == "failed":
+            if row.status == "failed" and retry_failed:
                 c.execute(tasks.update().where(tasks.c.id == row.id)
                           .values(status="pending", attempts=0, error=None, updated_at=_now()))
             return row.id

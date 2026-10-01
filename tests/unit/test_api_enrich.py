@@ -97,3 +97,129 @@ def test_only_msp_uses_cached_flag(env):
     assert _inns(client.post("/api/search", json=q)) == [CACHED]  # uncached: unknown -> hidden (D-030)
     put(msp=False)
     assert _inns(client.post("/api/search", json=q)) == []
+
+
+# --- review of PR #96: queue order, page-only queueing, failed stays failed, invalid INNs, kind, ГИР БО status
+
+
+def _inn10(n: int) -> str:
+    """A valid 10-digit legal-entity INN (78xxxxxxx + check digit)."""
+    body = f"78{n:07d}"
+    w = (2, 4, 10, 3, 5, 9, 4, 6, 8)
+    return body + str(sum(int(d) * k for d, k in zip(body, w, strict=True)) % 11 % 10)
+
+
+def _keys() -> list[str]:
+    with engine_from_env().connect() as c:
+        return [row.key for row in c.execute(tasks.select().order_by(tasks.c.id))]
+
+
+def _statuses() -> dict[str, str]:
+    with engine_from_env().connect() as c:
+        return {row.key: row.status for row in c.execute(tasks.select())}
+
+
+def test_new_companies_are_queued_before_history(env, monkeypatch):
+    from src.enrich import discover as discover_mod
+
+    client, put, calls = env
+    put()
+    new_inn = _inn10(999)
+    assert new_inn != UNCACHED
+
+    def fake_discover(query, history, *, enqueue=None, **k):
+        assert enqueue is not None
+        enqueue(new_inn)
+        cp = Counterparty(inn=new_inn, name="ООО НОВАЯ")
+        m = CounterpartyMatch(counterparty=cp, score=0.4, origin="discovered", components=[])
+        return discover_mod.Discovery(matches=[m], history_checked=True)
+    monkeypatch.setattr(discover_mod, "discover", fake_discover)
+    body = client.post("/api/search", json=Q).json()
+    assert [m["counterparty"]["name"] for m in body["discovered"]] == ["ООО НОВАЯ"]
+    assert _keys()[0] == new_inn  # «Новые» first: the worker takes them before the history INNs
+    assert _keys() == [new_inn, UNCACHED]
+
+
+def test_only_the_visible_page_is_queued(env, monkeypatch):
+    client, put, calls = env
+    inns = [_inn10(i) for i in range(1, 31)]
+    monkeypatch.setattr(search_mod, "search", lambda q, k=20: [_match(i) for i in inns])
+    r = client.post("/api/search?limit=5&offset=0", json=Q)
+    assert r.headers["X-Total-History"] == "30"
+    assert _keys() == inns[:5]  # not 30: the rest is queued when the user opens it
+    client.post("/api/search?limit=5&offset=5", json=Q)  # «Показать ещё»
+    assert _keys() == inns[:10]
+    client.post("/api/export", json=Q)  # the xlsx takes every row but queues nothing
+    assert _keys() == inns[:10]
+
+
+def test_failed_task_stays_failed_after_repeated_search(env):
+    from src.worker import queue as Q_
+
+    client, put, calls = env
+    put()  # only UNCACHED goes to the queue
+    client.post("/api/search", json=Q)
+    eng = engine_from_env()
+    for _ in range(Q_.MAX_ATTEMPTS):
+        task = Q_.claim(eng, "enrich")
+        assert task is not None and task[1] == UNCACHED
+        Q_.finish(eng, task[0], error="not found")
+    assert _statuses() == {UNCACHED: "failed"}
+    client.post("/api/search", json=Q)
+    client.post("/api/search", json=Q)
+    assert _statuses() == {UNCACHED: "failed"}  # the search does not revive it: no repeated registry hits
+    assert Q_.claim(eng, "enrich") is None
+    client.post(f"/api/enrich/{UNCACHED}")  # an explicit request still retries
+    assert _statuses() == {UNCACHED: "pending"}
+
+
+def test_invalid_inn_is_not_queued(env):
+    # Counterparty rejects a bad INN, so this guards rows built without validation (model_construct)
+    bad = "7801000013"
+    good = _match(UNCACHED)
+    cp = Counterparty.model_construct(**{**good.counterparty.model_dump(), "inn": bad})
+    rows = [CounterpartyMatch.model_construct(**{**good.__dict__, "counterparty": cp}), good]
+    uncached: set[str] = set()
+    out = app_mod._enriched(rows, uncached)
+    app_mod._queue_uncached(out, uncached)
+    assert uncached == {UNCACHED} and _keys() == [UNCACHED]
+
+
+def test_kind_from_the_cached_card_reaches_history_and_the_filter(env):
+    client, put, calls = env
+    put("33.12", "17.12")  # main OKVED 17.12 (paper) -> manufacturer, basis = the cached line (D-057)
+    by = {m["counterparty"]["inn"]: m["counterparty"] for m in client.post("/api/search", json=Q).json()["history"]}
+    assert by[CACHED]["kind"] == "manufacturer"
+    assert any(e["field"] == "okved" and e["fact"].startswith("Роль") for e in by[CACHED]["evidence"])
+    only = {**Q, "filters": {"only_manufacturers": True}}
+    assert _inns(client.post("/api/search", json=only)) == [CACHED]
+
+
+def test_role_without_a_verified_basis_does_not_pass_only_manufacturers(env, monkeypatch):
+    from src.enrich import enrich as enrich_mod
+
+    client, put, calls = env
+    monkeypatch.setattr(enrich_mod, "enrich", lambda inn, cache=None, *, offline=None: Counterparty(
+        inn=inn, name="ООО ВЫДУМКА", kind="manufacturer"))  # no Evidence for the role
+    only = {**Q, "filters": {"only_manufacturers": True}}
+    # strip_unverified runs before the filters: the row is not shown as a manufacturer it cannot back
+    assert _inns(client.post("/api/search", json=only)) == []
+
+
+@pytest.mark.parametrize(("code", "dropped"), [
+    ("ACTIVE", False), ("LIQUIDATED", True), ("LIQUIDATING", True), ("BANKRUPT", True),
+    ("TERMINATED", True), ("REORGANIZING", False), (None, False),
+])
+def test_bo_status_code_is_normalized_for_the_hard_filter(code, dropped):
+    from src.contracts import Query
+    from src.enrich.enrich import bo_status
+    from src.match.filters import apply_filters
+
+    st = bo_status(code)
+    if code == "ACTIVE":
+        assert st == "действующая"
+    if code and not dropped and code != "ACTIVE":
+        assert st == code  # unknown code is kept as is, not guessed
+    m = _match(CACHED)
+    m = m.model_copy(update={"counterparty": m.counterparty.model_copy(update={"status": st})})
+    assert (apply_filters([m], Query(query_id="q", text="x")) == []) is dropped
