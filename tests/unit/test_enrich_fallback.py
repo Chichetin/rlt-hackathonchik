@@ -75,7 +75,7 @@ def test_not_found_anywhere_is_200_without_name_or_invented_facts(cache):
     assert cp.name == f"ИНН {BIG_INN}" and cp.is_msp is False and cp.status is None
     assert [e.field for e in cp.evidence] == ["msp"]
     assert "не значит, что компании нет" in cp.evidence[0].fact
-    assert check_counterparty(cp, cache.page_text) == [f"ИНН {BIG_INN} без Evidence с field='inn'"] or True
+    assert check_counterparty(cp, cache.page_text) == [f"ИНН {BIG_INN} без Evidence с field='inn'"]
 
 
 def test_pb_card_in_cache_wins(cache):
@@ -197,3 +197,19 @@ def test_api_503_only_when_nothing_answers(cache, monkeypatch):
     assert TestClient(app_mod.app).get(f"/api/counterparty/{MSP_INN}").status_code == 503
 
 
+
+
+def test_msp_flag_only_from_what_the_page_says():
+    """Active row with an unknown category is not «не действующая»: no fact, is_msp unknown."""
+    from src.enrich.enrich import _msp
+
+    facts: list[tuple[str, str, str]] = []
+
+    def add(field: str, value: str, fact: str) -> bool:
+        facts.append((field, value, fact))
+        return True
+
+    assert _msp({"is_active": "1", "category": ""}, add) is None and facts == []
+    assert _msp({"is_active": "1", "category": "?"}, add) is None and facts == []
+    assert _msp({"is_active": "0", "category": "1"}, add) is False
+    assert facts == [("msp", "is_active: 0", "Реестр МСП: запись есть, но не действующая")]

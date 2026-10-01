@@ -120,10 +120,10 @@ def _msp(row: dict[str, str], add) -> bool | None:  # type: ignore[no-untyped-de
     if row.get("is_active") == "1" and label:
         add("msp", f"category: {cat}", f"Реестр МСП: {label}, запись действующая")
         return True
-    if "is_active" in row:
-        add("msp", f"is_active: {row['is_active']}", "Реестр МСП: запись есть, но не действующая")
+    if row.get("is_active") == "0":
+        add("msp", "is_active: 0", "Реестр МСП: запись есть, но не действующая")
         return False
-    return None
+    return None  # active with an unknown category, or no flag: the page does not say
 
 
 def from_rmsp(inn: str, page: CachedPage) -> Counterparty:
