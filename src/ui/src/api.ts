@@ -108,7 +108,8 @@ export const PAGE = 20;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
-export type SearchPage = SearchResponse & { total: Totals; note?: string; facets?: Facets };
+// excludedLot: the loaded notice is in the data and was left out of its own results — X-Excluded-Lot (#249, F-13)
+export type SearchPage = SearchResponse & { total: Totals; note?: string; facets?: Facets; excludedLot?: string };
 
 function searchNote(r: Response): string | undefined {
   const raw = r.headers.get("X-Search-Note");
@@ -133,6 +134,7 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
     total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
     note: searchNote(r),
     facets: facets(r),
+    excludedLot: r.headers.get("X-Excluded-Lot") ?? undefined,
   };
 }
 
@@ -187,7 +189,7 @@ export function yesNo(v: boolean | null | undefined): string {
 
 // РНП ЕИС: «нет» не говорит, когда и как это проверено — показываем дату и источник из Evidence
 // (field="rnp", src/sources/eis_rnp.py), а не голое да/нет. Без Evidence in_rnp есть только как
-// None (strip_unverified, D-091): "не проверено".
+// None (strip_unverified, D-095): "не проверено".
 export function rnpLabel(cp: Pick<Counterparty, "in_rnp" | "evidence">): string {
   const ev = (cp.evidence ?? []).find((e) => e.field === "rnp");
   if (ev) return ev.fact;

@@ -122,6 +122,137 @@
         }
       }
     },
+    "/api/ratings": {
+      "get": {
+        "summary": "Api Ratings Batch",
+        "operationId": "api_ratings_batch_api_ratings_get",
+        "parameters": [
+          {
+            "name": "inns",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ИНН через запятую",
+              "title": "Inns"
+            },
+            "description": "ИНН через запятую"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/RatingSummary"
+                  },
+                  "title": "Response Api Ratings Batch Api Ratings Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ratings/{inn}": {
+      "get": {
+        "summary": "Api Ratings",
+        "operationId": "api_ratings_api_ratings__inn__get",
+        "parameters": [
+          {
+            "name": "inn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Inn"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Api Rate",
+        "operationId": "api_rate_api_ratings__inn__post",
+        "parameters": [
+          {
+            "name": "inn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Inn"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RatingIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingSaved"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "summary": "Health",
@@ -947,6 +1078,175 @@
         ],
         "title": "Query",
         "description": "Customer need: an item name, a description or a fragment of the spec.\n\nMirrors one notice (lot) of organizers' data (research/DATA_DICTIONARY.md): in the product\nthe user fills `text` (and optionally the rest); in backtest every field comes from the lot."
+      },
+      "RatingDetail": {
+        "properties": {
+          "inn": {
+            "type": "string",
+            "title": "Inn"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "опубликованных оценок"
+          },
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average",
+            "description": "None, пока оценок меньше MIN_SHOWN"
+          },
+          "min_shown": {
+            "type": "integer",
+            "title": "Min Shown",
+            "default": 3
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer",
+            "default": "Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены."
+          },
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            },
+            "type": "array",
+            "title": "Reviews"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inn",
+          "count",
+          "average",
+          "reviews"
+        ],
+        "title": "RatingDetail"
+      },
+      "RatingIn": {
+        "properties": {
+          "author_inn": {
+            "type": "string",
+            "title": "Author Inn",
+            "description": "ИНН заказчика, который оценивает (контрольная сумма)"
+          },
+          "browser_sig": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Browser Sig",
+            "description": "локальный ключ браузера, не удостоверяет личность"
+          },
+          "stars": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Stars"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "author_inn",
+          "browser_sig",
+          "stars",
+          "text"
+        ],
+        "title": "RatingIn"
+      },
+      "RatingSaved": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "published / quarantine / hidden"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/RatingSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "summary"
+        ],
+        "title": "RatingSaved"
+      },
+      "RatingSummary": {
+        "properties": {
+          "inn": {
+            "type": "string",
+            "title": "Inn"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "опубликованных оценок"
+          },
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average",
+            "description": "None, пока оценок меньше MIN_SHOWN"
+          },
+          "min_shown": {
+            "type": "integer",
+            "title": "Min Shown",
+            "default": 3
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer",
+            "default": "Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены."
+          }
+        },
+        "type": "object",
+        "required": [
+          "inn",
+          "count",
+          "average"
+        ],
+        "title": "RatingSummary"
+      },
+      "Review": {
+        "properties": {
+          "stars": {
+            "type": "integer",
+            "title": "Stars"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stars",
+          "text",
+          "created_at"
+        ],
+        "title": "Review"
       },
       "ScoreComponent": {
         "properties": {

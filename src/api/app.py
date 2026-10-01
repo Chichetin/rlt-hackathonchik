@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
+from src.api.ratings import router as ratings_router
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
@@ -87,6 +88,7 @@ app = FastAPI(
 )
 app.add_middleware(UploadLimit)  # 413 on an oversized test export before the body is read (#207)
 app.include_router(testset_router)  # /api/testset: the test export uploaded in the UI (#207), before the SPA route
+app.include_router(ratings_router)  # /api/ratings: customer ratings 1–5★, not in the score (#233)
 _engine = None
 
 
@@ -271,6 +273,8 @@ def api_search(query: Query, response: Response,
     if note:
         response.headers["X-Search-Note"] = quote(note)
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
+    if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
+        response.headers["X-Excluded-Lot"] = str(own)
     history = [m for m in matches if m.origin == "history"]
     discovered = [m for m in matches if m.origin == "discovered"]
     response.headers["X-Total-History"] = str(len(history))
@@ -332,7 +336,7 @@ def api_counterparty(inn: str) -> Counterparty:
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
         # rnp_offline=True: a direct card lookup must not wait on the 60 s РНП Crawl-delay pause
-        # (research/SOURCES.md, D-091) — only the worker does a live РНП request.
+        # (research/SOURCES.md, D-095) — only the worker does a live РНП request.
         cp = enrich_mod.enrich(inn, rnp_offline=True)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
