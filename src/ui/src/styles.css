@@ -536,4 +536,4 @@ html { scroll-padding-top: 80px; }
 .hero-mark { display: grid; place-items: center; min-width: 0; color: #dfe6f5; }
 .hero-mark svg { width: min(300px, 72%); height: auto; filter: drop-shadow(0 0 48px #9db4ff26); }
 .hero-mark path:first-child { stroke-opacity: .55; }
-@media (max-width: 760px) { .hero-mark svg { width: 150px; } }
+@media (max-width: 760px) { .hero-mark { display: none; } }
