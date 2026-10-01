@@ -31,7 +31,7 @@ import pyarrow.parquet as pq
 
 from src.match.store import LotHits, ParquetStore, Store, get_store
 from src.match.store import processed_dir as processed_dir
-from src.match.text import TOKENIZER_VERSION, tokenize
+from src.match.text import tokenize, tokenizer_version
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,7 +54,7 @@ def pq_path(path: Path) -> str:
 def index_key(manifest: dict, as_of: date | None) -> str:
     """Store-independent: Postgres loaded from an ingest carries its manifest (src/db/load.py)."""
     raw = json.dumps(
-        [manifest.get("built_at"), manifest.get("rows"), as_of.isoformat() if as_of else None, TOKENIZER_VERSION],
+        [manifest.get("built_at"), manifest.get("rows"), as_of.isoformat() if as_of else None, tokenizer_version()],
         sort_keys=True,
     )
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -142,7 +142,7 @@ def _build(store: Store, as_of: date | None, out: Path) -> None:
                    out / "texts.parquet")
     (out / "meta.json").write_text(
         json.dumps({"n_docs": len(corpus), "n_pairs": len(lot_ids), "as_of": as_of.isoformat() if as_of else None,
-                    "data_end": end.isoformat() if end else None, "tokenizer": TOKENIZER_VERSION},
+                    "data_end": end.isoformat() if end else None, "tokenizer": tokenizer_version()},
                    ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
