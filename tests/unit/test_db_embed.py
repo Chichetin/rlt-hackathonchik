@@ -1,4 +1,4 @@
-"""Embeddings of distinct normalized product names in Postgres (D-023). Live Postgres with pgvector:
+"""Embeddings of distinct normalized product names in Postgres (D-054). Live Postgres with pgvector:
 TEST_DATABASE_URL, skipped otherwise. The model is replaced by a deterministic fake encoder."""
 
 from __future__ import annotations
