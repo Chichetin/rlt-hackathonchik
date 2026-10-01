@@ -26,6 +26,7 @@ from src.contracts import Counterparty, Evidence, inn_is_valid
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
 FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp"}
+FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/sources/fns_opendata.py
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
