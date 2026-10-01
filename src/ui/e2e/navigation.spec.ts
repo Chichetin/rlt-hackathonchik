@@ -41,7 +41,7 @@ test("результаты и запрос сохраняются при пер�
 
 test("главная и подбор — отдельные страницы, движение меню и reduced motion не ломают переходы", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Поставщики,");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Митрандир");
   await expect(page.getByLabel("Что нужно закупить")).toHaveCount(0);
   await page.getByRole("link", { name: "Начать подбор" }).click();
   await expect(page).toHaveURL(/\/search$/);

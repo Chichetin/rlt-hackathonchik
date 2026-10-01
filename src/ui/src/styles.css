@@ -208,7 +208,7 @@ button.secondary:disabled, button:disabled { opacity: .55; cursor: not-allowed; 
 .list { gap: 8px; }
 .block { padding: 20px; }
 .hint { margin: 6px 0 14px; }
-@media (min-width: 1280px) { .results { grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items: start; } }
+/* .results columns: see the container query #203 at the end of the file */
 .optional .chip { align-self: flex-end; flex: 0 1 auto; }
 
 /* logos, names, score meter, subpages (#119) */
@@ -615,3 +615,9 @@ html { scroll-padding-top: 80px; }
 .slider-row input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 .export-note { flex-basis: 100%; margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 .weights-card-note { margin: -4px 0 10px; font-size: 12.5px; color: #c7d4ff; }
+
+/* #203: «С опытом» and «Новые» side by side whenever the results column is wide enough —
+   measured on the column itself (container query), not the viewport, so any app shell works */
+.output { container: output / inline-size; }
+@container output (min-width: 700px) { #results.results { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+@container output (max-width: 699.98px) { #results.results { grid-template-columns: minmax(0, 1fr); } }
