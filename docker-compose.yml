@@ -27,8 +27,10 @@ services:
               "${HOME}/.cache/huggingface:/root/.cache/huggingface:ro"]
     depends_on: {db: {condition: service_healthy}}
   worker:
-    build: .
-    command: ["python", "-m", "src.worker.worker"]
+    build: {context: ., dockerfile: Dockerfile.worker}   # без UI и torch: воркеру они не нужны
+    # ночной режим (T-13): после капчи без запасных источников спит 15 мин, а не выходит; restart поднимает после сбоя
+    command: ["python", "-m", "src.worker.worker", "--captcha-sleep", "900"]
+    restart: unless-stopped
     env_file: [{path: .env, required: false}]
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@db:5432/app   # secret-scan: allow
