@@ -578,6 +578,55 @@ def test_plan_reads_the_rest_of_the_hard_limit(yandex_on):
     assert W.plan_run({}).requests_max == 0 and W.plan_run({"L": 5}).lots_yandex == 0
 
 
+# --- the order under the ceiling of the run: thin categories first (#263) ------------------------------------
+
+THIN = frozenset({"21.20", "10.51"})
+LOT_OKPD2 = {"L1": ["21.20.10.113"], "L2": ["26.20.15.000"], "L3": ["26.20.15.000", "10.51.11.110"], "L4": [],
+             "L5": ["10.51.11.110"]}
+
+
+def test_thin_classes_reads_the_metric_file(tmp_path, monkeypatch):
+    path = tmp_path / "thin.json"
+    path.write_text(json.dumps({"thin": [{"okpd2": "21.20"}, {"okpd2": "10.51"}]}), encoding="utf-8")
+    assert W.thin_classes(path) == THIN
+    assert W.thin_classes(tmp_path / "missing.json") == frozenset()  # no metric — no thin classes, no error
+    monkeypatch.setattr(W, "THIN_RESULT", path)
+    assert W.thin_classes() == THIN
+
+
+def test_priority_order_puts_thin_lots_first_and_keeps_the_rest_in_place():
+    assert W.priority_order(LOT_OKPD2, THIN) == ["L1", "L3", "L5", "L2", "L4"]  # any code of the lot may be thin
+    assert W.priority_order(LOT_OKPD2, frozenset()) == list(LOT_OKPD2)  # no metric — the order as it was
+    assert W.priority_order({}, THIN) == []
+
+
+def test_under_the_ceiling_of_the_run_thin_lots_are_served_first(yandex_on, tmp_path, fixture_processed):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    calls: list[httpx.Request] = []
+    kw = {"cache": cache, "budget": yandex_search.Budget(limit=10), "caps": yandex_search.Caps(per_lot=3, per_run=3),
+          "cfg": CFG, "processed": fixture_processed, "client": _yandex(calls), "site_client": _forbidden(),
+          "offline": False}
+    lots = {"L1": ("Задвижки чугунные", ["26.20.15.000"]), "L2": (LOT_TEXT, ["21.20.10.113"])}  # only L2 is thin
+    served = {lot: W.lot_candidates(lot, lots[lot][0], 0, okpd2=lots[lot][1], **kw).requests_live
+              for lot in W.priority_order({k: v[1] for k, v in lots.items()}, THIN)}
+    assert served == {"L2": 3, "L1": 0} and list(served) == ["L2", "L1"] and len(calls) == 3
+
+
+def test_plan_counts_thin_lots_among_those_under_yandex(yandex_on):
+    plan = W.plan_run(STRONG, okpd2_by_lot=LOT_OKPD2, thin=THIN)  # under Yandex: L1, L2, L3; thin among them: L1, L3
+    assert plan.lots_yandex == 3 and "из них в тонких категориях: 2" in plan.line()
+    assert "тонк" not in W.plan_run(STRONG).line()  # no OKPD2 of the lots — nothing is said about thin
+
+
+def test_plan_says_when_the_thin_metric_is_missing(yandex_on, tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(W, "THIN_RESULT", tmp_path / "missing.json")
+    plan = W.plan_run(STRONG, okpd2_by_lot=LOT_OKPD2)
+    with caplog.at_level(logging.WARNING, logger=W.log.name):
+        line = W.log_plan(plan)
+    assert "метрика тонких категорий недоступна, порядок прежний" in line and line in caplog.text
+
+
 def test_group_run_is_behind_the_same_gate(tmp_path, monkeypatch, fixture_processed):
     monkeypatch.setattr(W, "processed_dir", lambda: fixture_processed)
     monkeypatch.setattr(W, "SourceCache", lambda: SourceCache(tmp_path / "c.sqlite"))

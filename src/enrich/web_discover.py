@@ -62,6 +62,7 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs" / "yandex_discovery.yaml"
 RESULTS = ROOT / "eval" / "results"
+THIN_RESULT = RESULTS / "T-thin-v1.json"  # the metric of thin categories (#122, D-095)
 
 
 def pool_url(group: str) -> str:
@@ -325,6 +326,25 @@ def fallback_needed(strong: int, gate: yandex_search.Gate | None = None) -> tupl
     return True, f"нужен: сильных кандидатов из бесплатных источников {strong} < {MIN_STRONG}"
 
 
+def thin_classes(path: Path | None = None) -> frozenset[str]:
+    """OKPD2 groups (XX.XX) of the thin categories of #122; no metric file → empty set, the order stays as it was."""
+    try:
+        return frozenset(g["okpd2"] for g in json.loads((path or THIN_RESULT).read_text(encoding="utf-8"))["thin"])
+    except (OSError, ValueError, KeyError):
+        return frozenset()
+
+
+def _is_thin(okpd2: Sequence[str], thin: frozenset[str]) -> bool:
+    return any(code.strip()[:5] in thin for code in okpd2)
+
+
+def priority_order(okpd2_by_lot: Mapping[str, Sequence[str]], thin: frozenset[str] | None = None) -> list[str]:
+    """Lot ids for the fallback path: lots of thin categories first, the given order inside each part (#263). Only the
+    order under the ceiling of the run — whether a lot needs Yandex at all is still `fallback_needed` (< MIN_STRONG)."""
+    thin = thin_classes() if thin is None else thin
+    return sorted(okpd2_by_lot, key=lambda lot: not _is_thin(okpd2_by_lot[lot], thin))
+
+
 @dataclass(frozen=True)
 class Plan:
     """What a run may cost at most, known before the first request."""
@@ -339,6 +359,7 @@ class Plan:
     per_lot: int = 0
     per_run: int = 0
     budget_left: int = 0
+    thin: str = ""  # «из них в тонких категориях: N» / why it is unknown; empty — the OKPD2 of the lots were not given
 
     def line(self) -> str:
         if not self.enabled:
@@ -346,15 +367,18 @@ class Plan:
                     "запросов 0, 0 ₽")
         price = yandex_search.PRICE_RUB_PER_1000[self.mode]
         return (f"Yandex (запасной путь) {self.reason}: под Yandex попадают {self.lots_yandex} из {self.lots} лотов "
-                f"(сильных кандидатов < {MIN_STRONG}); максимум {self.requests_max} запросов ≈ {self.rub_max:.2f} ₽ "
+                f"(сильных кандидатов < {MIN_STRONG}){', ' + self.thin if self.thin else ''}; "
+                f"максимум {self.requests_max} запросов ≈ {self.rub_max:.2f} ₽ "
                 f"(режим {self.mode}, {price} ₽ за 1000); остаток общего лимита {self.budget_left}")
 
 
 def plan_run(strong_by_lot: Mapping[str, int], *, gate: yandex_search.Gate | None = None,
-             mode: yandex_search.Mode | None = None, budget_left: int | None = None) -> Plan:
+             mode: yandex_search.Mode | None = None, budget_left: int | None = None,
+             okpd2_by_lot: Mapping[str, Sequence[str]] | None = None, thin: frozenset[str] | None = None) -> Plan:
     """The plan of a run from the number of strong candidates of every lot (free sources only). The maximum
     of requests: lots under Yandex × min(ceiling per lot, queries of one lot), not above the ceiling per run
-    and the rest of the hard limit. Cached answers make the real number smaller."""
+    and the rest of the hard limit. Cached answers make the real number smaller. With the OKPD2 of the lots the
+    plan also counts those of thin categories among the lots under Yandex (they go first, `priority_order`)."""
     gate = gate or yandex_search.gate()
     mode = mode or yandex_search.search_mode()
     if not gate.enabled:
@@ -364,8 +388,15 @@ def plan_run(strong_by_lot: Mapping[str, int], *, gate: yandex_search.Gate | Non
     under = sum(1 for n in strong_by_lot.values() if n < MIN_STRONG)
     per_lot = min(gate.per_lot, max(len(m) for m in ROLE_MODIFIERS.values()))
     requests = max(0, min(under * per_lot, gate.per_run, budget_left))
+    note = ""
+    if okpd2_by_lot is not None:
+        thin = thin_classes() if thin is None else thin
+        in_thin = sum(1 for lot, n in strong_by_lot.items()
+                      if n < MIN_STRONG and _is_thin(okpd2_by_lot.get(lot, ()), thin))
+        note = (f"из них в тонких категориях: {in_thin}" if thin
+                else "метрика тонких категорий недоступна, порядок прежний")
     return Plan(True, gate.reason, mode, len(strong_by_lot), under, requests, yandex_search.cost_rub(requests, mode),
-                gate.per_lot, gate.per_run, budget_left)
+                gate.per_lot, gate.per_run, budget_left, note)
 
 
 def log_plan(plan: Plan) -> str:
