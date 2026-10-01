@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 import pytest
+import yaml
 
 from src.contracts import Counterparty, Evidence, Query
 from src.match import search as search_mod
@@ -167,6 +168,9 @@ def mode(monkeypatch):
 def test_default_mode_is_shadow_and_invalid_is_an_error():
     assert reliability_mode(search_mod.load_config()) == "shadow"
     assert reliability_mode({}) == "off"
+    # YAML 1.1 reads bare on / off as booleans
+    assert reliability_mode(yaml.safe_load("reliability: {mode: on}")) == "on"
+    assert reliability_mode(yaml.safe_load("reliability: {mode: off}")) == "off"
     with pytest.raises(ValueError):
         reliability_mode({"reliability": {"mode": "maybe"}})
 

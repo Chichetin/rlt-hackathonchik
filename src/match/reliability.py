@@ -73,7 +73,10 @@ class Prior:
 
 def reliability_mode(cfg: dict) -> str:
     raw = cfg.get("reliability") or {}
-    mode = str(raw.get("mode", DEFAULT_MODE)).strip().lower()
+    value = raw.get("mode", DEFAULT_MODE)
+    if isinstance(value, bool):  # YAML 1.1: bare on / off are booleans
+        value = "on" if value else "off"
+    mode = str(value).strip().lower()
     if mode not in MODES:
         raise ValueError(f"reliability.mode = {mode!r}: нужно {', '.join(MODES)}")
     return mode
