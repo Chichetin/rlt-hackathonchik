@@ -177,6 +177,17 @@ def _doc_codes(con: duckdb.DuckDBPyConnection, idx: LotIndex, processed: Path) -
     raise AssertionError("unreachable")
 
 
+def prebuild_doc_codes(idx: LotIndex, processed: Path) -> str:
+    """Build the position-codes sidecar now (`python -m src.match.index`), not on the first query
+    without a code: in docker-compose the index directory is read-only and the temp one dies with
+    the container. Returns the SQL path of the sidecar."""
+    con = duckdb.connect()
+    try:
+        return _doc_codes(con, idx, processed)
+    finally:
+        con.close()
+
+
 def _predict_okpd2(con: duckdb.DuckDBPyConnection, idx: LotIndex, processed: Path) -> str | None:
     """OKPD2 of a query without a code, from the documents that matched it (temp tables h, lot); D-045.
 

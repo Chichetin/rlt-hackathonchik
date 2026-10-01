@@ -196,3 +196,11 @@ def test_unbuildable_position_codes_fall_back_to_the_lot_vote(own_data, monkeypa
 
     monkeypatch.setattr(search_mod, "_doc_codes", unwritable)
     assert predicted("бумага офисная") == PAPER
+
+
+def test_index_cli_prebuilds_position_codes_next_to_both_indexes(own_data, capsys):
+    """#83: `python -m src.match.index` leaves nothing to build on the first query without a code."""
+    own_data([(1, "2024-02-01", "Поставка", [("Бумага офисная", PAPER)])])
+    assert index_mod.main([]) == 0
+    built = sorted(index_mod.index_root().glob(f"bm25-*/{search_mod.DOC_CODES}"))
+    assert len(built) == 2, capsys.readouterr().out

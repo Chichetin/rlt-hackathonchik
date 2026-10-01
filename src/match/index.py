@@ -199,7 +199,8 @@ def clear_memory_cache() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Prebuild the product index (as_of=None) and the eval one (split cutoff): no wait on the first query.
+    """Prebuild the product index (as_of=None) and the eval one (split cutoff), each with its position
+    codes (#83): no wait on the first query, with or without an OKPD2 code.
 
         uv run python -m src.match.index
     """
@@ -207,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     import time
 
     from src.eval.split import split_config
+    from src.match.search import prebuild_doc_codes
 
     processed = processed_dir()
     for as_of in (None, date.fromisoformat(str(split_config()["cutoff"]))):
@@ -216,7 +218,8 @@ def main(argv: list[str] | None = None) -> int:
         except FileNotFoundError as e:
             print(e, file=sys.stderr)
             return 2
-        print(f"as_of={as_of}: {idx.n_docs} документов, {idx.path} ({time.time() - t0:.1f} с)")
+        codes = prebuild_doc_codes(idx, processed)
+        print(f"as_of={as_of}: {idx.n_docs} документов, {idx.path}, коды позиций {codes} ({time.time() - t0:.1f} с)")
     return 0
 
 
