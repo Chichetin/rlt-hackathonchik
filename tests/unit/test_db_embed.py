@@ -13,7 +13,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from src.db.embed import DIM, embed, ensure_hnsw, nearest
+from src.db.embed import DIM, embed, encode_file, ensure_hnsw, export_missing, import_file, nearest
 from src.db.load import load, pg_dsn
 from src.db.norm import norm_sql, normalize
 from src.ingest.build import build
@@ -72,3 +72,18 @@ def test_hnsw_index_is_used_for_nearest(conn) -> None:
     assert "Index Scan" in plan and "hnsw" in plan
     rows = conn.execute(*nearest(VEC, q, 3)).fetchall()
     assert rows[0][0] == normalize(name) and rows[0][1] == pytest.approx(1.0)
+
+
+def test_export_encode_import_roundtrip(conn, tmp_path: Path) -> None:
+    """GPU handoff: export texts without vectors → encode elsewhere (no Postgres) → import."""
+    conn.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(VEC)))
+    total = embed(conn, fake_encode, data_schema=SCHEMA, vec_schema=VEC, limit=2)["total"]
+    texts, vecs = tmp_path / "texts.parquet", tmp_path / "vecs.parquet"
+    assert export_missing(conn, texts, vec_schema=VEC) == total - 2
+    assert encode_file(texts, vecs, fake_encode, chunk=3) == total - 2
+    assert import_file(conn, vecs, vec_schema=VEC) == total - 2
+    assert embed(conn, fake_encode, data_schema=SCHEMA, vec_schema=VEC, limit=0) == {"total": total, "done": total}
+    name = conn.execute(sql.SQL("SELECT norm FROM {} ORDER BY norm DESC LIMIT 1")
+                        .format(sql.Identifier(VEC, "names_e5_small"))).fetchone()[0]
+    rows = conn.execute(*nearest(VEC, fake_encode([name])[0], 1)).fetchall()
+    assert rows[0][0] == name and rows[0][1] == pytest.approx(1.0, abs=1e-3)  # float16 in transit
