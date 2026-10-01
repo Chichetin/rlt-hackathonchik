@@ -274,7 +274,7 @@ def test_lost_explain_on_fixture(hist):
     assert last is not None
     rec = explain([(c.query.query_id, last)], {c.query.query_id: c}, CUTOFF, k=1)
     assert rec["cases"] == 1 and rec["rank"]["median"] == len(matches)
-    assert set(rec["component_delta"]) == {"product_fit", "experience", "activity", "geography"}
+    assert set(rec["component_delta"]) == {"product_fit", "experience", "activity"}  # the scored ones (weight > 0)
     assert sum(rec["largest_weighted_deficit"].values()) == 1 and rec["rerun_differs"] == 0
     # the top-1 supplier against itself: no deficit — a tie, not a product_fit loss; a foreign record differs
     first = matches[0].counterparty.inn

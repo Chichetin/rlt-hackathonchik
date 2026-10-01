@@ -59,8 +59,9 @@ def test_experiment_overrides_are_merged_over_search_config(tmp_path, monkeypatc
     monkeypatch.setattr(R, "EXPERIMENTS_CONFIG", exp)
     product = R.load_method_config("no-such-experiment")
     cfg = R.load_method_config("X-1")
-    assert cfg["signals"]["incumbent"] == 0.3 and cfg["options"] == {"tie_break": "bm25"} and cfg["k"] == 10
-    assert cfg["weights"] == product["weights"] and "options" not in product
+    assert cfg["signals"]["incumbent"] == 0.3 and cfg["k"] == 10
+    assert cfg["options"] == {**(product.get("options") or {}), "tie_break": "bm25"}  # merged by key, not replaced
+    assert cfg["weights"] == product["weights"]
     # the same overrides under another id (H-15f-real); an unknown id is an error, not the product config
     assert R.load_method_config("X-1-real", config_of="X-1") == cfg
     assert R.load_method_config("X-1-real") == product

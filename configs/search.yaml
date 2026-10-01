@@ -3,15 +3,22 @@
 retriever: bm25          # T-02: stub → bm25 (v1, D-029) → bm25+okpd2 → hybrid_rrf (только через эксперимент)
 tokenizer: prefix5       # prefix5 | snowball | pymorphy (#116); переопределение — переменная BM25_TOKENIZER
 k: 20
-# Стартовые экспертные веса (research/DECISIONS.md D-004). Изменение состава компонент или
-# формулы — подтверждение человека №3 (CLAUDE.md): это слайд.
+# Веса v2 (D-063 → подтверждение человека №3 от 01.10, эксперимент H-15f, нормированы к сумме 1).
+# Было (D-004): 0.35 / 0.2 / 0.2 / 0.1 / 0.1 / 0.05. reliability и price — «нет данных» (D-029), вес 0.
+# geography показывается в карточке, в score не входит (H-15f-geo: любой проверенный вес снижал recall).
+# Изменение состава компонент или формулы — подтверждение человека №3 (CLAUDE.md): это слайд.
 weights:
-  product_fit: 0.35
-  experience: 0.2
-  reliability: 0.2
-  activity: 0.1
-  geography: 0.1
-  price: 0.05
+  product_fit: 0.762
+  experience: 0.19
+  reliability: 0.0
+  activity: 0.048
+  geography: 0.0
+  price: 0.0
+# Опции скоринга (src/match/search.py, OPTIONS): v2 = H-15f.
+options:
+  fit_bm25_share: 0.8      # product_fit = 0.8 · BM25 + 0.2 · глубина совпадения ОКПД2
+  experience_by: similar   # опыт — лоты и победы среди лотов с похожими позициями (class — вся группа ОКПД2)
+  tie_break: bm25          # равные баллы — по BM25, затем по ИНН
 # Сигналы экспериментов (#22, src/match/signals.py): доля в [0, 1], по умолчанию 0 = v1 без изменений.
 # incumbent — участие в лотах того же заказчика до as_of, подмешивается в experience.
 signals:

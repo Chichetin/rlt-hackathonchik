@@ -61,7 +61,10 @@ def test_unavailable_components_have_zero_weight_and_say_no_data(search_data):
     for name in ("reliability", "price"):
         c = comp(m, name)
         assert c.value == 0.0 and c.weight == 0.0 and c.explanation.startswith("Нет данных")
-    assert comp(m, "product_fit").weight == 0.35 and comp(m, "experience").weight == 0.2
+    # v2 defaults (D-064): the computable weights sum to 1, geography is shown but not scored
+    assert comp(m, "product_fit").weight == 0.762 and comp(m, "experience").weight == 0.19
+    assert comp(m, "activity").weight == 0.048 and comp(m, "geography").weight == 0.0
+    assert m.score <= 1.0
 
 
 def test_weights_argument_overrides_config(search_data):
@@ -84,7 +87,7 @@ def test_as_of_hides_later_lots_and_suppliers(search_data):
 
 
 def test_experience_counts_lots_and_wins_in_okpd2_group(search_data):
-    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])))
+    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]), config=_cfg(experience_by="class")))
     e = comp(m["7801000012"], "experience")
     assert "4 лот(ов) по ОКПД2 17.12" in e.explanation and "побед: 2" in e.explanation
     assert e.value > comp(m["7801000020"], "experience").value  # 1 paper lot, no paper wins
@@ -115,7 +118,8 @@ def test_okpd2_given_vs_predicted(search_data):
 def test_okpd2_mismatch_lowers_product_fit(search_data):
     m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["61.10.11.110"])))
     c = comp(m["7801000012"], "product_fit")
-    assert "в его истории не встречается" in c.explanation and c.value <= 0.6 + 1e-9
+    share = search_mod.scoring_options(search_mod.load_config())["fit_bm25_share"]
+    assert "в его истории не встречается" in c.explanation and c.value <= share + 1e-9
 
 
 def test_geography_by_kpp_region(search_data):
@@ -213,7 +217,7 @@ def test_as_of_boundary_is_strict(tmp_path, monkeypatch):
 def test_okpd2_subcategory_level_and_group_experience(search_data):
     m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.999"])))
     assert "совпадает до подкатегории 17.12.14" in comp(m["7801000012"], "product_fit").explanation
-    g = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.99.000"])))
+    g = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.99.000"]), config=_cfg(experience_by="class")))
     assert "4 лот(ов) по ОКПД2 17.12" in comp(g["7801000012"], "experience").explanation
 
 
@@ -265,8 +269,9 @@ def test_config_argument_without_options_equals_product(search_data):
 
 def test_experience_by_similar_counts_matched_lots(search_data):
     q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
-    by_class = {m.counterparty.inn: m for m in search(q)}
+    by_class = {m.counterparty.inn: m for m in search(q, config=_cfg(experience_by="class"))}
     similar = search(q, config=_cfg(experience_by="similar"))
+    assert [comp(m, "experience") for m in search(q)] == [comp(m, "experience") for m in similar]  # the default
     assert similar and len(similar) == len(by_class)
     for m in similar:
         exp = comp(m, "experience")
@@ -290,7 +295,7 @@ def test_fit_bm25_share_changes_product_fit(search_data):
 def test_tie_break_bm25_orders_equal_scores_by_similarity(search_data):
     q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
     zero = {"product_fit": 0.0, "experience": 0.0, "activity": 0.0, "geography": 0.0}  # every score ties at 0
-    inns = [m.counterparty.inn or "~" for m in search(q, weights=zero)]
+    inns = [m.counterparty.inn or "~" for m in search(q, weights=zero, config=_cfg(tie_break="inn"))]
     assert inns == sorted(inns)
     fits = [next(c.value for c in m.components if c.name == "product_fit")
             for m in search(q, weights=zero, config=_cfg(tie_break="bm25", fit_bm25_share=1.0))]
