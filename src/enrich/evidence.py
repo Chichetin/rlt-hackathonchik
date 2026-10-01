@@ -12,7 +12,7 @@ Rules (CLAUDE.md, «Проверки кодом»):
    the role (`kind`) by an `okved` Evidence whose value is a WHOLE line of the page with the main OKVED
    of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/enrich/role.py
    (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; `in_rnp` (True or
-   False) by at least one passing `field="rnp"` Evidence (D-072, #111) — an unbacked flag is None;
+   False) by at least one passing `field="rnp"` Evidence (D-091, #111) — an unbacked flag is None;
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
 
@@ -183,7 +183,7 @@ def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
 
 
 def _rnp_backed(cp: Counterparty, page_text: PageText) -> bool:
-    """True/False `in_rnp` needs at least one passing `field="rnp"` Evidence (D-072, #111): an
+    """True/False `in_rnp` needs at least one passing `field="rnp"` Evidence (D-091, #111): an
     unbacked flag (forged, or its page evicted from the cache) is stripped to None («не проверено»),
     never shown as a guessed «да»/«нет»."""
     page_text = cached_pages(page_text)
