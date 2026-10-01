@@ -9,7 +9,7 @@ EXP ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check lint typecheck test test-ui hooks-test stubs openapi openapi-check seal-check \
-        ui-build api worker ui-dev demo e2e eval eval-final up down db-load
+        ui-build api worker ui-dev demo e2e eval eval-final up down db-load db-embed
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -105,3 +105,6 @@ down:
 
 db-load:           ## data/processed → Postgres из docker compose (D-023): make up (или docker compose up -d db), затем это
 	DATABASE_URL=$${DATABASE_URL:-postgresql://app:app@127.0.0.1:$${PG_PORT:-5432}/app} $(PY) python -m src.db.load   # secret-scan: allow
+
+db-embed:          ## эмбеддинги уникальных наименований → pgvector + HNSW (после db-load; нужен make setup-ml; ≈ 70 мин CPU, возобновляемо)
+	DATABASE_URL=$${DATABASE_URL:-postgresql://app:app@127.0.0.1:$${PG_PORT:-5432}/app} $(PY) python -m src.db.embed --index   # secret-scan: allow
