@@ -112,7 +112,7 @@ def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     scoring_options(cfg)
-    ranker.spec(cfg)  # learned ranker (#198): on by default since D-102
+    ranker.spec(cfg)  # learned ranker (#198): on by default since D-103
     profile_overrides(cfg)  # weights by procurement type (#104), off by default
     return cfg
 
@@ -420,7 +420,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         from src.match import pg_retriever
 
         try:
-            hits, by_meaning = pg_retriever.hybrid(idx, query.text, hits, TOP_DOCS)
+            hits, by_meaning = pg_retriever.hybrid(idx, query.text, hits, TOP_DOCS, model=cfg.get("embedding_model"))
             how = " по словам и смыслу" if by_meaning else ""
         except pg_retriever.VectorsUnavailable as e:
             if STRICT_RETRIEVER:

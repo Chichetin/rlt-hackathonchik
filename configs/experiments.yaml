@@ -7,7 +7,7 @@
 # (проверка: tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs).
 # #218 (D-083): «География» с тех пор считается от региона заказчика — записи с geography > 0 сняты до #218 и
 # воспроизводятся на commit из файла результата; на HEAD различие ≤ 9 из 2000 dev-кейсов (ИНН заказчика 47…).
-# #198 (D-102): с 02.10 дефолт продукта — v2 + ранжировщик LightGBM (`ranker:` в search.yaml); записи, снятые
+# #198 (D-103): с 02.10 дефолт продукта — v2 + ранжировщик LightGBM (`ranker:` в search.yaml); записи, снятые
 # до него, выключают его явно (`ranker: null`), `v2` — формула D-077 без ранжировщика (eval/results/v2.json).
 v2:              # формула v2 (H-15f, D-077) без ранжировщика — база для R-198-*
   ranker: null
@@ -82,4 +82,12 @@ H-196-sat100:
   ranker: null
 H-196-sat500:
   options: {sat_lots: 500, sat_wins: 250}
+  ranker: null
+# Ступень 2 сравнения моделей (#98, ступень 1 — #115): гибрид BM25 + векторы (RRF), остальное — продукт.
+S2-hyb-e5s:      # pg_hybrid, intfloat/multilingual-e5-small (vec.names_e5_small)
+  retriever: pg_hybrid
+  ranker: null
+S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — лучший гибрид ступени 1 на коротких запросах
+  retriever: pg_hybrid
+  embedding_model: deepvk/USER-base
   ranker: null
