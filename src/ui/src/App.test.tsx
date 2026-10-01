@@ -288,21 +288,17 @@ test("«Новые» with a manufacturer emptied by other filters: «Тольк�
   expect(discovered).not.toHaveTextContent("Под фильтр");
 });
 
-test("card has a «Отзывы» block: not-in-score note, links by name, rating only from evidence (#106)", async () => {
-  const withRating = structuredClone(response);
-  withRating.history[0]!.counterparty.inn = "7804428656";
-  withRating.history[0]!.counterparty.evidence!.push({
-    source: "Отзывы: запись страницы с рейтингом", url: "https://2gis.ru/spb/search/7804428656",
-    fetched_at: "2026-10-01T12:00:00Z", fact: "Рейтинг в отзывах: 4.7 из 5", field: "rating", value: "rating: 4.7",
-  } as never);
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withRating), { status: 200 }));
+test("card has a «Отзывы» block: not-in-score note, links by name and INN, no rating (#106)", async () => {
+  const withInn = structuredClone(response);
+  withInn.history[0]!.counterparty.inn = "7804428656";
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withInn), { status: 200 }));
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   const block = within(screen.getByRole("region", { name: "Отзывы" }));
   expect(block.getByText(/Не влияет на рейтинг/)).toBeInTheDocument();
-  expect(block.getByText("Рейтинг в отзывах: 4.7 из 5")).toBeInTheDocument();
+  expect(block.getByText(/Рейтинг не показываем/)).toBeInTheDocument();
   expect(block.getByRole("link", { name: "2ГИС" })).toHaveAttribute("href", expect.stringContaining(encodeURIComponent("ООО Альфа 7804428656")));
 });
 

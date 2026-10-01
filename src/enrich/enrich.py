@@ -20,7 +20,7 @@ import httpx
 
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
 from src.enrich import role
-from src.sources import bo_nalog, pb_nalog, reviews, rmsp
+from src.sources import bo_nalog, pb_nalog, rmsp
 from src.sources.cache import CachedPage, SourceCache
 
 log = logging.getLogger(__name__)
@@ -219,19 +219,12 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
 
 
 def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None) -> Counterparty:
-    """`_enrich` + the rating from a cached review page (cache only; shown, never scored — #106, D-066)."""
-    cache = cache or SourceCache()
-    cp = _enrich(inn, cache, offline=offline)
-    extra = reviews.from_cache(inn, cache)
-    return cp.model_copy(update={"evidence": [*cp.evidence, *extra]}) if extra else cp
-
-
-def _enrich(inn: str, cache: SourceCache, *, offline: bool | None = None) -> Counterparty:
     """pb card from cache → pb live (unless blocked) → rmsp by INN → bo. The error of pb is raised
     only if no fallback source answered; otherwise the source of every fact is in its Evidence.
     `offline=True` — cache only (KeyError when nothing is cached); None — by `ENRICH_OFFLINE`."""
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
+    cache = cache or SourceCache()
     if offline is None:
         offline = os.environ.get("ENRICH_OFFLINE") == "1"
     err: Exception

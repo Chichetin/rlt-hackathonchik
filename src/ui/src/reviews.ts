@@ -1,5 +1,5 @@
 // Review links for the card (#106, D-066). They are search pages the USER opens: not facts, no Evidence,
-// we do not fetch them. Reviews never enter the score. A rating is shown only from Evidence (field "rating").
+// we do not fetch them. Reviews never enter the score; no rating is shown (no source that can be checked honestly).
 export interface ReviewLink {
   label: string;
   url: string;
