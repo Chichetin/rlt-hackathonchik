@@ -51,18 +51,25 @@ export class LotError extends Error {
   }
 }
 
+// Ключи — из docstring Counterparty.stats (src/contracts.py). Неизвестный ключ показывается как есть.
 export const STAT_LABEL: Record<string, string> = {
-  contracts_12m: "Контрактов за 12 мес.",
-  contracts_total: "Контрактов всего",
-  wins: "Побед",
-  offers: "Оферт",
+  lots_participated: "Лотов с участием",
+  lots_won: "Побед",
+  win_rate: "Доля побед",
   customers: "Заказчиков",
   customers_spb: "Заказчиков в СПб",
   first_seen: "Первое участие",
   last_seen: "Последнее участие",
-  median_start_price: "Медианная НМЦК, ₽",
+  median_start_price: "Медианная НМЦК",
   top_okpd2: "Основные ОКПД2",
 };
+
+export function formatStat(key: string, v: string | number): string {
+  if (typeof v !== "number") return String(v);
+  if (key === "win_rate") return `${(v <= 1 ? v * 100 : v).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} %`;
+  if (key === "median_start_price") return `${v.toLocaleString("ru-RU", { maximumFractionDigits: 0 })} ₽`;
+  return v.toLocaleString("ru-RU");
+}
 
 async function post(path: string, body: unknown): Promise<Response> {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

@@ -13,6 +13,8 @@ from src.api import app as app_mod
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
     monkeypatch.setattr(app_mod, "_engine", None)
+    # lots: CSV path unless a test sets parquet
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "no-processed"))
     return TestClient(app_mod.app)
 
 
@@ -121,3 +123,28 @@ def test_lot_unparsable_price_gives_no_budget(client, monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
     q = client.get("/api/lot/5").json()
     assert q["budget"] is None and q["customer_inn"] is None and q["okpd2"] == []
+
+
+def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path):
+    (tmp_path / "Извещения_t.csv").write_text(
+        "lot_id;reqnum;procedure_name;subject;start_price;customer_inn;is_eshop_or_aisgz\n"
+        "7;;Поставка картриджей;Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
+    assert client.get("/api/lot/7").json()["text"] == "Поставка картриджей"
+
+
+def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
+    import duckdb
+    con = duckdb.connect()
+    con.execute("COPY (SELECT 77::BIGINT lot_id, '0372200260024000124' reqnum, 'Картриджи' procedure_name, "
+                "'Картриджи' subject, 500.0 start_price, '7804105239' customer_inn, 'ЭМ' channel) "
+                f"TO '{tmp_path}/notices.parquet' (FORMAT parquet)")
+    con.execute("COPY (SELECT 77::BIGINT lot_id, 'x' product_name, '26.20.40.190' okpd2_code) "
+                f"TO '{tmp_path}/items.parquet' (FORMAT parquet)")
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path))
+    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path / "nope"))
+    q = client.get("/api/lot/0372200260024000124").json()
+    assert q["query_id"] == "lot-77" and q["okpd2"] == ["26.20.40.190"]
+    assert q["channel"] == "ЭМ" and q["budget"] == 500.0

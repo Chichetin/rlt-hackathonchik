@@ -4,6 +4,7 @@ import {
   COMPONENT_LABEL,
   exportXlsx,
   fetchLot,
+  formatStat,
   KIND_LABEL,
   LotError,
   search,
@@ -34,6 +35,10 @@ export function App() {
   const [customerInn, setCustomerInn] = useState("");
   const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [lotBusy, setLotBusy] = useState(false);
+  const resetLot = () => {
+    setLot(null);
+    setLotQueryId(undefined);
+  };
   const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId });
 
   async function loadLot() {
@@ -111,7 +116,10 @@ export function App() {
             inputMode="numeric"
             value={lotId}
             placeholder="lot_id или реестровый номер извещения"
-            onChange={(e) => setLotId(e.target.value)}
+            onChange={(e) => {
+              setLotId(e.target.value);
+              resetLot();
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -134,7 +142,10 @@ export function App() {
           rows={3}
           value={text}
           placeholder="Наименование товара или позиции из ТЗ, например: бумага офисная А4, 80 г/м²"
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            resetLot();
+          }}
         />
         <div className="optional">
           <label>
@@ -283,7 +294,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
           <dl className="facts stats">
             {Object.entries(cp.stats ?? {}).map(([k, v]) => [
               <dt key={`k-${k}`}>{STAT_LABEL[k] ?? k}</dt>,
-              <dd key={`v-${k}`}>{String(v)}</dd>,
+              <dd key={`v-${k}`}>{formatStat(k, v)}</dd>,
             ])}
           </dl>
         </>
