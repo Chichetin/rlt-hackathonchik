@@ -31,6 +31,8 @@ from src.sources.pb_nalog import CaptchaRequired
 from src.worker.queue import engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
+if os.environ.get("DEMO_FIXTURE") == "1":
+    log.warning("DEMO_FIXTURE=1: synthetic fixture, not the organizers' data")
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
 
@@ -68,6 +70,9 @@ def _queue():
 
 
 def _is_stub() -> bool:
+    # DEMO_FIXTURE=1 (scripts/demo.sh without organizers' data) serves the synthetic fixture (D-050).
+    if os.environ.get("DEMO_FIXTURE") == "1":
+        return True
     return bool(getattr(search_mod, "IS_STUB", False) or getattr(enrich_mod, "IS_STUB", False))
 
 

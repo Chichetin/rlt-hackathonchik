@@ -33,6 +33,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, Scor
 from src.ingest.load import built_at, counterparties
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index, pq_path, processed_dir
+from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.text import tokenize
 
 log = logging.getLogger(__name__)
@@ -328,6 +329,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built."""
     cfg = load_config()  # every call: eval passes weights, the retriever still comes from the config
     w = weights or cfg["weights"]
+    shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
     processed = processed_dir()
     as_of = query.as_of
     idx = get_index(processed, as_of)
@@ -357,6 +359,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
             codes, predicted = ([guess], True) if guess else ([], False)
         if codes:
             _class_history(con, cands, codes, processed, as_of)
+        incumbent: dict[str, int] = {}
+        if shares["incumbent"] > 0 and query.customer_inn:
+            incumbent = customer_lots(con, [c.inn for c in cands], query.customer_inn, processed, as_of)
         parties = counterparties([c.inn for c in cands], as_of, processed, con)
     finally:
         con.close()
@@ -370,6 +375,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how)
         exp, exp_why = _experience(c, codes, as_of)
+        if query.customer_inn:
+            exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         act, act_why = _activity(cp, ref, as_of)
         geo, geo_why = _geography(cp, query.region)
         comps = [
