@@ -56,9 +56,9 @@ def test_paper_query_returns_real_suppliers_with_components(search_data):
 
 def test_unavailable_components_have_zero_weight_and_say_no_data(search_data):
     m = search(Query(query_id="q", text="бумага"))[0]
-    for name in ("reliability", "price"):
-        c = comp(m, name)
-        assert c.value == 0.0 and c.weight == 0.0 and c.explanation.startswith("Нет данных")
+    c = comp(m, "price")
+    assert c.value == 0.0 and c.weight == 0.0 and c.explanation.startswith("Нет данных")
+    assert comp(m, "reliability").weight == 0.0  # shadow by default (#72): shown, not in the score
     assert comp(m, "product_fit").weight == 0.35 and comp(m, "experience").weight == 0.2
 
 

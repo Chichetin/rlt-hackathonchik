@@ -29,6 +29,8 @@ import duckdb
 import numpy as np
 import pyarrow as pa
 
+from src.match.reliability import History
+
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = ("manifest.json", "notices.parquet", "participants.parquet", "items.parquet", "suppliers.parquet")
@@ -66,6 +68,7 @@ class Store(Protocol):
     def text_codes(self, as_of: date | None) -> list[tuple[str, str, int]]: ...
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]: ...
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]: ...
+    def supplier_history(self, inns: list[str], as_of: date | None) -> dict[str, History]: ...
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
@@ -167,6 +170,35 @@ SELECT supplier_inn, count(DISTINCT lot_id) FROM {t[participants]}
 WHERE supplier_inn IN (SELECT unnest(%(inns)s{text_arr})) AND customer_inn = %(cust)s AND {cond}
 GROUP BY supplier_inn
 """
+
+# Reliability aggregates per supplier before as_of (src/match/reliability.py, #72): lots, wins, distinct
+# customers, customers with >= 1 / >= 2 winning lots, active months, first lot.
+_SUPPLIER_HISTORY = """
+WITH p AS (
+    SELECT lot_id, supplier_inn, is_winner, customer_inn, publish_date FROM {t[participants]}
+    WHERE supplier_inn IN (SELECT unnest(%(inns)s{text_arr})) AND {cond}
+),
+pc AS (
+    SELECT supplier_inn, count(DISTINCT lot_id) FILTER (WHERE is_winner) AS w
+    FROM p WHERE customer_inn IS NOT NULL GROUP BY supplier_inn, customer_inn
+),
+c AS (
+    SELECT supplier_inn, count(*) FILTER (WHERE w >= 1) AS won_customers,
+           count(*) FILTER (WHERE w >= 2) AS repeat_customers
+    FROM pc GROUP BY supplier_inn
+)
+SELECT p.supplier_inn, count(DISTINCT p.lot_id), count(DISTINCT p.lot_id) FILTER (WHERE p.is_winner),
+       count(DISTINCT p.customer_inn), coalesce(max(c.won_customers), 0), coalesce(max(c.repeat_customers), 0),
+       count(DISTINCT date_trunc('month', p.publish_date)), min(p.publish_date)
+FROM p LEFT JOIN c USING (supplier_inn)
+GROUP BY p.supplier_inn
+ORDER BY p.supplier_inn{c}
+"""
+
+
+def _histories(rows: list[tuple]) -> dict[str, History]:
+    return {r[0]: History(*(int(x) for x in r[1:7]), first_seen=r[7]) for r in rows}
+
 
 # Supplier aggregates (as of the cutoff for eval) + the latest lot: the INN Evidence of src/ingest/load.py.
 _SUPPLIERS = """
@@ -280,6 +312,9 @@ class ParquetStore:
         _, rows = self._fetch(_CUSTOMER_LOTS, {"inns": inns, "cust": customer_inn, "as_of": as_of}, as_of=as_of)
         return {r[0]: int(r[1]) for r in rows}
 
+    def supplier_history(self, inns: list[str], as_of: date | None) -> dict[str, History]:
+        return _histories(self._fetch(_SUPPLIER_HISTORY, {"inns": inns, "as_of": as_of}, as_of=as_of)[1])
+
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]:
         cols, rows = self._fetch(_SUPPLIERS, {"inns": inns, "as_of": as_of}, as_of=as_of,
                                  suppliers=self._suppliers(as_of))
@@ -388,6 +423,9 @@ class PgStore:
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]:
         _, rows = self._fetch(_CUSTOMER_LOTS, {"inns": inns, "cust": customer_inn, "as_of": as_of}, as_of=as_of)
         return {r[0]: int(r[1]) for r in rows}
+
+    def supplier_history(self, inns: list[str], as_of: date | None) -> dict[str, History]:
+        return _histories(self._fetch(_SUPPLIER_HISTORY, {"inns": inns, "as_of": as_of}, as_of=as_of)[1])
 
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]:
         table = f"suppliers_{as_of.isoformat().replace('-', '_')}" if as_of else "suppliers"

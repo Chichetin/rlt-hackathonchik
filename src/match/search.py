@@ -10,7 +10,10 @@ v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
    experience  — lots and wins in the query's OKPD2 group (level 4) before as_of;
    activity    — days from the last participation to as_of (or to the end of the data);
    geography   — region of the KPP (78 / 47) against Query.region;
-   reliability, price — no data yet: value 0, weight 0, "нет данных" (D-029).
+   reliability — quality of the supplier from its history before as_of (src/match/reliability.py, #72):
+                 `reliability.mode` off (as D-029: "нет данных"), shadow (shown, weight 0 — default),
+                 on (weight from the config; confirmation of a human №3);
+   price       — no data: value 0, weight 0, "нет данных" (D-029).
    score = Σ weight · value with weights from configs/search.yaml (D-004).
 Candidates found only in open sources (`origin="discovered"`) are #16: the block is empty here.
 """
@@ -37,6 +40,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, Scor
 from src.ingest.load import from_rows
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
+from src.match.reliability import SHADOW_NOTE, History, Prior, history_reliability, pool_prior, reliability_mode
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
@@ -270,6 +274,17 @@ def _geography(cp: Counterparty, region: str) -> tuple[float, str]:
     return 0.0, f"КПП {cp.kpp}: на учёте {where}, регион запроса — {region}"
 
 
+def _reliability(mode: str, h: History | None, prior: Prior, ref: date | None,
+                 weights: dict[str, float]) -> ScoreComponent:
+    if mode == "off" or ref is None:
+        return ScoreComponent(name="reliability", value=0.0, weight=0.0,  # type: ignore[arg-type]
+                              explanation=UNAVAILABLE["reliability"])
+    value, why = history_reliability(h, prior, ref)
+    weight = float(weights.get("reliability", 0.0)) if mode == "on" else 0.0
+    return ScoreComponent(name="reliability", value=round(min(1.0, max(0.0, value)), 4),  # type: ignore[arg-type]
+                          weight=weight, explanation=why if mode == "on" else why + SHADOW_NOTE)
+
+
 def _component(name: str, value: float, weights: dict[str, float], explanation: str) -> ScoreComponent:
     return ScoreComponent(name=name, value=round(min(1.0, max(0.0, value)), 4),  # type: ignore[arg-type]
                           weight=float(weights.get(name, 0.0)), explanation=explanation)
@@ -280,6 +295,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
     cfg = load_config()  # every call: eval passes weights, the retriever still comes from the config
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
+    rel_mode = reliability_mode(cfg)  # #72: off | shadow | on
     store = get_store()
     as_of = query.as_of
     idx = get_index(store, as_of)
@@ -315,6 +331,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
     ref = as_of or idx.data_end
+    history = store.supplier_history([c.inn for c in cands], as_of) if rel_mode != "off" else {}
+    prior = pool_prior(history.values())
     out: list[CounterpartyMatch] = []
     for c in cands:
         cp = parties.get(c.inn)
@@ -329,8 +347,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),
-            *(ScoreComponent(name=n, value=0.0, weight=0.0, explanation=why)  # type: ignore[arg-type]
-              for n, why in UNAVAILABLE.items()),
+            _reliability(rel_mode, history.get(c.inn), prior, ref, w),
+            ScoreComponent(name="price", value=0.0, weight=0.0, explanation=UNAVAILABLE["price"]),
             _component("activity", act, w, act_why),
             _component("geography", geo, w, geo_why),
         ]

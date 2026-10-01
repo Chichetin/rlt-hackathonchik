@@ -110,6 +110,8 @@ def test_store_rows_are_identical(loaded):
         for cust in ("7801000051", "7701000040", "0000000000"):
             assert pg.customer_lots(inns, cust, as_of) == pq.customer_lots(inns, cust, as_of)
         assert pq.customer_lots(inns, "7801000051", as_of)  # not vacuous
+        assert pg.supplier_history(inns + ["0000000000"], as_of) == pq.supplier_history(inns + ["0000000000"], as_of)
+        assert pq.supplier_history(inns, as_of)  # not vacuous
     assert pg.lot_codes([1, 2, 3, 6]) == pq.lot_codes([1, 2, 3, 6])
     assert pg.lot_codes([]) == pq.lot_codes([]) == []
 
