@@ -1,9 +1,11 @@
 {
  "exp": "K3-distributors-v1",
  "rule": "v1",
- "commit": "265655e",
- "at": "2026-10-01T18:50:38+00:00",
+ "commit": "32fd9b5",
+ "at": "2026-10-01T19:04:51+00:00",
  "cache_only": true,
+ "processed_dir": "/home/m1x/Documents/hackathons/rlt-hackathonchik/data/processed",
+ "source_cache": "/home/m1x/Documents/hackathons/rlt-hackathonchik/.claude/worktrees/108-distributors/cache/sources.sqlite",
  "pages_not_in_cache": [
   "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=71.12",
   "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=71.12",
@@ -19,6 +21,7 @@
   "pool_distributors": 61,
   "shown": 59,
   "shown_distributors": 25,
+  "shown_manufacturers": 25,
   "evidence_failed": 0,
   "queries_with_shown_distributors": 5
  },
@@ -39,6 +42,7 @@
    "pool_distributors": 15,
    "shown": 10,
    "shown_distributors": 5,
+   "shown_manufacturers": 5,
    "pool_by_kind": {
     "distributor": 15,
     "manufacturer": 10
@@ -68,6 +72,7 @@
    "pool_distributors": 8,
    "shown": 10,
    "shown_distributors": 5,
+   "shown_manufacturers": 5,
    "pool_by_kind": {
     "distributor": 8,
     "manufacturer": 11
@@ -95,6 +100,7 @@
    "pool_distributors": 12,
    "shown": 10,
    "shown_distributors": 5,
+   "shown_manufacturers": 5,
    "pool_by_kind": {
     "distributor": 12,
     "manufacturer": 8
@@ -121,6 +127,7 @@
    "pool_distributors": 0,
    "shown": 9,
    "shown_distributors": 0,
+   "shown_manufacturers": 0,
    "pool_by_kind": {
     "unknown": 9
    },
@@ -144,6 +151,7 @@
    "pool_distributors": 0,
    "shown": 0,
    "shown_distributors": 0,
+   "shown_manufacturers": 0,
    "pool_by_kind": {},
    "evidence_failed": 0,
    "requests": [
@@ -165,6 +173,7 @@
    "pool_distributors": 0,
    "shown": 0,
    "shown_distributors": 0,
+   "shown_manufacturers": 0,
    "pool_by_kind": {},
    "evidence_failed": 0,
    "requests": [
@@ -188,6 +197,7 @@
    "pool_distributors": 14,
    "shown": 10,
    "shown_distributors": 5,
+   "shown_manufacturers": 5,
    "pool_by_kind": {
     "distributor": 14,
     "manufacturer": 10
@@ -217,6 +227,7 @@
    "pool_distributors": 12,
    "shown": 10,
    "shown_distributors": 5,
+   "shown_manufacturers": 5,
    "pool_by_kind": {
     "distributor": 12,
     "manufacturer": 8
@@ -243,6 +254,7 @@
    "pool_distributors": 0,
    "shown": 0,
    "shown_distributors": 0,
+   "shown_manufacturers": 0,
    "pool_by_kind": {},
    "evidence_failed": 0,
    "requests": [
