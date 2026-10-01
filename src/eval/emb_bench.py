@@ -231,7 +231,13 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
             "candidates": CANDIDATES, "store": store.name, "index_docs": idx.n_docs}
     meta["tokenizer"] = tokenizer_version()
     bm25_key = "bm25" if tokenizer_name() == "prefix5" else f"bm25-{tokenizer_name()}"
-    results = {bm25_key: {**meta, "retriever": "bm25", "metrics": _summary(base), "slices": slices(base)}}
+    ids = [c.query.query_id for c in cases]
+
+    def per_query(rows: list[dict]) -> dict[str, float]:  # paired comparison across runs (same seed)
+        return {i: r["cand_recall@200"] for i, r in zip(ids, rows, strict=True)}
+
+    results = {bm25_key: {**meta, "retriever": "bm25", "metrics": _summary(base), "slices": slices(base),
+                          "per_query": per_query(base)}}
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def save(key: str) -> None:  # after each model: a crash later keeps what is measured
@@ -257,8 +263,10 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
         torch.cuda.empty_cache()
         results[slug(model)] = {
             **meta, "model": model, "prefix": PREFIX[model], "corpus_files": [p.name for p in vec_files(model)],
-            "vector": {"metrics": _summary(vec), "slices": slices(vec), "delta_vs_bm25": _paired(vec, base)},
-            "hybrid_rrf": {"metrics": _summary(hyb), "slices": slices(hyb), "delta_vs_bm25": _paired(hyb, base)},
+            "vector": {"metrics": _summary(vec), "slices": slices(vec), "delta_vs_bm25": _paired(vec, base),
+                    "per_query": per_query(vec)},
+            "hybrid_rrf": {"metrics": _summary(hyb), "slices": slices(hyb), "delta_vs_bm25": _paired(hyb, base),
+                    "per_query": per_query(hyb)},
             "gpu_seconds": round(elapsed, 1), "cpu_query_latency": cpu_latency(model, texts),
         }
         log.info("%s: vec %.3f, hybrid %.3f, bm25 %.3f", model, results[slug(model)]["vector"]["metrics"]
