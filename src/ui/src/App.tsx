@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
+import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
+import { Landing } from "./Landing";
+import { easeOut, glide, ScrollTools } from "./Motion";
 import {
   ALL,
   buildQuery,
@@ -19,7 +22,9 @@ import {
   type Filters,
   type Query,
   type SearchResponse,
+  type Counterparty,
 } from "./api";
+import { reviewLinks } from "./reviews";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -71,7 +76,7 @@ function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Quer
   return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
 }
 
-type Path = "/" | "/results" | "/settings" | "/about" | string;
+type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
 
 // History API routing without a router dependency; the API serves index.html for every page path (src/api/app.py)
 function usePath(): [Path, (next: Path) => void] {
@@ -82,9 +87,9 @@ function usePath(): [Path, (next: Path) => void] {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const go = (next: Path) => {
-    if (next !== window.location.pathname) window.history.pushState(null, "", next);
+    if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, "", next);
     setPath(next);
-    window.scrollTo?.({ top: 0 });
+    window.scrollTo?.({ top: 0, behavior: "instant" });
   };
   return [path, go];
 }
@@ -124,15 +129,6 @@ function logoHost(cp: CounterpartyMatch["counterparty"]): string | null {
   return domain && !FREE_MAIL.test(domain) ? domain : null;
 }
 
-function initials(name: string): string {
-  const words = name
-    .replace(/["«»'“”]/g, " ")
-    .replace(/^\s*(ООО|АО|ПАО|ЗАО|ОАО|ИП|ГУП|ГБУ|ФГУП|МУП|НАО)\s+/i, "")
-    .split(/\s+/)
-    .filter(Boolean);
-  return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? "")).toUpperCase() || "?";
-}
-
 export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterparty"]; large?: boolean }) {
   const host = logoHost(cp);
   const [failed, setFailed] = useState(false);
@@ -144,9 +140,18 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
       </span>
     );
   }
-  // no name in the data — nothing to draw; keep the column so rows stay aligned
-  if (/^ИНН\s/.test(cp.name)) return <span className={`${cls} logo-none`} aria-hidden="true" />;
-  return <span className={cls} aria-hidden="true">{initials(cp.name)}</span>;
+  // no real logo in the sources — show nothing rather than a placeholder
+  return null;
+}
+
+/** What puts the company in its block: its procurement record, or that it is new to АИС ГЗ. */
+function OriginBadge({ m }: { m: CounterpartyMatch }) {
+  const st = m.counterparty.stats ?? {};
+  if (m.origin !== "history") return <span className="badge badge-new">Новый · нет в АИС ГЗ</span>;
+  const lots = st.lots_participated;
+  if (typeof lots !== "number") return <span className="badge badge-history">Участник закупок АИС ГЗ</span>;
+  const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
+  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
 }
 
 function CompanyName({ name }: { name: string }) {
@@ -155,6 +160,7 @@ function CompanyName({ name }: { name: string }) {
 }
 
 export function App() {
+  const reduced = useReducedMotion();
   const [saved] = useState(loadSaved);
   const [path, go] = usePath();
   const [text, setText] = useState(saved.text ?? "");
@@ -232,7 +238,7 @@ export function App() {
       setBase(b ?? r);
       setState("idle");
       save({ text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
-      if (window.location.pathname === "/") go("/results");
+      if (window.location.pathname === "/search") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
       setError(String(e));
@@ -294,34 +300,52 @@ export function App() {
     },
   });
 
+  useEffect(() => {
+    const titles: Record<string, string> = { "/": "Поставщики для вашей закупки", "/search": "Подбор поставщиков", "/results": "Результаты подбора", "/settings": "Настройки", "/about": "О сервисе" };
+    document.title = `${titles[path] ?? "Страница не найдена"} — Митрандир`;
+  }, [path]);
+
   function toggle(next: Filters) {
     setFilters(next);
     if (res) void run(next);
   }
 
   return (
-    <>
-    <div className="page" inert={!!open}>
+    <MotionConfig reducedMotion="user">
+    <LayoutGroup id="mitrandir">
+    <div inert={!!open}><ScrollTools /></div>
+    <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
+      initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
+      <header className="appbar">
       <div className="workspace-bar">
         <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
           <span className="brand-mark"><BrandMark /></span>
           митрандир
         </a>
         <nav className="workspace-nav" aria-label="Разделы страницы">
-          <a {...link("/")}>Подбор</a>
-          <a {...link("/results")}>Результаты</a>
-          <a {...link("/settings")}>Настройки</a>
-          <a {...link("/about")}>Как это работает</a>
+          {[["/", "Главная"], ["/search", "Подбор"], ["/results", "Результаты"], ["/settings", "Настройки"], ["/about", "О сервисе"]].map(([to, label]) => (
+            <a key={to} {...link(to)}>
+              {path === to && <motion.span className="nav-indicator" layoutId="nav-current" transition={glide} aria-hidden="true" />}
+              <span className="nav-label">{label}</span>
+            </a>
+          ))}
         </nav>
       </div>
-      {path === "/about" ? <AboutPage onStart={() => go("/")} />
-      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
-      : path !== "/" && path !== "/results" ? <NotFound onHome={() => go("/")} />
-      : <>
-      <header className="top">
-        <h1>Подбор поставщиков для закупки</h1>
-        <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
       </header>
+      <div className="content">
+      <AnimatePresence mode="wait" initial={false}>
+      <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
+        initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
+      {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} />
+      : path === "/about" ? <AboutPage onStart={() => go("/search")} />
+      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
+      : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
+      : <>
+      <div className="top">
+        <h1>{path === "/results" ? "Поставщики для вашей закупки" : "Подбор поставщиков для закупки"}</h1>
+        <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
+      </div>
 
       {res?.stub && (
         <div className="stub" role="status">
@@ -388,11 +412,14 @@ export function App() {
         <div className="examples">
           <span>Например</span>
           {EXAMPLES.map((example) => (
-            <button type="button" key={example} onClick={() => {
+            <motion.button type="button" key={example} aria-pressed={text === example && !lot} whileTap={reduced ? undefined : { scale: 0.96 }} onClick={() => {
               setText(example);
               resetLot();
               document.getElementById("q")?.focus();
-            }}>{example}</button>
+            }}>
+              {text === example && !lot && <motion.span className="example-indicator" layoutId="query-example" transition={glide} aria-hidden="true" />}
+              <span>{example}</span>
+            </motion.button>
           ))}
         </div>
         <div className="optional">
@@ -404,9 +431,13 @@ export function App() {
             ИНН заказчика
             <input value={customerInn} inputMode="numeric" placeholder="необязательно" onChange={(e) => setCustomerInn(e.target.value)} />
           </label>
-          {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
-          {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
         </div>
+        {(lot?.channel || lot?.okpd2?.length) && (
+          <div className="chips">
+            {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
+            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
+          </div>
+        )}
         <div className="row">
           <fieldset className="filters">
             <legend>Фильтры</legend>
@@ -465,7 +496,7 @@ export function App() {
         </div>
       )}
 
-      {!res && state !== "error" && (
+      {(!res || path === "/search") && state !== "error" && (
         state === "loading" ? <Skeleton /> : path === "/results" ? (
           <section className="getting-started" aria-label="Результаты">
             <h2>Вы ещё не запускали подбор</h2>
@@ -492,14 +523,14 @@ export function App() {
         )
       )}
 
-      {res && state !== "loading" && filterNotes(base, filters).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
       ))}
 
-      {res && (
-        <main id="results" className="results" aria-busy={state === "loading"}>
+      {path === "/results" && res && (
+        <motion.main initial={reduced ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : 0.45, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
           <header className="results-heading">
             <h2 className="results-title">Результаты подбора</h2>
             <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
@@ -508,8 +539,10 @@ export function App() {
             </span>
           </header>
           <Block
+            variant="history"
+            tag="Проверенные"
             title="С опытом госзакупок"
-            hint="Есть в данных АИС ГЗ"
+            hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             rows={res.history}
             total={res.total.history}
             onMore={() => void showMore()}
@@ -522,8 +555,10 @@ export function App() {
             }
           />
           <Block
+            variant="new"
+            tag="Новые"
             title="Новые из открытых источников"
-            hint="Нет в данных АИС ГЗ, найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
+            hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             rows={res.discovered}
             total={res.total.discovered}
             onOpen={setOpen}
@@ -534,14 +569,24 @@ export function App() {
                 : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
-        </main>
+        </motion.main>
       )}
       </div>
       </div>
       </>}
-    </div>
-    {open && <Card m={open} onClose={() => setOpen(null)} />}
-    </>
+      </motion.div>
+      </AnimatePresence>
+      </div>
+      <footer className="appfoot">
+        <div className="appfoot-in">
+          <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
+          <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
+        </div>
+      </footer>
+    </motion.div>
+    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} />}</AnimatePresence>
+    </LayoutGroup>
+    </MotionConfig>
   );
 }
 
@@ -554,9 +599,13 @@ function Block(props: {
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
+  variant: "history" | "new";
+  tag: string;
 }) {
+  const reduced = useReducedMotion();
   return (
-    <section className="block" aria-label={props.title}>
+    <section className={`block block-${props.variant}`} aria-label={props.title}>
+      <span className="block-tag">{props.tag}</span>
       <h2>
         {props.title} <span className="count">{props.total}</span>
       </h2>
@@ -569,23 +618,28 @@ function Block(props: {
             const cp = m.counterparty;
             const top = [...m.components].sort((a, b) => b.value * b.weight - a.value * a.weight)[0];
             return (
-              <li key={`${cp.inn ?? cp.name}-${i}`}>
-                <button className="item" onClick={() => props.onOpen(m)}>
+              <motion.li key={cp.inn ?? cp.name} layout={reduced ? false : "position"}
+                initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.05 }} transition={{ duration: reduced ? 0 : 0.45, delay: reduced ? 0 : Math.min(i, 4) * 0.04, ease: easeOut }}>
+                <motion.button className="item" whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
                   <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
                     <span className="score-num">{m.score.toFixed(2)}</span>
                     <span className="score-meter" aria-hidden="true">
-                      <span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%` }} />
+                      <motion.span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%`, originX: 0 }} initial={reduced ? false : { scaleX: 0 }} whileInView={{ scaleX: 1 }} viewport={{ once: true }} transition={{ duration: reduced ? 0 : 0.7, ease: easeOut }} />
                     </span>
                   </span>
                   <span className="meta">
                     {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
+                  <span className="badges">
+                    <OriginBadge m={m} />
+                  </span>
                   {top && <span className="why">{top.explanation}</span>}
-                </button>
-              </li>
+                </motion.button>
+              </motion.li>
             );
           })}
         </ol>
@@ -606,7 +660,31 @@ function Block(props: {
   );
 }
 
+function ReviewsBlock({ cp }: { cp: Counterparty }) {
+  const links = reviewLinks(cp.name, cp.inn);
+  return (
+    <section aria-label="Отзывы">
+      <h3>Отзывы</h3>
+      <p className="hint">Не влияет на оценку подбора. Рейтинг из отзывов не показываем: нет источника, который можно честно проверить.</p>
+      {links.length > 0 ? (
+        <p className="review-links">
+          Искать отзывы самостоятельно:{" "}
+          {links.map((l, i) => (
+            <span key={l.url}>
+              {i > 0 && " · "}
+              <a href={l.url} target="_blank" rel="noreferrer">{l.label}</a>
+            </span>
+          ))}
+        </p>
+      ) : (
+        <p className="empty">Название и ИНН не определены — искать отзывы не по чему.</p>
+      )}
+    </section>
+  );
+}
+
 function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
+  const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -620,10 +698,10 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
     };
   }, []);
   return (
-    <div className="card-overlay" onClick={(event) => {
+    <motion.div className="card-overlay" initial={{ opacity: reduced ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.2 }} onClick={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-    <aside ref={cardRef} className="card" role="dialog" aria-modal="true" onKeyDown={(event) => {
+    <motion.aside ref={cardRef} initial={reduced ? false : { x: "100%" }} animate={{ x: 0 }} exit={{ x: reduced ? 0 : "100%" }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 38 }} className="card" role="dialog" aria-modal="true" onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
@@ -701,6 +779,8 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
         </>
       )}
 
+      <ReviewsBlock cp={cp} />
+
       <h3>Источники фактов</h3>
       {(cp.evidence ?? []).length === 0 && <p className="empty">Подтверждённых фактов с источником нет.</p>}
       <ul className="evidence">
@@ -721,12 +801,12 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
           </li>
         ))}
       </ul>
-    </aside>
-    </div>
+    </motion.aside>
+    </motion.div>
   );
 }
 
-const SEG_COLORS = ["#c0acf6", "#8fd3c1", "#f0c27b", "#88b4f2", "#e99bb4", "#b9c97a"];
+const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa6b2"];
 
 /** Score as a stacked bar: each segment is value × weight of one component, so their sum is the total. */
 function Breakdown({ m }: { m: CounterpartyMatch }) {
