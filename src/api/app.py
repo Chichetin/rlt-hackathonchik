@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 
+from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.contracts import Counterparty, Query, SearchResponse, inn_is_valid
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import strip_unverified
@@ -80,6 +81,19 @@ def api_search(query: Query) -> SearchResponse:
         discovered=[m for m in matches if m.origin == "discovered"],
         stub=_is_stub(),
     )
+
+
+@app.get("/api/lot/{ident}", response_model=Query)
+def api_lot(ident: str) -> Query:
+    """Notice number (lot_id or reqnum) -> Query from the notice; 503 when organizers' data is absent."""
+    if not ident.strip().isdigit():
+        raise HTTPException(422, "номер закупки — только цифры (lot_id или реестровый номер)")
+    try:
+        return find_lot(ident)
+    except LotNotFound as e:
+        raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
+    except LotDataUnavailable as e:
+        raise HTTPException(503, str(e)) from e
 
 
 @app.get("/api/counterparty/{inn}", response_model=Counterparty)

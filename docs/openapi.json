@@ -62,6 +62,46 @@
         }
       }
     },
+    "/api/lot/{ident}": {
+      "get": {
+        "summary": "Api Lot",
+        "description": "Notice number (lot_id or reqnum) -> Query from the notice; 503 when organizers' data is absent.",
+        "operationId": "api_lot_api_lot__ident__get",
+        "parameters": [
+          {
+            "name": "ident",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ident"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Query"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/counterparty/{inn}": {
       "get": {
         "summary": "Api Counterparty",
