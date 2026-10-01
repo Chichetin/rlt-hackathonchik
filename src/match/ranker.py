@@ -8,10 +8,10 @@ is v2 (D-077) byte for byte. One feature function (`feature_row`) serves trainin
            weights are a readable formula; contribution of a feature = w_j · z_j.
   lgbm   — LightGBM LambdaMART; contribution of a feature = pred_contrib (SHAP values of the trees).
 
-The card says which features lifted the supplier the most (product_fit explanation); the six components
-are unchanged — they keep their values and weights, the order is the model's. The score stays the formula
-of the components (#278): the relevance level the customer reads, the same scale as «Новые» and the
-min_score filter; rank_reason says why the model put a supplier above its visible neighbour.
+The card says which features lifted the supplier the most and which pulled it down (product_fit explanation);
+the six components are unchanged — they keep their values and weights, the order is the model's. The score stays
+the formula of the components (#278, M1hairu's confirmation №3): the relevance the customer reads, the same scale
+as «Новые» and filters.min_score; rank_reason says why the model put a supplier above its visible neighbour.
 """
 
 from __future__ import annotations
@@ -252,18 +252,21 @@ def value_text(name: str, x: float) -> str:
     return f"{FEATURES[name]}: {_value(name, x)}"
 
 
+# The UI shows the text after it as the reason of the position (src/ui/src/ranker.ts).
+MARKER = "почему на этом месте — "
+
+
 def explain(model: Model, contrib: np.ndarray, row: np.ndarray, pro: int = 3, con: int = 1) -> str:
     """Why the model put the supplier here: the `pro` features that lifted it most and the `con` that pulled
     it down most, each with its value. The contributions are exact (tree SHAP / w·z), not a guess."""
-    order = np.argsort(-contrib, kind="stable")
-    up = [i for i in order[:pro] if contrib[i] > 0]
-    down = [i for i in order[::-1][:con] if contrib[i] < 0]
-    parts = [f"порядок задаёт ранжировщик ({KIND_TEXT[model.kind]}), компоненты — его входы"]
-    parts.append("за — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in up) if up
-                 else "ни один признак не поднял выше среднего")
+    known = [i for i in np.argsort(-contrib, kind="stable") if not math.isnan(row[i])]  # «нет данных» is no reason
+    up = [i for i in known[:pro] if contrib[i] > 0]
+    down = [i for i in known[::-1][:con] if contrib[i] < 0]
+    why = ("за — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in up) if up
+           else "ни один признак не поднял выше среднего")
     if down:
-        parts.append("против — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in down))
-    return ". ".join(parts)
+        why += "; против — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in down)
+    return f"{MARKER}модель {KIND_TEXT[model.kind]}, обученная на истории закупок (критерии — её входы): {why}"
 
 
 @dataclass
@@ -292,8 +295,13 @@ def _key(m: CounterpartyMatch) -> str:
 
 
 def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
-    """Top-k by the model; the score stays the formula of the components (#278), equal model scores — by it;
-    the product_fit explanation gets the contributions, rank_reason — why above the next one."""
+    """Top-k in the model's order; the product_fit explanation gets the model's reason, rank_reason — why above
+    the next one; equal model scores — by the formula score.
+
+    The score is exactly the formula of the components (Σ weight · component, D-077), uncapped (#278): a cap by
+    the supplier above turned five of ten «1.00» of the demo query into «0.96» — numbers that are not the card's
+    sum and more equal numbers. The model's raw output is not a relevance scale (LambdaMART ranks within a
+    query). Where the number does not explain the order, rank_reason does."""
     forget()
     if not matches:
         return []

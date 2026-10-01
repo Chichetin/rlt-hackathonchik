@@ -71,7 +71,7 @@ def test_model_reorders_and_explains(search_data, tmp_path):
             assert a.rank_reason is not None and a.rank_reason.startswith("модель")
     assert res[-1].rank_reason is None
     fit = next(c for c in res[0].components if c.name == "product_fit")
-    assert "порядок задаёт ранжировщик (логистическая регрессия), компоненты — его входы" in fit.explanation
+    assert "почему на этом месте — модель логистическая регрессия, обученная на истории закупок" in fit.explanation
     n_top = round(math.expm1(top))
     assert f"за — лоты с похожими позициями: {n_top}" in fit.explanation  # the value, not only the name
     with pytest.raises(ValueError, match="ranker.kind"):
@@ -155,4 +155,8 @@ def test_value_text_reads_like_a_card():
     contrib = np.zeros(len(ranker.NAMES))
     contrib[ranker.NAMES.index("cust_lots")], contrib[ranker.NAMES.index("days_last")] = 0.9, -0.4
     text = ranker.explain(ranker.Model("lgbm", ranker.ROOT, {}), contrib, row)
-    assert "за — лоты у этого заказчика: 7" in text and "против — давность последнего участия: 240 дн." in text
+    assert text.endswith(": за — лоты у этого заказчика: 7; против — давность последнего участия: 240 дн.")
+    # a missing value is no reason: «нет данных» never shows up as «за» or «против» (review of #274)
+    row[ranker.NAMES.index("channel_share")] = math.nan
+    contrib[ranker.NAMES.index("channel_share")] = -2.0
+    assert ranker.explain(ranker.Model("lgbm", ranker.ROOT, {}), contrib, row) == text
