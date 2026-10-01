@@ -50,6 +50,7 @@ from src.enrich import role
 from src.enrich.enrich import MSP_CATEGORY, enrich, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.ingest.load import suppliers_path
+from src.match import new_fit
 from src.match import search as search_mod
 from src.match.filters import REGION_CODE, apply_filters
 from src.match.index import processed_dir
@@ -122,6 +123,11 @@ class Discovery:
     inactive: int = 0  # found but excluded from the registry
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
     notes: list[str] = field(default_factory=list)
+    # product_fit_new (#77, src/match/new_fit.py): off — not computed; shadow — computed here only;
+    # on — it IS product_fit of every match (experiment only, confirmation №3 to make it the default)
+    fit_mode: str = "off"
+    fit_new: dict[str, new_fit.NewFit] = field(default_factory=dict)  # INN → product_fit_new
+    profile: new_fit.Profile | None = None  # signal 8: words of the full OKPD2 code of the query
 
 
 def predicted_class_allowed() -> bool:
@@ -340,7 +346,8 @@ def with_card(cp: Counterparty, cache: SourceCache) -> tuple[Counterparty, bool]
 
 
 def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: bool, has_card: bool,
-                region: str, weights: dict[str, float]) -> list[ScoreComponent]:
+                region: str, weights: dict[str, float],
+                fit_new: new_fit.NewFit | None = None) -> list[ScoreComponent]:
     okved, okved_name = row["okved1"], row.get("okved1name", "")
     head = f"Основной ОКВЭД {okved}" + (f" «{okved_name}»" if okved_name else "")
     # A predicted class is never presented as the class of the query (#63: the prediction can be wrong).
@@ -368,8 +375,11 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
     else:
         geo, geo_why = 0.0, f"Реестр МСП: {where}; регион запроса — {region}"
 
+    fit = FIT[ch.relation]
+    if fit_new is not None:  # mode «on» only: the v0 sentence stays, product_fit_new explains the value
+        fit, fit_why = fit_new.value, f"{fit_why}. {fit_new.explanation()}"
     parts: dict[str, tuple[float, float, str]] = {
-        "product_fit": (FIT[ch.relation], weights.get("product_fit", 0.0), fit_why),
+        "product_fit": (fit, weights.get("product_fit", 0.0), fit_why),
         "experience": (0.0, weights.get("experience", 0.0),
                        "В данных организаторов за 2024–2025 не встречается ни в одной закупке"),
         "reliability": (0.0, 0.0, rel_why),
@@ -415,8 +425,12 @@ def discover(
     offline: bool | None = None,
     budget_s: float = LIVE_BUDGET_S,
     client: httpx.Client | None = None,
+    fit_mode: str | None = None,
 ) -> Discovery:
-    """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data."""
+    """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data.
+
+    `fit_mode` (off | shadow | on) overrides new_fit.mode() — for the off/on comparison (#77).
+    """
     cache = cache or SourceCache()
     processed = processed or processed_dir()
     offline = offline_mode() if offline is None else offline
@@ -480,6 +494,13 @@ def discover(
             if row.get("okved1"):  # no OKVED in the row → nothing to explain the match with
                 found.setdefault(row["inn"], (row, ch, page))  # first channel wins: class before wholesale
 
+    fit_cfg = new_fit.config()
+    res.fit_mode = new_fit.mode(fit_cfg) if fit_mode is None else fit_mode
+    if res.fit_mode not in new_fit.MODES:
+        raise ValueError(f"fit_mode {res.fit_mode!r}: нужен один из {', '.join(new_fit.MODES)}")
+    if res.fit_mode != "off" and found:
+        res.profile = new_fit.code_profile(codes, processed, query.as_of, fit_cfg)
+
     known = known_inns(list(found), query.as_of, processed)
     res.history_checked = known is not None
     if known is None:
@@ -492,16 +513,28 @@ def discover(
     for inn, (row, ch, page) in found.items():
         if known and inn in known:
             continue
-        cp, has_card = with_card(from_row(row, page), cache)
+        registry_cp = from_row(row, page)
+        cp, has_card = with_card(registry_cp, cache)
         if not has_card:
             no_card.add(inn)
         relation[inn] = ch.relation
-        comps = _components(cp, row, ch, res.predicted, has_card, query.region, weights)
+        if res.fit_mode != "off":  # only the registry row's own Evidence, checked against its cached page
+            res.fit_new[inn] = new_fit.score(
+                registry_cp, okved=row["okved1"], relation=ch.relation, base=FIT[ch.relation], codes=codes,
+                okpd_class=ch.okpd_class, query_text=query.text, page_body=page.body, profile=res.profile,
+                cfg=fit_cfg)
+        comps = _components(cp, row, ch, res.predicted, has_card, query.region, weights,
+                            res.fit_new.get(inn) if res.fit_mode == "on" else None)
         matches.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                          score=round(sum(c.value * c.weight for c in comps), 4)))
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
     matches.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
     res.matches = _mix(matches, relation)
+    if res.fit_new:
+        log.info("discovery %s: product_fit_new (%s), профиль ОКПД2 %s: %s", query.query_id, res.fit_mode,
+                 res.profile.code if res.profile else "—",
+                 "; ".join(f"{m.counterparty.inn} {res.fit_new[m.counterparty.inn or ''].value:.2f}"
+                           for m in res.matches if (m.counterparty.inn or "") in res.fit_new))
     if enqueue is not None:
         for m in res.matches:
             if m.counterparty.inn in no_card:
