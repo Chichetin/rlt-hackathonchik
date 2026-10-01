@@ -1,0 +1,279 @@
+"""Stage 1 of the light embedding models comparison (#115): candidate recall@200 on dev, no Postgres.
+
+    # 1) encode the product names corpus with a model (GPU machine, .venv-gpu):
+    python -m src.eval.emb_bench encode --model cointegrated/rubert-tiny2
+    # 2) compare BM25, vectors and their RRF fusion on a dev subsample:
+    python -m src.eval.emb_bench bench --model cointegrated/rubert-tiny2 --n 500
+
+Corpus = distinct normalized product names (src/db/norm.py), the same texts as `vec.names_e5_small`
+(data/gpu/texts-*.parquet). The benchmark keeps only names that are documents of the BM25 index of the
+split cutoff, so a name seen only after the cutoff never retrieves anything (no leak, as pg_retriever).
+
+Per query and retriever: documents -> lots -> participants before the cutoff (store.candidates, the
+same SQL as search()) -> the first CANDIDATES INNs. Metrics: cand_recall@200 (share of relevant INNs
+among them), winner_hit@200 (a grade-2 INN among them), recall@10 in the raw candidate order (not the
+component scoring of search() — that is stage 2, #98). Slices: channel, BM25 found nothing.
+Exact kNN in memory on GPU (torch), top KNN names as pg_retriever. Result: eval/results/emb-<slug>-s1.json.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import random
+import subprocess
+import sys
+import time
+from datetime import UTC, date, datetime
+from pathlib import Path
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+from src.db.norm import normalize
+from src.eval.metrics import bootstrap_ci
+from src.eval.split import ROOT, load_cases, split_config
+from src.match.index import get_index
+from src.match.pg_retriever import KNN, norm_map, rrf
+from src.match.store import ParquetStore, processed_dir
+from src.match.text import tokenize
+
+log = logging.getLogger(__name__)
+GPU_DIR = Path(os.environ.get("DATA_GPU_DIR") or ROOT / "data" / "gpu")
+TEXTS = ("texts-e5-small.parquet", "texts-rest.parquet")  # 1 031 361 distinct normalized names
+TOP_DOCS = 500  # as search.TOP_DOCS
+CANDIDATES = 200  # as search.CANDIDATES
+MAX_SEQ = 128
+# model -> (query prefix, passage prefix); e5 and USER need them (model cards), rubert-tiny2 has none.
+PREFIX = {
+    "intfloat/multilingual-e5-small": ("query: ", "passage: "),
+    "intfloat/multilingual-e5-base": ("query: ", "passage: "),
+    "deepvk/USER-base": ("query: ", "passage: "),
+    "cointegrated/rubert-tiny2": ("", ""),
+}
+# vectors already encoded for production (#48): model -> files
+EXISTING = {"intfloat/multilingual-e5-small": ("vecs-e5-small.parquet", "vecs-rest.parquet")}
+
+
+def slug(model: str) -> str:
+    return model.split("/")[-1].lower()
+
+
+def vec_files(model: str, gpu_dir: Path = GPU_DIR) -> list[Path]:
+    names = EXISTING.get(model) or (f"vecs-{slug(model)}.parquet",)
+    return [gpu_dir / n for n in names]
+
+
+def load_model(model: str, device: str | None = None):
+    from sentence_transformers import SentenceTransformer, models  # pyright: ignore[reportMissingImports]
+
+    try:
+        m = SentenceTransformer(model, device=device)
+    except TypeError:
+        # USER-base keeps Normalize at the model root: sentence-transformers 6 reads the HF config.json
+        # into it and fails. The same pipeline by hand: Transformer -> mean pooling -> Normalize.
+        tr = models.Transformer(model, max_seq_length=MAX_SEQ)
+        pool = models.Pooling(tr.get_word_embedding_dimension(), pooling_mode="mean")
+        m = SentenceTransformer(modules=[tr, pool, models.Normalize()], device=device)
+    m.max_seq_length = MAX_SEQ
+    if m.device.type == "cuda":
+        m.half()  # fp16 on the laptop GPU: ~2x faster, retrieval quality unchanged at this precision
+    return m
+
+
+def encode_corpus(model: str, gpu_dir: Path = GPU_DIR, chunk: int = 50_000) -> Path:
+    """All distinct names -> vecs-<slug>.parquet (norm, emb float16[dim]); resumable by whole chunks."""
+    texts = [t for f in TEXTS for t in pq.read_table(gpu_dir / f, columns=["norm"]).column("norm").to_pylist()]
+    m = load_model(model)
+    dim = m.get_sentence_embedding_dimension()
+    passage = PREFIX[model][1]
+    bs = 512 if dim <= 384 else 256
+    out = gpu_dir / f"vecs-{slug(model)}.parquet"
+    schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), dim))],
+                       metadata={"model": model, "prefix": passage})
+    # longest first inside a chunk: less padding, the order of the file is the order of TEXTS
+    started = time.monotonic()
+    with pq.ParquetWriter(out, schema) as w:
+        for i in range(0, len(texts), chunk):
+            part = texts[i:i + chunk]
+            emb = m.encode([passage + t for t in part], batch_size=bs, normalize_embeddings=True,
+                           show_progress_bar=False, convert_to_numpy=True)
+            flat = np.asarray(emb, dtype=np.float16).reshape(-1)
+            w.write_table(pa.table({"norm": part, "emb": pa.FixedSizeListArray.from_arrays(flat, dim)}, schema=schema))
+            done = i + len(part)
+            rate = done / max(time.monotonic() - started, 1e-3)
+            log.info("%s %d/%d (%.0f текстов/с, осталось ≈ %.1f мин)", slug(model), done, len(texts), rate,
+                     (len(texts) - done) / rate / 60)
+    return out
+
+
+def _commit() -> str:
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                              cwd=ROOT, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+class Corpus:
+    """Vectors of the names that are documents of the cutoff index, on GPU; name row -> doc_ids."""
+
+    def __init__(self, model: str, idx, gpu_dir: Path = GPU_DIR):
+        import torch
+
+        m = norm_map(idx)
+        norms: list[str] = []
+        chunks: list[np.ndarray] = []
+        for f in vec_files(model, gpu_dir):
+            t = pq.read_table(f)
+            dim = t.schema.field("emb").type.list_size
+            emb = t.column("emb").combine_chunks().flatten().to_numpy(zero_copy_only=False).reshape(-1, dim)
+            names = t.column("norm").to_pylist()
+            keep = np.fromiter((n in m for n in names), bool, len(names))
+            norms.extend(n for n, k in zip(names, keep, strict=True) if k)
+            chunks.append(emb[keep])
+        self.docs = [m[n] for n in norms]
+        self.emb = torch.from_numpy(np.concatenate(chunks).astype(np.float16)).cuda()
+        log.info("%s: %d имён в индексе cutoff из корпуса", slug(model), len(norms))
+
+    def search(self, q: np.ndarray, k: int = KNN) -> list[list[int]]:
+        """doc_ids nearest by cosine for each query vector, best first (as pg_retriever.vector_docs)."""
+        import torch
+
+        out: list[list[int]] = []
+        qs = torch.from_numpy(np.asarray(q, dtype=np.float16)).cuda()
+        for i in range(0, len(qs), 64):
+            top = torch.topk(qs[i:i + 64] @ self.emb.T, k, dim=1).indices.cpu().numpy()
+            for row in top:
+                docs: list[int] = []
+                for r in row:
+                    docs.extend(self.docs[r])
+                out.append(list(dict.fromkeys(docs)))
+        return out
+
+
+def _cands(store, idx, hits: list[tuple[int, float]], as_of: date) -> list[str]:
+    if not hits:
+        return []
+    return [r[0] for r in store.candidates(idx.lot_hits(hits), as_of, CANDIDATES)]
+
+
+def _row(ranked: list[str], case) -> dict[str, float]:
+    rel = set(case.relevant_inns)
+    winners = {i for i, g in case.grades.items() if g >= 2} or rel
+    got = set(ranked)
+    return {"cand_recall@200": len(got & rel) / len(rel), "winner_hit@200": float(bool(got & winners)),
+            "recall@10": len(set(ranked[:10]) & rel) / len(rel)}
+
+
+def _summary(rows: list[dict[str, float]]) -> dict:
+    out = {"n": len(rows)}
+    for k in ("cand_recall@200", "winner_hit@200", "recall@10"):
+        vals = [r[k] for r in rows]
+        lo, hi = bootstrap_ci(vals)
+        out[k] = {"mean": round(float(np.mean(vals)) if vals else 0.0, 4), "ci95": [round(lo, 4), round(hi, 4)]}
+    return out
+
+
+def _paired(a: list[dict], b: list[dict], key: str = "cand_recall@200") -> dict:
+    d = [x[key] - y[key] for x, y in zip(a, b, strict=True)]
+    lo, hi = bootstrap_ci(d)
+    return {"mean": round(float(np.mean(d)), 4), "ci95": [round(lo, 4), round(hi, 4)]}
+
+
+def cpu_latency(model: str, texts: list[str], n: int = 50) -> dict:
+    """ms per single query encoded on CPU (the API encodes one query per request)."""
+    m = load_model(model, device="cpu")
+    q = PREFIX[model][0]
+    m.encode([q + "прогрев"])
+    ms = []
+    for t in texts[:n]:
+        t0 = time.perf_counter()
+        m.encode([q + t], normalize_embeddings=True, show_progress_bar=False)
+        ms.append((time.perf_counter() - t0) * 1000)
+    return {"p50_ms": round(float(np.percentile(ms, 50)), 1), "p95_ms": round(float(np.percentile(ms, 95)), 1), "n": len(ms)}
+
+
+def bench(models: list[str], n: int, seed: int, out_dir: Path) -> dict[str, dict]:
+    cfg = split_config()
+    as_of = date.fromisoformat(str(cfg["cutoff"]))
+    store = ParquetStore(processed_dir())
+    idx = get_index(store, as_of)
+    cases = load_cases("dev", cfg)
+    cases = random.Random(seed).sample(cases, min(n, len(cases)))
+    texts = [normalize(c.query.text) for c in cases]
+    t0 = time.time()
+    bm25_hits = [idx.retrieve(tokenize(c.query.text), TOP_DOCS) for c in cases]
+    base = [_row(_cands(store, idx, h, as_of), c) for h, c in zip(bm25_hits, cases, strict=True)]
+    log.info("BM25: %.0f с", time.time() - t0)
+    empty = [i for i, h in enumerate(bm25_hits) if not h]
+
+    def slices(rows: list[dict]) -> dict:
+        s = {ch: _summary([r for r, c in zip(rows, cases, strict=True) if c.query.channel == ch])
+             for ch in ("ЭМ", "АИС ГЗ")}
+        s["bm25_empty"] = _summary([rows[i] for i in empty])
+        return s
+
+    meta = {"part": "dev", "n": len(cases), "seed": seed, "as_of": as_of.isoformat(), "commit": _commit(),
+            "created": datetime.now(UTC).isoformat(timespec="seconds"), "top_docs": TOP_DOCS, "knn": KNN,
+            "candidates": CANDIDATES, "store": store.name, "index_docs": idx.n_docs}
+    results = {"bm25": {**meta, "retriever": "bm25", "metrics": _summary(base), "slices": slices(base)}}
+    for model in models:
+        import torch
+
+        corpus = Corpus(model, idx)
+        m = load_model(model)
+        t0 = time.time()
+        qv = m.encode([PREFIX[model][0] + t for t in texts], batch_size=64, normalize_embeddings=True,
+                      show_progress_bar=False, convert_to_numpy=True)
+        vec_docs = corpus.search(qv)
+        vec = [_row(_cands(store, idx, [(d, 1.0 / (1 + r)) for r, d in enumerate(v[:TOP_DOCS])], as_of), c)
+               for v, c in zip(vec_docs, cases, strict=True)]
+        hyb = [_row(_cands(store, idx, rrf(h, v, TOP_DOCS), as_of), c)
+               for h, v, c in zip(bm25_hits, vec_docs, cases, strict=True)]
+        elapsed = time.time() - t0
+        del corpus, m
+        torch.cuda.empty_cache()
+        results[slug(model)] = {
+            **meta, "model": model, "prefix": PREFIX[model], "corpus_files": [p.name for p in vec_files(model)],
+            "vector": {"metrics": _summary(vec), "slices": slices(vec), "delta_vs_bm25": _paired(vec, base)},
+            "hybrid_rrf": {"metrics": _summary(hyb), "slices": slices(hyb), "delta_vs_bm25": _paired(hyb, base)},
+            "gpu_seconds": round(elapsed, 1), "cpu_query_latency": cpu_latency(model, texts),
+        }
+        log.info("%s: vec %.3f, hybrid %.3f, bm25 %.3f", model, results[slug(model)]["vector"]["metrics"]
+                 ["cand_recall@200"]["mean"], results[slug(model)]["hybrid_rrf"]["metrics"]["cand_recall@200"]["mean"],
+                 results["bm25"]["metrics"]["cand_recall@200"]["mean"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for key, res in results.items():
+        (out_dir / f"emb-{key}-s1.json").write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+    return results
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    e = sub.add_parser("encode")
+    e.add_argument("--model", action="append", required=True, choices=sorted(PREFIX))
+    b = sub.add_parser("bench")
+    b.add_argument("--model", action="append", default=[], choices=sorted(PREFIX))
+    b.add_argument("--n", type=int, default=500)
+    b.add_argument("--seed", type=int, default=20261001)
+    b.add_argument("--out-dir", type=Path, default=ROOT / "eval" / "results")
+    args = ap.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    if args.cmd == "encode":
+        for model in args.model:
+            print({"model": model, "out": str(encode_corpus(model))}, flush=True)
+        return 0
+    res = bench(args.model, args.n, args.seed, args.out_dir)
+    print(json.dumps({k: (v.get("metrics") or {kk: v[kk]["metrics"] for kk in ("vector", "hybrid_rrf")})
+                      for k, v in res.items()}, ensure_ascii=False, indent=1))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
