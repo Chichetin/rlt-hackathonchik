@@ -164,9 +164,11 @@ def load(pool_dir: Path, url: str, schema: str = "pool") -> dict[str, int]:
         pg(f"ANALYZE {new}.{name}")
     pg(f"DROP SCHEMA IF EXISTS {schema} CASCADE; ALTER SCHEMA {new} RENAME TO {schema}")
     import psycopg
+    from psycopg import sql
 
     with psycopg.connect(pg_dsn(url), autocommit=True) as conn:  # VACUUM runs outside a transaction
-        conn.execute(f"VACUUM (ANALYZE) {schema}.okved")  # visibility map: candidates() never touch the heap
+        # visibility map: candidates() never touch the heap
+        conn.execute(sql.SQL("VACUUM (ANALYZE) {}").format(sql.Identifier(schema, "okved")))
     return counts
 
 
