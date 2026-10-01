@@ -123,10 +123,13 @@ test("демо: запрос → два блока → карточка → фи
   }
   await expect(history.locator(".item")).toHaveCount(body.history.length);
   for (const meta of await history.locator(".item .meta").allTextContents()) expect(meta).toMatch(/в регионе заказчика|соседний регион/);
-  // what the choice hides is said, and it adds up: shown = all − hidden (X-Facets near, D-030)
-  const [hidden, of] = ((await context.getByRole("note").textContent()) ?? "").match(/\d+/g)!.map(Number);
-  const shown = Number(nearResponse.headers()["x-total-history"]) + Number(nearResponse.headers()["x-total-discovered"]);
-  expect(of - hidden).toBe(shown);
+  // what the choice hides is said, and it adds up: shown = kept by «near», hidden = all − kept (X-Facets near, D-030)
+  const nf = JSON.parse(nearResponse.headers()["x-facets"]);
+  const all = nf.history.near.any + nf.discovered.near.any;
+  const kept = nf.history.near.near + nf.discovered.near.near;
+  expect(kept).toBe(Number(nearResponse.headers()["x-total-history"]) + Number(nearResponse.headers()["x-total-discovered"]));
+  if (all > kept) await expect(context.getByRole("note")).toHaveText(`скрыто ${all - kept} из ${all}: другой регион или регион не известен`);
+  else await expect(context.getByRole("note")).toHaveCount(0); // nobody hidden — nothing to say
 
   // 5. Выгрузка в Excel
   const [download] = await Promise.all([
