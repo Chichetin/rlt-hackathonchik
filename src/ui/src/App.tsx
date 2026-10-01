@@ -19,7 +19,9 @@ import {
   type Filters,
   type Query,
   type SearchResponse,
+  type Counterparty,
 } from "./api";
+import { reviewLinks } from "./reviews";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -529,7 +531,7 @@ export function App() {
           />
           <Block
             variant="new"
-            tag="Расширение круга"
+            tag="Новые"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             rows={res.discovered}
@@ -615,6 +617,29 @@ function Block(props: {
             </button>
           )}
         </div>
+      )}
+    </section>
+  );
+}
+
+function ReviewsBlock({ cp }: { cp: Counterparty }) {
+  const links = reviewLinks(cp.name, cp.inn);
+  return (
+    <section aria-label="Отзывы">
+      <h3>Отзывы</h3>
+      <p className="hint">Не влияет на оценку подбора. Рейтинг из отзывов не показываем: нет источника, который можно честно проверить.</p>
+      {links.length > 0 ? (
+        <p className="review-links">
+          Искать отзывы самостоятельно:{" "}
+          {links.map((l, i) => (
+            <span key={l.url}>
+              {i > 0 && " · "}
+              <a href={l.url} target="_blank" rel="noreferrer">{l.label}</a>
+            </span>
+          ))}
+        </p>
+      ) : (
+        <p className="empty">Название и ИНН не определены — искать отзывы не по чему.</p>
       )}
     </section>
   );
@@ -714,6 +739,8 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
           </dl>
         </>
       )}
+
+      <ReviewsBlock cp={cp} />
 
       <h3>Источники фактов</h3>
       {(cp.evidence ?? []).length === 0 && <p className="empty">Подтверждённых фактов с источником нет.</p>}
