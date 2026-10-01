@@ -534,3 +534,10 @@ html { scroll-padding-top: 80px; }
 .query { max-height: calc(100dvh - 92px); overflow-y: auto; }
 @media (max-width: 760px) { .query { max-height: none; overflow: visible; } }
 @media (min-width: 1101px) { .page-home .content { padding-inline: 48px; } }
+
+/* #164: calmer list — the reason is clamped to three lines here, in full in the card */
+.item { row-gap: 8px; padding: 16px 18px; }
+.item .why { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.item .name { font-size: 15px; line-height: 1.35; }
+.item .badges { margin-top: 2px; }
+.item .name-inn { font-size: 13.5px; }
