@@ -57,7 +57,7 @@ ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
 # «Роль» of the xlsx: the captions of the role chips (KIND_LABEL in src/ui/src/api.ts), from D-057 (#232)
 KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Роль не определена"}
-ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП"}
+ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or a natural person (DATA_DICTIONARY)
 # The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
 MAX_TEXT_CHARS = 20_000
 

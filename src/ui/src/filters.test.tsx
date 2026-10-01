@@ -53,3 +53,12 @@ test("chip counts add both blocks; no facets from the server — no number", () 
   expect(facetCount(f, "kind", "dealer")).toBe(0);
   expect(facetCount(undefined, "kind", "dealer")).toBeUndefined();
 });
+
+test("filterNotes for ЮЛ/ИП takes the number of unknown from the server's facets", async () => {
+  const { filterNotes } = await import("./api");
+  const base = { query: { query_id: "q", text: "x" }, history: [], discovered: [], stub: false } as never;
+  const facets = { history: { kind: {}, entity: { unknown: 2 } }, discovered: { kind: {}, entity: { unknown: 1 } } };
+  expect(filterNotes(base, { ...NO_FILTERS, entity: "ul" }, facets)).toEqual([
+    "ЮЛ или ИП/ФЛ — не известно у 3 из 0 (ИНН не подтверждён); они скрыты фильтром.",
+  ]);
+});

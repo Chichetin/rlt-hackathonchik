@@ -197,7 +197,7 @@ export function regionLabel(cp: Pick<Counterparty, "region" | "kpp">): string {
 
 // Фильтр оставляет только подтверждённые совпадения (D-030): у кого признак неизвестен — скрыт.
 // Пользователь видит, сколько скрыто из-за неизвестного признака, а не «никого не нашли».
-export function filterNotes(base: SearchResponse | null, f: Filters): string[] {
+export function filterNotes(base: SearchResponse | null, f: Filters, facets?: Facets): string[] {
   if (!base) return [];
   const rows = [...base.history, ...base.discovered];
   const total = rows.length;
@@ -216,8 +216,9 @@ export function filterNotes(base: SearchResponse | null, f: Filters): string[] {
     }
   }
   if (f.entity) {
-    const n = unknown((cp) => !cp.inn);
-    if (n) notes.push(`ИНН не подтверждён у ${n} из ${total} — ЮЛ это или ИП, не известно; они скрыты фильтром.`);
+    // the server decides by stats.entity_type, else by the INN length — the count of unknown comes from X-Facets
+    const n = facetCount(facets, "entity", "unknown") ?? unknown((cp) => !cp.inn && !cp.stats?.entity_type);
+    if (n) notes.push(`ЮЛ или ИП/ФЛ — не известно у ${n} из ${total} (ИНН не подтверждён); они скрыты фильтром.`);
   }
   if (f.only_msp) {
     const n = unknown((cp) => cp.is_msp == null);

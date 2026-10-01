@@ -37,7 +37,7 @@ import {
 } from "./api";
 import { reviewLinks } from "./reviews";
 import { TestsetPanel } from "./TestsetPanel";
-import { KINDS, LEVELS, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
+import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
 import "./filters.css";
 import "./testset.css";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
@@ -125,7 +125,8 @@ function RoleChips({ filters, onChange, facets }: { filters: Filters; onChange: 
 
 /** Filters over the results (#232): role chips, ЮЛ / ИП, minimal relevance, and the legend of the levels. */
 function FilterBar({ filters, facets, onChange }: { filters: Filters; facets?: Facets; onChange: (f: Filters) => void }) {
-  const entities: [Filters["entity"], string][] = [["", "Все"], ["ul", "ЮЛ"], ["ip", "ИП"]];
+  // 12 INN digits: a sole trader or a natural person — «ИП/ФЛ», not a guessed «ИП»
+  const entities: [Filters["entity"], string][] = [["", "Все"], ["ul", "ЮЛ"], ["ip", "ИП/ФЛ"]];
   return (
     <div className="filterbar" role="group" aria-label="Фильтры выдачи">
       <RoleChips filters={filters} onChange={onChange} facets={facets} />
@@ -151,7 +152,8 @@ function FilterBar({ filters, facets, onChange }: { filters: Filters; facets?: F
             <option value="high">только высокая</option>
           </select>
         </label>
-        <p className="legend-levels" aria-label="Уровни релевантности">
+        <p className="legend-levels">
+          <span className="sr-only">Уровни релевантности:</span>
           {LEVELS.map((l, i) => (
             <span key={l.id} className={`relevance relevance-${l.id}`}>
               <i aria-hidden="true" />
@@ -707,7 +709,7 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
@@ -734,12 +736,12 @@ export function App() {
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             rows={weights ? atLeast(rerank(res.history, weights), filters.min_level).slice(0, shown) : res.history}
-            total={res.total.history}
+            total={weights ? atLeast(rerank(res.history, weights), filters.min_level).length : res.total.history}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
             loadingMore={more}
             onOpen={setOpen}
             empty={
-              filterNotes(base, filters).length
+              filterNotes(base, filters, res.facets).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
                 : noteText(res.note)
             }
@@ -808,7 +810,7 @@ function Block(props: {
                 <motion.button className="item" whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
-                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
+                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
                     <span className="score-num">{m.score.toFixed(2)}</span>
                     <RelevanceTag score={m.score} />
                     <span className="score-meter" aria-hidden="true">
