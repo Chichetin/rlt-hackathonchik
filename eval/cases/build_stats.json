@@ -1,0 +1,106 @@
+{
+  "as_of": "2025-07-01",
+  "holdout_from": "2025-10-01",
+  "parts": {
+    "dev": {
+      "lots": 58047,
+      "lots_by_channel": {
+        "АИС ГЗ": 31616,
+        "ЭМ": 26431
+      },
+      "excluded": {
+        "no_participants": 6189,
+        "aisgz_st93": 257,
+        "no_valid_inn": 2,
+        "no_text": 0
+      },
+      "excluded_aisgz_st93_with_items": 257,
+      "cases": 51599,
+      "by_channel": {
+        "ЭМ": 26431,
+        "АИС ГЗ": 25168
+      },
+      "em_without_winner": 709
+    },
+    "holdout": {
+      "lots": 99053,
+      "lots_by_channel": {
+        "ЭМ": 49203,
+        "АИС ГЗ": 49850
+      },
+      "excluded": {
+        "no_participants": 9671,
+        "aisgz_st93": 529,
+        "no_valid_inn": 5,
+        "no_text": 0
+      },
+      "excluded_aisgz_st93_with_items": 529,
+      "cases": 88848,
+      "by_channel": {
+        "ЭМ": 49203,
+        "АИС ГЗ": 39645
+      },
+      "em_without_winner": 1226
+    }
+  },
+  "sample": {
+    "n": 2000,
+    "seed": 20261001,
+    "strata": "channel x main OKPD2 class (2 digits)",
+    "by_channel": {
+      "ЭМ": 1024,
+      "АИС ГЗ": 976
+    }
+  },
+  "real": [
+    {
+      "query_id": "lot-5761234",
+      "channel": "АИС ГЗ",
+      "class": "21",
+      "subject": "Поставка наборов реагентов для нужд СПб ГБУЗ КВД №11 в 2025 году"
+    },
+    {
+      "query_id": "lot-5779719",
+      "channel": "АИС ГЗ",
+      "class": "20",
+      "subject": "Поставка дезинфицирующих средств"
+    },
+    {
+      "query_id": "lot-5786484",
+      "channel": "ЭМ",
+      "class": "43",
+      "subject": "Выполнение работ по сносу зеленых насаждений утративших жизнеспособность"
+    },
+    {
+      "query_id": "lot-5798959",
+      "channel": "ЭМ",
+      "class": "71",
+      "subject": "Выполнение кадастровых работ"
+    },
+    {
+      "query_id": "lot-5802116",
+      "channel": "ЭМ",
+      "class": "32",
+      "subject": "Поставка новогодних украшений на Абрамова"
+    },
+    {
+      "query_id": "lot-5804197",
+      "channel": "АИС ГЗ",
+      "class": "26",
+      "subject": "Поставка картриджей для электрографических печатающих устройств 2025 году"
+    },
+    {
+      "query_id": "lot-5809419",
+      "channel": "АИС ГЗ",
+      "class": "31",
+      "subject": "Поставка мягких модулей для сидения"
+    },
+    {
+      "query_id": "lot-5860547",
+      "channel": "ЭМ",
+      "class": "85",
+      "subject": "Оказание услуг по обучению Слушателей - сотрудников Заказчика"
+    }
+  ],
+  "max_items": 10
+}
