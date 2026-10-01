@@ -21,9 +21,20 @@ import argparse
 import os
 import random
 import sys
+from pathlib import Path
 
-from src.eval.run import RESULTS, ROOT, dump_record, evaluate, load_method_config, print_table, result_record
-from src.eval.split import EvalCase, load_cases, split_config
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # `uv run python scripts/fresh_eval.py` without PYTHONPATH
+
+from src.eval.run import (  # noqa: E402
+    RESULTS,
+    ROOT,
+    dump_record,
+    evaluate,
+    load_method_config,
+    print_table,
+    result_record,
+)
+from src.eval.split import EvalCase, load_cases, split_config  # noqa: E402
 
 SEED = 145
 N = 2000

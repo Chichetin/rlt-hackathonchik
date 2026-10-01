@@ -12,7 +12,7 @@ A git failure refuses (fail closed). The attempt is recorded BEFORE the holdout 
 crash after reading still leaves a trace; the result row is appended after the run.
 
 What is scored: `holdout_sample` cases of configs/split.yaml (null — all), the n lowest
-sha256(holdout_seed:query_id). The whole holdout is 88 848 cases at 0.25–0.30 s each — a 6–7 h
+sha256(holdout_seed:query_id). The whole holdout is 88 848 cases at 0.25–0.30 s each — a 6–7.5 h
 one-shot run that does not fit the window before code freeze (#145, docs/REVIEW.md); the sample
 is fixed in the hashed config before the run, so it cannot depend on any result.
 """
