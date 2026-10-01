@@ -1,0 +1,85 @@
+/* Fluid design units follow CSS viewport width, capped for comfortable reading.
+   Layout switches columns independently; text zoom and native controls stay intact. */
+:root {
+  --ui-unit: clamp(1px, .069444vw, 1.7px);
+  --ui-gutter: clamp(20px, 2.4vw, 80px);
+  --ui-header: calc(96 * var(--ui-unit));
+  --ui-body: calc(16 * var(--ui-unit));
+  --ui-small: calc(14 * var(--ui-unit));
+  --ui-gap: calc(24 * var(--ui-unit));
+}
+.appbar .workspace-bar { max-width: none; padding: calc(20 * var(--ui-unit)) var(--ui-gutter); min-height: var(--ui-header); }
+.brand { font-size: calc(24 * var(--ui-unit)); }
+.brand-mark { width: calc(32 * var(--ui-unit)); height: calc(32 * var(--ui-unit)); }
+.workspace-nav { gap: calc(8 * var(--ui-unit)); padding-block: calc(6 * var(--ui-unit)); }
+.workspace-nav a { font-size: calc(13 * var(--ui-unit)); min-height: calc(40 * var(--ui-unit)); padding: calc(9 * var(--ui-unit)) calc(17 * var(--ui-unit)); }
+.content { max-width: none; padding: 0 var(--ui-gutter) calc(40 * var(--ui-unit)); }
+.landing-hero { min-height: calc(100svh - var(--ui-header)); padding-inline: var(--ui-gutter); gap: calc(60 * var(--ui-unit)); }
+.landing-copy { max-width: calc(720 * var(--ui-unit)); }
+.landing h1 { font-size: calc(78 * var(--ui-unit)); }
+.landing-intro, .quiet-link { font-size: var(--ui-small); }
+.landing-description { font-size: var(--ui-body); max-width: 44ch; }
+.landing-actions { gap: var(--ui-gap); }
+.primary-link { font-size: var(--ui-body); padding: calc(16 * var(--ui-unit)) calc(26 * var(--ui-unit)); }
+.glass-diamond { width: min(calc(280 * var(--ui-unit)),55%); }
+.page-workspace .top { padding-block: calc(36 * var(--ui-unit)) calc(30 * var(--ui-unit)); }
+.page-workspace .top h1 { font-size: calc(44 * var(--ui-unit)); }
+.page-workspace .top .sub { font-size: var(--ui-body); max-width: 76ch; }
+.search-background { inset-block-start: var(--ui-header); opacity: .14; }
+.search-workbench { gap: var(--ui-gap); }
+.search-compose .query { grid-template-columns: minmax(0,1.5fr) minmax(320px,1fr); gap: var(--ui-gap); }
+.search-compose .query-main, .search-compose .query-options { padding: calc(30 * var(--ui-unit)); }
+.query .section-heading h2, .search-compose .section-heading h2 { font-size: calc(23 * var(--ui-unit)); }
+.query .section-heading p, .query-main > label, .query .lot-section > label, .query .optional label,
+.query .filters, .query .lotrow button, .query .actions button { font-size: var(--ui-small); }
+.query input:not([type="checkbox"]), .query textarea, .query select { font-size: var(--ui-body); padding: calc(13 * var(--ui-unit)) calc(14 * var(--ui-unit)); }
+.query input::placeholder, .query textarea::placeholder { font-size: var(--ui-small); }
+.search-compose .query textarea { min-height: calc(126 * var(--ui-unit)); }
+.search-compose .query-divider { margin-block: calc(20 * var(--ui-unit)); font-size: calc(12 * var(--ui-unit)); }
+.query .wheel-option { font-size: var(--ui-small); }
+.wheel-caption > span, .wheel-caption small { font-size: calc(12 * var(--ui-unit)); }
+.search-compose .filters > label:not(:last-child) { min-height: calc(44 * var(--ui-unit)); padding: calc(10 * var(--ui-unit)) calc(12 * var(--ui-unit)); }
+.search-compose .filters select { min-width: 0; }
+.search-compose .actions button[type="submit"] { font-size: var(--ui-body); min-height: calc(54 * var(--ui-unit)); }
+.page-workspace .item .name { font-size: var(--ui-body); }
+.page-workspace .item .meta, .page-workspace .item .why, .block .hint, .block-tag { font-size: var(--ui-small); }
+.page-workspace .block .item { padding: calc(20 * var(--ui-unit)); }
+.block h2 { font-size: calc(22 * var(--ui-unit)); }
+.score-num { font-size: calc(18 * var(--ui-unit)); }
+.block .badge, .block .count { font-size: calc(12 * var(--ui-unit)); }
+.results-title, .result-query, .result-total { font-size: var(--ui-small); }
+.page-workspace .settings, .page-workspace .subpage > .steps { gap: var(--ui-gap); }
+.page-workspace .setting-group, .page-workspace .subpage > .steps > li { padding: calc(28 * var(--ui-unit)); }
+.page-workspace .setting-group legend, .page-workspace .setting strong, .page-workspace .preset-title { font-size: var(--ui-body); }
+.page-workspace .setting small, .page-workspace .weights-note, .page-workspace .preset-hint, .page-workspace .crit { font-size: var(--ui-small); }
+.page-workspace .subpage > .steps h3 { font-size: calc(25 * var(--ui-unit)); }
+.page-workspace .subpage > .steps p, .page-workspace .setting select { font-size: var(--ui-body); }
+.search-compose .steps h3 { font-size: var(--ui-body); }
+.search-compose .steps p { font-size: var(--ui-small); }
+@media (min-width: 1101px) {
+  .search-workbench:has(.results) { grid-template-columns: minmax(360px,24%) minmax(0,1fr); }
+}
+@media (max-width: 1100px) {
+  .landing h1 { font-size: clamp(42px,6vw,68px); }
+  .search-compose .query { grid-template-columns: minmax(0,1.2fr) minmax(300px,1fr); }
+}
+@media (max-width: 760px) {
+  :root { --ui-header: 120px; --ui-gutter: 18px; }
+  .appbar .workspace-bar { padding: 15px var(--ui-gutter) 12px; }
+  .brand { font-size: 18px; }
+  .brand-mark { width: 24px; height: 24px; }
+  .workspace-nav { gap: 4px; padding-block: 8px; }
+  .workspace-nav a { font-size: 10px; min-height: 34px; padding: 8px 5px; }
+  .landing h1 { font-size: clamp(36px,8.6vw,56px); }
+  .landing-hero { padding: 36px 28px 44px; gap: 0; }
+  .landing-description { font-size: 14px; }
+  .landing-intro { font-size: 12px; }
+  .page-workspace .top { padding-block: 24px; }
+  .page-workspace .top h1 { font-size: clamp(29px,7.5vw,38px); }
+  .page-workspace .top .sub { font-size: 14px; }
+  .search-compose .query { grid-template-columns: minmax(0,1fr); }
+  .search-compose .query-main, .search-compose .query-options, .page-workspace .setting-group, .page-workspace .subpage > .steps > li { padding: 22px; }
+  .page-workspace .block .item { padding: 16px; }
+  .query .section-heading h2, .search-compose .section-heading h2 { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
