@@ -11,3 +11,9 @@ weights:
   activity: 0.1
   geography: 0.1
   price: 0.05
+# Сигналы экспериментов (#22, src/match/signals.py): доля в [0, 1], по умолчанию 0 = v1 без изменений.
+# incumbent — участие в лотах того же заказчика до as_of, подмешивается в experience.
+signals:
+  incumbent: 0.0
+  # inn_region (H-15c) — регион ИП без КПП / с КПП 000000000 по первым двум цифрам ИНН, доля geography.
+  inn_region: 0.0

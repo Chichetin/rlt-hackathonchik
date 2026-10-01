@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import {
+  ALL,
   buildQuery,
   COMPONENT_LABEL,
   exportXlsx,
@@ -10,11 +11,13 @@ import {
   LotError,
   regionLabel,
   search,
+  type SearchPage,
   STAT_LABEL,
   type Extra,
   yesNo,
   type CounterpartyMatch,
   type Filters,
+  type Query,
   type SearchResponse,
 } from "./api";
 
@@ -23,10 +26,24 @@ import {
 
 const REGIONS = ["", "Санкт-Петербург", "Ленинградская область"];
 
+/** «Новые» emptied by «Только производители», judged by the filters of the shown answer (#84): the type
+ *  of a new company is never confirmed (D-036), so this filter hides all of them. Other filters keep the
+ *  general text: region and МСП of new companies are known, their empty block has other reasons. */
+function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Query | null): string | undefined {
+  const n = base?.discovered.length ?? 0;
+  if (res.discovered.length || !n || base === res || !shown?.filters?.only_manufacturers) return undefined;
+  return (
+    `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ` +
+    "тип поставщика реестр не подтверждает (по ОКВЭД известно только «вероятно»). Снимите фильтр, чтобы их увидеть."
+  );
+}
+
 export function App() {
   const [text, setText] = useState("");
   const [filters, setFilters] = useState<Filters>({ only_msp: false, only_manufacturers: false, region: "" });
-  const [res, setRes] = useState<SearchResponse | null>(null);
+  const [res, setRes] = useState<SearchPage | null>(null);
+  const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
+  const [more, setMore] = useState(false);
   // the same query without user filters: how many candidates a filter hides for an unknown attribute
   const [base, setBase] = useState<SearchResponse | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
@@ -85,18 +102,38 @@ export function App() {
     try {
       const active = nextFilters.only_msp || nextFilters.only_manufacturers || !!nextFilters.region;
       const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
+      const q = buildQuery(text, nextFilters, extra());
       const [r, b] = await Promise.all([
-        search(buildQuery(text, nextFilters, extra())),
-        active ? search(buildQuery(text, none, extra())) : Promise.resolve(null),
+        search(q),
+        // every candidate without filters: how many of them a filter hides for an unknown attribute
+        active ? search(buildQuery(text, none, extra()), { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
+      setShownQuery(q);
       setBase(b ?? r);
       setState("idle");
     } catch (e) {
       if (seq !== runSeq.current) return;
       setError(String(e));
       setState("error");
+    }
+  }
+
+  // the next page of the history block from the server, for the same query and filters
+  async function showMore() {
+    if (!res || !shownQuery) return;
+    const seq = runSeq.current;
+    setMore(true);
+    try {
+      const next = await search(shownQuery, { offset: res.history.length });
+      if (seq !== runSeq.current) return;
+      setRes({ ...res, history: [...res.history, ...next.history], total: next.total });
+    } catch (e) {
+      setError(String(e));
+      setState("error");
+    } finally {
+      setMore(false);
     }
   }
 
@@ -239,6 +276,9 @@ export function App() {
             title="С опытом госзакупок"
             hint="Есть в данных АИС ГЗ"
             rows={res.history}
+            total={res.total.history}
+            onMore={() => void showMore()}
+            loadingMore={more}
             onOpen={setOpen}
             empty={
               filterNotes(base, filters).length
@@ -248,10 +288,16 @@ export function App() {
           />
           <Block
             title="Новые из открытых источников"
-            hint="Нет в данных АИС ГЗ, найдены в открытых источниках"
+            hint="Нет в данных АИС ГЗ, найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             rows={res.discovered}
+            total={res.total.discovered}
             onOpen={setOpen}
-            empty="Поиск в открытых источниках подключается (#16): здесь появятся компании, которых нет в данных АИС ГЗ."
+            empty={
+              hiddenNew(res, base, shownQuery) ??
+              (res.query.okpd2?.length
+                ? "В открытых источниках новых компаний по этому запросу не найдено: реестр МСП ФНС не ответил, в нём нет компаний с подходящим ОКВЭД в СПб и области, либо все найденные уже есть в данных АИС ГЗ."
+                : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
+            }
           />
         </main>
       )}
@@ -265,13 +311,16 @@ function Block(props: {
   title: string;
   hint: string;
   rows: CounterpartyMatch[];
+  total: number;
   onOpen: (m: CounterpartyMatch) => void;
+  onMore?: () => void;
+  loadingMore?: boolean;
   empty?: string;
 }) {
   return (
     <section className="block" aria-label={props.title}>
       <h2>
-        {props.title} <span className="count">{props.rows.length}</span>
+        {props.title} <span className="count">{props.total}</span>
       </h2>
       <p className="hint">{props.hint}</p>
       {props.rows.length === 0 ? (
@@ -298,6 +347,18 @@ function Block(props: {
             );
           })}
         </ol>
+      )}
+      {props.rows.length > 0 && props.rows.length < props.total && (
+        <div className="more">
+          <span className="shown">
+            Показаны {props.rows.length} из {props.total}
+          </span>
+          {props.onMore && (
+            <button type="button" className="secondary" disabled={props.loadingMore} onClick={props.onMore}>
+              {props.loadingMore ? "Загружаем…" : "Показать ещё"}
+            </button>
+          )}
+        </div>
       )}
     </section>
   );

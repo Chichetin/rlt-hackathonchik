@@ -165,9 +165,11 @@ def test_index_is_built_once_and_reused_from_disk(search_data, monkeypatch, tmp_
 
 def test_new_ingest_build_gives_new_index_key(search_data, tmp_path):
     manifest = json.loads((search_data / "manifest.json").read_text(encoding="utf-8"))
-    k1 = index_mod.index_key(search_data, manifest, None)
-    assert k1 != index_mod.index_key(search_data, {**manifest, "built_at": "2099-01-01T00:00:00+00:00"}, None)
-    assert k1 != index_mod.index_key(search_data, manifest, CUTOFF)
+    k1 = index_mod.index_key(manifest, None)
+    assert k1 != index_mod.index_key({**manifest, "built_at": "2099-01-01T00:00:00+00:00"}, None)
+    assert k1 != index_mod.index_key(manifest, CUTOFF)
+    # the same ingest in another place (or loaded into Postgres) shares the index
+    assert k1 == index_mod.index_key(json.loads(json.dumps(manifest)), None)
 
 
 def test_index_has_only_lots_before_as_of(search_data):
@@ -230,3 +232,27 @@ def test_prebuild_cli_builds_product_and_cutoff_indexes(search_data, tmp_path, c
 def test_prebuild_cli_without_data_exits_2(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "none"))
     assert index_mod.main() == 2
+
+
+def _sole_trader(kpp):
+    from src.contracts import Counterparty
+    return Counterparty(inn="780100000090", kpp=kpp, name="ИНН 780100000090")
+
+
+@pytest.mark.parametrize("kpp", ["000000000", None])
+def test_geography_kpp_stub_is_not_region_00(kpp):
+    value, why = search_mod._geography(_sole_trader(kpp), "Санкт-Петербург")
+    assert value == 0.0 and "регион не определён" in why
+    assert "00" not in why.replace("000000000", "")  # no "region with code 00"
+
+
+def test_geography_inn_region_signal_h15c():
+    stub = _sole_trader("000000000")
+    assert search_mod._geography(stub, "Санкт-Петербург", 1.0)[0] == 1.0
+    assert search_mod._geography(stub, "Ленинградская область", 1.0)[0] == pytest.approx(search_mod.NEIGHBOUR_VALUE)
+    value, why = search_mod._geography(_sole_trader(None), "Санкт-Петербург", 0.5)
+    assert value == 0.5 and "ИНН выдан в Санкт-Петербурге" in why and "регион выдачи ИНН" in why
+    # a real KPP is untouched by the signal
+    from src.contracts import Counterparty
+    org = Counterparty(inn="4701000038", kpp="470101001", name="x")
+    assert search_mod._geography(org, "Санкт-Петербург", 1.0) == search_mod._geography(org, "Санкт-Петербург")

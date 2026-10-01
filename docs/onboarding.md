@@ -54,7 +54,7 @@ research/DECISIONS.md, src/contracts.py. Перескажи мне в 5 стро
    area:. Зависимости («Зависит от #…») должны быть в main, иначе — на заглушке с пометкой.
    Покажи выбор одной строкой на задачу и сразу, без ожидания ответа, take <N>.
 2. Каждой задаче — свой worktree и builder в фоне (модель — по оценке сложности в задаче).
-3. Каждый PR — через reviewer; merge по вердикту, по одному, после make check (и make e2e).
+3. Каждый PR — через reviewer; merge по вердикту, по одному, после make check-changed.
 4. Спорное решение — reviewer в режиме «решение», 2 отклонения — jury; запись в DECISIONS.
    Вопрос к организаторам — строка в docs/questions-for-organizers.md, работаешь по
    рекомендуемой трактовке.
@@ -72,6 +72,7 @@ research/DECISIONS.md, src/contracts.py. Перескажи мне в 5 стро
 | Взять / по прямому указанию | `bash scripts/issues.sh take <N>` / `take <N> --force` |
 | Память перед `/compact` | `bash scripts/issues.sh note <N> "сделано" "дальше" "блокер"` |
 | Завести задачу | `bash scripts/issues.sh create "<заголовок>" "area:app,P0" <файл по шаблону>` |
-| Проверить всё | `make check && make e2e` |
+| Проверить изменённое (по умолчанию) | `make check-changed` |
+| Проверить всё (freeze, сдача, общие файлы) | `make check && make e2e` |
 | Эксперимент | `make eval EXP=<id>` → строка в `research/EXPERIMENTS.md` |
 | Демо | `make demo` → http://127.0.0.1:8000 |

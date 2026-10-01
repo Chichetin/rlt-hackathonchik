@@ -13,7 +13,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, ScoreCompon
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     monkeypatch.setattr(app_mod, "_engine", None)
     # lots: CSV path unless a test sets parquet
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "no-processed"))
@@ -50,6 +50,38 @@ def test_search_without_data_is_503(client):
 
 def test_search_rejects_empty_text(client):
     assert client.post("/api/search", json={"query_id": "q", "text": ""}).status_code == 422
+
+
+def test_search_pages_on_server_with_totals(search_client):
+    q = {"query_id": "q", "text": "бумага"}
+    full = search_client.post("/api/search", json=q)
+    total = int(full.headers["X-Total-History"])
+    rows = [m["counterparty"]["inn"] for m in full.json()["history"]]
+    assert total == len(rows) >= 3 and full.headers["X-Total-Discovered"] == "0"
+    page = search_client.post("/api/search?limit=2&offset=1", json=q)
+    assert page.headers["X-Total-History"] == str(total)  # the total does not depend on the page
+    assert [m["counterparty"]["inn"] for m in page.json()["history"]] == rows[1:3]
+    assert search_client.post(f"/api/search?offset={total}", json=q).json()["history"] == []
+    assert search_client.post("/api/search?limit=0", json=q).status_code == 422
+    assert search_client.post("/api/search?offset=-1", json=q).status_code == 422
+
+
+def test_filters_apply_before_the_page(search_client, monkeypatch):
+    """A filter selects from every candidate, not from the first page: its total is of the filtered rows."""
+    from src.match import search as search_mod
+    seen = []
+    real = search_mod.search
+    monkeypatch.setattr(search_mod, "search", lambda q, k=20: seen.append(k) or real(q, k=k))
+    q = {"query_id": "q", "text": "бумага", "filters": {"region": "Санкт-Петербург"}}
+    r = search_client.post("/api/search?limit=1", json=q)
+    assert seen == [search_mod.CANDIDATES]
+    spb = int(r.headers["X-Total-History"])
+    assert spb >= 2 and len(r.json()["history"]) == 1
+    assert r.json()["history"][0]["counterparty"]["kpp"].startswith("78")
+
+
+def test_health_names_the_store(client):
+    assert client.get("/api/health").json()["store"] in ("parquet", "postgres")
 
 
 def test_search_filters(search_client):
@@ -117,7 +149,7 @@ def _fabricated(origin: str) -> CounterpartyMatch:
 def test_search_strips_unverified_facts(client, monkeypatch, tmp_path):
     """A fabricated contact never reaches the card or the xlsx."""
     from src.match import search as search_mod
-    monkeypatch.setattr(search_mod, "search", lambda q: [_fabricated("history"), _fabricated("discovered")])
+    monkeypatch.setattr(search_mod, "search", lambda q, k=20: [_fabricated("history"), _fabricated("discovered")])
     monkeypatch.setattr(app_mod, "SourceCache", lambda: __import__("src.sources.cache", fromlist=["x"]).SourceCache(
         tmp_path / "c.sqlite"))
     body = client.post("/api/search", json={"query_id": "q", "text": "x"}).json()
@@ -185,11 +217,19 @@ def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
     con = duckdb.connect()
     con.execute("COPY (SELECT 77::BIGINT lot_id, '0372200260024000124' reqnum, 'Картриджи' procedure_name, "
                 "'Картриджи' subject, 500.0 start_price, '7804105239' customer_inn, 'ЭМ' channel) "
-                f"TO '{tmp_path}/notices.parquet' (FORMAT parquet)")
+                f"TO '{(tmp_path / 'notices.parquet').as_posix()}' (FORMAT parquet)")
     con.execute("COPY (SELECT 77::BIGINT lot_id, 'x' product_name, '26.20.40.190' okpd2_code) "
-                f"TO '{tmp_path}/items.parquet' (FORMAT parquet)")
+                f"TO '{(tmp_path / 'items.parquet').as_posix()}' (FORMAT parquet)")
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path))
     monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path / "nope"))
     q = client.get("/api/lot/0372200260024000124").json()
     assert q["query_id"] == "lot-77" and q["okpd2"] == ["26.20.40.190"]
     assert q["channel"] == "ЭМ" and q["budget"] == 500.0
+
+
+def test_health_stub_flag_follows_demo_fixture_env(client, monkeypatch):
+    """scripts/demo.sh without organizers' data sets DEMO_FIXTURE=1 → the UI shows the demo banner."""
+    monkeypatch.delenv("DEMO_FIXTURE", raising=False)
+    assert client.get("/api/health").json()["stub"] is False
+    monkeypatch.setenv("DEMO_FIXTURE", "1")
+    assert client.get("/api/health").json()["stub"] is True

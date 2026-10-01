@@ -19,12 +19,15 @@ make demo            # ставит зависимости по lockfile, соб
 # → http://127.0.0.1:8000
 ```
 
-`make demo` работает без интернета на закешированных ответах внешних источников (`cache/`).
+`make demo` работает без интернета на закешированных ответах внешних источников (`cache/`). Без данных
+организаторов в `data/raw/` поднимается на синтетической фикстуре с плашкой «демонстрационные данные»;
+откуда брать данные и кеш — `docs/demo-clean-clone.md`.
 
 | Команда | Что делает |
 |---|---|
 | `make setup` | окружение строго по `uv.lock` и `package-lock.json`, Playwright, git-хуки |
-| `make check` | ruff, pyright, tsc, pytest, vitest, тесты хуков, сверка OpenAPI, `# STUB` |
+| `make check-changed` | проверки только затронутого относительно `origin/main`: тесты модулей, которые импортируют изменённое; e2e — если задет демо-путь |
+| `make check` | всё: ruff, pyright, tsc, pytest, vitest, тесты хуков, сверка OpenAPI, `# STUB` |
 | `make e2e` | сценарий демо в браузере (Playwright) |
 | `make eval EXP=<id>` | оценка на dev-части → `eval/results/<id>.json` с bootstrap-интервалами |
 | `make eval-final CONFIRM=<sha256>` | однократная оценка замороженной конфигурации на запечатанном периоде |

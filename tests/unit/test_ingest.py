@@ -25,7 +25,7 @@ def processed(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def _rows(path: Path, sql: str) -> list[tuple]:
-    return duckdb.sql(sql.replace("{p}", str(path).replace("\\", "/"))).fetchall()
+    return duckdb.sql(sql.replace("{p}", path.as_posix())).fetchall()
 
 
 def test_files_and_counts(processed: Path) -> None:
@@ -93,6 +93,23 @@ def test_counterparty_evidence_and_stats(processed: Path) -> None:
     past = counterparties([A], as_of=CUTOFF, processed=processed)[A]
     assert past.stats["lots_participated"] == 3
     assert past.evidence[0].url == "data:participants#3"  # latest lot before the cutoff
+
+
+def test_crlf_and_lf_build_the_same(tmp_path: Path) -> None:
+    """Export from Windows (CRLF) and Linux (LF) give identical tables, whatever git checked out."""
+    tables = {}
+    for eol in (b"\n", b"\r\n"):
+        raw, out = tmp_path / f"raw{len(eol)}", tmp_path / f"out{len(eol)}"
+        raw.mkdir()
+        for src in FIXTURE.glob("*.csv"):
+            (raw / src.name).write_bytes(src.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", eol))
+        build(raw, out, as_of=None, cutoff=CUTOFF)
+        tables[eol] = [
+            _rows(out / f"{name}.parquet", "SELECT * FROM '{p}' ORDER BY ALL")
+            for name in ("notices", "participants", "items", "suppliers")
+        ]
+    assert tables[b"\n"] == tables[b"\r\n"]
+    assert all(t for t in tables[b"\n"])
 
 
 def test_unbuilt_as_of_is_a_clear_error(processed: Path) -> None:

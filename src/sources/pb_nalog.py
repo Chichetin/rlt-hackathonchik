@@ -10,7 +10,8 @@ What goes to the cache (src/sources/cache.py):
   src/enrich/evidence.py can check every extracted value against this text (D-028);
 - `raw_url(inn)` → the raw JSON answers, for audit.
 
-`captchaRequired: true` → CaptchaRequired: we stop, never solve captchas (research/SOURCES.md).
+`captchaRequired: true` or HTTP 400 with a captcha error → CaptchaRequired: we stop, never solve
+captchas (research/SOURCES.md).
 Requests are paced (MIN_INTERVAL_S between any two requests to the host).
 """
 
@@ -35,6 +36,8 @@ POLL_TRIES = 5
 
 _lock = threading.Lock()
 _last_request = 0.0
+_blocked_until = 0.0
+BLOCK_COOLDOWN_S = 900.0
 
 
 class CaptchaRequired(RuntimeError):
@@ -43,6 +46,17 @@ class CaptchaRequired(RuntimeError):
 
 class NotFound(KeyError):
     pass
+
+
+def blocked() -> bool:
+    """True after a captcha demand (or PB_DISABLED=1): no request goes to the host — every one extends the block."""
+    return os.environ.get("PB_DISABLED") == "1" or time.monotonic() < _blocked_until
+
+
+def _captcha(msg: str) -> CaptchaRequired:
+    global _blocked_until
+    _blocked_until = time.monotonic() + BLOCK_COOLDOWN_S
+    return CaptchaRequired(msg)
 
 
 def card_url(inn: str) -> str:
@@ -61,16 +75,22 @@ def _post(client: httpx.Client, path: str, data: dict[str, str]) -> httpx.Respon
         if wait > 0:
             time.sleep(wait)
         try:
-            return client.post(BASE + path, data=data)
+            r = client.post(BASE + path, data=data)
         finally:
             _last_request = time.monotonic()
+    # Seen live 01.10: the captcha demand is HTTP 400 `{"ERRORS": {"pbSearchCaptcha": [...]}}`,
+    # not `captchaRequired` in a 200 body. Without this the worker would count it as a failed
+    # task and keep knocking.
+    if r.status_code == 400 and "captcha" in r.text.lower():
+        raise _captcha("pb.nalog.ru требует капчу (HTTP 400) — останавливаемся (не решаем)")
+    return r
 
 
 def _json(r: httpx.Response) -> dict[str, Any]:
     r.raise_for_status()
     j = r.json()
     if j.get("captchaRequired"):
-        raise CaptchaRequired("pb.nalog.ru требует капчу — останавливаемся (не решаем)")
+        raise _captcha("pb.nalog.ru требует капчу — останавливаемся (не решаем)")
     return j
 
 
@@ -89,6 +109,8 @@ def flatten(row: dict[str, Any], vyp: dict[str, Any]) -> str:
 
 def fetch_raw(inn: str, client: httpx.Client | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Live fetch: (search row, card). NotFound if the registry has no such INN."""
+    if blocked():
+        raise CaptchaRequired("pb.nalog.ru: капча была недавно (или PB_DISABLED=1) — запрос не отправляем")
     own = client is None
     client = client or httpx.Client(
         timeout=TIMEOUT_S,

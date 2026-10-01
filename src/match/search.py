@@ -3,8 +3,8 @@
 v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
 1. BM25 (`bm25s`, src/match/index.py) over lot positions published strictly before `as_of`;
    matched lots -> their participants (Поставщики) = candidates, `origin="history"`.
-2. OKPD2 class of the query: `Query.okpd2`, or — when empty — the code with the largest BM25
-   weight among the positions of the top matched lots.
+2. OKPD2 class of the query: `Query.okpd2`, or — when empty — a vote of the positions that
+   matched the query themselves (D-045): group XX.XX first, then the code inside it.
 3. Components in [0, 1], one explanation line each:
    product_fit — BM25 similarity (normalized by the best candidate) + depth of the OKPD2 match;
    experience  — lots and wins in the query's OKPD2 group (level 4) before as_of;
@@ -19,17 +19,26 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import tempfile
+import threading
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 import duckdb
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
-from src.ingest.load import built_at, counterparties
+from src.ingest.load import from_rows
 from src.match.filters import REGION_CODE
-from src.match.index import LotIndex, get_index, pq_path, processed_dir
+from src.match.index import LotIndex, get_index
+from src.match.signals import customer_lots, mix_incumbent, signal_shares
+from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
 
 log = logging.getLogger(__name__)
@@ -43,7 +52,9 @@ STRICT_RETRIEVER = False
 
 TOP_DOCS = 500  # BM25 documents (distinct position texts) taken per query
 CANDIDATES = 200  # suppliers scored per query (by best BM25 of their lots)
-VOTE_LOTS = 20  # top lots that vote for the query's OKPD2 when the query has none
+VOTE_DOCS = 100  # best matched position texts that vote for the query's OKPD2 when it has none (D-045)
+DOC_CODES = "doc_codes.parquet"  # sidecar of the index: OKPD2 codes of the positions carrying each text
+VOTE_LOTS = 20  # fallback: only lot subjects matched — top lots vote, a lot's vote split over its positions
 FIT_BM25_SHARE = 0.6  # product_fit = 0.6 · BM25 + 0.4 · OKPD2 depth (BM25 only without a class)
 OKPD_DEPTH = {4: 1.0, 3: 0.75, 2: 0.5, 1: 0.25, 0: 0.0}
 OKPD_LEVEL_TEXT = {4: "совпадает код", 3: "совпадает до подкатегории", 2: "совпадает до группы",
@@ -72,12 +83,6 @@ def _fmt(d: date) -> str:
     return d.strftime("%d.%m.%Y")
 
 
-def _levels(code: str) -> tuple[str, str | None, str | None, str | None]:
-    """(code, level 6, level 4, level 2) as in src/ingest/build.py (items.okpd2_l*)."""
-    return (code, code[:8] if len(code) >= 8 else None, code[:5] if len(code) >= 5 else None,
-            code[:2] if len(code) >= 2 else None)
-
-
 def _prefix(code: str, level: int) -> str:
     return {4: code, 3: code[:8], 2: code[:5], 1: code[:2]}[level]
 
@@ -97,84 +102,110 @@ class Candidate:
     class_wins: int = 0
 
 
-def _retrieve(con: duckdb.DuckDBPyConnection, idx: LotIndex, hits: list[tuple[int, float]],
-              processed: Path, as_of: date | None) -> list[Candidate]:
-    con.execute("CREATE OR REPLACE TEMP TABLE h AS SELECT unnest($d) AS doc_id, unnest($s) AS score",
-                {"d": [d for d, _ in hits], "s": [s for _, s in hits]})
-    con.execute(
-        f"""
-        CREATE OR REPLACE TEMP TABLE lot AS
-        SELECT d.lot_id, max(h.score) AS score, arg_max(h.doc_id, h.score) AS doc_id
-        FROM read_parquet({idx.docs_parquet}) d JOIN h USING (doc_id) GROUP BY d.lot_id
-        """
-    )
-    cond = "p.publish_date < $as_of" if as_of else "TRUE"
-    rows = con.execute(
-        f"""
-        SELECT p.supplier_inn, max(lot.score) AS bm25, count(DISTINCT p.lot_id) AS n_lots,
-               count(DISTINCT p.lot_id) FILTER (WHERE p.is_winner) AS n_wins,
-               arg_max(p.lot_id, (lot.score, p.publish_date, p.lot_id)) AS best_lot,
-               arg_max(t.text, (lot.score, p.publish_date, p.lot_id)) AS best_text,
-               arg_max(p.publish_date, (lot.score, p.publish_date, p.lot_id)) AS best_date
-        FROM read_parquet({pq_path(processed / "participants.parquet")}) p
-        JOIN lot USING (lot_id)
-        JOIN read_parquet({pq_path(idx.path / "texts.parquet")}) t ON t.doc_id = lot.doc_id
-        WHERE {cond}
-        GROUP BY p.supplier_inn
-        ORDER BY bm25 DESC, n_lots DESC, p.supplier_inn
-        LIMIT {CANDIDATES}
-        """,
-        {"as_of": as_of} if as_of else {},
-    ).fetchall()
-    return [Candidate(*r) for r in rows]
+def _retrieve(store: Store, idx: LotIndex, lots: LotHits, as_of: date | None) -> list[Candidate]:
+    """Participants of the matched lots before as_of, best BM25 first (src/match/store.py: _CANDIDATES)."""
+    rows = store.candidates(lots, as_of, CANDIDATES)
+    return [Candidate(inn, bm25, n_lots, n_wins, best_lot, idx.text(doc), best_date)
+            for inn, bm25, n_lots, n_wins, best_lot, doc, best_date in rows]
 
 
-def _predict_okpd2(con: duckdb.DuckDBPyConnection, processed: Path) -> str | None:
-    row = con.execute(
-        f"""
-        WITH top AS (SELECT lot_id, score FROM lot ORDER BY score DESC, lot_id LIMIT {VOTE_LOTS})
-        SELECT i.okpd2_code FROM read_parquet({pq_path(processed / "items.parquet")}) i JOIN top USING (lot_id)
-        WHERE i.okpd2_code IS NOT NULL
-        GROUP BY i.okpd2_code ORDER BY sum(top.score) DESC, i.okpd2_code LIMIT 1
-        """
-    ).fetchone()
-    return row[0] if row else None
+_codes_lock = threading.Lock()
 
 
-def _class_history(con: duckdb.DuckDBPyConnection, cands: list[Candidate], codes: list[str],
-                   processed: Path, as_of: date | None) -> None:
+def _doc_codes(store: Store, idx: LotIndex) -> Path:
+    """Sidecar (doc_id, code, n): codes of the positions whose name is the document's text (D-045).
+
+    Built from the store (positions of lots before the index's as_of — no leak) and the index's own
+    texts, once per index next to it (the index files and its key are untouched); when the index
+    directory is read-only (docker mount) — in the temp directory.
+    """
+    places = (idx.path, Path(tempfile.gettempdir()) / f"rlt-doc-codes-{idx.key}")
+    with _codes_lock:
+        for base in places:
+            if (base / DOC_CODES).exists():
+                return base / DOC_CODES
+        rows = store.text_codes(idx.as_of)
+        codes = pa.table({"text": pa.array([r[0] for r in rows], pa.string()),
+                          "code": pa.array([r[1] for r in rows], pa.string()),
+                          "n": pa.array([int(r[2]) for r in rows], pa.int32())})
+        texts = pq.read_table(idx.path / "texts.parquet", columns=["doc_id", "text"])
+        table = (texts.join(codes, "text", join_type="inner").select(["doc_id", "code", "n"])
+                 .sort_by([("doc_id", "ascending"), ("code", "ascending")]))
+        for n, base in enumerate(places):
+            tmp = base / f"{DOC_CODES}.tmp{os.getpid()}"
+            try:
+                base.mkdir(parents=True, exist_ok=True)
+                pq.write_table(table, tmp)
+                os.replace(tmp, base / DOC_CODES)
+                log.info("built %s for index %s", base / DOC_CODES, idx.key)
+                return base / DOC_CODES
+            except OSError as e:
+                if n == len(places) - 1:
+                    raise
+                log.warning("индекс %s не доступен на запись (%s) — коды позиций строятся в %s", idx.path, e, places[1])
+    raise AssertionError("unreachable")
+
+
+def prebuild_doc_codes(store: Store, idx: LotIndex) -> Path:
+    """Build the position-codes sidecar now (`python -m src.match.index`), not on the first query
+    without a code: in docker-compose the index directory is read-only and the temp one dies with
+    the container (#83)."""
+    return _doc_codes(store, idx)
+
+
+def _position_codes(store: Store, idx: LotIndex) -> tuple[np.ndarray, pa.Array, np.ndarray]:
+    """(offsets by doc_id, codes, n) of the sidecar, read once per loaded index."""
+    if "doc_codes" not in idx.sidecars:
+        t = pq.read_table(_doc_codes(store, idx))
+        doc = t.column("doc_id").to_numpy()
+        idx.sidecars["doc_codes"] = (np.searchsorted(doc, np.arange(idx.n_docs + 1)),
+                                     t.column("code").combine_chunks(), t.column("n").to_numpy())
+    return idx.sidecars["doc_codes"]
+
+
+def _predict_okpd2(store: Store, idx: LotIndex, hits: list[tuple[int, float]], lots: LotHits) -> str | None:
+    """OKPD2 of a query without a code, from the documents that matched it; D-045.
+
+    A matched text votes with the codes of the positions that carry this very text — not with the
+    other positions of their lots. One vote per text, its score split over its codes; the
+    VOTE_DOCS best texts vote. Texts that are only lot subjects have no code of their own: they
+    vote only when no position matched at all — the VOTE_LOTS best lots, a lot's score split over
+    its positions. The heaviest group XX.XX wins, then the heaviest code inside it (9 digits
+    scatter the votes). Ties: bytewise order of the group / code.
+    """
+    votes: dict[str, float] = defaultdict(float)
+    try:
+        off, codes, n = _position_codes(store, idx)
+    except (OSError, duckdb.Error) as e:
+        log.warning("коды позиций не построены (%s) — класс определяют лучшие лоты", e)
+    else:
+        coded = sorted(((d, s) for d, s in hits if off[d + 1] > off[d]), key=lambda h: (-h[1], h[0]))
+        for d, s in coded[:VOTE_DOCS]:
+            total = int(n[off[d]:off[d + 1]].sum())
+            for i in range(off[d], off[d + 1]):
+                votes[codes[i].as_py()] += s * int(n[i]) / total
+    if not votes:
+        score = dict(lots.top(VOTE_LOTS))
+        per_lot: dict[tuple[int, str], int] = defaultdict(int)
+        for lot_id, code in store.lot_codes(list(score)):  # one row per position
+            per_lot[(lot_id, code)] += 1
+        positions: dict[int, int] = defaultdict(int)
+        for (lot_id, _), cnt in per_lot.items():
+            positions[lot_id] += cnt
+        for (lot_id, code), cnt in per_lot.items():
+            votes[code] += score[lot_id] * cnt / positions[lot_id]
+    if not votes:
+        return None
+    groups: dict[str, float] = defaultdict(float)
+    for code, w in votes.items():
+        groups[code[:5]] += w
+    grp = min(groups, key=lambda g: (-groups[g], g.encode()))
+    return min((c for c in votes if c[:5] == grp), key=lambda c: (-votes[c], c.encode()))
+
+
+def _class_history(store: Store, cands: list[Candidate], codes: list[str], as_of: date | None) -> None:
     """Deepest OKPD2 match over each candidate's history and lots/wins in the query's group."""
-    lv = [_levels(c) for c in codes]
-    params: dict = {
-        "inns": [c.inn for c in cands],
-        "q9": [x[0] for x in lv], "q6": [x[1] for x in lv if x[1]],
-        "q4": [x[2] for x in lv if x[2]], "q2": [x[3] for x in lv if x[3]],
-    }
-    cond = "publish_date < $as_of" if as_of else "TRUE"
-    if as_of:
-        params["as_of"] = as_of
-    rows = con.execute(
-        f"""
-        WITH p AS (
-            SELECT lot_id, supplier_inn, is_winner FROM read_parquet({pq_path(processed / "participants.parquet")})
-            WHERE supplier_inn IN (SELECT unnest($inns)) AND {cond}
-        ),
-        m AS (
-            SELECT p.supplier_inn, p.lot_id, p.is_winner, i.okpd2_code,
-                   CASE WHEN list_contains($q9, i.okpd2_code) THEN 4
-                        WHEN list_contains($q6, i.okpd2_l6) THEN 3
-                        WHEN list_contains($q4, i.okpd2_l4) THEN 2
-                        WHEN list_contains($q2, i.okpd2_l2) THEN 1 ELSE 0 END AS lvl
-            FROM p JOIN read_parquet({pq_path(processed / "items.parquet")}) i USING (lot_id)
-        )
-        SELECT supplier_inn, max(lvl), arg_max(okpd2_code, (lvl, okpd2_code)),
-               count(DISTINCT lot_id) FILTER (WHERE lvl >= 2),
-               count(DISTINCT lot_id) FILTER (WHERE lvl >= 2 AND is_winner)
-        FROM m GROUP BY supplier_inn
-        """,
-        params,
-    ).fetchall()
-    by_inn = {r[0]: r[1:] for r in rows}
+    by_inn = store.class_history([c.inn for c in cands], codes, as_of)
     for c in cands:
         if c.inn in by_inn:
             c.okpd_level, c.okpd_code, c.class_lots, c.class_wins = by_inn[c.inn]
@@ -207,7 +238,7 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
 
 def _experience(c: Candidate, codes: list[str], as_of: date | None) -> tuple[float, str]:
     if codes:
-        groups = ", ".join(sorted({x[2] or x[0] for x in map(_levels, codes)}))
+        groups = ", ".join(sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
         lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
@@ -224,10 +255,25 @@ def _activity(cp: Counterparty, ref: date | None, as_of: date | None) -> tuple[f
     return 0.5 ** (days / HALF_LIFE_DAYS), f"Последнее участие {_fmt(date.fromisoformat(last))} — {days} дн. {anchor}"
 
 
-def _geography(cp: Counterparty, region: str) -> tuple[float, str]:
+def _inn_geography(inn: str | None, want: str | None, share: float, why: str) -> tuple[float, str]:
+    """No usable KPP: 0 in v1; with signals.inn_region > 0 — region by the INN's first two digits (H-15c)."""
+    if share <= 0.0 or not inn or not inn[:2].isdigit():
+        return 0.0, f"{why} — регион не определён"
+    code = inn[:2]
+    where = REGION_IN.get(code, f"в регионе с кодом {code}")
+    note = f"{why}; ИНН выдан {where} — регион выдачи ИНН, не обязательно место работы"
+    if want is not None and code == want:
+        return share, note
+    if want is not None and NEIGHBOUR.get(want) == code:
+        return share * NEIGHBOUR_VALUE, f"{note}; соседний регион"
+    return 0.0, note
+
+
+def _geography(cp: Counterparty, region: str, inn_share: float = 0.0) -> tuple[float, str]:
     want = REGION_CODE.get(region)
-    if not cp.kpp or len(cp.kpp) < 2:
-        return 0.0, "КПП нет (ИП или не указан) — регион не определён"
+    if not cp.kpp or len(cp.kpp) < 2 or not cp.kpp.strip("0"):  # 000000000 — a stub, not region 00
+        why = "КПП нет (ИП или не указан)" if not cp.kpp or len(cp.kpp) < 2 else "КПП не указан (заглушка из нулей)"
+        return _inn_geography(cp.inn, want, inn_share, why)
     code = cp.kpp[:2]
     where = REGION_IN.get(code, f"в регионе с кодом {code}")
     if want is None:
@@ -248,9 +294,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built."""
     cfg = load_config()  # every call: eval passes weights, the retriever still comes from the config
     w = weights or cfg["weights"]
-    processed = processed_dir()
+    shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
+    store = get_store()
     as_of = query.as_of
-    idx = get_index(processed, as_of)
+    idx = get_index(store, as_of)
     hits = idx.retrieve(tokenize(query.text), TOP_DOCS)
     how = ""
     if cfg["retriever"] == "pg_hybrid":
@@ -265,22 +312,22 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
             log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
     if not hits:
         return []
-    con = duckdb.connect()
-    try:
-        cands = _retrieve(con, idx, hits, processed, as_of)
-        if not cands:
-            return []
-        codes = list(dict.fromkeys(c.strip() for c in query.okpd2 if c.strip()))
-        predicted = False
-        if not codes:
-            guess = _predict_okpd2(con, processed)
-            codes, predicted = ([guess], True) if guess else ([], False)
-        if codes:
-            _class_history(con, cands, codes, processed, as_of)
-        parties = counterparties([c.inn for c in cands], as_of, processed, con)
-    finally:
-        con.close()
-    fetched = built_at(processed)
+    lots = idx.lot_hits(hits)
+    cands = _retrieve(store, idx, lots, as_of)
+    if not cands:
+        return []
+    codes = list(dict.fromkeys(c.strip() for c in query.okpd2 if c.strip()))
+    predicted = False
+    if not codes:
+        guess = _predict_okpd2(store, idx, hits, lots)
+        codes, predicted = ([guess], True) if guess else ([], False)
+    if codes:
+        _class_history(store, cands, codes, as_of)
+    incumbent: dict[str, int] = {}
+    if shares["incumbent"] > 0 and query.customer_inn:
+        incumbent = customer_lots(store, [c.inn for c in cands], query.customer_inn, as_of)
+    fetched = store.built_at()
+    parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
@@ -290,8 +337,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how)
         exp, exp_why = _experience(c, codes, as_of)
+        if query.customer_inn:
+            exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         act, act_why = _activity(cp, ref, as_of)
-        geo, geo_why = _geography(cp, query.region)
+        geo, geo_why = _geography(cp, query.region, shares["inn_region"])
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),

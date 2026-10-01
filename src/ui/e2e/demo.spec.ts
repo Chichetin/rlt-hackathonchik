@@ -23,8 +23,11 @@ test("демо: запрос → два блока → карточка → фи
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   const discovered = page.getByRole("region", { name: "Новые из открытых источников" });
   await expect(history.locator(".item").first()).toBeVisible();
-  // блок «Новые» наполняет #16 (открытые источники); до этого он пуст и честно об этом говорит
-  await expect(discovered.locator(".item, .empty").first()).toBeVisible();
+  // блок «Новые» (#16): компании из реестра МСП ФНС, которых нет в данных АИС ГЗ. В e2e — записанные
+  // ответы rmsp.nalog.ru (tests/fixtures/rmsp/e2e) в кеше источников, без сети.
+  await expect(discovered.locator(".item").first()).toBeVisible();
+  await expect(discovered.locator(".why").first()).toContainText("Основной ОКВЭД");
+  await expect(discovered.locator(".hint")).toContainText("первые 10 действующих записей реестра МСП");
   await expect(history.locator(".score").first()).toHaveText(/\d\.\d\d/);
   await expect(history.locator(".why").first()).not.toBeEmpty();
 
@@ -39,25 +42,52 @@ test("демо: запрос → два блока → карточка → фи
   await expect(card.getByText("В РНП")).toBeVisible();
   await card.getByRole("button", { name: "Закрыть карточку" }).click();
 
-  // 4. Фильтры (D-030). «Только производители»: тип в данных организаторов не указан, enrich его
-  // пока не даёт — фильтр не угадывает, а говорит, у скольких признак неизвестен.
-  await expect(discovered.locator(".empty")).toHaveText(/^Поиск в открытых источниках подключается \(#16\)/);
+  // 3а. Карточка «новой» компании: ИНН подтверждён, у каждого факта — ссылка на реестр и дата
+  await discovered.locator(".item").first().click();
+  await expect(card.getByText("не подтверждён")).toHaveCount(0);
+  await expect(card.locator(".components li")).toHaveCount(6);
+  await expect(card.locator(".evidence li a").first()).toHaveAttribute("href", /^https:\/\/rmsp\.nalog\.ru\//);
+  await expect(card.locator(".evidence li").first()).toContainText(/\d{2}\.\d{2}\.\d{4}/);
+  // роль и её основание — факт с источником (D-057): основной ОКВЭД из реестра МСП
+  await expect(card.locator(".evidence .fact", { hasText: /^Роль — производитель: заявленный основной ОКВЭД 17\.12/ })).toHaveCount(1);
+  await card.getByRole("button", { name: "Закрыть карточку" }).click();
+
+  // 4. Фильтры (D-030). «Только производители»: в данных организаторов тип не указан — фильтр не
+  // угадывает, а говорит, у скольких признак неизвестен; в блоке «Новые» роль определена по основному
+  // ОКВЭД из реестра МСП (D-057) — остаются производители, дистрибьюторы скрыты.
+  const makers = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === "/api/search" &&
+      JSON.parse(r.request().postData() ?? "{}").filters?.only_manufacturers === true,
+  );
   await page.getByLabel("Только производители").check();
+  const onlyMakers = await (await makers).json();
+  expect(onlyMakers.discovered.length).toBeGreaterThan(0);
+  for (const m of onlyMakers.discovered) expect(m.counterparty.kind).toBe("manufacturer");
   await expect(page.locator(".filternote")).toHaveText(
     /^Тип поставщика ещё не определён у \d+ из \d+ — признак появится после обогащения\.$/,
   );
   await expect(history.locator(".empty")).toContainText("у кандидатов этот признак ещё не известен");
+  await expect(discovered.locator(".item")).toHaveCount(onlyMakers.discovered.length);
+  for (const meta of await discovered.locator(".item .meta").allTextContents()) expect(meta).toMatch(/^Производитель · /);
   await page.getByLabel("Только производители").uncheck();
   await expect(history.locator(".item").first()).toBeVisible();
 
-  // «Регион»: по реестру, иначе по КПП (78 — СПб); остаются строки, и у всех КПП 78…
+  // «Регион»: по реестру, иначе по КПП (78 — СПб; src/match/filters.py::in_region); остаются строки,
+  // и у каждой регион из реестра — СПб, а без него КПП 78…
   const regional = page.waitForResponse(
-    (r) => r.url().endsWith("/api/search") && (r.request().postData() ?? "").includes('"region":"Санкт-Петербург"'),
+    // the filtered request, not the parallel one without filters (both carry Query.region)
+    (r) =>
+      new URL(r.url()).pathname === "/api/search" &&
+      JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
   );
   await page.getByLabel("Регион").selectOption("Санкт-Петербург");
   const body = await (await regional).json();
   expect(body.history.length).toBeGreaterThan(0);
-  for (const m of body.history) expect(m.counterparty.kpp).toMatch(/^78/);
+  for (const m of body.history) {
+    if (m.counterparty.region) expect(m.counterparty.region).toBe("Санкт-Петербург");
+    else expect(m.counterparty.kpp).toMatch(/^78/);
+  }
   await expect(history.locator(".item")).toHaveCount(body.history.length);
   for (const meta of await history.locator(".item .meta").allTextContents()) expect(meta).toContain("Санкт-Петербург");
 
@@ -80,4 +110,8 @@ test("номер закупки не найден → понятное сооб�
   await page.getByLabel("Что нужно закупить").fill("Бумага офисная А4");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   await expect(page.getByRole("region", { name: "С опытом госзакупок" }).locator(".item").first()).toBeVisible();
+  // без ОКПД2 блок «Новые» не строится (D-041) и называет причину
+  await expect(page.getByRole("region", { name: "Новые из открытых источников" }).locator(".empty")).toContainText(
+    "Код ОКПД2 не указан — загрузите закупку по номеру",
+  );
 });
