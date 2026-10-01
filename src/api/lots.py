@@ -69,11 +69,12 @@ def find_lot(ident: str) -> Query:
         try:
             row = store.lot(ident)
             okpd2 = store.lot_okpd2(row[0]) if row else []
+            names = store.lot_names(row[0]) if row else []
         except StoreUnavailable as e:  # the database went down after it was chosen
             raise LotDataUnavailable(str(e)) from e
         if row is None:
             raise LotNotFound(ident)
-        return _query(*row, okpd2=okpd2)
+        return _query(*row, okpd2=okpd2, names=names)
     n_src, i_src = _sources()
     con = duckdb.connect(":memory:")
     try:
@@ -89,6 +90,7 @@ def find_lot(ident: str) -> Query:
             raise LotNotFound(ident)
         lot_id, subject, procedure_name, price, customer_inn, channel = row
         okpd2: list[str] = []
+        names: list[str] = []
         if i_src:
             okpd2 = [
                 r[0]
@@ -98,16 +100,31 @@ def find_lot(ident: str) -> Query:
                     [lot_id],
                 ).fetchall()
             ]
+            names = [
+                r[0]
+                for r in con.execute(
+                    f"SELECT product_name FROM {i_src} WHERE CAST(lot_id AS VARCHAR) = ? AND product_name IS NOT NULL "
+                    "AND trim(product_name) <> '' GROUP BY 1 ORDER BY 1 LIMIT 5",
+                    [lot_id],
+                ).fetchall()
+            ]
     except duckdb.Error as e:
         raise LotDataUnavailable(f"не удалось прочитать данные: {e}") from e
     finally:
         con.close()
-    return _query(lot_id, subject, procedure_name, price, customer_inn, channel, okpd2=okpd2)
+    return _query(lot_id, subject, procedure_name, price, customer_inn, channel, okpd2=okpd2, names=names)
 
 
-def _query(lot_id, subject, procedure_name, price, customer_inn, channel, *, okpd2: list[str]) -> Query:
-    if _is_template(subject) and procedure_name and str(procedure_name).strip():
-        subject = procedure_name
+def _query(lot_id, subject, procedure_name, price, customer_inn, channel, *, okpd2: list[str],
+           names: list[str]) -> Query:
+    # subject, else procedure_name, else the lot's position names (both are «ч. 12 ст. 93» templates in ~840 lots)
+    if _is_template(subject):
+        if not _is_template(procedure_name):
+            subject = procedure_name
+        elif names:
+            subject = "; ".join(names)
+        elif procedure_name and str(procedure_name).strip():
+            subject = procedure_name
     try:
         budget = float(price) if price not in (None, "") else None
     except ValueError:

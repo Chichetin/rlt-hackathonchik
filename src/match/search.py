@@ -35,6 +35,7 @@ import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
+from src.match import fallback
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
@@ -100,6 +101,7 @@ class Candidate:
     okpd_code: str | None = None  # supplier's code at the deepest match
     class_lots: int = 0
     class_wins: int = 0
+    found_by: str = ""  # fallback ladder (src/match/fallback.py): the first phrase of product_fit
 
 
 def _retrieve(store: Store, idx: LotIndex, lots: LotHits, as_of: date | None) -> list[Candidate]:
@@ -225,7 +227,7 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
                  how: str = "") -> tuple[float, str]:
     sim = c.bm25 / top_bm25 if top_bm25 > 0 else 0.0
     best = c.best_text if len(c.best_text) <= 60 else c.best_text[:57] + "…"
-    head = f"Похожие{how} позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
+    head = c.found_by or f"Похожие{how} позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
     if not codes:
         return sim, f"{head}; ОКПД2 запроса не определён"
     src = "ОКПД2 определён по похожим позициям" if predicted else "ОКПД2 запроса"
@@ -291,14 +293,21 @@ def _component(name: str, value: float, weights: dict[str, float], explanation: 
 
 
 def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -> list[CounterpartyMatch]:
-    """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built."""
+    """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
+
+    Why the answer is empty (or found by the fallback ladder): fallback.search_note() after the call."""
+    fallback.reset_note()
     cfg = load_config()  # every call: eval passes weights, the retriever still comes from the config
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
     store = get_store()
     as_of = query.as_of
     idx = get_index(store, as_of)
-    hits = idx.retrieve(tokenize(query.text), TOP_DOCS)
+    if idx.n_docs == 0:
+        fallback.set_note(fallback.no_history(as_of))
+        return []
+    tokens = fallback.cap_tokens(idx, tokenize(query.text))
+    hits = idx.retrieve(tokens, TOP_DOCS)
     how = ""
     if cfg["retriever"] == "pg_hybrid":
         from src.match import pg_retriever
@@ -310,13 +319,17 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
             if STRICT_RETRIEVER:
                 raise
             log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
-    if not hits:
-        return []
+    codes, bad_codes = fallback.okpd2_codes(query.okpd2)
     lots = idx.lot_hits(hits)
-    cands = _retrieve(store, idx, lots, as_of)
-    if not cands:
-        return []
-    codes = list(dict.fromkeys(c.strip() for c in query.okpd2 if c.strip()))
+    cands = _retrieve(store, idx, lots, as_of) if hits else []
+    if not cands:  # nobody by text: the fallback ladder (src/match/fallback.py)
+        hits, cands, note = fallback.ladder(store, idx, query, tokens, codes, cfg, bad_codes)
+        fallback.set_note(note)
+        if not cands:
+            return []
+        lots = idx.lot_hits(hits)
+    elif bad_codes:
+        fallback.set_note(f"ОКПД2 не распознан и не учтён: {', '.join(bad_codes)}")
     predicted = False
     if not codes:
         guess = _predict_okpd2(store, idx, hits, lots)

@@ -4,6 +4,8 @@ Also serves the built UI (src/ui/dist) at "/", so `make demo` is one process + w
 Search is paginated, filtered and sorted on the server (D-024): `POST /api/search?limit=&offset=`
 pages each block, the block sizes after filters are in the X-Total-History / X-Total-Discovered
 headers (the frozen SearchResponse has no total). The xlsx export takes every filtered row.
+Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
+X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Response
@@ -29,6 +32,7 @@ from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.llm.provider import get_provider
+from src.match import fallback
 from src.match import search as search_mod
 from src.match.filters import apply_filters
 from src.match.store import get_store
@@ -104,17 +108,25 @@ def health() -> Health:
     return Health(status="ok", stub=_is_stub(), llm=get_provider().name, queue=status_counts(_queue()), store=store)
 
 
-def _found(query: Query) -> list[CounterpartyMatch]:
-    """Every candidate of the query after the user filters, best first."""
+def _found(query: Query) -> tuple[list[CounterpartyMatch], str | None]:
+    """Every candidate of the query after the user filters, best first; and why history is empty."""
+    if not query.text.strip():
+        raise HTTPException(422, "Пустой запрос")
     try:
         found = search_mod.search(query, k=search_mod.CANDIDATES)
     except FileNotFoundError as e:  # organizers' data not ingested / not loaded (src/match/store.py)
         log.warning("search: %s", e)  # the path goes to the log, not to the client
         raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
                                  "или база не отвечает") from e
+    note = fallback.search_note()
     if not getattr(search_mod, "IS_STUB", False):
         found = [*found, *_discovered(query, found)]
-    return apply_filters(found, query)
+    shown = apply_filters(found, query)
+    hidden = sum(m.origin == "history" for m in found) - sum(m.origin == "history" for m in shown)
+    if hidden and not any(m.origin == "history" for m in shown):
+        note = f"фильтры скрыли {hidden}"
+        log.info("search %s: %s", query.query_id, note)
+    return shown, note
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -141,7 +153,9 @@ def _discovered(query: Query, history: list[CounterpartyMatch]) -> list[Counterp
 def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
-    matches = _found(query)
+    matches, note = _found(query)
+    if note:
+        response.headers["X-Search-Note"] = quote(note)
     history = [m for m in matches if m.origin == "history"]
     discovered = [m for m in matches if m.origin == "discovered"]
     response.headers["X-Total-History"] = str(len(history))
@@ -192,7 +206,7 @@ def api_enqueue(inn: str) -> EnqueueResult:
 
 @app.post("/api/export")
 def api_export(query: Query) -> StreamingResponse:
-    matches = _verified(_found(query))
+    matches = _verified(_found(query)[0])
     res = SearchResponse(query=query, history=[m for m in matches if m.origin == "history"],
                          discovered=[m for m in matches if m.origin == "discovered"], stub=_is_stub())
     wb = Workbook()
