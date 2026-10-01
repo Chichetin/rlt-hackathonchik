@@ -1,4 +1,4 @@
-import { useState, type AnchorHTMLAttributes, type ReactNode } from "react";
+import { type AnchorHTMLAttributes, type ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { WarmHints } from "./Micro";
 import { glide } from "./Motion";
@@ -23,29 +23,19 @@ function NavIcon({ icon }: { icon: string }) {
   return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[icon]}</svg>;
 }
 
-export function GlassSidebar({ path, link, mark }: { path: string; link: Link; mark: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+export function GlassHeader({ path, link, mark }: { path: string; link: Link; mark: ReactNode }) {
   const reduced = useReducedMotion();
-  return <header className="appbar glass-sidebar" data-collapsed={collapsed}>
+  return <header className="appbar">
     <div className="workspace-bar">
       <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
-        <span className="brand-mark">{mark}</span><span className="brand-word">митрандир</span>
+        <span className="brand-mark">{mark}</span><span>митрандир</span>
       </a>
-      <button type="button" className="sidebar-toggle" aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"} aria-expanded={!collapsed} aria-controls="workspace-navigation" onClick={() => setCollapsed(v => !v)}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16m7-11-3 3 3 3" /></svg>
-      </button>
-      <div className="sidebar-caption">Рабочее пространство</div>
-      <WarmHints route={path}><nav id="workspace-navigation" className="workspace-nav" aria-label="Разделы страницы">
+      <WarmHints route={path}><nav className="workspace-nav" aria-label="Разделы страницы">
         {pages.map(({ to, label, hint, icon }) => <a key={to} {...link(to)} aria-label={label} data-hint={hint}>
           {path === to && <motion.span className="nav-indicator" layoutId="nav-current" transition={reduced ? { duration: 0 } : glide} aria-hidden="true" />}
           <span className="nav-icon"><NavIcon icon={icon} /></span><span className="nav-label">{label}</span>
         </a>)}
       </nav></WarmHints>
-      <div className="sidebar-note"><span className="sidebar-note-mark">{mark}</span><p>От задачи —<br />к поставщику.</p><small>Основания подбора<br />в каждой карточке.</small></div>
     </div>
   </header>;
-}
-
-export function GlassTopbar({ path, link }: { path: string; link: Link }) {
-  return <div className="glass-topbar"><span>Митрандир <span aria-hidden="true">/</span> <strong>{pages.find(p => p.to === path)?.label ?? "Страница"}</strong></span><a {...link("/search")} className="new-purchase">К подбору <span aria-hidden="true">↗</span></a></div>;
 }
