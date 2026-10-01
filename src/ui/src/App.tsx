@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
+import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
 import { ResultInspector } from "./ResultInspector";
 import "./micro.css";
 import { GlassHeader } from "./GlassShell";
@@ -529,6 +530,7 @@ export function App() {
   const newRows = res ? (weights ? atLeast(rerank(res.discovered, weights), filters.min_level) : res.discovered) : [];
   const historyTotal = res ? (weights ? rankedHistory.length : res.total.history) : 0;
   const newTotal = res ? (weights ? newRows.length : res.total.discovered) : 0;
+  const customerRatings = useRatingSummaries([...historyRows, ...newRows].map(m => m.counterparty.inn));
   const activeRows = resultGroup === "history" ? historyRows : newRows;
   const selectedResult = activeRows.find(m => supplierKey(m) === selectedSuppliers[resultGroup]) ?? activeRows[0] ?? null;
   const selectedIndex = selectedResult ? activeRows.indexOf(selectedResult) : -1;
@@ -763,6 +765,7 @@ export function App() {
             tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
+            ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             rows={historyRows}
             total={historyTotal}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
@@ -782,6 +785,7 @@ export function App() {
             tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
+            ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             rows={newRows}
             total={newTotal}
             onOpen={selectResult}
@@ -819,6 +823,8 @@ function Block(props: {
   title: string;
   hint: string;
   rows: CounterpartyMatch[];
+  ratings: Record<string, RatingSummary>;
+  ratingsState: "loading" | "ready" | "error";
   total: number;
   onOpen: (m: CounterpartyMatch) => void;
   onMore?: () => void;
@@ -865,6 +871,7 @@ function Block(props: {
                     <RoleBadge kind={cp.kind} />
                     <OriginBadge m={m} />
                   </span>
+                  <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
                   {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
                 </motion.button>
               </motion.li>
@@ -892,8 +899,8 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   const links = reviewLinks(cp.name, cp.inn);
   return (
     <section aria-label="Отзывы">
-      <h3>Отзывы</h3>
-      <p className="hint">Не влияет на оценку подбора. Рейтинг из отзывов не показываем: нет источника, который можно честно проверить.</p>
+      <h3>Отзывы в открытых источниках</h3>
+      <p className="hint">Внешние отзывы можно проверить по ссылкам. Их рейтинг не переносится в Митрандир и не влияет на подбор.</p>
       {links.length > 0 ? (
         <p className="review-links">
           Искать отзывы самостоятельно:{" "}
@@ -1011,6 +1018,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         </>
       )}
 
+      <Ratings inn={cp.inn} />
       <ReviewsBlock cp={cp} />
 
       <h3>Источники фактов</h3>
