@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App } from "./App";
+import { App, noteText } from "./App";
 import { reviewLinks } from "./reviews";
 import { buildQuery, type Counterparty, filterNotes, regionLabel, type SearchResponse } from "./api";
 
@@ -56,6 +56,22 @@ test("search shows two blocks, explanation and card with sources", async () => {
   expect(card).toHaveTextContent("не подтверждён");
   // no site in the sources — no logo and no placeholder in its place (#138)
   expect(document.querySelector(".logo")).toBeNull();
+});
+
+test("empty history block shows the server's reason from X-Search-Note (#166)", async () => {
+  const empty = { ...response, history: [] } as SearchResponse;
+  const note = "по названию ничего не найдено; ОКПД2 не задан — уточните название или укажите код";
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(empty), { status: 200, headers: { "X-Search-Note": encodeURIComponent(note) } }),
+  );
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const block = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(block).toHaveTextContent("По названию ничего не найдено; ОКПД2 не задан — уточните название или укажите код.");
+  expect(block).not.toHaveTextContent("Никого не нашли");
+  expect(noteText(undefined)).toBeUndefined();
+  expect(noteText("готово.")).toBe("Готово.");
 });
 
 test("API error is shown, not swallowed", async () => {
