@@ -184,7 +184,8 @@ export interface paths {
         };
         /**
          * Api Counterparty
-         * @description The card by INN, live: the registries are asked inside the request, so at most COUNTERPARTY_LIVE_MAX at once.
+         * @description The card by INN: from the cache at once, otherwise the registries are asked inside the request, so at most
+         *     COUNTERPARTY_LIVE_MAX of those at once (F-10).
          */
         get: operations["api_counterparty_api_counterparty__inn__get"];
         put?: never;

@@ -1,4 +1,4 @@
-"""Limits of the endpoints that spend the registries' patience (F-10, #256, D-099).
+"""Limits of the endpoints that spend the registries' patience (F-10, #256, D-100).
 
 `POST /api/enrich` feeds the worker, `GET /api/counterparty` calls pb.nalog.ru inside the request: an open flood
 of either ends in a captcha, and the enrichment on the venue stops. Three limits (`.env`; the first two are read
@@ -7,7 +7,7 @@ at request time, the third at start):
 - `API_KEY` — set: both endpoints need the header `X-API-Key` (401 otherwise); empty: open, as in the local demo.
 - `ENRICH_QUEUE_MAX` — ceiling of the waiting enrichment tasks for a new INN (429 above it), default 2000.
 - `COUNTERPARTY_LIVE_MAX` — requests of `/api/counterparty` served at once, default 2; the rest get 429
-  (a cached card shares the cap: it takes milliseconds, so it is refused only while every slot holds a slow call).
+  (a card answered from the cache alone takes no slot: the endpoint decides before asking the registries).
 """
 
 from __future__ import annotations
@@ -46,8 +46,9 @@ def require_api_key(x_api_key: str | None = Header(None, description="ключ A
     expected = (os.environ.get("API_KEY") or "").strip()
     if not expected:
         return
-    # bytes: compare_digest raises on a non-ASCII str, and a wrong key must be a 401, not a 500
-    if x_api_key is None or not hmac.compare_digest(x_api_key.encode(), expected.encode()):
+    # bytes: compare_digest raises on a non-ASCII str, and a wrong key must be a 401, not a 500. Starlette decodes the
+    # header as latin-1, so latin-1 gives back the bytes the client sent: a UTF-8 key matches its UTF-8 setting
+    if x_api_key is None or not hmac.compare_digest(x_api_key.encode("latin-1", "replace"), expected.encode()):
         raise HTTPException(401, "нужен ключ API в заголовке X-API-Key")
 
 

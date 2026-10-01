@@ -25,7 +25,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -56,7 +56,7 @@ from src.match.filters import entity_of, kind_of, near_of, parse_filters
 from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
 from src.match.store import get_store
 from src.sources.cache import SourceCache
-from src.sources.pb_nalog import CaptchaRequired
+from src.sources.pb_nalog import CaptchaRequired, card_url
 from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
@@ -280,14 +280,20 @@ _LIMITED: dict[int | str, dict[str, Any]] = {
 }
 
 
+def _answers_from_cache(inn: str) -> bool:
+    """True when enrich() needs no network: offline mode, or a fresh pb card in the cache (its first branch)."""
+    return os.environ.get("ENRICH_OFFLINE") == "1" or SourceCache().get(card_url(inn)) is not None
+
+
 @app.get("/api/counterparty/{inn}", response_model=Counterparty, dependencies=[Depends(guard.require_api_key)],
          responses=_LIMITED)
 def api_counterparty(inn: str) -> Counterparty:
-    """The card by INN, live: the registries are asked inside the request, so at most COUNTERPARTY_LIVE_MAX at once."""
+    """The card by INN: from the cache at once, otherwise the registries are asked inside the request, so at most
+    COUNTERPARTY_LIVE_MAX of those at once (F-10)."""
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
-        with guard.live_slots.take():
+        with nullcontext() if _answers_from_cache(inn) else guard.live_slots.take():
             cp = enrich_mod.enrich(inn)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e

@@ -1,4 +1,6 @@
-"""F-10 (#256, D-099): the endpoints that spend the registries' patience have a key, a queue ceiling and a live cap."""
+"""F-10 (#256, D-100): the endpoints that spend the registries' patience have a key, a queue ceiling and a live cap."""
+
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,9 +8,13 @@ from fastapi.testclient import TestClient
 from src.api import app as app_mod
 from src.api import guard
 from src.contracts import inn_is_valid
+from src.sources import pb_nalog
+from src.sources.cache import SourceCache
 from src.worker import queue as Q
 
 KEY = "s3cret-key"
+CACHED = "7804428656"  # the card in tests/fixtures/pb_nalog
+CARD = Path(__file__).resolve().parents[1] / "fixtures" / "pb_nalog" / f"{CACHED}.txt"
 
 
 def _inn(n: int) -> str:
@@ -26,6 +32,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources.sqlite"))
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.delenv("ENRICH_QUEUE_MAX", raising=False)
+    monkeypatch.delenv("ENRICH_OFFLINE", raising=False)
     monkeypatch.setattr(app_mod, "_engine", None)
     return TestClient(app_mod.app)
 
@@ -68,10 +75,25 @@ def test_counterparty_needs_the_key_before_it_touches_a_registry(client, monkeyp
     assert calls == [_inn(4)]
 
 
-def test_search_and_health_do_not_ask_for_the_key(client, monkeypatch):
+def test_search_and_health_do_not_ask_for_the_key(client, search_data, monkeypatch):
     """The UI calls them without a key: only the two endpoints that reach the registries are guarded."""
     monkeypatch.setenv("API_KEY", KEY)
     assert client.get("/api/health").status_code == 200
+    r = client.post("/api/search", json={"query_id": "q", "text": "бумага А4"})
+    assert r.status_code == 200 and r.json()["history"]
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_blank_key_means_open(client, monkeypatch, blank):
+    monkeypatch.setenv("API_KEY", blank)
+    assert client.post(f"/api/enrich/{_inn(5)}").status_code == 202
+
+
+def test_a_key_with_cyrillic_works_when_the_client_sends_it_as_utf8(client, monkeypatch):
+    """Starlette decodes the header as latin-1; the comparison must give the bytes back, not re-encode the mojibake."""
+    monkeypatch.setenv("API_KEY", "ключ-доступа")
+    assert client.post(f"/api/enrich/{_inn(6)}", headers={"X-API-Key": "ключ-доступа".encode()}).status_code == 202
+    assert client.post(f"/api/enrich/{_inn(7)}", headers={"X-API-Key": "ключ-доступ".encode()}).status_code == 401
 
 
 # --- queue ceiling ---------------------------------------------------------------------------------------------------
@@ -149,6 +171,27 @@ def test_a_second_live_request_is_429_while_the_slot_is_taken(client, monkeypatc
     assert client.get(f"/api/counterparty/{_inn(60)}").status_code == 404
     assert seen == [429]
     assert client.get(f"/api/counterparty/{_inn(61)}").status_code == 404  # the slot is free again
+
+
+def test_a_card_from_the_cache_needs_no_slot(client, monkeypatch):
+    """Both slots hold slow live calls: a cached card is still answered at once, an uncached one waits (429)."""
+    SourceCache().put(pb_nalog.card_url(CACHED), CARD.read_text(encoding="utf-8"))
+    slots = guard.LiveSlots(1)
+    monkeypatch.setattr(guard, "live_slots", slots)
+    with slots.take():
+        cached = client.get(f"/api/counterparty/{CACHED}")
+        uncached = client.get(f"/api/counterparty/{_inn(62)}")
+    assert cached.status_code == 200 and cached.json()["inn"] == CACHED
+    assert uncached.status_code == 429
+
+
+def test_offline_mode_never_takes_a_slot(client, monkeypatch):
+    """ENRICH_OFFLINE=1 does not reach the registries at all: an unknown INN is 404, not 429, with the slot taken."""
+    monkeypatch.setenv("ENRICH_OFFLINE", "1")
+    slots = guard.LiveSlots(1)
+    monkeypatch.setattr(guard, "live_slots", slots)
+    with slots.take():
+        assert client.get(f"/api/counterparty/{_inn(63)}").status_code == 404
 
 
 def test_the_slot_is_released_after_an_error(client, monkeypatch):

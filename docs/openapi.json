@@ -466,7 +466,7 @@
     "/api/counterparty/{inn}": {
       "get": {
         "summary": "Api Counterparty",
-        "description": "The card by INN, live: the registries are asked inside the request, so at most COUNTERPARTY_LIVE_MAX at once.",
+        "description": "The card by INN: from the cache at once, otherwise the registries are asked inside the request, so at most\nCOUNTERPARTY_LIVE_MAX of those at once (F-10).",
         "operationId": "api_counterparty_api_counterparty__inn__get",
         "parameters": [
           {
