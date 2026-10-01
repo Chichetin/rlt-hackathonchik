@@ -225,3 +225,11 @@ def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
     q = client.get("/api/lot/0372200260024000124").json()
     assert q["query_id"] == "lot-77" and q["okpd2"] == ["26.20.40.190"]
     assert q["channel"] == "ЭМ" and q["budget"] == 500.0
+
+
+def test_health_stub_flag_follows_demo_fixture_env(client, monkeypatch):
+    """scripts/demo.sh without organizers' data sets DEMO_FIXTURE=1 → the UI shows the demo banner."""
+    monkeypatch.delenv("DEMO_FIXTURE", raising=False)
+    assert client.get("/api/health").json()["stub"] is False
+    monkeypatch.setenv("DEMO_FIXTURE", "1")
+    assert client.get("/api/health").json()["stub"] is True

@@ -80,11 +80,7 @@ ui-dev:            ## Vite dev-сервер с прокси на API
 demo:              ## всё одной командой с чистого клона, на кеше: http://127.0.0.1:$(PORT)
 	@[ -d .venv ] && [ -d $(UI)/node_modules ] || $(MAKE) setup
 	$(MAKE) ui-build
-	-$(PY) python -m src.match.index   # предсборка BM25 (продукт + cutoff); без данных — предупреждение, демо стартует
-	@echo "Демо: http://127.0.0.1:$(PORT)  (Ctrl+C — остановить)"
-	@trap 'kill 0' EXIT INT TERM; \
-	$(PY) python -m src.worker.worker & \
-	$(PY) uvicorn src.api.app:app --host 127.0.0.1 --port $(PORT)
+	bash scripts/demo.sh   # данные (processed → raw → фикстура), индексы, API + worker
 
 e2e: ui-build      ## e2e демо-сценария (Playwright), свой порт: E2E_PORT=8766
 	cd $(UI) && npx playwright test
