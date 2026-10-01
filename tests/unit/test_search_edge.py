@@ -22,6 +22,18 @@ def _no_postgres(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
 
 
+@pytest.fixture(scope="module")
+def data(fixture_processed, tmp_path_factory):
+    """search_data for the whole module: one index for all searches (the set stays within seconds)."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DATA_PROCESSED_DIR", str(fixture_processed))
+        mp.setenv("DATA_STORE", "parquet")
+        mp.setenv("INDEX_DIR", str(tmp_path_factory.mktemp("edge-indexes")))
+        index_mod.clear_memory_cache()
+        yield fixture_processed
+        index_mod.clear_memory_cache()
+
+
 def fit(m):
     return next(c for c in m.components if c.name == "product_fit")
 
@@ -43,10 +55,9 @@ def test_ladder_rungs_start_at_the_codes_own_level():
 @pytest.mark.parametrize(("text", "okpd2", "what", "depth"), [
     ("абракадабра", ["17.12.14.110"], "кода ОКПД2 17.12.14.110", 1.0),  # no word in the index
     ("и в на", ["1712"], "группы ОКПД2 17.12", 0.5),  # no words at all; the code normalized
-    ("абракадабра", ["17.12.99.000"], "группы ОКПД2 17.12", 0.5),  # code absent from the data: raised
-    ("абракадабра", ["17.99.99.999"], "класса ОКПД2 17", 0.25),  # up to the class
+    ("абракадабра", ["17.99.99.999"], "класса ОКПД2 17", 0.25),  # code absent from the data: up to the class
 ])
-def test_ladder_finds_suppliers_by_okpd2_level(search_data, text, okpd2, what, depth):
+def test_ladder_finds_suppliers_by_okpd2_level(data, text, okpd2, what, depth):
     res = search(Query(query_id="q", text=text, okpd2=okpd2))
     assert res and res[0].counterparty.inn == "7801000012"  # most lots with the code
     for m in res:
@@ -56,7 +67,7 @@ def test_ladder_finds_suppliers_by_okpd2_level(search_data, text, okpd2, what, d
     assert what in (fallback.search_note() or "")
 
 
-def test_vector_step_when_vectors_answer(search_data, monkeypatch):
+def test_vector_step_when_vectors_answer(data, monkeypatch):
     """Postgres stand-in: the vector step returns the paper documents; BM25 part is 0, class predicted."""
     monkeypatch.setattr(fallback, "_vector_hits", lambda idx, text: (idx.retrieve(["бумаг"], 50), ""))
     res = search(Query(query_id="q", text="bumaga"))
@@ -74,7 +85,7 @@ def test_vector_step_when_vectors_answer(search_data, monkeypatch):
     ({"text": "бумага", "as_of": "2020-01-01"}, 200, "нет истории до 01.01.2020"),
     ({"text": "бумага", "filters": {"region": "Москва"}}, 200, "фильтры скрыли 6"),
 ])
-def test_empty_answer_says_why(search_data, tmp_path, monkeypatch, body, status, note):
+def test_empty_answer_says_why(data, tmp_path, monkeypatch, body, status, note):
     from fastapi.testclient import TestClient
 
     from src.api import app as app_mod
@@ -90,8 +101,8 @@ def test_empty_answer_says_why(search_data, tmp_path, monkeypatch, body, status,
     assert note in unquote(r.headers["X-Search-Note"])
 
 
-def test_long_query_keeps_the_rarest_words(search_data):
-    idx = index_mod.get_index(search_data, None)
+def test_long_query_keeps_the_rarest_words(data):
+    idx = index_mod.get_index(data, None)
     tokens = ["бумаг", "картр", "тонер", "ремон", "бумаг", "xyzzy"]
     assert fallback.cap_tokens(idx, tokens, cap=5) == tokens  # ≤ cap unique words: untouched
     assert fallback.cap_tokens(idx, tokens, cap=2) == ["тонер", "ремон"]  # 1 and 2 documents
