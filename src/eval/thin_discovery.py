@@ -1,4 +1,4 @@
-"""Discovery on thin categories: «было → стало» per OKPD2 group (#122, D-066).
+"""Discovery on thin categories: «было → стало» per OKPD2 group (#122, D-072).
 
     uv run python -m src.eval.thin_discovery T-disc-v1 --thin T-thin-v1 --top 5 --live --max-live 40
 

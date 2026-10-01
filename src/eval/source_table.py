@@ -9,12 +9,11 @@ with a note, not an invented number.
 
 Columns:
 - requests: cached answers of the source (one per request);
-- found: entities the answers contain (rmsp: distinct INN rows; pb / bo: cards with a row; РНП: INNs
-  asked; estore: supplier cells with an INN);
+- found: entities the answers contain (rmsp: distinct INN rows; pb / bo: cards with a row);
 - verified: found AND INN checksum valid AND the INN literally on the cached page (the Evidence rule of
   src/enrich/evidence.py) AND the source says «действующее» (rmsp is_active, pb status, bo ACTIVE);
 - dropped: the rest by reason; `new`: verified and absent from organizers' data (rmsp search only).
-estore is the primary source of the organizers' data: a row «сверка», never a source of new companies (D-061).
+estore is the primary source of the organizers' data: a row «сверка» (pages counted, not parsed), never a source of new companies (D-061).
 """
 
 from __future__ import annotations
@@ -34,12 +33,13 @@ from src.contracts import inn_is_valid
 from src.enrich.evidence import value_in_page
 from src.eval.run import RESULTS, git
 from src.eval.split import ROOT
-from src.sources import bo_nalog, eis_rnp, estore, pb_nalog, rmsp
+from src.sources import bo_nalog, eis_rnp, pb_nalog, rmsp
 from src.sources.cache import SourceCache
 
 ROLE_NEW = "поиск новых"
 ROLE_CHECK = "проверка"
 ROLE_RECON = "сверка (первоисточник данных, не источник новых)"
+ESTORE_BASE = "https://estore.gz-spb.ru"  # the client was removed from the code (D-061): only cached pages are counted
 
 
 @dataclass
@@ -207,16 +207,14 @@ def _rnp(pages: list[Page]) -> Row:
 
 
 def _estore(pages: list[Page]) -> Row:
+    """Reconciliation only: the registry of Электронный магазин is the organizers' own data (D-061). No client
+    in the code any more, so cached pages (if an older run left some) are counted, not parsed."""
     row = Row("estore.gz-spb.ru — реестр контрактов ЭМ", ROLE_RECON)
     for p in pages:
         row.requests += 1
         row.seen(p.fetched_at)
-        for r in estore.parse(p.body).rows:
-            row.found += 1
-            if r.supplier_inn and inn_is_valid(r.supplier_inn):
-                row.verified += 1
-            else:
-                row.dropped["у поставщика нет ИНН или он невалиден"] += 1
+    if row.requests:
+        row.note = "страницы не разбираются: ЭМ — первоисточник данных организаторов, не источник новых (D-061)"
     return row
 
 
@@ -231,7 +229,7 @@ def build_table(pages: list[Page], known: set[str] | None = None) -> list[Row]:
         _pb(pick(f"{pb_nalog.BASE}/search.html#queryAll=")),
         _bo(pick(f"{bo_nalog.BASE}/advanced-search/")),
         _rnp(pick(f"{eis_rnp.BASE}/epz/dishonestsupplier/")),
-        _estore(pick(estore.BASE)),
+        _estore(pick(ESTORE_BASE)),
     ]
     for r in rows:
         if r.requests == 0:

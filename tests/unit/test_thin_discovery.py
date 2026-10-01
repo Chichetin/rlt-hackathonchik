@@ -79,9 +79,10 @@ def groups(n: int) -> list[dict]:
 
 
 def test_budget_stops_before_exceeding_the_cap(cache):
-    res = TD.run(groups(10), cache, offline=False, max_live=10, discover_fn=fake(4))
-    assert [r.live_requests for r in res] == [4, 4]  # a third group could take it to 12 > 10: not started
-    assert sum(r.live_requests for r in res) <= 10
+    cap = D.MAX_REQUESTS  # the most one group can take
+    res = TD.run(groups(10), cache, offline=False, max_live=cap * 5 // 2, discover_fn=fake(cap))
+    assert [r.live_requests for r in res] == [cap, cap]  # a third group could exceed the limit: not started
+    assert sum(r.live_requests for r in res) <= cap * 5 // 2
 
 
 def test_refusal_stops_the_run(cache):
@@ -114,8 +115,9 @@ def test_cap_of_the_block_is_lifted_only_during_the_call(cache, tmp_path):
 
 
 def test_budget_boundary_is_inclusive(cache):
-    res = TD.run(groups(10), cache, offline=False, max_live=12, discover_fn=fake(4))
-    assert len(res) == 3 and sum(r.live_requests for r in res) == 12  # exactly the cap is allowed
+    cap = D.MAX_REQUESTS
+    res = TD.run(groups(10), cache, offline=False, max_live=cap * 3, discover_fn=fake(cap))
+    assert len(res) == 3 and sum(r.live_requests for r in res) == cap * 3  # exactly the limit is allowed
 
 
 def test_company_without_cached_evidence_is_not_counted_as_passed(cache):

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.eval import source_table as S
-from src.sources import bo_nalog, eis_rnp, estore, pb_nalog, rmsp
+from src.sources import bo_nalog, eis_rnp, pb_nalog, rmsp
 from src.sources.cache import SourceCache
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures"
@@ -105,13 +105,10 @@ def test_rnp_clean_vs_listed(cache):
 
 
 def test_estore_is_reconciliation_never_new(cache):
-    inn = "7805772436"
-    body = ('<table class="mte-grid-table"><tr id="rowId-1"><td class="row-name">Бумага</td>'
-            f'<td class="row-supplier">ООО Ромашка ({inn})</td><td class="row-priceRur">10</td></tr></table>')
-    cache.put(estore.supplier_url(inn), body, fetched_at=T0)
+    cache.put("https://estore.gz-spb.ru/contracts/catalog/common/eshop?supplier=7805772436", "<html/>", fetched_at=T0)
     row = table(cache)["estore.gz-spb.ru"]
-    assert (row.found, row.verified, row.new) == (1, 1, None)
-    assert row.role.startswith("сверка") and "не источник новых" in row.role
+    assert (row.requests, row.found, row.verified, row.new) == (1, 0, 0, None)
+    assert row.role.startswith("сверка") and "не источник новых" in row.role and "D-061" in row.note
 
 
 def test_render_marks_empty_sources(cache):
