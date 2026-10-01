@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Делает одну GitHub-issue в её worktree — тест → код → make check → PR с Closes #N → reviewer → merge по вердикту. Для любой задачи, меняющей код, данные, тесты или документы. По умолчанию sonnet; на задачах со сложностью «высокая» (оценка в issue) запускается с model: opus. Контракт и зависимости сам не меняет.
+description: Делает одну GitHub-issue в её worktree — тест → код → make check-changed → PR с Closes #N → reviewer → merge по вердикту. Для любой задачи, меняющей код, данные, тесты или документы. По умолчанию sonnet; на задачах со сложностью «высокая» (оценка в issue) запускается с model: opus. Контракт и зависимости сам не меняет.
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 color: blue
@@ -43,8 +43,8 @@ color: blue
 4. **Проверки** в worktree:
 
    ```bash
-   make check                      # ruff, pyright, tsc, pytest, vitest, хуки, openapi-check, stubs
-   make e2e                        # если трогал API, контракт или UI; свой порт: E2E_PORT=8766 make e2e
+   make check-changed              # только затронутые модули: ruff/pyright по файлам, их pytest, vitest,
+                                   # e2e по демо-пути (свой порт: E2E_PORT=8766), полный check по общим файлам
    make eval EXP=<id>              # если менял поиск, скоринг или данные — дальше evaluator
    bash .claude/hooks/check-upstream.sh manual
    ```
@@ -55,7 +55,7 @@ color: blue
 6. **Push и PR**:
 
    ```bash
-   git fetch --prune && git merge origin/main && make check
+   git fetch --prune && git merge origin/main && make check-changed
    git push -u origin HEAD
    gh pr create --base main --title "<area>: <что закончено>" --body-file <файл по .github/pull_request_template.md>
    ```
@@ -63,7 +63,7 @@ color: blue
    В описании: `Closes #<N>`, пункт условий, команды проверок с числами, затронутые
    потребители контракта.
 7. **Ревью и merge**: попроси запустить `reviewer` (или запусти сам, если тебе дан Agent) с
-   веткой, worktree и #N. Вердикт `merge` → `git merge origin/main && make check` →
+   веткой, worktree и #N. Вердикт `merge` → `git merge origin/main && make check-changed` →
    `gh pr merge <PR> --merge --delete-branch`. По одному: пока идёт чужой merge — ждёшь.
    `доработать` → правишь и снова reviewer; два отклонения подряд — арбитр `jury`.
 8. **Память**: перед `/compact`, концом сессии и закрытием задачи —
@@ -87,7 +87,7 @@ color: blue
 Задача: #<N> — <название>; area:<…>; пункт условий <№>
 Ветка / PR / commit: worktree-… / #<PR> / <hash>
 Сделано: 3–6 строк
-Проверки: команда → результат с числами (pytest 42/42, vitest 3/3, e2e 1/1, make check OK)
+Проверки: команда → результат с числами (pytest 42/42, vitest 3/3, e2e 1/1, make check-changed OK)
 Мутации: N сделано, M выжило, чем закрыто | не делались: без логики
 Eval: make eval EXP=<id> → метрика [CI] | не менялось
 Решения: строки DECISIONS / tz-compliance

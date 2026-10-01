@@ -242,7 +242,7 @@ def _cfg(**options) -> dict:
 
 def test_scoring_options_default_is_v1_and_unknown_is_an_error():
     assert search_mod.scoring_options({}) == {"fit_bm25_share": search_mod.FIT_BM25_SHARE, "experience_by": "class",
-                                              "ip_region_by_inn": False, "tie_break": "inn"}
+                                              "tie_break": "inn"}
     for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"}):
         with pytest.raises(ValueError):
             search_mod.scoring_options({"options": bad})
@@ -265,21 +265,6 @@ def test_experience_by_similar_counts_matched_lots(search_data):
         assert "по ОКПД2" in other.explanation
 
 
-def test_ip_region_by_inn_only_with_the_option():
-    from src.contracts import Counterparty
-
-    ip = Counterparty(inn="780443398976", kpp="000000000", name="ИНН 780443398976")
-    assert search_mod._geography(ip, "Санкт-Петербург")[0] == 0.0  # v1: placeholder KPP — region 00
-    value, why = search_mod._geography(ip, "Санкт-Петербург", ip_by_inn=True)
-    assert value == 1.0 and "ИНН выдан" in why
-    lo = Counterparty(inn="470000000091", kpp=None, name="x")
-    assert search_mod._geography(lo, "Санкт-Петербург", ip_by_inn=True)[0] == search_mod.NEIGHBOUR_VALUE
-    far = Counterparty(inn="540000000000", kpp=None, name="x")
-    assert search_mod._geography(far, "Санкт-Петербург", ip_by_inn=True)[0] == 0.0
-    org = Counterparty(inn="7701000040", kpp="770101001", name="x")  # an organization keeps its KPP region
-    assert search_mod._geography(org, "Санкт-Петербург", ip_by_inn=True)[0] == 0.0
-
-
 def test_tie_break_bm25_orders_equal_scores_by_similarity(search_data):
     q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
     zero = {"product_fit": 0.0, "experience": 0.0, "activity": 0.0, "geography": 0.0}  # every score ties at 0
@@ -288,3 +273,27 @@ def test_tie_break_bm25_orders_equal_scores_by_similarity(search_data):
     fits = [next(c.value for c in m.components if c.name == "product_fit")
             for m in search(q, weights=zero, config=_cfg(tie_break="bm25", fit_bm25_share=1.0))]
     assert fits == sorted(fits, reverse=True)
+
+
+def _sole_trader(kpp):
+    from src.contracts import Counterparty
+    return Counterparty(inn="780100000090", kpp=kpp, name="ИНН 780100000090")
+
+
+@pytest.mark.parametrize("kpp", ["000000000", None])
+def test_geography_kpp_stub_is_not_region_00(kpp):
+    value, why = search_mod._geography(_sole_trader(kpp), "Санкт-Петербург")
+    assert value == 0.0 and "регион не определён" in why
+    assert "00" not in why.replace("000000000", "")  # no "region with code 00"
+
+
+def test_geography_inn_region_signal_h15c():
+    stub = _sole_trader("000000000")
+    assert search_mod._geography(stub, "Санкт-Петербург", 1.0)[0] == 1.0
+    assert search_mod._geography(stub, "Ленинградская область", 1.0)[0] == pytest.approx(search_mod.NEIGHBOUR_VALUE)
+    value, why = search_mod._geography(_sole_trader(None), "Санкт-Петербург", 0.5)
+    assert value == 0.5 and "ИНН выдан в Санкт-Петербурге" in why and "регион выдачи ИНН" in why
+    # a real KPP is untouched by the signal
+    from src.contracts import Counterparty
+    org = Counterparty(inn="4701000038", kpp="470101001", name="x")
+    assert search_mod._geography(org, "Санкт-Петербург", 1.0) == search_mod._geography(org, "Санкт-Петербург")

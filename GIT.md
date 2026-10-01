@@ -57,8 +57,8 @@ cd .claude/worktrees/<N>-<тема> && uv sync --frozen --extra pg && (cd src/ui
 ## Финиш: ветка → PR → main
 
 ```bash
-make check                                  # lint, typecheck, pytest, vitest, хуки, OpenAPI, # STUB
-make e2e                                    # если затронуты API или UI; из worktree: E2E_PORT=8766
+make check-changed                          # только затронутое (+ e2e по демо-пути, полный check по общим файлам)
+                                            # из worktree e2e со своим портом: E2E_PORT=8766 make check-changed
 git fetch --prune && git merge origin/main  # main ушёл вперёд → проверки заново
 git add <пути> && git commit -m "<area>: <что закончено>"
 git push -u origin HEAD
@@ -72,7 +72,7 @@ gh pr create --fill --body-file <описание по .github/pull_request_temp
 - `доработать` → правки в той же ветке, повторный `reviewer`;
 - два отклонения подряд → арбитр `jury`.
 
-**Merge — строго по одному:** перед каждым — `git merge origin/main` в ветке и `make check`.
+**Merge — строго по одному:** перед каждым — `git merge origin/main` в ветке и `make check-changed`.
 Сломанный `main` чинит тот, чей merge его сломал, — раньше своей задачи. PR, ломающий e2e демо, не
 вливается.
 
