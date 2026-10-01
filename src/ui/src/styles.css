@@ -534,6 +534,33 @@ html { scroll-padding-top: 80px; }
 
 /* #168: hero shows the brand mark alone */
 .hero-mark { display: grid; place-items: center; min-width: 0; color: #dfe6f5; }
-.hero-mark svg { width: min(300px, 72%); height: auto; filter: drop-shadow(0 0 48px #9db4ff26); }
-.hero-mark path:first-child { stroke-opacity: .55; }
 @media (max-width: 760px) { .hero-mark { display: none; } }
+
+/* #171: the hero mark as glass — clear body, chrome rim with a dispersive rainbow glint, colour-split «М» */
+@property --glint { syntax: "<angle>"; initial-value: 210deg; inherits: false; }
+.glass-diamond {
+  position: relative; display: grid; place-items: center; width: min(230px, 56%); aspect-ratio: 1;
+  transform: rotate(45deg); border-radius: 24%;
+  background: linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.02) 46%, rgba(0,0,0,.32));
+  backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow: 0 0 0 6px #05060880, 0 40px 90px -30px #000, inset 0 2px 1px #ffffff2a, inset 0 -14px 34px #0006, inset 14px 14px 44px #9db4ff14; }
+/* the rim only: the conic gradient is masked to a 2px ring */
+.glass-diamond::after {
+  content: ""; position: absolute; inset: 0; padding: 2px; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(from var(--glint),
+    #34373e 0deg, #eef1f6 26deg, #6b7079 58deg, #24272d 104deg, #c4cad3 140deg,
+    #ffd27a 150deg, #ff7ab8 156deg, #7ad7ff 162deg, #f2f4f8 172deg, #4b4f57 214deg,
+    #24272d 250deg, #f2f4f8 282deg, #9cf0ff 292deg, #ffe9a8 298deg, #8a8f98 318deg, #34373e 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: glint-turn 14s linear infinite; }
+/* a soft specular streak across the glass */
+.glass-diamond::before { content: ""; position: absolute; inset: 3px; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.12) 43%, rgba(255,255,255,.02) 52%, transparent 60%); }
+.glass-m { width: 74%; transform: rotate(-45deg); overflow: visible; filter: drop-shadow(0 0 10px #dfe8ff55); }
+.m-split { fill: none; stroke-width: 3.2; stroke-linejoin: round; vector-effect: non-scaling-stroke; mix-blend-mode: screen; opacity: .65; }
+.m-split-warm { stroke: #ff6f9a; }
+.m-split-cool { stroke: #63d9ff; }
+@keyframes glint-turn { to { --glint: 570deg; } }
+@media (prefers-reduced-motion: reduce) { .glass-diamond::after { animation: none; } }
+.hero-mark .glass-m { width: 74%; } /* beats glass.css `.hero-mark svg` */
