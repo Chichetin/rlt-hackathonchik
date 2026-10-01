@@ -28,6 +28,25 @@ STATS_KEYS = (
     "last_seen",
     "median_start_price",
     "top_okpd2",
+    # profile (D-059)
+    "okpd2_classes",
+    "okpd2_groups",
+    "top_class_share",
+    "assortment_breadth",
+    "distinct_codes",
+    "items_per_lot",
+    "p90_start_price",
+    "top_customer_share",
+    "repeat_win_share",
+    "active_months",
+    "lots_last_90d",
+    "em_offers",
+    "em_wins",
+    "aisgz_contracts",
+    "avg_rivals",
+    "entity_type",
+    "kpp_count",
+    "smp_contracts",
 )
 
 

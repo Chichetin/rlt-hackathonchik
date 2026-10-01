@@ -139,9 +139,12 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
 
     Columns are the keys of Counterparty.stats: lots_participated, lots_won, win_rate, customers,
     customers_spb, first_seen, last_seen, median_start_price, top_okpd2 (3 most frequent level-4
-    groups, comma-separated), plus kpp (most frequent) and inn_valid.
+    groups, comma-separated), plus kpp (most frequent) and inn_valid, and the profile keys
+    (D-059, research/DATA_DICTIONARY.md): assortment, scale, customers, activity, channels, legal.
     """
     cond = f"publish_date < DATE '{as_of.isoformat()}'" if as_of else "TRUE"
+    # End of the history: lots_last_90d counts lots in [end - 90 days, end).
+    end = f"DATE '{as_of.isoformat()}'" if as_of else "(SELECT max(publish_date) + 1 FROM p)"
     con.execute(f"DROP TABLE IF EXISTS {table}")
     con.execute(
         f"""
@@ -167,8 +170,72 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
             FROM (SELECT supplier_inn, supplier_kpp, count(*) AS n FROM p
                   WHERE supplier_kpp IS NOT NULL GROUP BY ALL)
             GROUP BY supplier_inn
+        ),
+        lot_n AS (SELECT lot_id, count(*) AS n FROM p GROUP BY lot_id),
+        lot_items AS (
+            SELECT lot_id, count(*) AS n_items FROM items GROUP BY lot_id
+        ),
+        cls AS (  -- lots per (supplier, level-2 class)
+            SELECT p.supplier_inn, i.okpd2_l2, count(DISTINCT p.lot_id) AS n
+            FROM p JOIN items i USING (lot_id) WHERE i.okpd2_l2 IS NOT NULL GROUP BY ALL
+        ),
+        cls_agg AS (
+            SELECT supplier_inn, count(*) AS okpd2_classes, max(n) AS top_n FROM cls GROUP BY supplier_inn
+        ),
+        cls_lots AS (
+            SELECT p.supplier_inn, count(DISTINCT p.lot_id) AS n
+            FROM p JOIN items i USING (lot_id) WHERE i.okpd2_l2 IS NOT NULL GROUP BY p.supplier_inn
+        ),
+        grp_agg AS (  -- normalized Shannon entropy over level-4 groups: 0 for one group, 1 for even
+            SELECT supplier_inn, count(*) AS okpd2_groups,
+                   CASE WHEN count(*) > 1 THEN -sum(share * ln(share)) / ln(count(*)) ELSE 0 END
+                   AS assortment_breadth
+            FROM (SELECT supplier_inn, n / sum(n) OVER (PARTITION BY supplier_inn) AS share FROM groups)
+            GROUP BY supplier_inn
+        ),
+        codes AS (
+            SELECT p.supplier_inn, count(DISTINCT i.okpd2_code) AS distinct_codes
+            FROM p JOIN items i USING (lot_id) WHERE i.okpd2_code IS NOT NULL GROUP BY p.supplier_inn
+        ),
+        cust AS (
+            SELECT supplier_inn, max(n) AS top_n, sum(n) AS total
+            FROM (SELECT supplier_inn, customer_inn, count(*) AS n FROM p
+                  WHERE customer_inn IS NOT NULL GROUP BY ALL) GROUP BY supplier_inn
+        ),
+        repeat AS (  -- a win is a repeat when the same customer already gave him a win earlier
+            SELECT supplier_inn, count(*) FILTER (WHERE r > 1) AS rep, count(*) AS wins
+            FROM (SELECT supplier_inn, row_number() OVER (
+                      PARTITION BY supplier_inn, customer_inn ORDER BY publish_date, lot_id) AS r
+                  FROM p WHERE is_winner AND customer_inn IS NOT NULL)
+            GROUP BY supplier_inn
+        ),
+        per_lot AS (
+            SELECT p.supplier_inn, p.channel, n.is_smp, p.is_winner, ln.n - 1 AS rivals, li.n_items
+            FROM p JOIN notices n USING (lot_id) JOIN lot_n ln USING (lot_id)
+            LEFT JOIN lot_items li USING (lot_id)
+        ),
+        lot_agg AS (
+            SELECT supplier_inn,
+                   median(n_items) AS items_per_lot,
+                   avg(rivals) FILTER (WHERE channel = 'ЭМ') AS avg_rivals,
+                   count(*) FILTER (WHERE is_winner AND is_smp) AS smp_contracts
+            FROM per_lot GROUP BY supplier_inn
+        ),
+        prof AS (
+            SELECT l.supplier_inn,
+                   c.okpd2_classes, g.okpd2_groups,
+                   round(c.top_n / cl.n, 4) AS top_class_share,
+                   round(g.assortment_breadth, 4) AS assortment_breadth,
+                   cd.distinct_codes, l.items_per_lot,
+                   round(cu.top_n / cu.total, 4) AS top_customer_share,
+                   round(r.rep / r.wins, 4) AS repeat_win_share,
+                   round(l.avg_rivals, 2) AS avg_rivals, l.smp_contracts
+            FROM lot_agg l
+            LEFT JOIN cls_agg c USING (supplier_inn) LEFT JOIN cls_lots cl USING (supplier_inn)
+            LEFT JOIN grp_agg g USING (supplier_inn) LEFT JOIN codes cd USING (supplier_inn)
+            LEFT JOIN cust cu USING (supplier_inn) LEFT JOIN repeat r USING (supplier_inn)
         )
-        SELECT a.*, top.top_okpd2
+        SELECT a.*, top.top_okpd2, prof.* EXCLUDE (supplier_inn)
         FROM (
             SELECT supplier_inn AS inn,
                    kpp.kpp,
@@ -181,9 +248,18 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
                    count(DISTINCT customer_inn) FILTER (WHERE customer_inn LIKE '{SPB}%') AS customers_spb,
                    min(publish_date) AS first_seen,
                    max(publish_date) AS last_seen,
-                   median(start_price) AS median_start_price
+                   median(start_price) AS median_start_price,
+                   quantile_cont(start_price, 0.9) AS p90_start_price,
+                   count(DISTINCT date_trunc('month', publish_date)) AS active_months,
+                   count(DISTINCT lot_id) FILTER (WHERE publish_date >= {end} - 90) AS lots_last_90d,
+                   count(DISTINCT lot_id) FILTER (WHERE channel = 'ЭМ') AS em_offers,
+                   count(DISTINCT lot_id) FILTER (WHERE channel = 'ЭМ' AND is_winner) AS em_wins,
+                   count(DISTINCT lot_id) FILTER (WHERE channel = 'АИС ГЗ' AND is_winner) AS aisgz_contracts,
+                   CASE length(supplier_inn) WHEN 10 THEN 'ЮЛ' WHEN 12 THEN 'ИП' END AS entity_type,
+                   count(DISTINCT supplier_kpp) AS kpp_count
             FROM p LEFT JOIN kpp ON kpp.inn = p.supplier_inn GROUP BY supplier_inn, kpp.kpp
         ) a LEFT JOIN top ON top.supplier_inn = a.inn
+        LEFT JOIN prof ON prof.supplier_inn = a.inn
         ORDER BY a.lots_participated DESC, a.inn
         """
     )

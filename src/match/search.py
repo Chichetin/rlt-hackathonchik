@@ -246,6 +246,26 @@ def _experience(c: Candidate, codes: list[str], as_of: date | None) -> tuple[flo
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
 
+# Assortment summary thresholds (D-059, research/DATA_DICTIONARY.md): shown only with enough history.
+PROFILE_MIN_LOTS = 5
+NARROW_TOP_SHARE = 0.8
+WIDE_CLASSES, WIDE_TOP_SHARE = 5, 0.5
+
+
+def _profile_note(cp: Counterparty) -> str:
+    """One-line assortment summary from the supplier profile; empty between the thresholds. Not scored."""
+    st = cp.stats
+    share, classes, lots = st.get("top_class_share"), st.get("okpd2_classes"), st.get("lots_participated")
+    if not isinstance(share, (int, float)) or not isinstance(lots, (int, float)) or lots < PROFILE_MIN_LOTS:
+        return ""
+    top = str(st.get("top_okpd2") or "")[:2]
+    if share >= NARROW_TOP_SHARE:
+        return f"; узкий ассортимент: {share:.0%} лотов — класс {top}" if top.isdigit() else ""
+    if isinstance(classes, (int, float)) and classes >= WIDE_CLASSES and share < WIDE_TOP_SHARE:
+        return f"; широкий ассортимент: {int(classes)} классов ОКПД2"
+    return ""
+
+
 def _activity(cp: Counterparty, ref: date | None, as_of: date | None) -> tuple[float, str]:
     last = cp.stats.get("last_seen")
     if not isinstance(last, str) or ref is None:
@@ -339,6 +359,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
         exp, exp_why = _experience(c, codes, as_of)
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
+        exp_why += _profile_note(cp)
         act, act_why = _activity(cp, ref, as_of)
         geo, geo_why = _geography(cp, query.region, shares["inn_region"])
         comps = [
