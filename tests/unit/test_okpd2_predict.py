@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -170,8 +171,8 @@ def test_position_codes_are_built_once_next_to_the_index(own_data, monkeypatch):
     assert predicted("бумага офисная") == PAPER and sidecar.stat().st_mtime_ns == stamp
 
 
-# Windows has no geteuid and chmod 0o555 does not make a directory read-only there
-@pytest.mark.skipif(getattr(os, "geteuid", lambda: 0)() == 0, reason="root (or Windows) ignores directory permissions")
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                    reason="Windows has no geteuid and ignores chmod on directories; root ignores permissions")
 def test_read_only_index_dir_still_predicts(own_data, tmp_path, monkeypatch):
     """docker-compose mounts indexes read-only: the sidecar goes to the temp directory."""
     own_data([(1, "2024-02-01", "Поставка", [("Бумага офисная", PAPER), ("Краска красная", PAINT)])])
