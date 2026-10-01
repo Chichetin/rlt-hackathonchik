@@ -84,6 +84,7 @@ def test_export_encode_import_roundtrip(conn, tmp_path: Path) -> None:
     assert export_missing(conn, texts, vec_schema=VEC) == total - 2
     assert encode_file(texts, vecs, fake_encode, chunk=3) == total - 2
     assert import_file(conn, vecs, data_schema=SCHEMA, vec_schema=VEC, batch_size=2) == total - 2  # several batches
+    assert import_file(conn, vecs, data_schema=SCHEMA, vec_schema=VEC, batch_size=2) == 0  # rerun changes nothing
     assert embed(conn, fake_encode, data_schema=SCHEMA, vec_schema=VEC, limit=0) == {"total": total, "done": total}
     name = conn.execute(sql.SQL("SELECT norm FROM {} ORDER BY norm DESC LIMIT 1")
                         .format(sql.Identifier(VEC, "names_e5_small"))).fetchone()[0]

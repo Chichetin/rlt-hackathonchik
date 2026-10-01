@@ -155,8 +155,8 @@ def import_file(conn: psycopg.Connection, path: Path, data_schema: str = "data",
     pf = pq.ParquetFile(path)
     updated, seen, started = 0, 0, time.monotonic()
     with conn.cursor() as cur:
-        # Batch by batch: one 1M-row UPDATE took the 7 GB laptop's Docker VM down (#48); each batch commits on its
-        # own under autocommit, so a rerun resumes where it stopped (only rows with emb IS NULL change).
+        # Batch by batch: one 1M-row UPDATE took the 7 GB laptop's Docker VM down (#48). Each batch is committed, so
+        # a rerun keeps what is done: it reads the whole file again but changes only rows with emb IS NULL.
         for batch in pf.iter_batches(batch_size=batch_size):
             cur.execute("TRUNCATE import_vecs")
             emb = batch.column("emb").flatten().to_numpy().reshape(-1, DIM).astype(np.float32)
@@ -164,9 +164,11 @@ def import_file(conn: psycopg.Connection, path: Path, data_schema: str = "data",
                 for norm, v in zip(batch.column("norm").to_pylist(), emb, strict=True):
                     cp.write_row((norm, _vec(v)))
             cur.execute(update)
+            if not conn.autocommit:
+                conn.commit()
             updated, seen = updated + cur.rowcount, seen + batch.num_rows
-            log.info("импорт %d/%d (обновлено %d, %.0f строк/с)", seen, pf.metadata.num_rows, updated,
-                     _rate(seen, started))
+            log.info("импорт %d/%d (обновлено %d, пропущено %d: уже с вектором или нет в таблице; %.0f строк/с)",
+                     seen, pf.metadata.num_rows, updated, seen - updated, _rate(seen, started))
     return updated
 
 
