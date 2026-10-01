@@ -19,12 +19,11 @@ from pathlib import Path
 import yaml
 
 from src.contracts import Query
-from src.enrich.evidence import strip_unverified
 from src.eval import baselines
 from src.eval.metrics import METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
+from src.match import pipeline
 from src.match import search as search_mod
-from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
@@ -89,13 +88,13 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
 
 
 def _rank_search(query: Query, cfg: dict) -> list[str]:
-    """What the user sees: search() + strip_unverified(), as /api/search (D-015)."""
-    matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"), config=cfg)
-    if not getattr(search_mod, "IS_STUB", False):
-        cache = SourceCache()
-        matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
-                   for m in matches]
-    return [m.counterparty.inn for m in matches if m.origin == "history" and m.counterparty.inn]
+    """What the user sees: the history block of /api/search — the same pipeline (src/match/pipeline.py, #220)
+    in its backtest mode: user filters on organizers' data and the Evidence check, top-k as on screen; no
+    «Новые» (never relevant) and nothing from the cache — status, РНП, МСП, role there are today's facts,
+    a leak in a backtest (D-097)."""
+    picked = pipeline.pick(query, config=cfg, backtest=True)
+    shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
+    return [m.counterparty.inn for m in shown if m.counterparty.inn]
 
 
 def _summary(rows: list[dict]) -> dict:
@@ -156,6 +155,7 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     method = cfg.get("method", "search")
     novelty = winner_novelty(cases, cutoff)
     per_query = []
+    audit = pipeline.TodayAudit() if method == "search" else None
     strict, search_mod.STRICT_RETRIEVER = search_mod.STRICT_RETRIEVER, True  # unavailable retriever fails the run
     started = time.monotonic()
     try:
@@ -163,6 +163,8 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             query = with_cutoff(case.query, cutoff)
             ranked = _rank_search(query, cfg) if method == "search" else baselines.rank(query, cfg)
             rel = set(case.relevant_inns)
+            if audit is not None:
+                audit.add(ranked, rel)
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
                          "channel": case.query.channel}
             if novelty is not None:
@@ -172,8 +174,11 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             per_query.append(row)
     finally:
         search_mod.STRICT_RETRIEVER = strict
-    return {"n_queries": len(per_query), "elapsed_s": round(time.monotonic() - started, 1),
-            "metrics": _summary(per_query), "slices": slices(per_query), "per_query": per_query}
+    out = {"n_queries": len(per_query), "elapsed_s": round(time.monotonic() - started, 1),
+           "metrics": _summary(per_query), "slices": slices(per_query)}
+    if audit is not None:
+        out["today_filters"] = audit.record()
+    return {**out, "per_query": per_query}
 
 
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
