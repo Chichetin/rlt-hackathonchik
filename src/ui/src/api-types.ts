@@ -4,6 +4,48 @@
  */
 
 export interface paths {
+    "/api/testset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Testset */
+        get: operations["get_testset_api_testset_get"];
+        put?: never;
+        /**
+         * Upload Testset
+         * @description Test export files (CSV text) -> the active set; 422 with a message on a broken format, 413 over the limit.
+         */
+        post: operations["upload_testset_api_testset_post"];
+        /** Delete Testset */
+        delete: operations["delete_testset_api_testset_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/testset/predict.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Predict Testset
+         * @description `make predict` over the active set: per lot «История» and «Новые» with score and components.
+         */
+        get: operations["predict_testset_api_testset_predict_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -293,6 +335,62 @@ export interface components {
              */
             stub: boolean;
         };
+        /** UploadTestsetRequest */
+        UploadTestsetRequest: {
+            /** Files */
+            files: components["schemas"]["UploadedCsv"][];
+        };
+        /** UploadedCsv */
+        UploadedCsv: {
+            /**
+             * Name
+             * @description имя файла, как у пользователя (Извещения*.csv, ТРУ*.csv)
+             */
+            name: string;
+            /**
+             * Text
+             * @description содержимое файла, UTF-8 текстом
+             */
+            text: string;
+        };
+        /** UploadedLot */
+        UploadedLot: {
+            /** Lot Id */
+            lot_id: string;
+            /** Reqnum */
+            reqnum: string | null;
+            /**
+             * Text
+             * @description текст запроса подбора (Query.text) — тем же правилом, что /api/lot
+             */
+            text: string;
+            /** Okpd2 */
+            okpd2: string[];
+            /**
+             * Notes
+             * @description что не так с лотом: пустой ОКПД2, предмет, НМЦК
+             */
+            notes: string[];
+        };
+        /** UploadedTestset */
+        UploadedTestset: {
+            /**
+             * Id
+             * @description sha256 содержимого Извещения + ТРУ, первые 12 знаков
+             */
+            id: string;
+            /**
+             * Files
+             * @description использованные файлы (Поставщики*.csv не используется)
+             */
+            files: string[];
+            /** Lots */
+            lots: number;
+            /** Warnings */
+            warnings: string[];
+            /** Items */
+            items: components["schemas"]["UploadedLot"][];
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -315,6 +413,125 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_testset_api_testset_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedTestset"];
+                };
+            };
+            /** @description набор не загружен */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upload_testset_api_testset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadTestsetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedTestset"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_testset_api_testset_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    predict_testset_api_testset_predict_csv_get: {
+        parameters: {
+            query?: {
+                /** @description кандидатов в каждом блоке */
+                top?: number;
+                /** @description «Новые» только из кеша, без сети */
+                offline?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description выдача по каждой процедуре (CSV «;») */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description набор не загружен */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;
