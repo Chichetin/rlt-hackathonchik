@@ -11,12 +11,14 @@ export type Evidence = components["schemas"]["Evidence"];
 export type ScoreComponent = components["schemas"]["ScoreComponent"];
 
 // #232: the role is a multiple choice (chips), plus ЮЛ / ИП and the minimal relevance level
-// #242: «Может работать у заказчика» — by the CUSTOMER's region; "auto" lets the server pick by the purchase type
+// #242: «Может работать у заказчика» — by the CUSTOMER's region; "auto" lets the server pick by the purchase type.
+// It replaces «Регион поставщика»: the supplier's region alone said nothing about the customer
 export type NearChoice = "auto" | "worked" | "near" | "any";
-export type Filters = { only_msp: boolean; kinds: Kind[]; entity: "" | "ul" | "ip"; min_level: MinLevel; near: NearChoice; region: string };
-export const NO_FILTERS: Filters = { only_msp: false, kinds: [], entity: "", min_level: "", near: "auto", region: "" };
+export type Filters = { only_msp: boolean; kinds: Kind[]; entity: "" | "ul" | "ip"; min_level: MinLevel; near: NearChoice };
+export const NO_FILTERS: Filters = { only_msp: false, kinds: [], entity: "", min_level: "", near: "auto" };
 
-/** Filters from storage of an older version (one «Только производители» box) or partial — always complete. */
+/** Filters from storage of an older version (one «Только производители» box, the supplier's region — no control
+ *  any more, dropped) or partial — always complete. */
 export function normalizeFilters(raw: unknown): Filters {
   const f = (raw ?? {}) as Partial<Filters> & { only_manufacturers?: boolean };
   const kinds = Array.isArray(f.kinds) ? f.kinds.filter((k): k is Kind => KINDS.includes(k as Kind)) : f.only_manufacturers ? ["manufacturer" as Kind] : [];
@@ -26,13 +28,12 @@ export function normalizeFilters(raw: unknown): Filters {
     entity: f.entity === "ul" || f.entity === "ip" ? f.entity : "",
     min_level: f.min_level === "mid" || f.min_level === "high" ? f.min_level : "",
     near: f.near === "worked" || f.near === "near" || f.near === "any" ? f.near : "auto",
-    region: typeof f.region === "string" ? f.region : "",
   };
 }
 
 export function filtersActive(f: Filters): boolean {
   // «Может работать у заказчика» is not counted: its notes need no second, unfiltered request (#242)
-  return f.only_msp || f.kinds.length > 0 || !!f.entity || !!f.min_level || !!f.region;
+  return f.only_msp || f.kinds.length > 0 || !!f.entity || !!f.min_level;
 }
 
 // Поля закупки, которые не вводятся руками: приходят из извещения (okpd2, канал, ИНН заказчика).
@@ -49,7 +50,6 @@ export function buildQuery(text: string, filters: Filters, extra?: Extra): Query
   if (filters.entity) f.entity = filters.entity;
   const min = minScore(filters.min_level);
   if (min !== undefined) f.min_score = min;
-  if (filters.region) f.region = filters.region;
   f.near_customer = filters.near;
   const q: Query = {
     query_id: extra?.query_id ?? `ui-${Date.now()}`,
@@ -152,7 +152,7 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
 export type SearchContext = {
   customer_region: string;
   customer_basis: string;
-  purchase_type: "goods" | "works" | "services" | null;
+  purchase_type: "goods" | "works" | "services" | "remote" | null;
   purchase_label: string | null;
   type_basis: string[];
   default_near: "near" | "any";
@@ -257,13 +257,34 @@ export function filterNotes(base: SearchResponse | null, f: Filters, facets?: Fa
     const n = unknown((cp) => cp.is_msp == null);
     if (n) notes.push(`Статус МСП ещё не проверен у ${n} из ${total} — признак появится после обогащения.`);
   }
-  if (f.region) {
-    const n = unknown((cp) => !cp.region && !cp.kpp);
-    if (n) notes.push(`Регион не определён у ${n} из ${total} (нет КПП и данных реестра) — они скрыты фильтром.`);
-  }
   return notes;
 }
 
+/** How many suppliers «Может работать у заказчика» hides (#242, D-030): X-Facets near.any − the applied choice, both
+ *  blocks; undefined — nothing hidden or no facets. Unknown regions are hidden too (never guessed). */
+export function nearHidden(context: SearchContext | undefined, f: Facets | undefined): { hidden: number; of: number } | undefined {
+  const applied = context?.applied_near ?? context?.default_near;
+  if (!applied || applied === "any") return undefined;
+  const of = facetCount(f, "near", "any");
+  const kept = facetCount(f, "near", applied);
+  if (of === undefined || kept === undefined || of <= kept) return undefined;
+  return { hidden: of - kept, of };
+}
+
+export type Backtest = components["schemas"]["Backtest"];
+
+// Места реальных участников закупки в нашей выдаче (backtest, #192). Ошибка — текст причины от сервера.
+export async function fetchBacktest(ident: string): Promise<Backtest> {
+  const r = await fetch(`/api/lot/${encodeURIComponent(ident.trim())}/backtest`);
+  if (r.ok) return r.json();
+  let detail = "";
+  try {
+    detail = (await r.json()).detail ?? "";
+  } catch {
+    /* тело не JSON */
+  }
+  throw new Error(detail || `HTTP ${r.status}`);
+}
 // Organizers' test export uploaded from the UI (#207): CSV of the training format, sent as text in JSON
 // (no multipart). The server keeps it in cache/testsets and makes it the active set: /api/lot finds its lots.
 export type TestsetLot = { lot_id: string; reqnum: string | null; text: string; okpd2: string[]; notes: string[] };
@@ -317,13 +338,16 @@ export const PREDICT_CSV_URL = "/api/testset/predict.csv?top=10&offline=1";
 const NEIGHBOUR: Record<string, string> = { "Санкт-Петербург": "Ленинградская область", "Ленинградская область": "Санкт-Петербург" };
 export function relationToCustomer(cp: Pick<Counterparty, "region" | "kpp"> & { inn?: string | null }, customerRegion: string | undefined): string | null {
   if (!customerRegion) return null;
-  // the server's order (src/match/filters.py, #242): registry region → KPP (not a stub of zeros) → INN for ИП only
-  const kpp = cp.kpp && /^\d{2}/.test(cp.kpp) && /[1-9]/.test(cp.kpp) ? cp.kpp.slice(0, 2) : "";
-  const ip = !kpp && cp.inn && /^\d{12}$/.test(cp.inn) ? cp.inn.slice(0, 2) : "";
+  // the server's order (src/match/filters.py, #242): registry region → KPP (not a stub of zeros, not 99 — the
+  // inspectorate of the largest taxpayers, not a region) → INN for ИП only, the region where the INN was issued
+  const head = cp.kpp?.trim().slice(0, 2) ?? "";
+  const kpp = /^\d{2}$/.test(head) && head !== "00" && head !== "99" ? head : "";
+  const ip = !cp.region && !kpp && cp.inn && /^\d{12}$/.test(cp.inn) ? cp.inn.slice(0, 2) : "";
   const code = kpp || ip;
   const where = cp.region || KPP_REGION[code] || (code ? `регион с кодом ${code}` : "");
   if (!where) return null;
-  if (where === customerRegion) return "в регионе заказчика";
-  if (NEIGHBOUR[customerRegion] === where) return "соседний регион";
-  return "другой регион";
+  const basis = ip ? " (по ИНН)" : "";
+  if (where === customerRegion) return `в регионе заказчика${basis}`;
+  if (NEIGHBOUR[customerRegion] === where) return `соседний регион${basis}`;
+  return `другой регион${basis}`;
 }

@@ -656,12 +656,12 @@ def test_api_facets_of_the_new_block_count_the_candidates(api):
     disc = _json.loads(r.headers["X-Facets"])["discovered"]
     assert disc == {"kind": {"manufacturer": 0, "distributor": 1, "dealer": 0, "unknown": 0},
                     "entity": {"ul": 1, "ip": 0, "unknown": 0},
-                    "near": {"worked": 1, "near": 1}}  # registry region 78 = the customer's region (#242)
+                    "near": {"worked": 1, "near": 1, "any": 1}}  # registry region 78 = the customer's region (#242)
     makers = api.post("/api/search", json={**q, "filters": {"kinds": "manufacturer"}})
     assert makers.json()["discovered"] == [] and makers.headers["X-Total-Discovered"] == "0"
     # the role chips keep their counts; ЮЛ/ИП and «near» are counted among manufacturers — none here
     assert _json.loads(makers.headers["X-Facets"])["discovered"] == {
-        "kind": disc["kind"], "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0}}
+        "kind": disc["kind"], "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0, "any": 0}}
     # «Может работать у заказчика» reaches the block through discover() as every user filter (#242): for a customer
     # of the Leningrad region (INN 47) the company of the registry region 78 is a neighbour, not «worked»
     lo = {**q, "customer_inn": "4703173460"}
@@ -671,7 +671,7 @@ def test_api_facets_of_the_new_block_count_the_candidates(api):
     assert worked.json()["discovered"] == [] and worked.headers["X-Total-Discovered"] == "0"
     assert _json.loads(worked.headers["X-Facets"])["discovered"] == {
         "kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 0},
-        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 1}}
+        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 1, "any": 1}}
 
 
 def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):

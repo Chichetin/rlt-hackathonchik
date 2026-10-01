@@ -54,6 +54,7 @@ ENTITIES: dict[str, Entity] = {"ul": "ul", "ip": "ip"}
 _INN_ENTITY: dict[int, Entity] = {10: "ul", 12: "ip"}
 NEAR_CHOICES = ("worked", "near", "any", "auto")  # filters.near_customer (#242)
 SPB = "78"  # stats.customers_spb counts customers with INN 78 (src/ingest/build.py)
+NOT_A_REGION = ("00", "99")  # KPP prefixes: a stub; the inspectorate of the largest taxpayers
 _REGION_N = re.compile(r"регион (\d{2})")  # Counterparty.region of a region without a name (enrich._region_by_code)
 
 
@@ -102,8 +103,9 @@ def entity_of(cp: Counterparty) -> Entity | None:
 def supplier_region(cp: Counterparty) -> str | None:
     """Region of the supplier for «Может работать у заказчика»: the registry region (`Counterparty.region`, enrich /
     discovery, with Evidence) as a code; a registry region without a code stays its name (a known region that is
-    not 78 / 47); else the KPP of organizers' data or the ФНС card (a 000000000 stub is not a region); else — an ИП
-    only, it has no KPP — the first two digits of its INN. None when unknown: such a row never passes (not guessed).
+    not 78 / 47); else the KPP of organizers' data or the ФНС card (a 00… stub is not a region, nor is 99… — the
+    inspectorate of the largest taxpayers: a telecom or a utility of any region); else — an ИП only, it has no KPP —
+    the first two digits of its INN. None when unknown: such a row never passes (not guessed).
     """
     if cp.region:
         if cp.region in REGION_CODE:
@@ -111,7 +113,7 @@ def supplier_region(cp: Counterparty) -> str | None:
         numbered = _REGION_N.fullmatch(cp.region)
         return numbered.group(1) if numbered else cp.region
     kpp = (cp.kpp or "").strip()
-    if kpp[:2].isdigit() and kpp[:2] != "00":
+    if kpp[:2].isdigit() and kpp[:2] not in NOT_A_REGION:
         return kpp[:2]
     if entity_of(cp) == "ip" and cp.inn and cp.inn[:2].isdigit():
         return cp.inn[:2]
@@ -252,12 +254,14 @@ def facets(matches: Iterable[CounterpartyMatch]) -> dict[str, dict[str, int]]:
 
 
 def near_facets(matches: Iterable[CounterpartyMatch], nc: NearCustomer) -> dict[str, int]:
-    """Counts for «Может работать у заказчика»: how many rows each of worked / near keeps (call before the filters)."""
-    out = {"worked": 0, "near": 0}
+    """Counts for «Может работать у заказчика»: how many rows each of worked / near / any keeps (call before the
+    filters); any - <applied> is what the applied choice hides (the UI says it, D-030)."""
+    out = {"worked": 0, "near": 0, "any": 0}
     for m in matches:
         worked, near = near_marks(m.counterparty, nc)
         out["worked"] += worked
         out["near"] += near
+        out["any"] += 1
     return out
 
 

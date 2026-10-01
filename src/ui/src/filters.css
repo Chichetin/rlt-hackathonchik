@@ -5,9 +5,9 @@
   --role-distributor: #9db4ff;
   --role-dealer: #e2c08d;
   --role-unknown: #9aa3ad;
-  --level-high: #7fd1b9;
-  --level-mid: #e2c08d;
-  --level-low: #9aa3ad;
+  --level-high: #244f96;
+  --level-mid: #a3c4e6;
+  --level-low: #e4e7ed;
 }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
@@ -69,8 +69,12 @@
 }
 
 /* #242: the purchase context — the customer and the purchase type drive the «Может работать у заказчика» filter */
-.search-context { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0 0 8px; border-bottom: 1px solid rgba(255, 255, 255, .08);
-  font-size: 12.5px; color: var(--muted, #8b939d); }
-.search-context strong { color: var(--ink, #eceef1); font-weight: 500; }
+/* #242: over the results, a full row of the command bar — the customer, the purchase type and the choice it drives */
+.search-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; flex-basis: 100%; margin: 0; padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, .08); font-size: 12.5px; color: var(--muted, #8b939d); }
+.search-context strong { color: var(--ink, #eceef1); font-size: inherit; font-weight: 500; }
 .search-context small { font-size: 11.5px; color: var(--faint, #7c848e); }
+.search-context label { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: inherit; color: inherit; }
+.search-context select { width: auto; max-width: 100%; padding: 4px 8px; font-size: 12.5px; }
+.search-context [role="note"] { color: #e2c08d; }
 .badge-worked { color: #cfe9df; border-color: #7fd1b955; background: #7fd1b914; }

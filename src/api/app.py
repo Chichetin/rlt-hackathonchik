@@ -6,13 +6,13 @@ pages each block, the block sizes after filters are in the X-Total-History / X-T
 headers (the frozen SearchResponse has no total). The xlsx export takes every filtered row.
 Counts for the filter chips (#232) are the X-Facets header, ASCII JSON
 `{"history": F, "discovered": F}`, F = `{"kind": {"manufacturer": n, "distributor": n, "dealer": n, "unknown": n},
-"entity": {"ul": n, "ip": n, "unknown": n}, "near": {"worked": n, "near": n}}`: the candidates of the block after the
+"entity": {"ul": n, "ip": n, "unknown": n}, "near": {"worked": n, "near": n, "any": n}}`: the candidates of the block after the
 legal status (liquidation, RNP), each group after the user filters of the other groups (filters.chip_facets), so a
 chip count is the block size its choice gives with the other filters on; «Новые» shows at most discover.MAX_SHOWN, so
 its counts are capped at it. Filter keys — src/match/filters.py.
 The customer and the purchase type the search assumed (#242) are the X-Search-Context header, ASCII JSON
 `{"customer_region", "customer_basis": "ИНН 78…" | "регион запроса", "purchase_type": goods | works | services |
-null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_near": near | any, "applied_near": worked | near |
+remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_near": near | any, "applied_near": worked | near |
 any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 
+from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
@@ -317,6 +318,22 @@ def api_lot(ident: str) -> Query:
         raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
     except LotDataUnavailable as e:
         raise HTTPException(503, str(e)) from e
+
+
+@app.get("/api/lot/{ident}/backtest", response_model=Backtest)
+def api_lot_backtest(ident: str) -> Backtest:
+    """Places of the lot's real participants and winner in our ranking, history before the cutoff (#192, D-084)."""
+    if not ident.strip().isdigit():
+        raise HTTPException(422, "номер закупки — только цифры (lot_id или реестровый номер)")
+    try:
+        return lot_backtest(ident)
+    except LotNotFound as e:
+        raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
+    except NotBacktestable as e:
+        raise HTTPException(422, str(e)) from e
+    except FileNotFoundError as e:
+        log.warning("backtest: %s", e)
+        raise HTTPException(503, "данные организаторов недоступны: не загружены или база не отвечает") from e
 
 
 OKPD2_LABELS_MAX = 50

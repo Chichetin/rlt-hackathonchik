@@ -178,6 +178,13 @@ def test_supplier_region_registry_then_kpp_then_ip_inn():
                    "registry-moscow": "Москва", "nothing": None, "new-spb": "78", "new-lo": "47"}
 
 
+def test_kpp_99_is_not_a_region():
+    """KPP 99…: the inspectorate of the largest taxpayers — the region is unknown, not «another region»."""
+    big = Counterparty(inn="7707049388", name="telecom", kpp="997750001")
+    assert F.supplier_region(big) is None
+    assert F.supplier_region(big.model_copy(update={"region": "Санкт-Петербург"})) == "78"  # the registry still wins
+
+
 def test_near_is_the_customer_region_or_the_neighbour():
     assert _near(near_customer="near") == SPB_NEAR
     assert _near(near_customer="near", customer_inn=LO_INN) == SPB_NEAR  # 78 and 47 are neighbours both ways
@@ -210,6 +217,7 @@ def test_any_and_empty_are_no_filter():
 @pytest.mark.parametrize("okpd2, applied", [
     (["43.39.11.000"], "near"), (["81.21.10.000"], "near"),  # works, services: on site — near by default
     (["17.12.14.110"], "any"), ([], "any"),  # goods travel; no OKPD2 — no type, no default filter
+    (["62.01.29.000"], "any"), (["58.11.11.000"], "any"),  # a remote service, printed editions (goods, #188)
 ])
 def test_auto_follows_the_purchase_type(okpd2, applied):
     q = Query(query_id="q", text="x", okpd2=okpd2, filters={"near_customer": "auto"})
@@ -244,8 +252,8 @@ def test_near_facets_equal_the_rows_each_choice_keeps():
     for inn in (None, LO_INN):
         q = Query(query_id="q", text="x", customer_inn=inn)
         got = F.near_facets(NEAR_ROWS, F.near_of(q))
-        assert got == {c: len(_near(customer_inn=inn, near_customer=c)) for c in ("worked", "near")}
-    assert F.near_facets(NEAR_ROWS, F.near_of(Query(query_id="q", text="x"))) == {"worked": 4, "near": 7}
+        assert got == {c: len(_near(customer_inn=inn, near_customer=c)) for c in ("worked", "near", "any")}
+    assert F.near_facets(NEAR_ROWS, F.near_of(Query(query_id="q", text="x"))) == {"worked": 4, "near": 7, "any": len(NEAR_ROWS)}
 
 
 # --- review of #240, item 3: each chip group counted after the filters of the OTHER groups -------------------------
@@ -272,7 +280,7 @@ def test_chip_facets_count_each_group_after_the_other_groups():
     assert _chips(f) == {
         "kind": {"manufacturer": 1, "distributor": 0, "dealer": 1, "unknown": 0},  # ЮЛ near the customer
         "entity": {"ul": 0, "ip": 1, "unknown": 0},  # distributors near the customer
-        "near": {"worked": 1, "near": 0},  # distributors-ЮЛ: one from Moscow that bid for St Petersburg
+        "near": {"worked": 1, "near": 0, "any": 1},  # distributors-ЮЛ: one from Moscow that bid for St Petersburg
     }
 
 

@@ -308,7 +308,7 @@ ROLE_ROWS = [  # name, kind, inn (10 digits — ЮЛ, 12 — ИП), score, statu
     ("В РНП", "distributor", "4703173460", 0.85, None, True),
 ]
 ZERO = {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 0},
-        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0}}
+        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0, "any": 0}}
 
 
 def _role_rows() -> list[CounterpartyMatch]:
@@ -380,7 +380,7 @@ def test_search_facets_after_legal_status_each_group_after_the_other_groups(role
     assert json.loads(raw) == {
         "history": {"kind": {"manufacturer": 1, "distributor": 1, "dealer": 1, "unknown": 2},  # kinds itself: off
                     "entity": {"ul": 0, "ip": 1, "unknown": 0},  # among distributors: «Опт», ИП
-                    "near": {"worked": 1, "near": 1}},  # «Опт»: ИП, INN 78… (#242)
+                    "near": {"worked": 1, "near": 1, "any": 1}},  # «Опт»: ИП, INN 78… (#242)
         "discovered": ZERO}
     # the page and the offset do not change the facets, nor does another choice in the same group
     again = roles_client.post("/api/search?limit=2&offset=1", json=q)
@@ -392,7 +392,7 @@ def test_search_facets_after_legal_status_each_group_after_the_other_groups(role
     assert json.loads(other.headers["X-Facets"])["history"] == {
         "kind": {"manufacturer": 1, "distributor": 0, "dealer": 0, "unknown": 0},  # ЮЛ with score ≥ 0.8: «Завод»
         "entity": {"ul": 1, "ip": 0, "unknown": 0},  # score ≥ 0.8: «Завод» (ЮЛ)
-        "near": {"worked": 0, "near": 0}}  # «Завод»: ЮЛ without a KPP — region unknown
+        "near": {"worked": 0, "near": 0, "any": 1}}  # «Завод»: ЮЛ without a KPP — region unknown
 
 
 def test_search_facets_on_fixture(search_client):
@@ -401,7 +401,7 @@ def test_search_facets_on_fixture(search_client):
     facets = json.loads(r.headers["X-Facets"])
     assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 2},  # ИП
                                  "entity": {"ul": 4, "ip": 2, "unknown": 0},  # entity itself: off
-                                 "near": {"worked": 2, "near": 2}}  # the two ИП: INN 78… / 47…, customers 78
+                                 "near": {"worked": 2, "near": 2, "any": 2}}  # the two ИП: INN 78… / 47…, customers 78
     assert r.headers["X-Total-History"] == "2"
 
 
@@ -422,7 +422,7 @@ def test_facets_of_new_are_capped_at_the_block_size(search_client, monkeypatch):
     assert json.loads(r.headers["X-Facets"])["discovered"] == {
         "kind": {"manufacturer": discover_mod.MAX_SHOWN, "distributor": 1, "dealer": 0, "unknown": 0},
         "entity": {"ul": discover_mod.MAX_SHOWN, "ip": 0, "unknown": 0},
-        "near": {"worked": 0, "near": 0}}  # no registry region, no KPP: not guessed
+        "near": {"worked": 0, "near": 0, "any": discover_mod.MAX_SHOWN}}  # no registry region, no KPP: not guessed
 
 
 def test_facets_of_new_without_history_check_are_zero(search_client, monkeypatch):
@@ -554,12 +554,12 @@ def test_search_facets_near_after_the_other_filters(near_client):
     facets = json.loads(r.headers["X-Facets"])
     assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 1},
                                  "entity": {"ul": 2, "ip": 1, "unknown": 0},  # near: СПб, ЛО, ИП СПб
-                                 "near": {"worked": 1, "near": 1}}  # ИП: «ИП СПб»
-    assert facets["discovered"]["near"] == {"worked": 0, "near": 0}
+                                 "near": {"worked": 1, "near": 1, "any": 1}}  # ИП: «ИП СПб»
+    assert facets["discovered"]["near"] == {"worked": 0, "near": 0, "any": 0}
     every = json.loads(_near_search(near_client)[0].headers["X-Facets"])["history"]["near"]
-    assert every == {"worked": 3, "near": 3}
+    assert every == {"worked": 3, "near": 3, "any": len(NEAR_API_ROWS)}
     lo = json.loads(_near_search(near_client, customer_inn="4703173460")[0].headers["X-Facets"])
-    assert lo["history"]["near"] == {"worked": 1, "near": 3}
+    assert lo["history"]["near"] == {"worked": 1, "near": 3, "any": len(NEAR_API_ROWS)}
 
 
 @pytest.mark.parametrize("q", [{"filters": {"near_customer": "close"}},
@@ -591,4 +591,4 @@ def test_facets_near_of_new_count_the_candidates(search_client, monkeypatch):
     monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
         matches=pool, candidates=pool, history_checked=True))
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
-    assert json.loads(r.headers["X-Facets"])["discovered"]["near"] == {"worked": 1, "near": 2}
+    assert json.loads(r.headers["X-Facets"])["discovered"]["near"] == {"worked": 1, "near": 2, "any": 4}
