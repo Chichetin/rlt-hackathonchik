@@ -848,7 +848,7 @@ function Block(props: {
                 <motion.button className="item" aria-controls="supplier-preview" aria-pressed={props.selectedKey === supplierKey(m)} whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
-                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
+                  <span className={`score score-level-${levelOf(m.score)}`} title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
                     <span className="score-num">{m.score.toFixed(2)}</span>
                     <RelevanceTag score={m.score} />
                     <span className="score-meter" aria-hidden="true">

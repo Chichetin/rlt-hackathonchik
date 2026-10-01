@@ -93,30 +93,8 @@ test("демо: запрос → два блока → карточка → фи
   await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).click();
   await page.getByRole("checkbox", { name: /Производители/ }).uncheck();
 
-  // 4а. Роль чипами (#232): «Дистрибьюторы» — в выдаче только дистрибьюторы, бейдж роли в каждой строке
-  const distributors = page.waitForResponse(
-    (r) =>
-      new URL(r.url()).pathname === "/api/search" &&
-      JSON.parse(r.request().postData() ?? "{}").filters?.kinds === "distributor",
-  );
-  // the number on the chip is honest: with only this chip chosen it equals the size of both blocks (X-Facets, #232)
-  const chip = page.getByRole("checkbox", { name: /Дистрибьюторы/ });
-  const onChip = Number(((await page.locator("label.role-chip", { has: chip }).textContent()) ?? "").match(/\d+/)?.[0]);
-  await chip.check();
-  await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
-  const distResponse = await distributors;
-  const onlyDist = await distResponse.json();
-  const totals = Number(distResponse.headers()["x-total-history"]) + Number(distResponse.headers()["x-total-discovered"]);
-  expect(onChip).toBe(totals);
-  expect(onlyDist.discovered.length).toBeGreaterThan(0);
-  for (const m of [...onlyDist.history, ...onlyDist.discovered]) expect(m.counterparty.kind).toBe("distributor");
-  await expect(discovered.locator(".item")).toHaveCount(onlyDist.discovered.length);
-  for (const role of await page.locator(".results .item .role-badge").allTextContents()) expect(role).toBe("Дистрибьютор");
-  await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).click();
-  await page.getByRole("checkbox", { name: /Дистрибьюторы/ }).uncheck();
   await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
   await page.getByRole("button", { name: /^С опытом/ }).click();
-
   await expect(history.locator(".item").first()).toBeVisible();
 
   // «Регион»: по реестру, иначе по КПП (78 — СПб; src/match/filters.py::in_region); остаются строки,
@@ -147,6 +125,48 @@ test("демо: запрос → два блока → карточка → фи
 
   // Сценарий укладывается в 60–90 с у человека; машинный проход — секунды.
   expect(Date.now() - started).toBeLessThan(15_000);
+});
+
+// Отдельная регрессия #232: расширенная проверка ролей не меняет состав и бюджет основного демо.
+test("фильтр роли: счётчик дистрибьюторов совпадает с выдачей и бейджами", async ({ page }) => {
+  await page.goto("/search");
+  await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
+  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага офисная А4/);
+  await page.getByRole("button", { name: "Найти поставщиков" }).click();
+  const history = page.getByRole("region", { name: "С опытом госзакупок" });
+  const discovered = page.getByRole("region", { name: "Новые из открытых источников" });
+  await expect(history.locator(".item").first()).toBeVisible();
+  await page.getByRole("button", { name: /^Новые/ }).click();
+  await expect(discovered.locator(".item").first()).toBeVisible();
+  await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).click();
+
+  // Роль чипами (#232): «Дистрибьюторы» — в выдаче только дистрибьюторы, бейдж роли в каждой строке
+  const distributors = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === "/api/search" &&
+      JSON.parse(r.request().postData() ?? "{}").filters?.kinds === "distributor",
+  );
+  // the number on the chip is honest: with only this chip chosen it equals the size of both blocks (X-Facets, #232)
+  const chip = page.getByRole("checkbox", { name: /Дистрибьюторы/ });
+  const onChip = Number(((await page.locator("label.role-chip", { has: chip }).textContent()) ?? "").match(/\d+/)?.[0]);
+  await chip.check();
+  await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
+  const distResponse = await distributors;
+  const onlyDist = await distResponse.json();
+  const totals = Number(distResponse.headers()["x-total-history"]) + Number(distResponse.headers()["x-total-discovered"]);
+  expect(onChip).toBe(totals);
+  expect(onlyDist.discovered.length).toBeGreaterThan(0);
+  for (const m of [...onlyDist.history, ...onlyDist.discovered]) expect(m.counterparty.kind).toBe("distributor");
+  await expect(discovered.locator(".item")).toHaveCount(onlyDist.discovered.length);
+  for (const role of await page.locator(".results .item .role-badge").allTextContents()) expect(role).toBe("Дистрибьютор");
+  await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).click();
+  await page.getByRole("checkbox", { name: /Дистрибьюторы/ }).uncheck();
+  await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
+  await page.getByRole("button", { name: /^С опытом/ }).click();
+
+  await expect(history.locator(".item").first()).toBeVisible();
+
 });
 
 test("номер закупки не найден → понятное сообщение, свободный текст работает", async ({ page }) => {

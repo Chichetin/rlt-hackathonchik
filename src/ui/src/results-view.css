@@ -73,3 +73,18 @@
 /* Group names/counts are already in the persistent group buttons. */
 .result-list-scroll .block > .block-tag, .result-list-scroll .block > h2 { display: none; }
 .result-list-scroll .block > .hint { margin: 0 0 18px; }
+/* Relevance is a sequential blue-to-white scale, independent of supplier origin. */
+.relevance { background: var(--lc); color: #172338; padding: 5px 9px; border-radius: 7px; font-size: 12px; line-height: 1.25; }
+.relevance-high { color: #f5f8ff; }
+.relevance i { background: currentColor; width: 5px; height: 5px; box-shadow: none; opacity: .7; }
+.score-level-high { --score-surface: #173771; --score-ink: #f5f8ff; --score-fill: #9fbfff; }
+.score-level-mid { --score-surface: #a3c4e6; --score-ink: #14283e; --score-fill: #426486; }
+.score-level-low { --score-surface: #e4e7ed; --score-ink: #29313d; --score-fill: #717b89; }
+.block .score, .inspector-score { background: var(--score-surface); color: var(--score-ink); border-radius: 10px; padding: 10px 12px; }
+.score .score-num, .inspector-score strong { color: var(--score-ink); }
+.score .relevance, .inspector-score .relevance { background: transparent; color: inherit; padding: 0; }
+.block .score-meter { background: color-mix(in srgb, var(--score-ink) 20%, transparent); }
+.block .score-meter > span { background: var(--score-fill); }
+.inspector-score { display: grid; grid-template-columns: auto auto; align-items: center; gap: 6px 14px; }
+.inspector-score > .relevance { grid-column: 1 / -1; }
+.inspector-topline .inspector-score strong { margin: 0; }
