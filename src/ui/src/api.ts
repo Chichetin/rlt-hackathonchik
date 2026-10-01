@@ -11,8 +11,10 @@ export type Evidence = components["schemas"]["Evidence"];
 export type ScoreComponent = components["schemas"]["ScoreComponent"];
 
 // #232: the role is a multiple choice (chips), plus ЮЛ / ИП and the minimal relevance level
-export type Filters = { only_msp: boolean; kinds: Kind[]; entity: "" | "ul" | "ip"; min_level: MinLevel; region: string };
-export const NO_FILTERS: Filters = { only_msp: false, kinds: [], entity: "", min_level: "", region: "" };
+// #242: «Может работать у заказчика» — by the CUSTOMER's region; "auto" lets the server pick by the purchase type
+export type NearChoice = "auto" | "worked" | "near" | "any";
+export type Filters = { only_msp: boolean; kinds: Kind[]; entity: "" | "ul" | "ip"; min_level: MinLevel; near: NearChoice; region: string };
+export const NO_FILTERS: Filters = { only_msp: false, kinds: [], entity: "", min_level: "", near: "auto", region: "" };
 
 /** Filters from storage of an older version (one «Только производители» box) or partial — always complete. */
 export function normalizeFilters(raw: unknown): Filters {
@@ -23,17 +25,20 @@ export function normalizeFilters(raw: unknown): Filters {
     kinds,
     entity: f.entity === "ul" || f.entity === "ip" ? f.entity : "",
     min_level: f.min_level === "mid" || f.min_level === "high" ? f.min_level : "",
+    near: f.near === "worked" || f.near === "near" || f.near === "any" ? f.near : "auto",
     region: typeof f.region === "string" ? f.region : "",
   };
 }
 
 export function filtersActive(f: Filters): boolean {
+  // «Может работать у заказчика» is not counted: its notes need no second, unfiltered request (#242)
   return f.only_msp || f.kinds.length > 0 || !!f.entity || !!f.min_level || !!f.region;
 }
 
 // Поля закупки, которые не вводятся руками: приходят из извещения (okpd2, канал, ИНН заказчика).
 export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "budget">;
-export type Extra = { budget: string; customer_inn: string; lot: LotContext | null; query_id?: string };
+// customer_region: the customer's region when there is no customer INN (#242) — goes to Query.region
+export type Extra = { budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
 
 export function buildQuery(text: string, filters: Filters, extra?: Extra): Query {
   const f: Record<string, string | boolean | number> = {};
@@ -45,7 +50,13 @@ export function buildQuery(text: string, filters: Filters, extra?: Extra): Query
   const min = minScore(filters.min_level);
   if (min !== undefined) f.min_score = min;
   if (filters.region) f.region = filters.region;
-  const q: Query = { query_id: extra?.query_id ?? `ui-${Date.now()}`, text: text.trim(), filters: f, region: "Санкт-Петербург" };
+  f.near_customer = filters.near;
+  const q: Query = {
+    query_id: extra?.query_id ?? `ui-${Date.now()}`,
+    text: text.trim(),
+    filters: f,
+    region: extra?.customer_region || "Санкт-Петербург",
+  };
   if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
   if (extra?.lot?.channel) q.channel = extra.lot.channel;
   const budget = Number(extra?.budget.replace(/\s/g, "").replace(",", "."));
@@ -108,7 +119,7 @@ export const PAGE = 20;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
-export type SearchPage = SearchResponse & { total: Totals; note?: string; facets?: Facets };
+export type SearchPage = SearchResponse & { total: Totals; note?: string; facets?: Facets; context?: SearchContext };
 
 function searchNote(r: Response): string | undefined {
   const raw = r.headers.get("X-Search-Note");
@@ -133,11 +144,33 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
     total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
     note: searchNote(r),
     facets: facets(r),
+    context: searchContext(r),
   };
 }
 
+// #242: who the customer is and what is bought, as the server decided it (X-Search-Context)
+export type SearchContext = {
+  customer_region: string;
+  customer_basis: string;
+  purchase_type: "goods" | "works" | "services" | null;
+  purchase_label: string | null;
+  type_basis: string[];
+  default_near: "near" | "any";
+  applied_near?: "worked" | "near" | "any";
+};
+
+function searchContext(r: Response): SearchContext | undefined {
+  const raw = r.headers.get("X-Search-Context");
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as SearchContext;
+  } catch {
+    return undefined;
+  }
+}
+
 // Counts for the chips (#232): X-Facets over every candidate before the user filters, per block
-export type FacetCounts = { kind: Partial<Record<string, number>>; entity: Partial<Record<string, number>> };
+export type FacetCounts = { kind: Partial<Record<string, number>>; entity: Partial<Record<string, number>>; near?: Partial<Record<string, number>> };
 export type Facets = { history?: FacetCounts; discovered?: FacetCounts };
 
 function facets(r: Response): Facets | undefined {
@@ -151,7 +184,7 @@ function facets(r: Response): Facets | undefined {
 }
 
 /** Chip count: the role in both blocks; undefined when the server sends no facets. */
-export function facetCount(f: Facets | undefined, group: "kind" | "entity", key: string): number | undefined {
+export function facetCount(f: Facets | undefined, group: "kind" | "entity" | "near", key: string): number | undefined {
   if (!f) return undefined;
   return (f.history?.[group]?.[key] ?? 0) + (f.discovered?.[group]?.[key] ?? 0);
 }
@@ -278,3 +311,18 @@ export async function dropTestset(): Promise<void> {
 
 // offline=1: «Новые» from the cache only — a live run over every lot would be a mass crawl (confirmation №4)
 export const PREDICT_CSV_URL = "/api/testset/predict.csv?top=10&offline=1";
+
+// Where the supplier is relative to the customer (#242): same region / the neighbour (78 ↔ 47) / another
+const NEIGHBOUR: Record<string, string> = { "Санкт-Петербург": "Ленинградская область", "Ленинградская область": "Санкт-Петербург" };
+export function relationToCustomer(cp: Pick<Counterparty, "region" | "kpp"> & { inn?: string | null }, customerRegion: string | undefined): string | null {
+  if (!customerRegion) return null;
+  // the server's order (src/match/filters.py, #242): registry region → KPP (not a stub of zeros) → INN for ИП only
+  const kpp = cp.kpp && /^\d{2}/.test(cp.kpp) && /[1-9]/.test(cp.kpp) ? cp.kpp.slice(0, 2) : "";
+  const ip = !kpp && cp.inn && /^\d{12}$/.test(cp.inn) ? cp.inn.slice(0, 2) : "";
+  const code = kpp || ip;
+  const where = cp.region || KPP_REGION[code] || (code ? `регион с кодом ${code}` : "");
+  if (!where) return null;
+  if (where === customerRegion) return "в регионе заказчика";
+  if (NEIGHBOUR[customerRegion] === where) return "соседний регион";
+  return "другой регион";
+}

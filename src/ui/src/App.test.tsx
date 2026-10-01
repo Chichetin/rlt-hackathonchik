@@ -37,7 +37,7 @@ afterEach(() => vi.restoreAllMocks());
 test("buildQuery keeps only enabled filters", () => {
   const q = buildQuery("  бумага ", { ...NO_FILTERS, only_msp: true });
   expect(q.text).toBe("бумага");
-  expect(q.filters).toEqual({ only_msp: true });
+  expect(q.filters).toEqual({ only_msp: true, near_customer: "auto" }); // «авто» — the server decides by the purchase type (#242)
 });
 
 test("search shows two blocks, explanation and card with sources", async () => {
@@ -225,7 +225,7 @@ test("history is paged on the server: total from the header, «Показать 
 });
 
 // #84: «Новые» emptied by a filter. Mock: requests with the given filter get no new companies.
-async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["17.12.14.110"], kinds: Counterparty["kind"][] = [null]) {
+async function newBlockWith(filter: "only_manufacturers" | "near_customer", okpd2 = ["17.12.14.110"], kinds: Counterparty["kind"][] = [null]) {
   const base = structuredClone(response);
   base.stub = false;
   base.query.okpd2 = okpd2;
@@ -238,7 +238,8 @@ async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["1
   const filtered = { ...structuredClone(base), discovered: [] };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
     const body = JSON.parse(String((init as RequestInit).body));
-    return new Response(JSON.stringify(body.filters?.[filter] ? filtered : base), { status: 200 });
+    const on = filter === "near_customer" ? body.filters?.near_customer === "near" : body.filters?.[filter];
+    return new Response(JSON.stringify(on ? filtered : base), { status: 200 });
   });
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
@@ -259,9 +260,9 @@ test("«Новые» emptied by «Только производители» name
   expect(await within(discovered).findByText("ООО Бета")).toBeInTheDocument();
 });
 
-test("«Новые» emptied by the region keep the general text: the region of new companies is known (#84)", async () => {
-  const discovered = await newBlockWith("region");
-  await userEvent.selectOptions(screen.getByLabelText("Регион"), "Ленинградская область");
+test("«Новые» emptied by «Может работать у заказчика» keep the general text: the region of new companies is known (#84, #242)", async () => {
+  const discovered = await newBlockWith("near_customer");
+  await userEvent.selectOptions(screen.getByLabelText("Может работать у заказчика"), "near");
   expect(await within(discovered).findByText(/новых компаний по этому запросу не найдено/)).toBeInTheDocument();
   expect(discovered).not.toHaveTextContent("Под фильтр");
 });

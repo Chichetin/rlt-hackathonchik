@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
-import { buildQuery, facetCount, NO_FILTERS, normalizeFilters } from "./api";
+import { buildQuery, facetCount, NO_FILTERS, normalizeFilters, relationToCustomer } from "./api";
 import { kindOf, levelOf, LEVELS, minScore, RelevanceTag, RoleBadge } from "./roles";
 
 test("relevance levels: thresholds in one place, a label, not colour alone", () => {
@@ -23,13 +23,18 @@ test("role: null and «unknown» are one honest «Роль не определе
 });
 
 test("query filters: roles as a list, the old single box as a synonym, ЮЛ/ИП, minimal score", () => {
-  expect(buildQuery("бумага", { ...NO_FILTERS, kinds: ["distributor", "dealer"] }).filters).toEqual({ kinds: "distributor,dealer" });
+  const auto = { near_customer: "auto" }; // #242: always sent, the server picks by the purchase type
+  expect(buildQuery("бумага", { ...NO_FILTERS, kinds: ["distributor", "dealer"] }).filters).toEqual({ kinds: "distributor,dealer", ...auto });
   expect(buildQuery("бумага", { ...NO_FILTERS, kinds: ["manufacturer"] }).filters).toEqual({
     kinds: "manufacturer",
     only_manufacturers: true,
+    ...auto,
   });
-  expect(buildQuery("бумага", { ...NO_FILTERS, entity: "ip", min_level: "high" }).filters).toEqual({ entity: "ip", min_score: minScore("high") });
-  expect(buildQuery("бумага", NO_FILTERS).filters).toEqual({});
+  expect(buildQuery("бумага", { ...NO_FILTERS, entity: "ip", min_level: "high" }).filters).toEqual({ entity: "ip", min_score: minScore("high"), ...auto });
+  expect(buildQuery("бумага", NO_FILTERS).filters).toEqual(auto);
+  expect(buildQuery("бумага", { ...NO_FILTERS, near: "near" }).filters).toEqual({ near_customer: "near" });
+  // no customer INN: the customer's region from the form goes to Query.region
+  expect(buildQuery("бумага", NO_FILTERS, { budget: "", customer_inn: "", lot: null, customer_region: "Ленинградская область" }).region).toBe("Ленинградская область");
 });
 
 test("filters saved by an older version (one «Только производители» box) still load", () => {
@@ -52,4 +57,16 @@ test("chip counts add both blocks; no facets from the server — no number", () 
   expect(facetCount(f, "kind", "distributor")).toBe(5);
   expect(facetCount(f, "kind", "dealer")).toBe(0);
   expect(facetCount(undefined, "kind", "dealer")).toBeUndefined();
+});
+
+test("the supplier relative to the customer: same region, the neighbour, another; unknown — not guessed", () => {
+  expect(relationToCustomer({ kpp: "780101001" }, "Санкт-Петербург")).toBe("в регионе заказчика");
+  expect(relationToCustomer({ kpp: "470101001" }, "Санкт-Петербург")).toBe("соседний регион");
+  expect(relationToCustomer({ kpp: "770101001" }, "Санкт-Петербург")).toBe("другой регион");
+  expect(relationToCustomer({ region: "Ленинградская область" }, "Ленинградская область")).toBe("в регионе заказчика");
+  expect(relationToCustomer({ kpp: "000000000" }, "Санкт-Петербург")).toBeNull();
+  // ИП without a KPP: by the INN, as the server does; a 10-digit INN without a KPP — not guessed
+  expect(relationToCustomer({ kpp: "000000000", inn: "780100000090" }, "Санкт-Петербург")).toBe("в регионе заказчика");
+  expect(relationToCustomer({ kpp: null, inn: "7801000012" }, "Санкт-Петербург")).toBeNull();
+  expect(relationToCustomer({ kpp: "780101001" }, undefined)).toBeNull();
 });

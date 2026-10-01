@@ -67,3 +67,10 @@
   .legend-levels { margin-left: 0; }
   .filterbar { padding: 10px; }
 }
+
+/* #242: the purchase context — the customer and the purchase type drive the «Может работать у заказчика» filter */
+.search-context { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0 0 8px; border-bottom: 1px solid rgba(255, 255, 255, .08);
+  font-size: 12.5px; color: var(--muted, #8b939d); }
+.search-context strong { color: var(--ink, #eceef1); font-weight: 500; }
+.search-context small { font-size: 11.5px; color: var(--faint, #7c848e); }
+.badge-worked { color: #cfe9df; border-color: #7fd1b955; background: #7fd1b914; }
