@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
 import "./micro.css";
-import { GlassSidebar, GlassTopbar } from "./GlassShell";
+import { GlassHeader } from "./GlassShell";
+import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
+import { okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
   PAGE,
@@ -188,6 +190,7 @@ export function App() {
   const [open, setOpen] = useState<CounterpartyMatch | null>(null);
   const [lotId, setLotId] = useState(saved.lotId ?? "");
   const [lot, setLot] = useState<Extra["lot"]>(saved.lot ?? null);
+  const lotLabels = useOkpd2Labels(lot?.okpd2 ?? []);
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
@@ -380,9 +383,9 @@ export function App() {
     <div inert={!!open}><ScrollTools /></div>
     <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
-      <GlassSidebar path={path} link={link} mark={<BrandMark />} />
+      <GlassHeader path={path} link={link} mark={<BrandMark />} />
+      {path === "/search" && <div className="search-background"><WaveField pattern="slats" /></div>}
       <div className="content">
-      <GlassTopbar path={path} link={link} />
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -476,7 +479,7 @@ export function App() {
         {(lot?.channel || lot?.okpd2?.length) && (
           <div className="chips">
             {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
-            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
+            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {okpd2Text(lot.okpd2, lotLabels)}</span> : null}
           </div>
         )}
         <div className="row">
@@ -624,12 +627,12 @@ export function App() {
       </motion.div>
       </AnimatePresence>
       </div>
-      <footer className="appfoot">
+      {path !== "/" && <footer className="appfoot">
         <div className="appfoot-in">
           <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
           <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
         </div>
-      </footer>
+      </footer>}
     </motion.div>
     <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} />}</AnimatePresence>
     </LayoutGroup>
@@ -734,6 +737,8 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
   const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
+  const topOkpd2 = String(cp.stats?.top_okpd2 ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+  const okpd2Labels = useOkpd2Labels(topOkpd2);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overflow = document.body.style.overflow;
@@ -821,7 +826,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
           <dl className="facts stats">
             {Object.entries(cp.stats ?? {}).map(([k, v]) => [
               <dt key={`k-${k}`}>{STAT_LABEL[k] ?? k}</dt>,
-              <dd key={`v-${k}`}>{formatStat(k, v)}</dd>,
+              <dd key={`v-${k}`}>{k === "top_okpd2" ? okpd2Text(topOkpd2, okpd2Labels) : formatStat(k, v)}</dd>,
             ])}
           </dl>
         </>

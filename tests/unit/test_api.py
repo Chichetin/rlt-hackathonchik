@@ -282,3 +282,13 @@ def test_health_stub_flag_follows_demo_fixture_env(client, monkeypatch):
     assert client.get("/api/health").json()["stub"] is False
     monkeypatch.setenv("DEMO_FIXTURE", "1")
     assert client.get("/api/health").json()["stub"] is True
+
+
+def test_okpd2_labels_for_ui(client):
+    r = client.get("/api/okpd2", params={"codes": "17.12.14.110, 80.10.12.000,99.99.99.999,,"})
+    assert r.status_code == 200
+    assert r.json() == {"17.12.14.110": "17.12.14.110 «Бумага для печати»",
+                        "80.10.12.000": "80.10.12.000 (по 80.10.12 «Услуги охраны»)",
+                        "99.99.99.999": "99.99.99.999"}
+    assert client.get("/api/okpd2").json() == {}
+    assert client.get("/api/okpd2", params={"codes": ",".join(f"17.12.{i}" for i in range(51))}).status_code == 422
