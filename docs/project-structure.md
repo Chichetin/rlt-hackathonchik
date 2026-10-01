@@ -51,7 +51,7 @@ data/ cache/ indexes/ # вне git
 research/             # PROBLEM, DATA_DICTIONARY, METHODOLOGY, SOURCES, DECISIONS, EXPERIMENTS, ERROR_ANALYSIS, EVAL, deep/
 pitch/                # outline, facts, QA, architecture, demo-insurance
 docs/                 # timeline, onboarding, agents, ui, tz-compliance, questions-for-organizers, kickoff-todo, plans/, source/
-scripts/              # issues.sh, download-models.sh, check_stubs.py, openapi.py
+scripts/              # issues.sh, download-models.sh, check_stubs.py, check_layers.py (+ layers_allowlist.txt), openapi.py
 .claude/              # settings.json, hooks/, agents/, skills/
 .githooks/            # pre-commit, pre-push
 .github/              # ISSUE_TEMPLATE/task.md, pull_request_template.md
@@ -59,7 +59,33 @@ scripts/              # issues.sh, download-models.sh, check_stubs.py, openapi.p
 
 ## Правила импортов
 
+Направление зависимостей проверяет код, а не память: `make layers` (`scripts/check_layers.py`) входит в
+`make check` и `make check-changed`. Решение и обоснование — D-102.
+
+**Модуль слоя Lk импортирует только слои ≤ k** — вниз или в свой слой, не вверх. Считаются все
+импорты: верхнего уровня, ленивые (внутри функции), относительные и под `if TYPE_CHECKING:`.
+
+| Слой | Что | Модули `src/` |
+|---|---|---|
+| L0 | типы и настройки | `contracts.py`; `regions`, `settings` — когда появятся (#292, #290) |
+| L1 | внешний мир и хранение | `sources/`, `db/`, `llm/`, `ingest/` (build, load, okpd2, profile, testset), `worker/queue.py` |
+| L2 | ядро match | `match/` — store, index, search, fallback, filters, signals, profiles, purchase_type, text, pg_retriever |
+| L3 | обогащение | `enrich/` — enrich, discover, evidence, role |
+| L4 | сценарии поверх ядра | `match/pipeline.py`, `ingest/predict.py` |
+| L5 | точки входа | `api/`, `worker/` (кроме `queue.py`) |
+| L6 | инструменты | `eval/` — импортирует продукт; продукт `eval/` не импортирует |
+
+- Слой модуля — по самому длинному префиксу из `LAYERS` в `scripts/check_layers.py`: новый модуль
+  внутри пакета получает слой пакета, исключение — отдельная строка (так `match/pipeline.py` — L4,
+  а не L2). Новый пакет без строки в `LAYERS` — ошибка: его размещают осознанно, и строка таблицы
+  выше обновляется в том же PR.
+- Нужно импортировать вверх — не добавляйте строку в список, а вынесите нужное вниз (общий тип — в
+  `src/contracts.py`) или передайте зависимость аргументом.
 - Модули ролей стыкуются только через `src/contracts.py` и публичные функции `search()`,
-  `enrich()`, `apply_filters()`; внутренние файлы соседа не импортируются.
+  `enrich()`, `apply_filters()`; внутренние файлы соседа не импортируются (слои этого не заменяют).
+- Нарушения, которые уже были в `src/` (10 рёбер «модуль → модуль»), записаны в
+  `scripts/layers_allowlist.txt` с причиной и способом устранения (#294). Новое нарушение — ошибка;
+  строку можно удалять всегда, устаревшая строка — предупреждение. Полный список текущих нарушений —
+  `python scripts/check_layers.py --all`.
 - `src/api/` — единственный, кто знает про HTTP; `src/ui/` ходит только в `/api/*`.
 - `src/eval/` вызывает `search()` так же, как API: метрика измеряет то, что видит пользователь.
