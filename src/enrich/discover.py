@@ -35,7 +35,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -417,6 +417,21 @@ def _np_types() -> list[str]:
     return [t for t in (x.strip().upper() for x in raw.split(",")) if t in rmsp.NP_TYPES] or ["UL"]
 
 
+PAGE_ROWS = 10  # rows on one registry page: fewer → the last page
+
+
+def _pages(jobs: list[tuple[Channel, str, str]], pages: int,
+           last_rows: dict[tuple[str, str, str], int]) -> Iterator[tuple[tuple[Channel, str, str], int | None]]:
+    """(job, page number) in order: page 1 of every job, then pages 2..N of a job whose previous page
+    was full (`last_rows`, filled lazily by the caller's loop); None — skip, the job has no more rows."""
+    for job in jobs:
+        yield job, 1
+    for n in range(2, pages + 1):
+        for job in jobs:
+            full = last_rows.get((job[0].okved, job[1], job[2]), 0) >= PAGE_ROWS
+            yield job, (n if full else None)
+
+
 def discover(
     query: Query,
     history: Sequence[CounterpartyMatch] = (),
@@ -428,8 +443,16 @@ def discover(
     offline: bool | None = None,
     budget_s: float = LIVE_BUDGET_S,
     client: httpx.Client | None = None,
+    max_requests: int | None = MAX_REQUESTS,
+    pages: int = 1,
+    predicted_class: bool | None = None,
 ) -> Discovery:
-    """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data."""
+    """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data.
+
+    `/api/search` uses the defaults (budget, MAX_REQUESTS, the first page). `make predict` (#229) lifts
+    them: `max_requests=None` — every (OKVED, region, type), `pages` — registry pages per request,
+    `predicted_class=True` — build the block by the class search() predicted even without
+    DISCOVERY_PREDICTED_CLASS (the caller decided the text is more reliable than the code)."""
     cache = cache or SourceCache()
     processed = processed or processed_dir()
     offline = offline_mode() if offline is None else offline
@@ -441,7 +464,8 @@ def discover(
     classes = okpd_classes(query.okpd2)
     codes: list[str] = [c.strip() for c in query.okpd2]
     if not classes:
-        if not predicted_class_allowed():  # D-036: off until search() predicts the class reliably (#63)
+        allowed = predicted_class_allowed() if predicted_class is None else predicted_class
+        if not allowed:  # D-036: off until search() predicts the class reliably (#63)
             res.notes.append("ОКПД2 в запросе не указан — блок «Новые» не строится "
                              "(DISCOVERY_PREDICTED_CLASS выключен)")
             return res
@@ -453,17 +477,21 @@ def discover(
     res.okpd_classes = classes[:MAX_CLASSES]
 
     jobs = [(ch, region, np) for region in _regions(query) for ch in okved_plan(codes)
-            for np in _np_types()][:MAX_REQUESTS]
+            for np in _np_types()][:max_requests]
     deadline = time.monotonic() + budget_s  # every live request of this query ends before it
     net_ok = True  # False after the first network failure: the rest of the query is cache only
     found: dict[str, tuple[dict[str, str], Channel, CachedPage]] = {}
-    for ch, region, np_type in jobs:
-        label = f"ОКВЭД {ch.okved}, регион {region}, {np_type}"
-        url = rmsp.search_url(ch.okved, region, np_type)
+    last_rows: dict[tuple[str, str, str], int] = {}
+    for (ch, region, np_type), page_no in _pages(jobs, pages, last_rows):
+        if page_no is None:  # the previous page was the last one
+            continue
+        label = f"ОКВЭД {ch.okved}, регион {region}, {np_type}" + (f", стр. {page_no}" if page_no > 1 else "")
+        url = rmsp.search_url(ch.okved, region, np_type, page_no)
         # no time left before the deadline → the client raises Paused without a request
         live = not offline and net_ok and cache.get(url) is None and not rmsp.blocked()
         try:
-            page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live, deadline=deadline)
+            page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live, deadline=deadline,
+                                     page=page_no)
         except rmsp.Paused:  # no request was made: pause of the source or no time left
             net_ok, page = False, None
         except rmsp.Blocked as e:
@@ -483,6 +511,7 @@ def discover(
         if live and cache.get(url) is None:  # the request failed and an outdated answer was used
             net_ok, live = False, False
         answer = rmsp.parse(page.body)
+        last_rows[(ch.okved, region, np_type)] = len(answer.rows)
         active = [r for r in answer.rows if r.get("is_active") == "1"]
         res.inactive += len(answer.rows) - len(active)
         count = answer.meta.get("answer.rowCount", "")

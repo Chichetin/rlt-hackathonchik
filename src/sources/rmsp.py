@@ -2,7 +2,8 @@
 
 Discovery channel v0 (#16, research/SOURCES.md «(б) discovery v0», D-036): one POST per
 (OKVED prefix, region, subject type) returns the first page of the registry (10 rows, registry order).
-No pagination, no bulk walk: the page tokens are opaque and we do not need more for v0.
+`/api/search` reads only page 1; `make predict` (#229) asks pages 2..N with the form's own `page` field
+([ПРОВЕРИТЬ] on the live site that the order is stable between pages). No bulk walk of the registry.
 
 What goes to the cache (src/sources/cache.py):
 - `search_url(...)` → the answer as flat lines `row.<inn>.<field>: <value>` (values verbatim, only
@@ -83,15 +84,18 @@ def _check_args(okved: str, region: str, np_type: str) -> None:
         raise ValueError(f"rmsp: bad search arguments okved={okved!r} region={region!r} npType={np_type!r}")
 
 
-def search_url(okved: str, region: str, np_type: str = "UL") -> str:
+def search_url(okved: str, region: str, np_type: str = "UL", page: int = 1) -> str:
     # Cache key and Evidence url. [ПРОВЕРИТЬ] the public form does not prefill itself from the query
-    # string: the user repeats the search with the same three fields.
+    # string: the user repeats the search with the same three fields. Page 1 keeps the old key (cache).
     _check_args(okved, region, np_type)
-    return f"{BASE}/search.html?mode=extended&region={region}&npType={np_type}&okved1={okved}"
+    if page < 1:
+        raise ValueError(f"rmsp: bad page {page}")
+    tail = f"&page={page}" if page > 1 else ""
+    return f"{BASE}/search.html?mode=extended&region={region}&npType={np_type}&okved1={okved}{tail}"
 
 
-def raw_url(okved: str, region: str, np_type: str = "UL") -> str:
-    return search_url(okved, region, np_type) + "#raw"
+def raw_url(okved: str, region: str, np_type: str = "UL", page: int = 1) -> str:
+    return search_url(okved, region, np_type, page) + "#raw"
 
 
 def _scalar(v: Any) -> str:
@@ -199,8 +203,8 @@ def _client(timeout: float | None = None) -> httpx.Client:
 
 
 def fetch_raw(okved: str, region: str, np_type: str = "UL", client: httpx.Client | None = None,
-              deadline: float | None = None) -> dict[str, Any]:
-    """One live POST: the first page of the extended search. Blocked on 403/429/captcha/non-JSON,
+              deadline: float | None = None, page: int = 1) -> dict[str, Any]:
+    """One live POST: one page (the first by default) of the extended search. Blocked on 403/429/captcha/non-JSON,
     Paused when the host is on pause or the deadline leaves no time (no request is made)."""
     _check_args(okved, region, np_type)
     if blocked():
@@ -208,7 +212,7 @@ def fetch_raw(okved: str, region: str, np_type: str = "UL", client: httpx.Client
     own = client is None
     client = client or _client()
     try:
-        return _checked(_post(client, {"mode": "extended", "page": "1", "region": region, "npType": np_type,
+        return _checked(_post(client, {"mode": "extended", "page": str(page), "region": region, "npType": np_type,
                                        "okved1": okved}, deadline))
     finally:
         if own:
@@ -217,20 +221,20 @@ def fetch_raw(okved: str, region: str, np_type: str = "UL", client: httpx.Client
 
 def fetch_search(okved: str, region: str, np_type: str = "UL", cache: SourceCache | None = None,
                  client: httpx.Client | None = None, offline: bool = False,
-                 deadline: float | None = None) -> CachedPage | None:
-    """Cached answer text. offline → cache only (stale is fine), None when not cached.
+                 deadline: float | None = None, page: int = 1) -> CachedPage | None:
+    """Cached answer text of one page. offline → cache only (stale is fine), None when not cached.
 
     Live: fresh cache → cache; else one POST; POST failed → stale cache if any, else the error.
     An empty answer is cached too, so the same question is not asked again within the TTL.
     """
     cache = cache or SourceCache()
-    url = search_url(okved, region, np_type)
+    url = search_url(okved, region, np_type, page)
     if offline:
         return cache.get(url, allow_stale=True)
 
     def live(_: str) -> tuple[int, str]:
-        answer = fetch_raw(okved, region, np_type, client, deadline)
-        cache.put(raw_url(okved, region, np_type), json.dumps(
+        answer = fetch_raw(okved, region, np_type, client, deadline, page)
+        cache.put(raw_url(okved, region, np_type, page), json.dumps(
             {"rowCount": answer.get("rowCount"), "dtQueryEnd": answer.get("dtQueryEnd"), "data": clean_rows(answer)},
             ensure_ascii=False))
         return 200, flatten(okved, region, np_type, answer)

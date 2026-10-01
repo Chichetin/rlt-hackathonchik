@@ -89,9 +89,9 @@ eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-час�
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
 	$(PY) python -m src.eval.run --exp $(EXP)
 
-predict:           ## тестовая выгрузка организаторов → eval/predict/<папка>.csv: make predict CSV_DIR=<папка> [TOP=10] [OFFLINE=1]
+predict:           ## тестовая выгрузка организаторов → eval/predict/<папка>.csv: make predict CSV_DIR=<папка> [TOP=10] [OFFLINE=1] [MODE=full|demo] [NO_RNP=1]
 	@[ -n "$(CSV_DIR)" ] || { echo "нужен CSV_DIR=<папка с Извещения*.csv и ТРУ*.csv>"; exit 2; }
-	$(PY) python -m src.ingest.predict --csv-dir "$(CSV_DIR)" --top $(or $(TOP),10) $(if $(OFFLINE),--offline)
+	$(PY) python -m src.ingest.predict --csv-dir "$(CSV_DIR)" --top $(or $(TOP),10) $(if $(OFFLINE),--offline) --mode $(or $(MODE),full) $(if $(NO_RNP),--no-rnp)
 
 okpd2:             ## справочник ОКПД2 код → наименование → data/processed/okpd2.parquet; обновить снимок: make okpd2 IMPORT=<zip с data.mos.ru>
 	$(PY) python -m src.ingest.okpd2 $(if $(IMPORT),--import "$(IMPORT)")
