@@ -164,3 +164,28 @@ def test_eval_slices_by_procurement_type(monkeypatch, tmp_path):
     assert [q["type"] for q in body["per_query"]] == ["services", "goods", "unknown", "unknown"]
     assert {"type=goods", "type=services", "type=unknown"} <= set(body["slices"])
     assert body["slices"]["type=unknown"]["n_queries"] == 2
+
+
+def test_compare_slices_by_type_against_older_result_and_shows_both_values(tmp_path, capsys):
+    import json
+
+    from src.eval import compare as C
+
+    old = {"exp_id": "OLD", "part": "dev", "per_query": [  # a result from before #104: no "type"
+        {"query_id": q, "recall@10": v, "mrr": v, "ndcg@10": v, "channel": "ЭМ"} for q, v in
+        (("g1", 1.0), ("g2", 0.0), ("s1", 0.5))]}
+    new = {"exp_id": "NEW", "part": "dev", "per_query": [
+        {"query_id": q, "recall@10": v, "mrr": v, "ndcg@10": v, "channel": "ЭМ", "type": t} for q, v, t in
+        (("s1", 1.0, "services"), ("g1", 1.0, "goods"), ("g2", 0.5, "goods"))]}
+    for t in (C.paired(new, old), C.paired(old, new)):  # the type of either run defines the slice
+        assert t["type=goods"]["n_queries"] == 2 and t["type=services"]["n_queries"] == 1
+    t = C.paired(new, old)
+    r = t["type=services"]["metrics"]["recall@10"]
+    assert (r["a"], r["b"], r["delta"]) == (1.0, 0.5, 0.5)
+    g = t["type=goods"]["metrics"]["recall@10"]
+    assert (g["a"], g["b"], g["delta"]) == (0.75, 0.5, 0.25)
+    for rec in (old, new):
+        (tmp_path / f"{rec['exp_id']}.json").write_text(json.dumps(rec), encoding="utf-8")
+    assert C.main(["NEW", "OLD"], results=tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "type=services" in out and "0.500 → 1.000" in out
