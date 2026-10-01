@@ -3,8 +3,12 @@ import {
   buildQuery,
   COMPONENT_LABEL,
   exportXlsx,
+  fetchLot,
   KIND_LABEL,
+  LotError,
   search,
+  STAT_LABEL,
+  type Extra,
   yesNo,
   type CounterpartyMatch,
   type Filters,
@@ -23,13 +27,51 @@ export function App() {
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
   const [error, setError] = useState("");
   const [open, setOpen] = useState<CounterpartyMatch | null>(null);
+  const [lotId, setLotId] = useState("");
+  const [lot, setLot] = useState<Extra["lot"]>(null);
+  const [lotQueryId, setLotQueryId] = useState<string | undefined>();
+  const [budget, setBudget] = useState("");
+  const [customerInn, setCustomerInn] = useState("");
+  const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [lotBusy, setLotBusy] = useState(false);
+  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId });
+
+  async function loadLot() {
+    if (!lotId.trim()) return;
+    setLotBusy(true);
+    setLotMsg(null);
+    try {
+      const q = await fetchLot(lotId);
+      setText(q.text);
+      setBudget(q.budget ? String(q.budget) : "");
+      setCustomerInn(q.customer_inn ?? "");
+      setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
+      setLotQueryId(q.query_id);
+      setLotMsg({ kind: "ok", text: `Закупка ${lotId.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+    } catch (e) {
+      setLot(null);
+      setLotQueryId(undefined);
+      const st = e instanceof LotError ? e.status : 0;
+      const why =
+        st === 404
+          ? "Закупка с таким номером не найдена в данных."
+          : st === 503
+            ? "Данные закупок на сервере не подключены."
+            : st === 422
+              ? "Номер закупки — только цифры (lot_id или реестровый номер)."
+              : `Не удалось загрузить закупку: ${String(e)}.`;
+      setLotMsg({ kind: "err", text: `${why} Опишите предмет закупки текстом ниже.` });
+    } finally {
+      setLotBusy(false);
+    }
+  }
 
   async function run(nextFilters: Filters = filters) {
     if (!text.trim()) return;
     setState("loading");
     setOpen(null);
     try {
-      setRes(await search(buildQuery(text, nextFilters)));
+      setRes(await search(buildQuery(text, nextFilters, extra())));
       setState("idle");
     } catch (e) {
       setError(String(e));
@@ -62,6 +104,30 @@ export function App() {
           void run();
         }}
       >
+        <label htmlFor="lot">Номер закупки (необязательно)</label>
+        <div className="lotrow">
+          <input
+            id="lot"
+            inputMode="numeric"
+            value={lotId}
+            placeholder="lot_id или реестровый номер извещения"
+            onChange={(e) => setLotId(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void loadLot();
+              }
+            }}
+          />
+          <button type="button" className="secondary" disabled={!lotId.trim() || lotBusy} onClick={() => void loadLot()}>
+            {lotBusy ? "Загружаем…" : "Загрузить закупку"}
+          </button>
+        </div>
+        {lotMsg && (
+          <p className={lotMsg.kind === "ok" ? "lotmsg" : "lotmsg lotmsg-err"} role={lotMsg.kind === "ok" ? "status" : "alert"}>
+            {lotMsg.text}
+          </p>
+        )}
         <label htmlFor="q">Что нужно закупить</label>
         <textarea
           id="q"
@@ -70,6 +136,18 @@ export function App() {
           placeholder="Наименование товара или позиции из ТЗ, например: бумага офисная А4, 80 г/м²"
           onChange={(e) => setText(e.target.value)}
         />
+        <div className="optional">
+          <label>
+            НМЦК, ₽
+            <input value={budget} inputMode="decimal" placeholder="необязательно" onChange={(e) => setBudget(e.target.value)} />
+          </label>
+          <label>
+            ИНН заказчика
+            <input value={customerInn} inputMode="numeric" placeholder="необязательно" onChange={(e) => setCustomerInn(e.target.value)} />
+          </label>
+          {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
+          {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
+        </div>
         <div className="row">
           <fieldset className="filters">
             <legend>Фильтры</legend>
@@ -108,7 +186,7 @@ export function App() {
               type="button"
               className="secondary"
               disabled={!res}
-              onClick={() => void exportXlsx(buildQuery(text, filters)).catch((e) => setError(String(e)))}
+              onClick={() => void exportXlsx(buildQuery(text, filters, extra())).catch((e) => setError(String(e)))}
             >
               Выгрузить в Excel
             </button>
@@ -199,6 +277,18 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
         {Object.entries(cp.contacts ?? {}).map(([k, v]) => [<dt key={`k-${k}`}>{k}</dt>, <dd key={`v-${k}`}>{v}</dd>])}
       </dl>
 
+      {Object.keys(cp.stats ?? {}).length > 0 && (
+        <>
+          <h3>Статистика из данных АИС ГЗ</h3>
+          <dl className="facts stats">
+            {Object.entries(cp.stats ?? {}).map(([k, v]) => [
+              <dt key={`k-${k}`}>{STAT_LABEL[k] ?? k}</dt>,
+              <dd key={`v-${k}`}>{String(v)}</dd>,
+            ])}
+          </dl>
+        </>
+      )}
+
       <h3>Почему в списке · score {m.score.toFixed(2)}</h3>
       <ul className="components">
         {m.components.map((c) => (
@@ -216,6 +306,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
       </ul>
 
       <h3>Источники фактов</h3>
+      {(cp.evidence ?? []).length === 0 && <p className="empty">Подтверждённых фактов с источником нет.</p>}
       <ul className="evidence">
         {(cp.evidence ?? []).map((e, i) => (
           <li key={i}>

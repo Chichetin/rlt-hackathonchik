@@ -14,7 +14,7 @@ export default defineConfig({
   webServer: {
     command: `uv run --frozen uvicorn src.api.app:app --host 127.0.0.1 --port ${port}`,
     cwd: "../..",
-    env: { PYTHONPATH: ".", DATABASE_URL: "sqlite:///cache/e2e-queue.sqlite" },
+    env: { PYTHONPATH: ".", DATABASE_URL: "sqlite:///cache/e2e-queue.sqlite", DATA_RAW_DIR: "tests/fixtures/raw" },
     url: `http://127.0.0.1:${port}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,

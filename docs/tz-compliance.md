@@ -14,7 +14,7 @@
 | 3 | Методология подбора | match | `research/METHODOLOGY.md`, `configs/search.yaml` | `make eval EXP=<id>` против baseline | заглушка (v0 текстом) |
 | 4 | Поиск в открытых источниках | sources | блок «Новые из открытых источников», `src/sources/` | e2e: в блоке есть компания с URL источника; precision@10 блока B | заглушка |
 | 5 | Обогащение данных | sources | `enrich()`, `src/enrich/evidence.py`, карточка | `pytest tests/unit/test_evidence.py`; покрытие обогащения (EVAL C) | заглушка (проверка Evidence готова) |
-| 6 | Удобный веб-интерфейс | app | `src/ui/`, `docs/ui.md` | `make e2e` (демо-сценарий); `operator` ≤ 90 с | заглушка (сценарий проходит на stub) |
+| 6 | Удобный веб-интерфейс | app | `src/ui/`, `docs/ui.md` | `make e2e` (демо-сценарий); `operator` ≤ 90 с | заглушка на данных (поиск и обогащение — stub); номер закупки → запрос из извещения работает (`tests/unit/test_api.py::test_lot_*`, `make e2e`: «номер закупки → выдача», на фикстуре, не на реальном лоте); карточка: статистика, факты с URL и датой, «ИНН не подтверждён» |
 | 7 | Тест на реальных кейсах | data | 5–10 закупок СПб: прогон, метрики, разбор | `make eval`, скриншоты в `pitch/` | нет |
 | 8 | Масштабирование | app | `pitch/architecture.md`, `docker-compose.yml` | `make up` → `/api/health`; замер latency командой | частично (compose работает на stub) |
 | 9 | Демонстрация | app | `make demo`, запасное видео | `make demo` с чистого клона на машине показа | заглушка |

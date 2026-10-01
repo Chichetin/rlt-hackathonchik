@@ -61,3 +61,47 @@ test("API error is shown, not swallowed", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось получить подбор");
 });
+
+test("buildQuery adds optional budget, customer and lot context", () => {
+  const f = { only_msp: false, only_manufacturers: false, region: "" };
+  const lot = { okpd2: ["17.12.14.110"], channel: "ЭМ" as const, customer_inn: null, budget: null };
+  const q = buildQuery("бумага", f, { budget: "45 000,5", customer_inn: "7804105239", lot, query_id: "lot-1" });
+  expect(q).toMatchObject({ query_id: "lot-1", budget: 45000.5, customer_inn: "7804105239", okpd2: ["17.12.14.110"], channel: "ЭМ" });
+  const bad = buildQuery("бумага", f, { budget: "abc", customer_inn: "123", lot: null });
+  expect(bad.budget).toBeUndefined();
+  expect(bad.customer_inn).toBeUndefined();
+});
+
+test("lot number fills the query from the notice", async () => {
+  const lotQuery = { query_id: "lot-9", text: "Бумага из извещения", okpd2: ["17.12"], budget: 1000, customer_inn: "7804105239", channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(lotQuery), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
+  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
+  expect(await screen.findByDisplayValue("Бумага из извещения")).toBeInTheDocument();
+  expect(screen.getByLabelText("НМЦК, ₽")).toHaveValue("1000");
+  expect(screen.getByText(/ОКПД2: 17.12/)).toBeInTheDocument();
+});
+
+test("lot 503 says data is not connected and falls back to free text", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ detail: "нет данных" }), { status: 503 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
+  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("не подключены");
+  expect(alert).toHaveTextContent("текстом");
+});
+
+test("card shows stats and the unconfirmed INN note", async () => {
+  const withStats = structuredClone(response);
+  withStats.history[0].counterparty.stats = { contracts_12m: 7 };
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withStats), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(await screen.findByText("ООО Альфа"));
+  const card = screen.getByRole("dialog");
+  expect(card).toHaveTextContent("Контрактов за 12 мес.");
+  expect(card).toHaveTextContent("ИННне подтверждён");
+});
