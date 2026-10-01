@@ -204,7 +204,8 @@ def test_search_strips_unverified_facts(client, monkeypatch, tmp_path):
     """A fabricated contact never reaches the card or the xlsx."""
     from src.match import search as search_mod
     monkeypatch.setattr(search_mod, "search", lambda q, k=20: [_fabricated("history"), _fabricated("discovered")])
-    monkeypatch.setattr(app_mod, "SourceCache", lambda: __import__("src.sources.cache", fromlist=["x"]).SourceCache(
+    from src.match import pipeline
+    monkeypatch.setattr(pipeline, "SourceCache", lambda: __import__("src.sources.cache", fromlist=["x"]).SourceCache(
         tmp_path / "c.sqlite"))
     body = client.post("/api/search", json={"query_id": "q", "text": "x"}).json()
     rows = body["history"] + body["discovered"]

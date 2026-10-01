@@ -81,6 +81,6 @@ def test_basis_is_up_to_three_codes_of_the_chosen_type_in_order():
 
 def test_labels_and_default_near():
     assert PURCHASE_LABEL == {"goods": "товар", "works": "работа", "services": "услуга",
-                              "remote": "услуга дистанционная"}
+                              "remote": "услуга не на месте заказчика"}
     assert default_near("works") == "near" and default_near("services") == "near"
     assert default_near("goods") == "any" and default_near("remote") == "any" and default_near(None) == "any"

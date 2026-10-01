@@ -13,10 +13,13 @@ Query.okpd2); a tie — works > services > remote > goods (on-site work is the s
 region). A code without two leading digits (or class 00) does not vote; no voting code — None, the type is not
 guessed.
 
-REMOTE_CLASSES — the service classes whose real winners travel like goods: a winner outside the customer's region
-and its neighbour (78 <-> 47) in at least 20 % of the wins, goods have 22.2 % (wins of customers 78 / 47 in the
-organizers' data, the class of a lot is the mode of its positions; the supplier's region is its KPP, an ИП — its
-INN; classes with >= 100 wins; `uv run python scripts/near_by_class.py`).
+REMOTE_CLASSES — the service classes whose real winners travel like goods: «near» would hide at least 20 % of the
+wins (a winner outside the customer's region and its neighbour 78 <-> 47, or of an unknown region — e.g. KPP 99, the
+largest taxpayers: energy, telecom), goods have 22.3 % (wins of customers 78 / 47 in the organizers' data, the class
+of a lot is the mode of its positions, the supplier's region by filters.supplier_region; classes with >= 100 wins;
+`uv run python scripts/near_by_class.py`). The table is over all of 2024–2025 and only sets a UI filter default (eval
+uses no filters); before the scoring profiles of #104 use it, recompute it on the data before the cutoff
+(configs/split.yaml) — else the choice of classes sees the holdout.
 """
 
 from __future__ import annotations
@@ -29,16 +32,16 @@ PurchaseType = Literal["goods", "works", "services", "remote"]
 Near = Literal["worked", "near", "any"]  # applied values of filters.near_customer ("auto" resolves to one of them)
 
 PURCHASE_LABEL: dict[PurchaseType, str] = {
-    "goods": "товар", "works": "работа", "services": "услуга", "remote": "услуга дистанционная",
+    "goods": "товар", "works": "работа", "services": "услуга", "remote": "услуга не на месте заказчика",
 }
 TIE_ORDER: tuple[PurchaseType, ...] = ("works", "services", "remote", "goods")  # first wins a tie
 GOODS_LAST, WORKS = 33, (41, 43)  # class ranges of the rule
 GOODS_CLASSES = frozenset({46, 47})  # #188: trade — the goods themselves are bought
 GOODS_SUBCLASSES = frozenset({"58.11", "58.14", "58.19"})  # #188: printed books, periodicals, other editions
-# class -> % of winners outside the customer's region and its neighbour (scripts/near_by_class.py, 02.10)
+# class -> % of wins «near» would hide (scripts/near_by_class.py, 02.10)
 REMOTE_SHARE: dict[int, float] = {
-    35: 24.0, 53: 22.6, 55: 34.0, 58: 43.1, 59: 35.5, 62: 26.5, 63: 42.8, 64: 49.1, 65: 80.6, 66: 31.9,
-    69: 24.4, 70: 32.3, 72: 22.0, 73: 28.7, 74: 26.5, 78: 50.4, 79: 21.8, 82: 25.4, 85: 21.2,
+    35: 24.0, 53: 22.6, 55: 34.1, 58: 43.1, 59: 35.5, 62: 26.5, 63: 42.8, 64: 49.1, 65: 80.6, 66: 31.9,
+    69: 24.6, 70: 32.3, 72: 25.4, 73: 28.7, 74: 26.5, 78: 50.4, 79: 21.8, 82: 25.4, 85: 21.2,
 }
 REMOTE_CLASSES = frozenset(REMOTE_SHARE)
 BASIS_CODES = 3  # codes shown as the basis of the type

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Ratings } from "./Ratings";
 import { levelOf, RelevanceTag } from "./roles";
 import { COMPONENT_LABEL, KIND_LABEL, regionLabel, relationToCustomer, type CounterpartyMatch } from "./api";
 
@@ -38,6 +39,7 @@ export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext
     <p className="inspector-meta">{KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}{relationToCustomer(cp, customerRegion) && <> — {relationToCustomer(cp, customerRegion)}</>}</p>
     <p className="inspector-inn">ИНН {cp.inn ?? "не подтверждён"}</p>
     <button type="button" className="inspector-open" onClick={() => onOpen(match)}>Открыть полную карточку <span aria-hidden="true">↗</span></button>
+    <Ratings inn={cp.inn} />
     <h3>Почему подходит</h3>
     {weightsNote && <p className="inspector-note">Оценка с вашими весами: «{weightsNote}».</p>}
     <ul className="inspector-reasons">
