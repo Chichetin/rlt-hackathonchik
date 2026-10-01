@@ -253,7 +253,8 @@ def test_near_facets_equal_the_rows_each_choice_keeps():
         q = Query(query_id="q", text="x", customer_inn=inn)
         got = F.near_facets(NEAR_ROWS, F.near_of(q))
         assert got == {c: len(_near(customer_inn=inn, near_customer=c)) for c in ("worked", "near", "any")}
-    assert F.near_facets(NEAR_ROWS, F.near_of(Query(query_id="q", text="x"))) == {"worked": 4, "near": 7, "any": len(NEAR_ROWS)}
+    every = F.near_facets(NEAR_ROWS, F.near_of(Query(query_id="q", text="x")))
+    assert every == {"worked": 4, "near": 7, "any": len(NEAR_ROWS)}
 
 
 # --- review of #240, item 3: each chip group counted after the filters of the OTHER groups -------------------------

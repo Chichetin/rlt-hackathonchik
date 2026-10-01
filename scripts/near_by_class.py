@@ -32,7 +32,8 @@ def main(data: Path) -> None:
     con.execute(f"""
         create temp table w as
         select p.lot_id,
-          case when regexp_matches(trim(coalesce(p.supplier_kpp, '')), '^[0-9]{{2}}') and left(trim(p.supplier_kpp), 2) <> '00'
+          case when regexp_matches(trim(coalesce(p.supplier_kpp, '')), '^[0-9]{{2}}')
+                    and left(trim(p.supplier_kpp), 2) <> '00'
                  then left(trim(p.supplier_kpp), 2)
                when length(p.supplier_inn) = 12 then left(p.supplier_inn, 2) end as sreg
         from '{d}/participants.parquet' p join '{d}/notices.parquet' n using (lot_id)

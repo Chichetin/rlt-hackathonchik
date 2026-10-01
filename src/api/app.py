@@ -6,14 +6,14 @@ pages each block, the block sizes after filters are in the X-Total-History / X-T
 headers (the frozen SearchResponse has no total). The xlsx export takes every filtered row.
 Counts for the filter chips (#232) are the X-Facets header, ASCII JSON
 `{"history": F, "discovered": F}`, F = `{"kind": {"manufacturer": n, "distributor": n, "dealer": n, "unknown": n},
-"entity": {"ul": n, "ip": n, "unknown": n}, "near": {"worked": n, "near": n, "any": n}}`: the candidates of the block after the
-legal status (liquidation, RNP), each group after the user filters of the other groups (filters.chip_facets), so a
-chip count is the block size its choice gives with the other filters on; «Новые» shows at most discover.MAX_SHOWN, so
-its counts are capped at it. Filter keys — src/match/filters.py.
+"entity": {"ul": n, "ip": n, "unknown": n}, "near": {"worked": n, "near": n, "any": n}}`: the candidates of the block
+after the legal status (liquidation, RNP), each group after the user filters of the other groups
+(filters.chip_facets), so a chip count is the block size its choice gives with the other filters on; «Новые» shows
+at most discover.MAX_SHOWN, so its counts are capped at it. Filter keys — src/match/filters.py.
 The customer and the purchase type the search assumed (#242) are the X-Search-Context header, ASCII JSON
 `{"customer_region", "customer_basis": "ИНН 78…" | "регион запроса", "purchase_type": goods | works | services |
-remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_near": near | any, "applied_near": worked | near |
-any}`.
+remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_near": near | any, "applied_near":
+worked | near | any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
 """
