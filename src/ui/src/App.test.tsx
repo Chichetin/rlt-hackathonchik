@@ -1,7 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
+import { reviewLinks } from "./reviews";
 import { buildQuery, type Counterparty, filterNotes, regionLabel, type SearchResponse } from "./api";
 
 const match = (name: string, origin: "history" | "discovered", kind = "manufacturer") => ({
@@ -30,6 +31,7 @@ const response: SearchResponse = {
   stub: true,
 } as SearchResponse;
 
+beforeEach(() => window.history.replaceState(null, "", "/search"));
 afterEach(() => vi.restoreAllMocks());
 
 test("buildQuery keeps only enabled filters", () => {
@@ -287,4 +289,24 @@ test("«Новые» with a manufacturer emptied by other filters: «Тольк�
   await userEvent.click(screen.getByLabelText("Только производители"));
   expect(await within(discovered).findByText(/новых компаний по этому запросу не найдено/)).toBeInTheDocument();
   expect(discovered).not.toHaveTextContent("Под фильтр");
+});
+
+test("card has a «Отзывы» block: not-in-score note, links by name and INN, no rating (#106)", async () => {
+  const withInn = structuredClone(response);
+  withInn.history[0]!.counterparty.inn = "7804428656";
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withInn), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  const block = within(screen.getByRole("region", { name: "Отзывы" }));
+  expect(block.getByText(/Не влияет на оценку подбора/)).toBeInTheDocument();
+  expect(block.getByText(/Рейтинг из отзывов не показываем/)).toBeInTheDocument();
+  expect(block.getByRole("link", { name: "2ГИС" })).toHaveAttribute("href", expect.stringContaining(encodeURIComponent("ООО Альфа 7804428656")));
+});
+
+test("reviewLinks: a placeholder name «ИНН …» is not used as a query; nothing to search — no links", () => {
+  expect(reviewLinks("ИНН 7804428656", "7804428656")[0].url).toContain("text=7804428656");
+  expect(reviewLinks("ИНН 7804428656", "7804428656")[0].url).not.toContain("%D0%98%D0%9D%D0%9D");
+  expect(reviewLinks("ИНН ", null)).toEqual([]);
 });

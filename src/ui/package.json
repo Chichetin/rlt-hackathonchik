@@ -12,6 +12,7 @@
     "types": "openapi-typescript ../../docs/openapi.json -o src/api-types.ts"
   },
   "dependencies": {
+    "motion": "^13.5.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
