@@ -7,7 +7,7 @@ import "./micro.css";
 import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
-import { easeOut, glide, ScrollTools } from "./Motion";
+import { easeOut, ScrollTools } from "./Motion";
 import { okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
@@ -353,8 +353,7 @@ export function shortName(name: string): string {
 
 function CompanyName({ name }: { name: string }) {
   // the organizers' data has no supplier names (contracts.py): such a row is named by its INN
-  const short = shortName(name);
-  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={short !== name ? name : undefined}>{short}</span>;
+  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={name}>{name}</span>;
 }
 
 export function App() {
@@ -368,6 +367,7 @@ export function App() {
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
   const [more, setMore] = useState(false);
+  const [mobileDetails, setMobileDetails] = useState(false);
   const [resultGroup, setResultGroup] = useState<"history" | "new">("history");
   const [selectedSuppliers, setSelectedSuppliers] = useState<Partial<Record<"history" | "new", string>>>({});
   // the same query without user filters: how many candidates a filter hides for an unknown attribute
@@ -611,12 +611,18 @@ export function App() {
   const selectResult = (m: CounterpartyMatch) => {
     revealSelection.current = true;
     setSelectedSuppliers(prev => ({ ...prev, [resultGroup]: supplierKey(m) }));
-    if (window.matchMedia("(max-width: 900px)").matches) requestAnimationFrame(() => {
-      document.getElementById("supplier-preview")?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "start" });
-    });
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      setMobileDetails(true);
+      requestAnimationFrame(() => {
+      const pane = document.getElementById("supplier-preview");
+      pane?.querySelector<HTMLButtonElement>(".inspector-back")?.focus({ preventScroll: true });
+      pane?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "start" });
+      });
+    }
   };
 
   const selectedKey = selectedResult ? supplierKey(selectedResult) : "";
+  useEffect(() => { if (!selectedKey) setMobileDetails(false); }, [selectedKey]);
   useEffect(() => {
     if (!revealSelection.current) return;
     revealSelection.current = false;
@@ -628,22 +634,25 @@ export function App() {
     else if (item.bottom > box.bottom) list.scrollTop += item.bottom - box.bottom;
   }, [selectedKey, path]);
   function returnToList() {
+    setMobileDetails(false);
+    requestAnimationFrame(() => {
     const row = document.querySelector<HTMLElement>('.result-list-scroll:not([hidden]) .item[aria-pressed="true"]');
     row?.focus({ preventScroll: true });
     row?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "center" });
+    });
   }
 
   return (
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
     <div inert={!!open}><ScrollTools /></div>
-    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} inert={!!open}
+    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
-      {path !== "/" && <div className="search-background"><WaveField pattern="slats" /></div>}
+      {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
       <div className="content">
       <AnimatePresence mode="wait" initial={false}>
-      <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
+      <motion.div className={path === "/" ? undefined : "interior-route"} key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
       {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
@@ -690,7 +699,6 @@ export function App() {
             <p>Загрузите извещение или опишите, что вам нужно.</p>
           </div>
         </div>
-        <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
         <div className="lot-section">
           <label htmlFor="lot">Номер закупки (необязательно)</label>
           <div className="lotrow">
@@ -739,10 +747,10 @@ export function App() {
         }} />
         </div>
         <div className="query-options">
-        {path === "/search" && <div className="section-heading"><div>
+        <div className="section-heading refinement-heading"><div>
           <h2>Уточнить подбор</h2>
-          <p>Необязательно. Поможет сузить круг компаний.</p>
-        </div></div>}
+          <p>Необязательные параметры</p>
+        </div></div>
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -772,9 +780,9 @@ export function App() {
             {lot?.okpd2?.length ? <span className="chip">ОКПД2: {okpd2Text(lot.okpd2, lotLabels)}</span> : null}
           </div>
         )}
-        <div className="row">
+        <div className="row query-finish">
           <div className="query-refinements">
-            <a className="filter-link" {...link("/settings")}>Фильтры <span aria-hidden="true">↗</span></a>
+            <a className="filter-link" {...link("/settings")}>Фильтры {filtersActive(filters) && <span className="filter-applied">применены</span>}<span aria-hidden="true">↗</span></a>
             <label className="query-region">Может работать у заказчика
               <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} facets={res?.facets} />
             </label>
@@ -788,6 +796,7 @@ export function App() {
           </div>
         </div>
         </div>
+        <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
       </form>
       <div className="output">
       {state === "error" && (
@@ -800,7 +809,7 @@ export function App() {
         state === "loading" ? <Skeleton /> : path === "/results" ? (
           <section className="getting-started" aria-label="Результаты">
             <h2>Вы ещё не запускали подбор</h2>
-            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки слева и нажмите «Найти поставщиков».</p>
+            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки и нажмите «Найти поставщиков».</p>
           </section>
         ) : (
         <section id="about" className="getting-started" aria-label="Как работает подбор">
@@ -842,7 +851,7 @@ export function App() {
           {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
             Оценка: {presetTitle(weightSet)} · только у вас
           </a>}
-          <div className="result-browser">
+          <div className="result-browser" data-mobile-details={mobileDetails && !!selectedResult}>
           <div className="result-list-pane">
             <div className="result-groups" role="group" aria-label="Группа поставщиков">
               <button type="button" className="group-history" aria-pressed={resultGroup === "history"} onClick={() => setResultGroup("history")}>С опытом <span>{historyTotal}</span></button>
@@ -939,14 +948,13 @@ function Block(props: {
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
         <ol className="list">
-          {props.rows.map((m, i) => {
+          {props.rows.map((m) => {
             const cp = m.counterparty;
             const top = [...m.components].sort((a, b) => b.value * b.weight - a.value * a.weight)[0];
             return (
               <motion.li key={cp.inn ?? cp.name} layout={reduced ? false : "position"}
-                initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, amount: 0.05 }} transition={{ duration: reduced ? 0 : 0.45, delay: reduced ? 0 : Math.min(i, 4) * 0.04, ease: easeOut }}>
-                <motion.button className="item" aria-controls="supplier-preview" aria-pressed={props.selectedKey === supplierKey(m)} whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
+                initial={false} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.12 }}>
+                <motion.button className="item" aria-controls="supplier-preview" aria-pressed={props.selectedKey === supplierKey(m)} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
                   <span className={`score score-level-${levelOf(m.score)}`} title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
@@ -1033,13 +1041,13 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
     <motion.div className="card-overlay" initial={{ opacity: reduced ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.2 }} onClick={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-    <motion.aside ref={cardRef} initial={reduced ? false : { x: "100%" }} animate={{ x: 0 }} exit={{ x: reduced ? 0 : "100%" }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 38 }} className="card" role="dialog" aria-modal="true" onKeyDown={(event) => {
+    <motion.aside ref={cardRef} initial={reduced ? false : { x: "100%" }} animate={{ x: 0 }} exit={{ x: reduced ? 0 : "100%" }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 38 }} className="card interior-card" role="dialog" aria-modal="true" onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
       }
       if (event.key === "Tab") {
-        const elements = cardRef.current?.querySelectorAll<HTMLElement>('button, a[href]');
+        const elements = [...(cardRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? [])].filter(el => el.getClientRects().length > 0 && el.tabIndex >= 0);
         if (!elements?.length) return;
         const first = elements[0];
         const last = elements[elements.length - 1];
