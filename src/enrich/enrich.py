@@ -219,12 +219,19 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
     return None
 
 
-def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None) -> Counterparty:
-    """The base card (below) plus the offline facts of ФНС open data, each with its own url."""
+def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counterparty]:
+    """The cards plus the offline facts of ФНС open data, each with its own url (one query for all, no network)."""
+    facts = fns_opendata.lookup_many([c.inn for c in cards if c.inn and inn_is_valid(c.inn)], cache)
+    return [c.model_copy(update={"evidence": [*c.evidence, *facts[c.inn]]}) if c.inn in facts else c for c in cards]
+
+
+def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
+           open_data: bool = True) -> Counterparty:
+    """The base card (below) plus add_open_data(); `open_data=False` — the base card only (the search
+    loop over 200 candidates needs no ФНС facts: the page and the export add them to what they show)."""
     cache = cache or SourceCache()
     cp = _enrich(inn, cache, offline)
-    extra = fns_opendata.lookup(inn, cache)
-    return cp.model_copy(update={"evidence": [*cp.evidence, *extra]}) if extra else cp
+    return add_open_data([cp], cache)[0] if open_data else cp
 
 
 def _enrich(inn: str, cache: SourceCache, offline: bool | None) -> Counterparty:

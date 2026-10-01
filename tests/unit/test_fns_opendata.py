@@ -5,17 +5,22 @@ Fixtures are real documents cut from the 25.09.2026 archives (legal entities onl
 7707049388 (Ростелеком) is in none of the four datasets.
 """
 
+import logging
 import os
 import zipfile
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import duckdb
 import pytest
+from fastapi.testclient import TestClient
 
-from src.contracts import Evidence
+from src.api import app as app_mod
+from src.contracts import Counterparty, CounterpartyMatch, Evidence, ScoreComponent
 from src.enrich.enrich import enrich
 from src.enrich.evidence import check_counterparty, check_evidence
+from src.match import search as search_mod
 from src.sources import fns_opendata as F
 from src.sources import pb_nalog
 from src.sources.cache import SourceCache
@@ -81,7 +86,7 @@ def test_lookup_facts_pass_evidence_check(built):
     assert [e.fact for e in by["tax_regime"]] == ["Применяет УСН (сведения на 01.09.2026)"]
     for e in evs:
         assert check_evidence(e, cache.page_text) == []
-        assert e.url.startswith("https://file.nalog.ru/opendata/") and e.url.endswith(f"#inn={BRASS}")
+        assert e.url.startswith("https://www.nalog.gov.ru/opendata/7707329152-") and e.url.endswith(f"#inn={BRASS}")
         assert e.fetched_at == datetime.fromtimestamp(FETCHED, tz=UTC)
         assert e.source.startswith("ФНС, открытые данные: ")
     page = cache.page_text(F.page_url(F.DATASETS["snr"], BRASS)) or ""
@@ -154,3 +159,118 @@ def test_enrich_without_fns_parquet_is_unchanged(built):
     cache.put(pb_nalog.card_url(BRASS), (PB / f"{BRASS}.txt").read_text(encoding="utf-8"))
     cp = enrich(BRASS, cache, offline=True)
     assert all(e.url == pb_nalog.card_url(BRASS) for e in cp.evidence)
+
+
+def test_individual_entrepreneur_inn_gives_nothing(built):
+    out, _, cache = built
+    assert F.lookup("500100732259", cache, parquet=out) == []  # 12 digits: the datasets list legal entities only
+
+
+def test_unreadable_parquet_gives_no_facts_and_the_card_survives(built, tmp_path, monkeypatch, caplog):
+    _, _, cache = built
+    broken = tmp_path / "broken.parquet"
+    broken.write_bytes(b"PAR1 not a parquet file")
+    with caplog.at_level(logging.WARNING):
+        assert F.lookup(BRASS, cache, parquet=broken) == []
+    assert "факты ФНС пропущены" in caplog.text
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(broken))
+    cache.put(pb_nalog.card_url(BRASS), (PB / f"{BRASS}.txt").read_text(encoding="utf-8"))
+    cp = enrich(BRASS, cache, offline=True)
+    assert cp.name == 'ООО "БРАСС"' and all(e.url == pb_nalog.card_url(BRASS) for e in cp.evidence)
+
+
+def test_missing_parquet_warns_once(built, tmp_path, monkeypatch, caplog):
+    _, _, cache = built
+    monkeypatch.setattr(F, "_missing_warned", set())
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            assert F.lookup(BRASS, cache, parquet=tmp_path / "missing.parquet") == []
+    assert caplog.text.count("не собраны") == 1
+
+
+def test_document_without_state_date_is_skipped_in_build(tmp_path):
+    root = tmp_path / "external"
+    root.mkdir()
+    for ds in F.DATASETS.values():
+        xml = (FIX / f"{ds.id}.xml").read_text(encoding="utf-8")
+        if ds.id == "sshr2019":  # the first document loses ДатаСост
+            xml = xml.replace(' ДатаСост="31.12.2025"', "", 1)
+        with zipfile.ZipFile(F.archive_path(ds, root), "w") as z:
+            z.writestr(f"VO_{ds.id}.xml", xml)
+    counts = F.build(root, tmp_path / "out.parquet")
+    assert counts["sshr2019"] == 1 and counts["revexp"] == 2
+
+
+def test_evidence_url_is_the_dataset_passport_not_the_archive(built):
+    out, _, cache = built
+    for e in F.lookup(BRASS, cache, parquet=out):
+        assert e.url.startswith("https://www.nalog.gov.ru/opendata/7707329152-") and ".zip" not in e.url
+
+
+def test_default_parquet_follows_data_processed_dir(tmp_path, monkeypatch):
+    monkeypatch.delenv("FNS_OPENDATA_PARQUET")
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "processed"))
+    assert F._parquet() == tmp_path / "processed" / "fns_opendata.parquet"
+
+
+def test_amount_keeps_its_sign():
+    assert F._rub(Decimal("-0.50")) == "-0,50"
+    assert F._rub(Decimal("-1234567.5")) == "-1 234 567,50"
+    assert F._rub(Decimal("0.50")) == "0,50" and F._rub(Decimal("1000")) == "1 000"
+
+
+@pytest.mark.parametrize(("n", "noun"), [(1, "позиция"), (2, "позиции"), (5, "позиций"), (11, "позиций"),
+                                         (12, "позиций"), (21, "позиция"), (22, "позиции")])
+def test_debt_items_noun(n, noun):
+    pairs = [("Документ.ДатаСост", "01.09.2026")]
+    for i in range(n):
+        pairs += [("СведНедоим.НаимНалог", f"Налог {i}"), ("СведНедоим.ОбщСумНедоим", "10.00")]
+    (debt,) = F.evidence(F.DATASETS["debtam"], pairs, "https://x#inn=1", datetime.now(UTC))
+    assert f"({n} {noun};" in debt.fact
+
+
+def _match(inn: str) -> CounterpartyMatch:
+    ev = Evidence(source="data:participants", url="data:participants#1", fetched_at=datetime.now(UTC),
+                  fact="ИНН", field="inn", value=inn)
+    cp = Counterparty(inn=inn, name=f"ИНН {inn}", kpp="780601001", stats={"lots_won": 3}, evidence=[ev])
+    return CounterpartyMatch(counterparty=cp, score=0.5, origin="history", components=[
+        ScoreComponent(name="product_fit", value=0.5, weight=0.35, explanation="x")])
+
+
+def test_search_looks_up_open_data_for_the_shown_page_only(built, tmp_path, monkeypatch):
+    out, _, _ = built
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(out))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setattr(app_mod, "_engine", None)
+    monkeypatch.setattr(search_mod, "search", lambda q, k=20: [_match(BRASS), _match(OFFICEMAG)])
+    SourceCache().put(pb_nalog.card_url(BRASS), (PB / f"{BRASS}.txt").read_text(encoding="utf-8"))
+    looked_up: list[str] = []
+    real = F.lookup_many
+
+    def spy(inns, *a, **k):
+        inns = list(inns)
+        looked_up.extend(inns)
+        return real(inns, *a, **k)
+    monkeypatch.setattr(F, "lookup_many", spy)
+    client = TestClient(app_mod.app)
+
+    r = client.post("/api/search", params={"limit": 1}, json={"query_id": "q", "text": "x"})
+    (card,) = r.json()["history"]
+    assert looked_up == [BRASS]  # one shown card, not both candidates of the loop
+    assert {"employees", "income", "expenses", "tax_regime"} <= {e["field"] for e in card["counterparty"]["evidence"]}
+    assert all(e["url"].startswith("http") or e["url"].startswith("data:") for e in card["counterparty"]["evidence"])
+
+    looked_up.clear()
+    client.post("/api/search", params={"limit": 20}, json={"query_id": "q", "text": "x"})
+    assert sorted(looked_up) == sorted([BRASS, OFFICEMAG])
+
+
+def test_lookup_many_is_one_query_with_facts_per_inn(built):
+    out, _, cache = built
+    got = F.lookup_many([BRASS, OFFICEMAG, ROSTELECOM, BRASS, "500100732259"], cache, parquet=out)
+    assert set(got) == {BRASS, OFFICEMAG}  # no document / an entrepreneur → absent, a repeated INN → once
+    assert got[BRASS] == F.lookup(BRASS, cache, parquet=out)
+    assert all(check_evidence(e, cache.page_text) == [] for evs in got.values() for e in evs)
+    assert F.lookup_many([], cache, parquet=out) == {}
+    with pytest.raises(ValueError):
+        F.lookup_many([BRASS, "7804428657"], cache, parquet=out)

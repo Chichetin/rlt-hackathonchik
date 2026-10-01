@@ -30,7 +30,7 @@ import shutil
 import sys
 import time
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -66,6 +66,11 @@ class Dataset:
     title: str
     url: str
 
+    @property
+    def passport(self) -> str:
+        """Public page of the dataset: an Evidence url that opens in a browser, unlike the archive."""
+        return f"https://www.nalog.gov.ru/opendata/7707329152-{self.id}/"
+
 
 DATASETS = {
     d.id: d
@@ -88,7 +93,8 @@ def _external() -> Path:
 
 
 def _parquet() -> Path:
-    return Path(os.environ.get("FNS_OPENDATA_PARQUET", "data/processed/fns_opendata.parquet"))
+    default = Path(os.environ.get("DATA_PROCESSED_DIR", "data/processed")) / "fns_opendata.parquet"
+    return Path(os.environ.get("FNS_OPENDATA_PARQUET", default))
 
 
 def archive_path(ds: Dataset, root: Path | None = None) -> Path:
@@ -96,7 +102,7 @@ def archive_path(ds: Dataset, root: Path | None = None) -> Path:
 
 
 def page_url(ds: Dataset, inn: str) -> str:
-    return f"{ds.url}#inn={inn}"
+    return f"{ds.passport}#inn={inn}"
 
 
 def download(root: Path | None = None) -> None:
@@ -173,10 +179,15 @@ def values(dataset: str, pairs: Pairs) -> dict[str, int | float | str | None]:
     raise KeyError(dataset)
 
 
+def _sql_str(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _rub(amount: Decimal) -> str:
     q = amount.quantize(Decimal("0.01"))
-    whole = f"{int(q):,}".replace(",", " ")
-    return whole if q == int(q) else f"{whole},{str(q).split('.')[1]}"
+    whole = f"{abs(int(q)):,}".replace(",", " ")
+    out = whole if q == int(q) else f"{whole},{str(q).split('.')[1]}"
+    return f"-{out}" if q < 0 else out
 
 
 def evidence(ds: Dataset, pairs: Pairs, url: str, at: datetime) -> list[Evidence]:
@@ -250,9 +261,15 @@ def build(root: Path | None = None, out: Path | None = None, force: bool = False
         counts[ds_id] = n
         log.info("%s: всего %d документов, %.0f с", ds_id, n, time.monotonic() - t0)
     tmp_out = out.with_suffix(".tmp")
-    duckdb.execute(
-        f"COPY (SELECT * FROM read_parquet('{tmp_dir}/*.parquet') ORDER BY inn, dataset) TO '{tmp_out}' "
-        "(FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 100000)")
+    src, dst = (_sql_str(f"{tmp_dir.as_posix()}/*.parquet"), _sql_str(tmp_out.as_posix()))
+    # sorted by INN with 10 000-row groups: a lookup decompresses one group (≈ 11 ms), not 100 000 rows (≈ 17 ms)
+    con = duckdb.connect()  # the sort of 6 M documents spills to disk instead of the default 80 % of RAM (OOM, 01.10)
+    con.execute("SET memory_limit = '4GB'")
+    con.execute("SET temp_directory = ?", [(out.parent / f".{out.name}.spill").as_posix()])
+    con.execute(f"COPY (SELECT * FROM read_parquet({src}) ORDER BY inn, dataset) TO {dst} "
+                "(FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 10000)")
+    con.close()
+    shutil.rmtree(out.parent / f".{out.name}.spill", ignore_errors=True)
     tmp_out.replace(out)
     shutil.rmtree(tmp_dir)
     log.info("%s: %d строк, %.1f МБ, %.0f с", out, sum(counts.values()), out.stat().st_size / 2**20,
@@ -260,22 +277,49 @@ def build(root: Path | None = None, out: Path | None = None, force: bool = False
     return counts
 
 
+_missing_warned: set[Path] = set()  # one warning per missing file, not one per card
+
+
 def lookup(inn: str, cache: SourceCache | None = None, parquet: Path | None = None) -> list[Evidence]:
-    """Facts by INN from the built parquet; the document text goes to the cache under page_url()."""
-    if not inn_is_valid(inn):
-        raise ValueError(f"INN {inn!r} fails the checksum")
+    return lookup_many([inn], cache, parquet).get(inn, [])
+
+
+def lookup_many(inns: Iterable[str], cache: SourceCache | None = None,
+                parquet: Path | None = None) -> dict[str, list[Evidence]]:
+    """Facts by INN from the built parquet in ONE query (a shown page: 28 ms for 20 cards, 161 ms one by one);
+    the document text goes to the cache under page_url(). INNs without a document are absent from the result.
+
+    An optional source: a missing or unreadable parquet gives no facts, never an error of the card."""
+    wanted = list(dict.fromkeys(inns))
+    for inn in wanted:
+        if not inn_is_valid(inn):
+            raise ValueError(f"INN {inn!r} fails the checksum")
+    wanted = [inn for inn in wanted if len(inn) == 10]  # 12 digits = an individual entrepreneur: legal entities only
+    if not wanted:
+        return {}
     path = parquet or _parquet()
     if not path.exists():
-        log.warning("%s нет — открытые данные ФНС не собраны (download, build)", path)
-        return []
-    rows = duckdb.execute(f"SELECT dataset, fetched_at, text FROM read_parquet('{path}') WHERE inn = ? "
-                          "ORDER BY dataset", [inn]).fetchall()
+        if path not in _missing_warned:
+            _missing_warned.add(path)
+            log.warning("%s нет — открытые данные ФНС не собраны (download, build)", path)
+        return {}
+    try:
+        rows = duckdb.execute("SELECT inn, dataset, fetched_at, text FROM read_parquet(?) "
+                              "WHERE inn IN (SELECT unnest(?)) ORDER BY inn, dataset",
+                              [path.as_posix(), wanted]).fetchall()
+    except duckdb.Error as e:
+        log.warning("%s не прочитан (%s) — факты ФНС пропущены", path, e)
+        return {}
     cache = cache or SourceCache()
-    out: list[Evidence] = []
-    for ds_id, fetched_at, text in rows:
+    out: dict[str, list[Evidence]] = {}
+    for inn, ds_id, fetched_at, text in rows:
         ds = DATASETS[ds_id]
-        page = cache.put(page_url(ds, inn), text, fetched_at=fetched_at)
-        out += evidence(ds, parse(page.body), page.url, datetime.fromtimestamp(page.fetched_at, tz=UTC))
+        url = page_url(ds, inn)
+        page = cache.get(url, allow_stale=True)
+        if page is None or page.body != text or page.fetched_at != fetched_at:  # a write costs ≈ 1.3 ms
+            page = cache.put(url, text, fetched_at=fetched_at)
+        out.setdefault(inn, []).extend(
+            evidence(ds, parse(page.body), page.url, datetime.fromtimestamp(page.fetched_at, tz=UTC)))
     return out
 
 

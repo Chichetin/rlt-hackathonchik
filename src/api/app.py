@@ -158,11 +158,16 @@ def _found(query: Query, uncached: set[str] | None = None) -> tuple[list[Counter
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
-    """What the card and the xlsx show: only facts and contacts that pass the Evidence check."""
+    """What the card and the xlsx show: ФНС open data added (only here, not in the loop over all candidates),
+    then only facts and contacts that pass the Evidence check."""
     if getattr(search_mod, "IS_STUB", False):
         return matches
-    pages = cached_pages(SourceCache().page_text)  # one read and one normalization per page per request
-    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in matches]
+    cache = SourceCache()
+    # one query for the whole list; before cached_pages(), because the facts' texts land in the cache here
+    cards = enrich_mod.add_open_data([m.counterparty for m in matches], cache)
+    shown = [m.model_copy(update={"counterparty": cp}) for m, cp in zip(matches, cards, strict=True)]
+    pages = cached_pages(cache.page_text)  # one read and one normalization per page per request
+    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in shown]
 
 
 def _enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[CounterpartyMatch]:
@@ -182,7 +187,7 @@ def _enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[Coun
             continue
         try:
             # filters see only facts that pass the Evidence check, as the card does (strip before filters)
-            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True), pages)
+            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True, open_data=False), pages)
         except KeyError:  # nothing cached for this INN
             uncached.add(cp.inn)
             out.append(m)
