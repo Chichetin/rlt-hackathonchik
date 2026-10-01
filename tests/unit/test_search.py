@@ -219,3 +219,14 @@ def test_index_boundary_excludes_lot_on_as_of_day(search_data):
     lots = {r[0] for r in duckdb.sql(f"SELECT DISTINCT lot_id FROM read_parquet({idx.docs_parquet})").fetchall()}
     assert 6 not in lots and 5 in lots
     assert idx.data_end == date(2025, 5, 20)
+
+
+def test_prebuild_cli_builds_product_and_cutoff_indexes(search_data, tmp_path, capsys):
+    assert index_mod.main() == 0
+    assert len(list((tmp_path / "indexes").glob("bm25-*"))) == 2
+    assert "as_of=2025-07-01" in capsys.readouterr().out
+
+
+def test_prebuild_cli_without_data_exits_2(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "none"))
+    assert index_mod.main() == 2

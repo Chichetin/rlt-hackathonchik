@@ -198,4 +198,30 @@ def clear_memory_cache() -> None:
         _cache.clear()
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Prebuild the product index (as_of=None) and the eval one (split cutoff): no wait on the first query.
+
+        uv run python -m src.match.index
+    """
+    import sys
+    import time
+
+    from src.eval.split import split_config
+
+    processed = processed_dir()
+    for as_of in (None, date.fromisoformat(str(split_config()["cutoff"]))):
+        t0 = time.time()
+        try:
+            idx = get_index(processed, as_of)
+        except FileNotFoundError as e:
+            print(e, file=sys.stderr)
+            return 2
+        print(f"as_of={as_of}: {idx.n_docs} документов, {idx.path} ({time.time() - t0:.1f} с)")
+    return 0
+
+
 __all__ = ["LotIndex", "check_processed", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
