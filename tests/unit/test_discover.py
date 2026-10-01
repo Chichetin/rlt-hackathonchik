@@ -38,6 +38,7 @@ IP_ROW = {"inn": "500100732259", "ogrn": "318169000190351", "nptype": "IP", "cat
 def _fast_and_unblocked(monkeypatch):
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", 0.0)
     monkeypatch.setattr(rmsp, "_blocked_until", 0.0)
+    monkeypatch.setenv("DISCOVERY_LEADS", "0")  # the registry channel only; web leads — tests/unit/test_web_leads.py
 
 
 @pytest.fixture
