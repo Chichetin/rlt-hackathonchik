@@ -1,0 +1,10 @@
+# Одинаковые байты на Windows и Linux (#36). В репозитории текст хранится в LF, рабочая копия —
+# по core.autocrlf, кроме файлов, которым CR ломает запуск или результат теста.
+* text=auto
+*.sh text eol=lf
+.githooks/* text eol=lf
+# Фикстуры — побайтно как в репозитории на любой ОС; чтение CRLF проверяет отдельный тест
+# (tests/unit/test_ingest.py::test_crlf_and_lf_build_the_same).
+tests/fixtures/** -text
+*.parquet binary
+*.png binary

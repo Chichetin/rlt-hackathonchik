@@ -73,7 +73,7 @@ def test_no_msp_key_is_unknown_not_false(tmp_path, monkeypatch):
 def test_worker_stops_on_captcha_and_keeps_task(tmp_path, monkeypatch):
     from src.worker import queue as Q
     from src.worker import worker as W
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     eng = Q.engine_from_env()
     Q.enqueue(eng, "enrich", UL)
     Q.enqueue(eng, "enrich", "7707083893")
@@ -91,7 +91,7 @@ def test_worker_stops_on_captcha_and_keeps_task(tmp_path, monkeypatch):
 
 def test_api_503_when_source_down(tmp_path, monkeypatch):
     monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "s.sqlite"))
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     monkeypatch.setattr(app_mod, "_engine", None)
 
     def down(inn, cache=None, client=None):
@@ -173,7 +173,7 @@ def test_ip_card_no_address(tmp_path, monkeypatch):
 
 def test_api_counterparty_shows_facts_with_url(cache, tmp_path, monkeypatch):
     monkeypatch.setenv("ENRICH_OFFLINE", "1")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     monkeypatch.setattr(app_mod, "_engine", None)
     client = TestClient(app_mod.app)
     body = client.get(f"/api/counterparty/{UL}").json()

@@ -8,7 +8,7 @@ PORT ?= 8000
 EXP ?=
 CONFIRM ?=
 
-.PHONY: help setup setup-ml models check lint typecheck test test-ui hooks-test stubs openapi openapi-check seal-check \
+.PHONY: help setup setup-ml models check check-changed lint typecheck test test-ui hooks-test stubs openapi openapi-check seal-check \
         ui-build api worker ui-dev demo e2e eval eval-final up down
 
 help:              ## список целей
@@ -50,20 +50,16 @@ openapi:           ## docs/openapi.json + TS-типы UI из src/contracts.py
 	cd $(UI) && npx openapi-typescript ../../docs/openapi.json -o src/api-types.ts
 
 openapi-check:     ## контракты, OpenAPI и TS-типы UI не разошлись
-	@tmp=$$(mktemp -d); \
-	$(PY) python -c "import json; from src.api.app import app; print(json.dumps(app.openapi(), ensure_ascii=False, indent=2))" > $$tmp/openapi.json; \
-	diff -q --strip-trailing-cr $$tmp/openapi.json docs/openapi.json >/dev/null || { echo "openapi: docs/openapi.json устарел — make openapi"; rm -rf $$tmp; exit 1; }; \
-	(cd $(UI) && npx openapi-typescript $$tmp/openapi.json -o $$tmp/api-types.ts >/dev/null 2>&1); \
-	diff -q --strip-trailing-cr $$tmp/api-types.ts $(UI)/src/api-types.ts >/dev/null || { echo "openapi: src/ui/src/api-types.ts устарел — make openapi"; rm -rf $$tmp; exit 1; }; \
-	rm -rf $$tmp; echo "openapi: контракты, OpenAPI и типы UI совпадают"
+	bash scripts/openapi_check.sh
 
 seal-check:        ## holdout читают только src/eval/split.py и final.py (D-010)
-	@hits=$$(grep -rnE 'unseal\(|holdout\.jsonl|load_cases\(["'"'"']holdout' src --include='*.py' | grep -vE '^src/eval/(split|final)\.py:'); \
-	if [ -n "$$hits" ]; then echo "seal: holdout вне src/eval/split.py и final.py:"; echo "$$hits"; exit 1; fi; \
-	echo "seal: holdout читается только через make eval-final"
+	bash scripts/seal_check.sh
 
-check: lint typecheck test test-ui hooks-test openapi-check seal-check stubs   ## полный прогон перед push
+check: lint typecheck test test-ui hooks-test openapi-check seal-check stubs   ## всё целиком: общие файлы, freeze, сдача
 	@echo "make check: OK"
+
+check-changed:     ## только затронутое относительно origin/main (+ e2e, если задет демо-путь) — по умолчанию
+	bash scripts/check_changed.sh
 
 ui-build:
 	cd $(UI) && npx vite build

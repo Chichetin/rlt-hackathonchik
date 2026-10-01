@@ -13,7 +13,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, ScoreCompon
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     monkeypatch.setattr(app_mod, "_engine", None)
     # lots: CSV path unless a test sets parquet
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "no-processed"))
@@ -185,9 +185,9 @@ def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
     con = duckdb.connect()
     con.execute("COPY (SELECT 77::BIGINT lot_id, '0372200260024000124' reqnum, 'Картриджи' procedure_name, "
                 "'Картриджи' subject, 500.0 start_price, '7804105239' customer_inn, 'ЭМ' channel) "
-                f"TO '{tmp_path}/notices.parquet' (FORMAT parquet)")
+                f"TO '{(tmp_path / 'notices.parquet').as_posix()}' (FORMAT parquet)")
     con.execute("COPY (SELECT 77::BIGINT lot_id, 'x' product_name, '26.20.40.190' okpd2_code) "
-                f"TO '{tmp_path}/items.parquet' (FORMAT parquet)")
+                f"TO '{(tmp_path / 'items.parquet').as_posix()}' (FORMAT parquet)")
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path))
     monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path / "nope"))
     q = client.get("/api/lot/0372200260024000124").json()
