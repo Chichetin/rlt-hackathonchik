@@ -1,0 +1,647 @@
+{
+  "exp_id": "T-thin-v1",
+  "kind": "thin-categories",
+  "created_at": "2026-10-01T19:44:28+00:00",
+  "commit": "44c2d1f7b022105290936959e7f2f0ac73b8969b",
+  "dirty": false,
+  "config": {
+    "channel": "ЭМ",
+    "period": "publish_date < 2025-07-01 (cutoff of configs/split.yaml)",
+    "unit": "items.okpd2_l4 (XX.XX)",
+    "min_lots": 50,
+    "min_single": 0.5,
+    "max_per_100": 25.0,
+    "top_n": 20
+  },
+  "data": {
+    "manifest": {
+      "built_at": "2026-10-01T18:40:57+00:00",
+      "as_of": null,
+      "cutoff": "2025-07-01",
+      "rows": {
+        "notices": 604452,
+        "participants": 1010107,
+        "items": 2550089,
+        "suppliers": 44196
+      },
+      "invalid_supplier_inns": 22,
+      "seconds": 42.7
+    }
+  },
+  "population": {
+    "groups": 499,
+    "eligible_groups": 287,
+    "single_share_quantiles": {
+      "p25": 0.286,
+      "p50": 0.416,
+      "p75": 0.696
+    },
+    "per_100_lots_quantiles": {
+      "p25": 23.315,
+      "p50": 48.09,
+      "p75": 84.82
+    }
+  },
+  "metrics": {
+    "thin_groups": 47,
+    "thin_lots": 61332,
+    "eligible_lots": 292730,
+    "thin_suppliers_sum": 4854
+  },
+  "sensitivity": [
+    {
+      "param": "min_lots",
+      "value": 30,
+      "thin_groups": 47,
+      "thin_lots": 61332
+    },
+    {
+      "param": "min_lots",
+      "value": 50,
+      "thin_groups": 47,
+      "thin_lots": 61332
+    },
+    {
+      "param": "min_lots",
+      "value": 100,
+      "thin_groups": 46,
+      "thin_lots": 61278
+    },
+    {
+      "param": "min_single",
+      "value": 0.4,
+      "thin_groups": 54,
+      "thin_lots": 78657
+    },
+    {
+      "param": "min_single",
+      "value": 0.5,
+      "thin_groups": 47,
+      "thin_lots": 61332
+    },
+    {
+      "param": "min_single",
+      "value": 0.6,
+      "thin_groups": 44,
+      "thin_lots": 57826
+    },
+    {
+      "param": "max_per_100",
+      "value": 15.0,
+      "thin_groups": 38,
+      "thin_lots": 51824
+    },
+    {
+      "param": "max_per_100",
+      "value": 25.0,
+      "thin_groups": 47,
+      "thin_lots": 61332
+    },
+    {
+      "param": "max_per_100",
+      "value": 40.0,
+      "thin_groups": 65,
+      "thin_lots": 74228
+    }
+  ],
+  "top": [
+    {
+      "okpd2": "21.20",
+      "lots": 7754,
+      "single_share": 0.7049,
+      "median_offers": 1.0,
+      "suppliers": 1039,
+      "per_100_lots": 13.4
+    },
+    {
+      "okpd2": "56.29",
+      "lots": 4518,
+      "single_share": 0.9916,
+      "median_offers": 1.0,
+      "suppliers": 106,
+      "per_100_lots": 2.35
+    },
+    {
+      "okpd2": "58.29",
+      "lots": 3153,
+      "single_share": 0.7666,
+      "median_offers": 1.0,
+      "suppliers": 500,
+      "per_100_lots": 15.86
+    },
+    {
+      "okpd2": "80.10",
+      "lots": 2492,
+      "single_share": 0.7632,
+      "median_offers": 1.0,
+      "suppliers": 273,
+      "per_100_lots": 10.96
+    },
+    {
+      "okpd2": "61.10",
+      "lots": 2340,
+      "single_share": 0.9671,
+      "median_offers": 1.0,
+      "suppliers": 145,
+      "per_100_lots": 6.2
+    },
+    {
+      "okpd2": "11.07",
+      "lots": 1649,
+      "single_share": 0.5609,
+      "median_offers": 1.0,
+      "suppliers": 121,
+      "per_100_lots": 7.34
+    },
+    {
+      "okpd2": "10.51",
+      "lots": 1626,
+      "single_share": 0.7005,
+      "median_offers": 1.0,
+      "suppliers": 58,
+      "per_100_lots": 3.57
+    },
+    {
+      "okpd2": "81.10",
+      "lots": 1594,
+      "single_share": 0.5238,
+      "median_offers": 1.0,
+      "suppliers": 391,
+      "per_100_lots": 24.53
+    },
+    {
+      "okpd2": "10.61",
+      "lots": 1470,
+      "single_share": 0.7333,
+      "median_offers": 1.0,
+      "suppliers": 55,
+      "per_100_lots": 3.74
+    },
+    {
+      "okpd2": "01.13",
+      "lots": 1469,
+      "single_share": 0.7052,
+      "median_offers": 1.0,
+      "suppliers": 45,
+      "per_100_lots": 3.06
+    },
+    {
+      "okpd2": "20.14",
+      "lots": 1454,
+      "single_share": 0.7297,
+      "median_offers": 1.0,
+      "suppliers": 229,
+      "per_100_lots": 15.75
+    },
+    {
+      "okpd2": "10.89",
+      "lots": 1413,
+      "single_share": 0.7417,
+      "median_offers": 1.0,
+      "suppliers": 111,
+      "per_100_lots": 7.86
+    },
+    {
+      "okpd2": "10.39",
+      "lots": 1412,
+      "single_share": 0.7394,
+      "median_offers": 1.0,
+      "suppliers": 53,
+      "per_100_lots": 3.75
+    },
+    {
+      "okpd2": "10.83",
+      "lots": 1350,
+      "single_share": 0.737,
+      "median_offers": 1.0,
+      "suppliers": 68,
+      "per_100_lots": 5.04
+    },
+    {
+      "okpd2": "10.86",
+      "lots": 1327,
+      "single_share": 0.7408,
+      "median_offers": 1.0,
+      "suppliers": 83,
+      "per_100_lots": 6.25
+    },
+    {
+      "okpd2": "10.82",
+      "lots": 1321,
+      "single_share": 0.7313,
+      "median_offers": 1.0,
+      "suppliers": 63,
+      "per_100_lots": 4.77
+    },
+    {
+      "okpd2": "10.72",
+      "lots": 1277,
+      "single_share": 0.7338,
+      "median_offers": 1.0,
+      "suppliers": 50,
+      "per_100_lots": 3.92
+    },
+    {
+      "okpd2": "01.11",
+      "lots": 1271,
+      "single_share": 0.7349,
+      "median_offers": 1.0,
+      "suppliers": 34,
+      "per_100_lots": 2.68
+    },
+    {
+      "okpd2": "01.47",
+      "lots": 1186,
+      "single_share": 0.7521,
+      "median_offers": 1.0,
+      "suppliers": 34,
+      "per_100_lots": 2.87
+    },
+    {
+      "okpd2": "10.41",
+      "lots": 1184,
+      "single_share": 0.7475,
+      "median_offers": 1.0,
+      "suppliers": 47,
+      "per_100_lots": 3.97
+    }
+  ],
+  "thin": [
+    {
+      "okpd2": "21.20",
+      "lots": 7754,
+      "single_share": 0.7049,
+      "median_offers": 1.0,
+      "suppliers": 1039,
+      "per_100_lots": 13.4
+    },
+    {
+      "okpd2": "56.29",
+      "lots": 4518,
+      "single_share": 0.9916,
+      "median_offers": 1.0,
+      "suppliers": 106,
+      "per_100_lots": 2.35
+    },
+    {
+      "okpd2": "58.29",
+      "lots": 3153,
+      "single_share": 0.7666,
+      "median_offers": 1.0,
+      "suppliers": 500,
+      "per_100_lots": 15.86
+    },
+    {
+      "okpd2": "80.10",
+      "lots": 2492,
+      "single_share": 0.7632,
+      "median_offers": 1.0,
+      "suppliers": 273,
+      "per_100_lots": 10.96
+    },
+    {
+      "okpd2": "61.10",
+      "lots": 2340,
+      "single_share": 0.9671,
+      "median_offers": 1.0,
+      "suppliers": 145,
+      "per_100_lots": 6.2
+    },
+    {
+      "okpd2": "11.07",
+      "lots": 1649,
+      "single_share": 0.5609,
+      "median_offers": 1.0,
+      "suppliers": 121,
+      "per_100_lots": 7.34
+    },
+    {
+      "okpd2": "10.51",
+      "lots": 1626,
+      "single_share": 0.7005,
+      "median_offers": 1.0,
+      "suppliers": 58,
+      "per_100_lots": 3.57
+    },
+    {
+      "okpd2": "81.10",
+      "lots": 1594,
+      "single_share": 0.5238,
+      "median_offers": 1.0,
+      "suppliers": 391,
+      "per_100_lots": 24.53
+    },
+    {
+      "okpd2": "10.61",
+      "lots": 1470,
+      "single_share": 0.7333,
+      "median_offers": 1.0,
+      "suppliers": 55,
+      "per_100_lots": 3.74
+    },
+    {
+      "okpd2": "01.13",
+      "lots": 1469,
+      "single_share": 0.7052,
+      "median_offers": 1.0,
+      "suppliers": 45,
+      "per_100_lots": 3.06
+    },
+    {
+      "okpd2": "20.14",
+      "lots": 1454,
+      "single_share": 0.7297,
+      "median_offers": 1.0,
+      "suppliers": 229,
+      "per_100_lots": 15.75
+    },
+    {
+      "okpd2": "10.89",
+      "lots": 1413,
+      "single_share": 0.7417,
+      "median_offers": 1.0,
+      "suppliers": 111,
+      "per_100_lots": 7.86
+    },
+    {
+      "okpd2": "10.39",
+      "lots": 1412,
+      "single_share": 0.7394,
+      "median_offers": 1.0,
+      "suppliers": 53,
+      "per_100_lots": 3.75
+    },
+    {
+      "okpd2": "10.83",
+      "lots": 1350,
+      "single_share": 0.737,
+      "median_offers": 1.0,
+      "suppliers": 68,
+      "per_100_lots": 5.04
+    },
+    {
+      "okpd2": "10.86",
+      "lots": 1327,
+      "single_share": 0.7408,
+      "median_offers": 1.0,
+      "suppliers": 83,
+      "per_100_lots": 6.25
+    },
+    {
+      "okpd2": "10.82",
+      "lots": 1321,
+      "single_share": 0.7313,
+      "median_offers": 1.0,
+      "suppliers": 63,
+      "per_100_lots": 4.77
+    },
+    {
+      "okpd2": "10.72",
+      "lots": 1277,
+      "single_share": 0.7338,
+      "median_offers": 1.0,
+      "suppliers": 50,
+      "per_100_lots": 3.92
+    },
+    {
+      "okpd2": "01.11",
+      "lots": 1271,
+      "single_share": 0.7349,
+      "median_offers": 1.0,
+      "suppliers": 34,
+      "per_100_lots": 2.68
+    },
+    {
+      "okpd2": "01.47",
+      "lots": 1186,
+      "single_share": 0.7521,
+      "median_offers": 1.0,
+      "suppliers": 34,
+      "per_100_lots": 2.87
+    },
+    {
+      "okpd2": "10.41",
+      "lots": 1184,
+      "single_share": 0.7475,
+      "median_offers": 1.0,
+      "suppliers": 47,
+      "per_100_lots": 3.97
+    },
+    {
+      "okpd2": "10.84",
+      "lots": 1154,
+      "single_share": 0.7036,
+      "median_offers": 1.0,
+      "suppliers": 83,
+      "per_100_lots": 7.19
+    },
+    {
+      "okpd2": "10.32",
+      "lots": 1148,
+      "single_share": 0.7343,
+      "median_offers": 1.0,
+      "suppliers": 36,
+      "per_100_lots": 3.14
+    },
+    {
+      "okpd2": "10.81",
+      "lots": 1146,
+      "single_share": 0.6885,
+      "median_offers": 1.0,
+      "suppliers": 68,
+      "per_100_lots": 5.93
+    },
+    {
+      "okpd2": "93.19",
+      "lots": 1145,
+      "single_share": 0.9371,
+      "median_offers": 1.0,
+      "suppliers": 193,
+      "per_100_lots": 16.86
+    },
+    {
+      "okpd2": "10.11",
+      "lots": 1128,
+      "single_share": 0.7012,
+      "median_offers": 1.0,
+      "suppliers": 41,
+      "per_100_lots": 3.63
+    },
+    {
+      "okpd2": "10.20",
+      "lots": 1121,
+      "single_share": 0.6976,
+      "median_offers": 1.0,
+      "suppliers": 43,
+      "per_100_lots": 3.84
+    },
+    {
+      "okpd2": "10.12",
+      "lots": 1114,
+      "single_share": 0.7199,
+      "median_offers": 1.0,
+      "suppliers": 38,
+      "per_100_lots": 3.41
+    },
+    {
+      "okpd2": "01.23",
+      "lots": 1105,
+      "single_share": 0.714,
+      "median_offers": 1.0,
+      "suppliers": 37,
+      "per_100_lots": 3.35
+    },
+    {
+      "okpd2": "01.24",
+      "lots": 1100,
+      "single_share": 0.7055,
+      "median_offers": 1.0,
+      "suppliers": 36,
+      "per_100_lots": 3.27
+    },
+    {
+      "okpd2": "10.73",
+      "lots": 1084,
+      "single_share": 0.7076,
+      "median_offers": 1.0,
+      "suppliers": 35,
+      "per_100_lots": 3.23
+    },
+    {
+      "okpd2": "01.25",
+      "lots": 1081,
+      "single_share": 0.7031,
+      "median_offers": 1.0,
+      "suppliers": 39,
+      "per_100_lots": 3.61
+    },
+    {
+      "okpd2": "01.22",
+      "lots": 1040,
+      "single_share": 0.699,
+      "median_offers": 1.0,
+      "suppliers": 32,
+      "per_100_lots": 3.08
+    },
+    {
+      "okpd2": "10.71",
+      "lots": 1037,
+      "single_share": 0.7416,
+      "median_offers": 1.0,
+      "suppliers": 39,
+      "per_100_lots": 3.76
+    },
+    {
+      "okpd2": "10.62",
+      "lots": 1022,
+      "single_share": 0.7114,
+      "median_offers": 1.0,
+      "suppliers": 41,
+      "per_100_lots": 4.01
+    },
+    {
+      "okpd2": "60.10",
+      "lots": 812,
+      "single_share": 0.9963,
+      "median_offers": 1.0,
+      "suppliers": 17,
+      "per_100_lots": 2.09
+    },
+    {
+      "okpd2": "38.11",
+      "lots": 746,
+      "single_share": 0.7748,
+      "median_offers": 1.0,
+      "suppliers": 143,
+      "per_100_lots": 19.17
+    },
+    {
+      "okpd2": "61.90",
+      "lots": 590,
+      "single_share": 0.9288,
+      "median_offers": 1.0,
+      "suppliers": 110,
+      "per_100_lots": 18.64
+    },
+    {
+      "okpd2": "61.20",
+      "lots": 570,
+      "single_share": 0.6211,
+      "median_offers": 1.0,
+      "suppliers": 51,
+      "per_100_lots": 8.95
+    },
+    {
+      "okpd2": "58.14",
+      "lots": 373,
+      "single_share": 0.8043,
+      "median_offers": 1.0,
+      "suppliers": 70,
+      "per_100_lots": 18.77
+    },
+    {
+      "okpd2": "84.24",
+      "lots": 369,
+      "single_share": 0.9024,
+      "median_offers": 1.0,
+      "suppliers": 55,
+      "per_100_lots": 14.91
+    },
+    {
+      "okpd2": "49.31",
+      "lots": 271,
+      "single_share": 0.9705,
+      "median_offers": 1.0,
+      "suppliers": 18,
+      "per_100_lots": 6.64
+    },
+    {
+      "okpd2": "38.12",
+      "lots": 263,
+      "single_share": 0.597,
+      "median_offers": 1.0,
+      "suppliers": 53,
+      "per_100_lots": 20.15
+    },
+    {
+      "okpd2": "66.19",
+      "lots": 190,
+      "single_share": 0.9158,
+      "median_offers": 1.0,
+      "suppliers": 31,
+      "per_100_lots": 16.32
+    },
+    {
+      "okpd2": "53.10",
+      "lots": 164,
+      "single_share": 0.872,
+      "median_offers": 1.0,
+      "suppliers": 15,
+      "per_100_lots": 9.15
+    },
+    {
+      "okpd2": "64.19",
+      "lots": 125,
+      "single_share": 0.888,
+      "median_offers": 1.0,
+      "suppliers": 5,
+      "per_100_lots": 4.0
+    },
+    {
+      "okpd2": "61.30",
+      "lots": 120,
+      "single_share": 0.9833,
+      "median_offers": 1.0,
+      "suppliers": 13,
+      "per_100_lots": 10.83
+    },
+    {
+      "okpd2": "93.12",
+      "lots": 54,
+      "single_share": 1.0,
+      "median_offers": 1.0,
+      "suppliers": 7,
+      "per_100_lots": 12.96
+    }
+  ]
+}
