@@ -23,8 +23,8 @@ log = logging.getLogger(__name__)
 MSP_CATEGORY = {"1": "микропредприятие", "2": "малое предприятие", "3": "среднее предприятие"}
 
 
-def _region(kpp_or_inn: str) -> str | None:
-    return {"78": "Санкт-Петербург", "47": "Ленинградская область"}.get(kpp_or_inn[:2])
+def _region(kpp: str) -> str | None:
+    return {"78": "Санкт-Петербург", "47": "Ленинградская область"}.get(kpp[:2])
 
 
 def from_card(inn: str, page: CachedPage) -> Counterparty:
@@ -67,21 +67,24 @@ def from_card(inn: str, page: CachedPage) -> Counterparty:
     okved_name = f.get("vyp.НаимОКВЭД") or f.get("search.okved2mainname")
     add("okved", okved_name, f"Основной ОКВЭД {okved_code} — {okved_name}")
 
+    # МСП only from the card's own value: the line `vyp.rsmpcategory: <c>` is the Evidence value.
+    # No key (empty card, ИП without it) → None («не проверено»), never a guessed «нет».
     category = f.get("vyp.rsmpcategory")
-    if category in MSP_CATEGORY:  # "0" — not in the МСП registry (e.g. ПАО «Ростелеком»)
-        is_msp: bool | None = True
-        cat = MSP_CATEGORY[category]
+    is_msp: bool | None = None
+    if category in MSP_CATEGORY:
+        is_msp = True
         since = f.get("vyp.rsmpdate", "").split(" ")[0]
-        add("msp", f.get("vyp.rsmpdate"), f"В реестре МСП с {since}: {cat}")
-    else:
+        add("msp", f"rsmpcategory: {category}",
+            f"Реестр МСП: {MSP_CATEGORY[category]}" + (f", включено {since}" if since else ""))
+    elif category == "0":
         is_msp = False
-        add("inn", inn, "В карточке ФНС нет категории МСП — не субъект МСП")
+        add("msp", "rsmpcategory: 0", "В реестре МСП не состоит (категория МСП в карточке ФНС: 0)")
 
     return Counterparty(
         inn=inn,
         kpp=kpp,
         name=name or f"ИНН {inn}",
-        region=_region(kpp or inn),
+        region=_region(kpp) if kpp else None,  # KPP is evidenced; INN prefix is not a fact
         status=status,
         is_msp=is_msp,
         okved=[okved_code] if okved_code else [],

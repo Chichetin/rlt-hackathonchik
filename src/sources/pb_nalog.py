@@ -7,7 +7,7 @@ company-proc.json get-request → company-proc.json get-response (card `vyp`).
 What goes to the cache (src/sources/cache.py):
 - `card_url(inn)` → the card as flat `key: value` lines (search row + `vyp` scalars). Values are
   copied verbatim, only JSON escaping is removed, so `ООО "БРАСС"` occurs literally and
-  src/enrich/evidence.py can check every extracted value against this text (D-026);
+  src/enrich/evidence.py can check every extracted value against this text (D-028);
 - `raw_url(inn)` → the raw JSON answers, for audit.
 
 `captchaRequired: true` → CaptchaRequired: we stop, never solve captchas (research/SOURCES.md).

@@ -13,7 +13,7 @@
 | 2 | Бизнес-смысл полей | data | `research/DATA_DICTIONARY.md` | каждое поле с уверенностью и «как проверили» | нет |
 | 3 | Методология подбора | match | `research/METHODOLOGY.md`, `configs/search.yaml` | `make eval EXP=<id>` против baseline | заглушка (v0 текстом) |
 | 4 | Поиск в открытых источниках | sources | блок «Новые из открытых источников», `src/sources/` | e2e: в блоке есть компания с URL источника; precision@10 блока B | заглушка |
-| 5 | Обогащение данных | sources | `enrich()`, `src/enrich/evidence.py`, карточка | `pytest tests/unit/test_evidence.py tests/unit/test_enrich.py`; `curl /api/counterparty/<inn>`; покрытие обогащения (EVAL C) | `enrich()` из pb.nalog.ru через кеш, Evidence на каждый факт (D-026); запасные источники не сделаны |
+| 5 | Обогащение данных | sources | `enrich()`, `src/enrich/evidence.py`, карточка | `pytest tests/unit/test_evidence.py tests/unit/test_enrich.py`; `curl /api/counterparty/<inn>`; покрытие обогащения (EVAL C) | `enrich()` из pb.nalog.ru через кеш, Evidence на каждый факт (D-028); запасные источники не сделаны |
 | 6 | Удобный веб-интерфейс | app | `src/ui/`, `docs/ui.md` | `make e2e` (демо-сценарий); `operator` ≤ 90 с | заглушка (сценарий проходит на stub) |
 | 7 | Тест на реальных кейсах | data | 5–10 закупок СПб: прогон, метрики, разбор | `make eval`, скриншоты в `pitch/` | нет |
 | 8 | Масштабирование | app | `pitch/architecture.md`, `docker-compose.yml` | `make up` → `/api/health`; замер latency командой | частично (compose работает на stub) |

@@ -56,8 +56,49 @@ def test_msp_category_zero_is_not_msp(tmp_path, monkeypatch):
     body = (FIX / f"{UL}.txt").read_text(encoding="utf-8").replace("vyp.rsmpcategory: 1", "vyp.rsmpcategory: 0")
     cache.put(pb_nalog.card_url(UL), body)
     cp = enrich(UL, cache)
-    assert cp.is_msp is False and "msp" not in {e.field for e in cp.evidence}
+    assert cp.is_msp is False and any(e.field == "msp" and e.value == "rsmpcategory: 0" for e in cp.evidence)
     assert check_counterparty(cp, cache.page_text) == []
+
+
+def test_no_msp_key_is_unknown_not_false(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENRICH_OFFLINE", "1")
+    cache = SourceCache(tmp_path / "c.sqlite")
+    body = "\n".join(line for line in (FIX / f"{UL}.txt").read_text(encoding="utf-8").splitlines()
+                     if not line.startswith("vyp.rsmp"))
+    cache.put(pb_nalog.card_url(UL), body)
+    cp = enrich(UL, cache)
+    assert cp.is_msp is None and "msp" not in {e.field for e in cp.evidence}
+
+
+def test_worker_stops_on_captcha_and_keeps_task(tmp_path, monkeypatch):
+    from src.worker import queue as Q
+    from src.worker import worker as W
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    eng = Q.engine_from_env()
+    Q.enqueue(eng, "enrich", UL)
+    Q.enqueue(eng, "enrich", "7707083893")
+    calls = []
+
+    def captcha(inn):
+        calls.append(inn)
+        raise pb_nalog.CaptchaRequired("captcha")
+
+    monkeypatch.setattr(W, "enrich", captcha)
+    assert W.run(once=True, pause_s=0) == 0
+    assert calls == [UL] and Q.status_counts(eng) == {"pending": 2}
+    assert Q.claim(eng, "enrich") is not None  # attempt not spent: the task is claimable again
+
+
+def test_api_503_when_source_down(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "s.sqlite"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setattr(app_mod, "_engine", None)
+
+    def down(inn, cache=None, client=None):
+        raise pb_nalog.CaptchaRequired("captcha")
+
+    monkeypatch.setattr(pb_nalog, "fetch_card", down)
+    assert TestClient(app_mod.app).get(f"/api/counterparty/{UL}").status_code == 503
 
 
 def test_offline_unknown_inn_is_keyerror(cache, monkeypatch):
@@ -125,7 +166,7 @@ def test_ip_card_no_address(tmp_path, monkeypatch):
     pb_nalog.fetch_card(IP, cache, client)
     monkeypatch.setenv("ENRICH_OFFLINE", "1")
     cp = enrich(IP, cache)
-    assert cp.name == "ИП МУРАСИН ИВАН ИВАНОВИЧ" and cp.is_msp is True and cp.kpp is None
+    assert cp.name == "ИП МУРАСИН ИВАН ИВАНОВИЧ" and cp.is_msp is True and cp.kpp is None and cp.region is None
     assert "address" not in {e.field for e in cp.evidence}
     assert check_counterparty(cp, cache.page_text) == []
 
