@@ -442,7 +442,7 @@ export function App() {
     <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
-      {path === "/search" && <div className="search-background"><WaveField pattern="slats" /></div>}
+      {path !== "/" && <div className="search-background"><WaveField pattern="slats" /></div>}
       <div className="content">
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
