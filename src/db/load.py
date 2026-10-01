@@ -74,7 +74,8 @@ def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
         want = con.execute(f"SELECT count(*) FROM read_parquet({_lit(path.as_posix())})").fetchone()[0]  # type: ignore[index]
         got = con.execute(f"SELECT count(*) FROM pg.{new}.{name}").fetchone()[0]  # type: ignore[index]
         if got != want or (name in manifest["rows"] and got != manifest["rows"][name]):
-            raise RuntimeError(f"{name}: в Postgres {got} строк, в parquet {want}, в manifest {manifest['rows'].get(name)}")
+            expected = manifest["rows"].get(name)
+            raise RuntimeError(f"{name}: в Postgres {got} строк, в parquet {want}, в manifest {expected}")
         counts[name] = got
         log.info("%s: %d строк", name, got)
 
@@ -91,7 +92,8 @@ def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ingest parquet → Postgres (D-023)")
-    ap.add_argument("--processed", type=Path, default=Path(os.environ.get("DATA_PROCESSED_DIR") or ROOT / "data/processed"))
+    default = Path(os.environ.get("DATA_PROCESSED_DIR") or ROOT / "data/processed")
+    ap.add_argument("--processed", type=Path, default=default)
     ap.add_argument("--schema", default="data")
     args = ap.parse_args(argv)
     url = os.environ.get("DATABASE_URL", "")
