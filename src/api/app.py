@@ -69,7 +69,12 @@ def health() -> Health:
 
 @app.post("/api/search", response_model=SearchResponse)
 def api_search(query: Query) -> SearchResponse:
-    matches = apply_filters(search_mod.search(query), query)
+    try:
+        found = search_mod.search(query)
+    except FileNotFoundError as e:  # organizers' data not ingested (src/match/index.py)
+        log.warning("search: %s", e)  # the path goes to the log, not to the client
+        raise HTTPException(503, "данные организаторов не загружены (запустите src.ingest.build)") from e
+    matches = apply_filters(found, query)
     if not getattr(search_mod, "IS_STUB", False):
         # What the card and the xlsx show: only facts and contacts that pass the Evidence check.
         cache = SourceCache()

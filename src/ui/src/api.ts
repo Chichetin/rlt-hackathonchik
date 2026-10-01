@@ -109,3 +109,36 @@ export const KIND_LABEL: Record<string, string> = {
 export function yesNo(v: boolean | null | undefined): string {
   return v === true ? "да" : v === false ? "нет" : "не проверено";
 }
+
+// Регион: из реестра (enrich, с Evidence), иначе — по коду КПП из данных АИС ГЗ (78 / 47), как фильтр
+// «Регион» на сервере (src/match/filters.py, D-030).
+const KPP_REGION: Record<string, string> = { "78": "Санкт-Петербург", "47": "Ленинградская область" };
+
+export function regionLabel(cp: Pick<Counterparty, "region" | "kpp">): string {
+  if (cp.region) return cp.region;
+  const byKpp = cp.kpp ? KPP_REGION[cp.kpp.slice(0, 2)] : undefined;
+  return byKpp ? `${byKpp} (по КПП)` : "регион не указан";
+}
+
+// Фильтр оставляет только подтверждённые совпадения (D-030): у кого признак неизвестен — скрыт.
+// Пользователь видит, сколько скрыто из-за неизвестного признака, а не «никого не нашли».
+export function filterNotes(base: SearchResponse | null, f: Filters): string[] {
+  if (!base) return [];
+  const rows = [...base.history, ...base.discovered];
+  const total = rows.length;
+  const notes: string[] = [];
+  const unknown = (pred: (cp: Counterparty) => boolean) => rows.filter((m) => pred(m.counterparty)).length;
+  if (f.only_manufacturers) {
+    const n = unknown((cp) => !cp.kind || cp.kind === "unknown");
+    if (n) notes.push(`Тип поставщика ещё не определён у ${n} из ${total} — признак появится после обогащения.`);
+  }
+  if (f.only_msp) {
+    const n = unknown((cp) => cp.is_msp == null);
+    if (n) notes.push(`Статус МСП ещё не проверен у ${n} из ${total} — признак появится после обогащения.`);
+  }
+  if (f.region) {
+    const n = unknown((cp) => !cp.region && !cp.kpp);
+    if (n) notes.push(`Регион не определён у ${n} из ${total} (нет КПП и данных реестра) — они скрыты фильтром.`);
+  }
+  return notes;
+}

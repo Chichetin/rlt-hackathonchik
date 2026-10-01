@@ -11,11 +11,12 @@ import hashlib
 import json
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import yaml
 
+from src.contracts import Query
 from src.enrich.evidence import strip_unverified
 from src.eval.metrics import METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
@@ -65,10 +66,24 @@ def config_sha256(root: Path | None = None) -> str:
     return h.hexdigest()
 
 
-def evaluate(cases: list[EvalCase], cfg: dict) -> dict:
+def with_cutoff(query: Query, cutoff: date) -> Query:
+    """Features only before the split cutoff (D-018, research/EVAL.md): as_of defaults to the cutoff.
+
+    A case asking for history after the cutoff would see the evaluated period — refused.
+    """
+    if query.as_of is None:
+        return query.model_copy(update={"as_of": cutoff})
+    if query.as_of > cutoff:
+        raise ValueError(f"{query.query_id}: as_of {query.as_of} позже cutoff {cutoff} — утечка будущего в признаки")
+    return query
+
+
+def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None) -> dict:
+    cutoff = cutoff or date.fromisoformat(str(split_config()["cutoff"]))
     per_query = []
     for case in cases:
-        matches = search_mod.search(case.query, k=cfg.get("k", 20), weights=cfg.get("weights"))
+        query = with_cutoff(case.query, cutoff)
+        matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"))
         if not getattr(search_mod, "IS_STUB", False):  # measure what the user sees (as /api/search)
             cache = SourceCache()
             matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})

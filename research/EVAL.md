@@ -59,6 +59,7 @@ stub-dev-1,,ООО «…» (ИНН не подтверждён),0,llm:<моде�
 - Части — `configs/split.yaml`: `cutoff`, `holdout_from`, пути к кейсам. `dev` —
   `[cutoff, holdout_from)`, для настройки; `holdout` — с `holdout_from`, **запечатан**.
   Даты — `configs/split.yaml` (cutoff 2025-07-01, holdout 2025-10-01); сборщик — T-07; исключаем лоты без участников и АИС ГЗ с «ст.93»/«единственный поставщик».
+- `Query.as_of` в кейсе — пусто или ≤ `cutoff`: пустое `src/eval/run.py` заменяет на `cutoff` (признаки только до него, D-018), позже `cutoff` — ошибка. T-07 не ставит `as_of = holdout_from`: `make eval-final` пишет маркер до прогона, и такая ошибка сожжёт sha конфигурации.
 - `src/eval/split.py`: `load_cases("holdout")` вне `make eval-final` бросает `SealedError`;
   кейс dev вне своих дат — ошибка «split leak».
 - `make eval-final CONFIRM=<sha256>` (`src/eval/final.py`) читает holdout, только если:
