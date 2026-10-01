@@ -44,34 +44,32 @@ def _components(m: CounterpartyMatch) -> str:
 
 
 def recommend(lot: TestLot, top: int, offline: bool | None = None) -> tuple[list[CounterpartyMatch], list[str]]:
-    """History top-N + «Новые» for one lot; notes explain an empty block. Errors become notes."""
-    from src.enrich import discover as discover_mod
-    from src.match import search as search_mod
+    """History top-N + «Новые» for one lot — the /api/search pipeline (src/match/pipeline.py, #220): cached
+    enrichment, hard filters (liquidated, РНП), the Evidence check; notes explain an empty block."""
+    from src.match import pipeline
 
     notes = list(lot.notes)
     try:
-        history = search_mod.search(lot.query, k=top)
+        picked = pipeline.pick(lot.query, offline=offline)
     except FileNotFoundError:
         raise  # training data absent: nothing can be predicted, the caller stops
     except Exception as e:  # noqa: BLE001 — one bad lot must not stop the whole export
-        log.exception("search, лот %s", lot.lot_id)
+        # the pipeline is one call now: a failed search leaves no «Новые» either (D-097)
+        log.exception("подбор, лот %s", lot.lot_id)
         notes.append(f"ошибка подбора по истории: {type(e).__name__}")
-        history = []
+        return [], notes
+    history, discovered = picked.history[:top], picked.discovered[:top]
     if not history:
-        notes.append("в истории нет поставщиков по этому предмету")
-    discovered: list[CounterpartyMatch] = []
-    try:
-        res = discover_mod.discover(lot.query, history, offline=offline)
-        if res.history_checked:
-            discovered = res.matches[:top]
-        else:
-            notes.append("«Новые» не установлены: нет сверки с данными организаторов")
-        if not discovered:
-            notes.extend(res.notes or ["открытые источники не дали новых компаний"])
-    except Exception as e:  # noqa: BLE001 — an open source failing never breaks the history block
-        log.exception("discover, лот %s", lot.lot_id)
-        notes.append(f"блок «Новые» недоступен: {type(e).__name__}")
-    return [*history, *discovered], notes
+        notes.append(picked.note or "в истории нет поставщиков по этому предмету")
+    res = picked.discovery
+    if res is None:
+        if not pipeline.is_stub():
+            notes.append(f"блок «Новые» недоступен: {picked.discovery_error or 'ошибка источника'}")
+    elif not res.history_checked:
+        notes.append("«Новые» не установлены: нет сверки с данными организаторов")
+    if res is not None and not discovered:
+        notes.extend(res.notes or ["открытые источники не дали новых компаний"])
+    return pipeline.verified([*history, *discovered]), notes
 
 
 def _done(out: Path) -> set[str]:
