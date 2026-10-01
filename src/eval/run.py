@@ -274,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="dev sample (default), all dev cases or the 5–10 real cases; never holdout")
     ap.add_argument("--baseline", default=None,
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
+    ap.add_argument("--every", type=int, default=1,
+                    help="every N-th case (cases[::N]): a deterministic subsample when the part is too slow")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
     args = ap.parse_args(argv)
@@ -288,7 +290,13 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    rec = result_record(args.exp, args.part, cfg, evaluate(load_cases(args.part, split_config()), cfg))
+    if args.every < 1:
+        print("--every должен быть ≥ 1", file=sys.stderr)
+        return 2
+    cases = load_cases(args.part, split_config())[::args.every]
+    rec = result_record(args.exp, args.part, cfg, evaluate(cases, cfg))
+    if args.every > 1:
+        rec["every"] = args.every  # the subsample is part of the result: n_queries alone does not say which
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(dump_record(rec), encoding="utf-8")

@@ -40,5 +40,18 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
-rel-on-s500:     # reliability в балле с весом weights.reliability (#72, D-082); "on" в кавычках — иначе YAML 1.1 bool
+# reliability (#72, D-082). Подвыборка — каждый 4-й кейс dev: `uv run python -m src.eval.run --exp <id> --every 4`.
+# "on" в кавычках — иначе YAML 1.1 читает bool.
+rel-off-s500:    # на прежнем дефолте v1 (до D-077): reliability в карточке, не в балле
+  weights: *v1_weights
+  options: *v1_options
+  reliability: {mode: shadow}
+rel-on-s500:     # на v1: reliability в балле с весом 0.2 (D-004)
+  weights: *v1_weights
+  options: *v1_options
+  reliability: {mode: "on"}
+rel-off-f:       # на дефолте H-15f (D-077): shadow — то же, что продукт
+  reliability: {mode: shadow}
+rel-on-f:        # на H-15f: + reliability 0.2 поверх нормированных весов H-15f
+  weights: {reliability: 0.2}
   reliability: {mode: "on"}

@@ -109,3 +109,9 @@ def test_experiment_entries_reproduce_recorded_configs(exp, result):
     from src.match.signals import signal_shares
     assert signal_shares(cfg) == signal_shares(rec)
     assert (cfg["retriever"], cfg["k"]) == (rec["retriever"], rec["k"])
+
+
+def test_every_must_be_positive():
+    from src.eval.run import main
+
+    assert main(["--exp", "rel-off-f", "--every", "0"]) == 2

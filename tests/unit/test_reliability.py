@@ -161,7 +161,9 @@ def test_supplier_history_counts_only_before_as_of(fixture_processed):
 def mode(monkeypatch):
     def apply(value: str):
         cfg = search_mod.load_config()
-        monkeypatch.setattr(search_mod, "load_config", lambda: {**cfg, "reliability": {"mode": value}})
+        weights = {**cfg["weights"], "reliability": 0.2} if value == "on" else cfg["weights"]
+        monkeypatch.setattr(search_mod, "load_config",
+                            lambda: {**cfg, "weights": weights, "reliability": {"mode": value}})
     return apply
 
 
@@ -240,7 +242,11 @@ def test_rel_on_experiment_is_reproducible_from_the_repository():
     """rel-on-s500 (research/EXPERIMENTS.md) is an entry of configs/experiments.yaml, not a tree copy."""
     from src.eval.run import load_method_config
 
-    cfg = search_mod.check_config(load_method_config("rel-on-s500"))
-    assert reliability_mode(cfg) == "on"
-    assert cfg["weights"]["reliability"] == pytest.approx(0.2)
+    for exp in ("rel-on-s500", "rel-on-f"):
+        cfg = search_mod.check_config(load_method_config(exp))
+        assert reliability_mode(cfg) == "on" and cfg["weights"]["reliability"] == pytest.approx(0.2), exp
+    v1, f = load_method_config("rel-on-s500"), load_method_config("rel-on-f")
+    assert v1["options"]["experience_by"] == "class" and f["options"] == load_method_config("H-15f")["options"]
+    for exp in ("rel-off-s500", "rel-off-f"):
+        assert reliability_mode(load_method_config(exp)) == "shadow"
     assert reliability_mode(search_mod.load_config()) == "shadow"  # the product stays in shadow
