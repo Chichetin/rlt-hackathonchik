@@ -31,7 +31,7 @@ from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.match import fallback
 from src.match import search as search_mod
-from src.match.filters import apply_legal, apply_user_filters, facets, legal_ok, parse_filters
+from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ Facets = dict[str, dict[str, dict[str, int]]]
 class Picked:
     matches: list[CounterpartyMatch]  # history first, then «Новые»; best first within a block
     note: str | None = None  # why history is empty (#113) or «фильтры скрыли N»
-    facets: Facets = field(default_factory=dict)  # X-Facets of /api/search: chips before the user filters
+    facets: Facets = field(default_factory=dict)  # X-Facets of /api/search: each chip group after the OTHER groups
     uncached: set[str] = field(default_factory=set)  # history INNs without a cached card (queue them)
     discovery: discover_mod.Discovery | None = None  # None — the block was not asked for or failed
     discovery_error: str | None = None  # the exception type when discover() failed
@@ -92,12 +92,13 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
     if hidden and not any(m.origin == "history" for m in shown):
         out.note = f"фильтры скрыли {hidden}"
         log.info("search %s: %s", query.query_id, out.note)
-    new = facets(m for m in legal if m.origin == "discovered")
+    # each chip group counted after the user filters of the other groups (review of #240, #242, D-094)
+    new = chip_facets((m for m in legal if m.origin == "discovered"), query)
     if candidates is not None:  # discovery: the block is cut to MAX_SHOWN after the user filters
         new = {g: {v: min(n, discover_mod.MAX_SHOWN) for v, n in counts.items()}
-               for g, counts in facets(apply_legal(candidates)).items()}
+               for g, counts in chip_facets(apply_legal(candidates), query).items()}
     out.matches = shown
-    out.facets = {"history": facets(m for m in legal if m.origin == "history"), "discovered": new}
+    out.facets = {"history": chip_facets((m for m in legal if m.origin == "history"), query), "discovered": new}
     return out
 
 
