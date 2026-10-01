@@ -378,7 +378,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if idx.n_docs == 0:
         fallback.set_note(fallback.no_history(as_of))
         return []
-    tokens = fallback.cap_tokens(idx, tokenize(query.text))
+    words = tokenize(query.text)
+    tokens = fallback.cap_tokens(idx, words)
     hits = idx.retrieve(tokens, TOP_DOCS)
     how = ""
     if cfg["retriever"] == "pg_hybrid":
@@ -404,7 +405,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         fallback.set_note(f"ОКПД2 не распознан и не учтён: {', '.join(bad_codes)}")
     predicted = False
     if not codes:
-        guess = _predict_okpd2(store, idx, hits, lots, tokens)
+        guess = _predict_okpd2(store, idx, hits, lots, words)
         codes, predicted = ([guess], True) if guess else ([], False)
     if codes:
         _class_history(store, cands, codes, as_of)

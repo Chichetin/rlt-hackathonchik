@@ -15,10 +15,12 @@ from pathlib import Path
 import pytest
 
 from src.contracts import Query
+from src.eval import okpd2_predict
 from src.ingest.build import build
 from src.match import index as index_mod
 from src.match import search as search_mod
 from src.match.search import search
+from src.match.store import get_store
 
 SUPPLIER = "7801000012"
 PAPER, PAINT = "17.12.14.110", "20.30.23.110"
@@ -228,3 +230,5 @@ def test_exact_name_in_history_gives_its_own_code(own_data):
     ])
     assert predicted("бумага а4  тип 2") == PAPER  # case and spaces do not matter
     assert predicted("а4 тип 2") == PAINT  # no such name: the vote as before (D-045)
+    store = get_store()  # the accuracy measurement (P-01/P-02) predicts the same way as search()
+    assert okpd2_predict.predict("бумага а4  тип 2", store, index_mod.get_index(store, None)) == PAPER
