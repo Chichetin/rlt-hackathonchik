@@ -11,6 +11,8 @@ filter of the page lists the two statuses «Размещено» / «Исклю�
 """
 
 import re
+import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,6 +59,7 @@ def _all_valid(res: eis_rnp.RnpResult, cache: SourceCache) -> None:
     assert res.evidence
     for ev in res.evidence:
         assert check_evidence(ev, cache.page_text) == [], ev.fact
+        assert "None" not in ev.fact and "«»" not in ev.fact  # an unknown value is left out, not printed
 
 
 def _status(body: str, status: str, only: int | None = None) -> str:
@@ -174,7 +177,8 @@ def test_excluded_entries_are_history(cache):
                              '<div class="data-block__value">12.03.2026</div>\n'
                              '<div class="data-block__title">Обновлено</div>')
     assert eis_rnp.parse(dated)[0][0].excluded == "12.03.2026"
-    assert _check(cache, dated).in_rnp is False
+    res = _check(cache, dated)
+    assert res.in_rnp is False and "исключено 12.03.2026" in res.evidence[0].fact
 
 
 def test_one_current_entry_among_excluded_is_in_rnp(cache):
@@ -191,6 +195,91 @@ def test_unknown_status_is_not_called_clean(cache):
     res = _check(cache, _status(POS_PAGE, "Приостановлено"))
     assert res.in_rnp is None
     assert "статус «Приостановлено»" in res.evidence[0].fact
+
+
+# --- review round: whole-number INN, contradictory «no results», Crawl-delay floor, MSK date, facts ---
+
+def test_inn_with_a_suffix_in_the_entry_cell_is_not_checked_not_clean(cache):
+    # derived: the cell reads «9717122721 (RU)»: it is the INN, but not equal to it — never «не найдена»
+    body = POS_PAGE.replace(f">{IN_RNP}<", f">{IN_RNP} (RU)<")
+    assert {e.inn for e in eis_rnp.parse(body)[0]} == {f"{IN_RNP} (RU)"}
+    assert eis_rnp.mentions(body, IN_RNP) == 3
+    res = _check(cache, body)
+    assert res.in_rnp is None and res.evidence == []
+
+
+def test_mentions_counts_whole_numbers_in_entry_blocks_only():
+    assert eis_rnp.mentions(POS_PAGE, IN_RNP) == 3  # the query in the search form is not an entry
+    assert eis_rnp.mentions(POS_PAGE, OTHER_INN) == 0
+    for longer in (f">{IN_RNP}0<", f">1{IN_RNP}<"):  # another number that contains ours
+        assert eis_rnp.mentions(POS_PAGE.replace(f">{IN_RNP}<", longer), IN_RNP) == 0
+    in_name = POS_PAGE.replace("ООО «Строймонтажатом»", f"ООО «Строймонтажатом» ИНН {IN_RNP}")
+    assert eis_rnp.mentions(in_name, IN_RNP) == 3  # any field of the block counts
+
+
+def test_inn_only_in_a_name_field_is_not_checked(cache):
+    # derived: the INN is in an entry (a founder's name field), no entry has it as its own INN
+    body = POS_PAGE.replace(f">{IN_RNP}<", f">{OTHER_INN}<").replace(
+        "ООО «Строймонтажатом»", f"ООО «Строймонтажатом» (учредитель, ИНН {IN_RNP})")
+    assert {e.inn for e in eis_rnp.parse(body)[0]} == {OTHER_INN}
+    assert _check(cache, body).in_rnp is None
+
+
+@pytest.mark.parametrize("injected", [
+    '<div class="search-registry-entry-block box-shadow-search-input"><div>unreadable</div></div>',
+    '<div class="search-results__total"> Результаты поиска 3 записей </div>',
+    '<div class="search-results__total"> Результаты поиска 0 записей </div>',
+])
+def test_no_results_text_with_raw_entry_blocks_or_a_total_is_not_checked(cache, injected):
+    # derived: «Поиск не дал результатов» + something that says results exist (or may exist)
+    block = '<div class="search-registry-entrys-block">'
+    body = NEG_PAGE.replace(block, injected + block)
+    assert eis_rnp.NO_RESULTS in body and injected in body
+    res = _check(cache, body, NOT_IN_RNP)
+    assert res.in_rnp is None and res.evidence == []
+
+
+def test_crawl_delay_cannot_be_lowered_from_the_environment():
+    code = (
+        "import importlib, os\n"
+        "from src.sources import eis_rnp\n"
+        "out = []\n"
+        "for raw in ('1', '0', '90', ''):\n"
+        "    os.environ['RNP_MIN_INTERVAL_S'] = raw\n"
+        "    out.append(importlib.reload(eis_rnp).MIN_INTERVAL_S)\n"
+        "print(out)\n"
+    )
+    root = Path(__file__).resolve().parents[2]
+    done = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True)
+    assert done.stdout.strip() == "[60.0, 60.0, 90.0, 60.0]"  # robots.txt Crawl-delay: 60 is a floor
+
+
+def test_search_date_is_moscow_time_not_utc(cache):
+    late = datetime(2026, 10, 1, 22, 30, tzinfo=UTC)  # 01:30 on 02.10 in Moscow
+    cache.put(eis_rnp.search_url(NOT_IN_RNP), NEG_PAGE, fetched_at=late.timestamp())
+    ev = eis_rnp.check(NOT_IN_RNP, cache).evidence[0]
+    assert ev.fact.startswith("Не найдена в РНП ЕИС на 02.10.2026") and ev.fetched_at == late
+    early = datetime(2026, 10, 1, 20, 59, tzinfo=UTC)  # 23:59 on 01.10 in Moscow
+    cache.put(eis_rnp.search_url(NOT_IN_RNP), NEG_PAGE, fetched_at=early.timestamp())
+    assert eis_rnp.check(NOT_IN_RNP, cache).evidence[0].fact.startswith("Не найдена в РНП ЕИС на 01.10.2026")
+
+
+def test_facts_leave_out_values_the_page_does_not_have(cache):
+    # derived: no «Включено» block → no «включено None»
+    no_date = POS_PAGE.replace('<div class="data-block__title">Включено</div>',
+                               '<div class="data-block__title">Размещено в реестре</div>')
+    assert eis_rnp.parse(no_date)[0][0].included is None
+    res = _check(cache, no_date)
+    assert res.in_rnp is True and "включено" not in res.evidence[0].fact
+    _all_valid(res, cache)
+    # excluded by status only: «статус «Исключено»», not «исключено Исключено»
+    res = _check(cache, _status(POS_PAGE, "Исключено"))
+    assert "статус «Исключено»" in res.evidence[0].fact and "исключено Исключено" not in res.evidence[0].fact
+    _all_valid(res, cache)
+    # status text missing in the header: unknown, said so
+    res = _check(cache, _status(POS_PAGE, ""))
+    assert res.in_rnp is None and "статус не указан" in res.evidence[0].fact
+    _all_valid(res, cache)
 
 
 # --- network: errors and captcha never become «не найдена» --------------------------------------

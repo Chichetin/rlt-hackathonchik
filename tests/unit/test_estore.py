@@ -1,4 +1,9 @@
-"""Электронный магазин СПб, реестр контрактов: parsing, Evidence on the cached page, 152-ФЗ."""
+"""Электронный магазин СПб, реестр контрактов: parsing, Evidence on the cached page, 152-ФЗ.
+
+Fixtures (tests/fixtures/estore/README.md) are registry pages recorded 01.10.2026; the 12-digit rows
+of individuals are anonymised in them (synthetic «Иванов Иван Иванович (500100732259)», 152-ФЗ),
+so the page is not a byte-for-byte copy of the site's answer.
+"""
 
 import time
 from pathlib import Path
@@ -13,7 +18,7 @@ from src.sources.cache import SourceCache
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "estore"
 OKPD_PAGE = (FIX / "okpd2_17.12.14_bumaga.html").read_text(encoding="utf-8")
 SUPPLIER_PAGE = (FIX / "supplier_7820324037.html").read_text(encoding="utf-8")
-OFFICEMAG = "7820324037"  # ООО «Офисмаг СПБ», real registry page fetched 01.10
+OFFICEMAG = "7820324037"  # ООО «Офисмаг СПБ», a legal entity of the registry (page recorded 01.10, see README)
 
 
 @pytest.fixture
