@@ -8,7 +8,8 @@ the /api/search budget (every OKVED × region, several registry pages); every sh
 blocks is checked now (src/enrich/verify.py: ФНС card / ГИР БО status, RNP of the ЕИС) and only verified
 ones are written; «Новые» by product_fit steps — 1.0 / 0.8 up to TOP, 0.6 only while strong < 5, lower
 never. A lot whose OKPD2 code disagrees with its text (another section) or whose class is new to the
-2024–2025 data is searched by the text, and the file says so. Next to the CSV — `<name>.report.csv`:
+2024–2025 data: «История» by the code and by the text in turn, «Новые» by the class of the text; the
+file says so. Next to the CSV — `<name>.report.csv`:
 per lot, candidates from each source, how many were checked and shown, which sources were down.
 Mode `demo` — the old behaviour (cache, the budget of /api/search).
 
@@ -31,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import duckdb
+import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Query
 from src.enrich.role import LABEL as ROLE_LABEL
@@ -47,8 +49,11 @@ RNP_TEXT = {True: "в РНП", False: "нет", None: ""}
 FULL_PAGES = 5  # registry pages per (OKVED, region, type) in the full mode: up to 50 companies each
 FULL_BUDGET_S = 600.0  # live discovery of one lot: generous, but a hanging source does not stop the run
 CHECK_FACTOR = 4  # at most TOP × CHECK_FACTOR candidates of a block are checked
-STRONG_FIT, WEAK_FIT, MIN_STRONG = 0.8, 0.6, 5  # decisions 19–20 (IR630): steps of product_fit in «Новые»
-NOT_CONNECTED = ("пул МСП из выгрузки ФНС (#185)", "крупные компании вне МСП (#219)", "Yandex Search (#186)")
+# decisions 19–20 (IR630): «Новые» by the step of their basis (src.enrich.discover.STEP) — 1.0 / 0.8 up to TOP,
+# 0.6 (and 0.5, an additional OKVED of the class, decision 22) only while strong < MIN_STRONG, 0.4 never
+STRONG_FIT, WEAK_FIT, MIN_STRONG = 0.8, 0.5, 5
+NOT_CONNECTED = ("крупные компании вне МСП (#219)", "Yandex Search (#186)")
+POOL_SOURCE = "пул МСП (выгрузка ФНС, #185)"
 BLOCKS = {"history": "История", "discovered": "Новые"}
 FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
@@ -86,7 +91,7 @@ class LotReport:
     mode: str
     okpd2: str = ""
     text_class: str = ""
-    searched_by: str = "код и текст"
+    searched_by: str = "код"
     counts: dict[str, int] = field(default_factory=lambda: dict.fromkeys(
         ("history_candidates", "history_checked", "history_shown", "new_found", "new_checked", "new_shown"), 0))
     requests: list[str] = field(default_factory=list)
@@ -193,13 +198,25 @@ def section_shares(history: Sequence[CounterpartyMatch], processed: Path) -> dic
     return {k: v / total for k, v in votes.items()} if total > 0 else {}
 
 
+def interleave(first: Sequence[CounterpartyMatch], second: Sequence[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """Both rankings in turn (first, second, first, …), one row per INN — the first occurrence wins."""
+    out: list[CounterpartyMatch] = []
+    seen: set[str | None] = set()
+    for i in range(max(len(first), len(second))):
+        for ranked in (first, second):
+            if i < len(ranked) and ranked[i].counterparty.inn not in seen:
+                seen.add(ranked[i].counterparty.inn)
+                out.append(ranked[i])
+    return out
+
+
 def code_disagrees(codes: Sequence[str], shares: dict[str, float], text_class: str | None,
                    known: frozenset[str] | None) -> str | None:
     """Why the lot is searched by its text (decision 18), or None: the code is used as given.
 
     - the code's sections get less than MISMATCH_SHARE of the votes of the lots similar by text —
-      «код и текст расходятся» (dev: 8 % of real lots, 96 % of lots with a code of another section;
-      recall@10 of the winner unchanged on real lots, +3 п.п. on swapped codes — EXPERIMENTS X-code-text);
+      «код и текст расходятся» (dev n=400: 7 % of real lots, 96 % of lots with a code of another section;
+      the caller then interleaves the answers by the code and by the text — EXPERIMENTS X-code-text-mix);
     - the code's class never occurs in the 2024–2025 data while the text points at a known class.
     A lot without a code, or a text that matches nothing, keeps its code."""
     from src.enrich.discover import okpd_classes
@@ -213,10 +230,9 @@ def code_disagrees(codes: Sequence[str], shares: dict[str, float], text_class: s
     by_text = f"класс {text_class}" if text_class else f"раздел {top}"
     if own < MISMATCH_SHARE:
         return (f"код и текст расходятся: ОКПД2 {shown} — {own:.0%} похожих по тексту закупок, по тексту — "
-                f"{by_text} ({shares[top]:.0%}); кандидаты по тексту")
+                f"{by_text} ({shares[top]:.0%})")
     if known is not None and text_class and not any(c in known for c in classes) and text_class in known:
-        return (f"код ОКПД2 {shown} новый — класса нет в данных 2024–2025; по тексту — класс {text_class}; "
-                "кандидаты по тексту")
+        return f"код ОКПД2 {shown} новый — класса нет в данных 2024–2025; по тексту — класс {text_class}"
     return None
 
 
@@ -255,6 +271,7 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
         verify_fn = check
 
     rep = LotReport(lot.lot_id, "full", ",".join(lot.query.okpd2))
+    text_class: str | None = None
     notes = list(lot.notes)
     pool_k = top * CHECK_FACTOR
     query: Query = lot.query
@@ -264,10 +281,11 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
         text_class = discover_mod.predict_class(by_text, processed)
         rep.text_class = text_class or ""
         why = code_disagrees(query.okpd2, section_shares(by_text, processed), text_class, known_classes(processed))
-        if why:
-            notes.append(why)
-            rep.searched_by = "текст (код не учтён)"
-            query, history = text_query, by_text
+        if why:  # decision 18: by the text too; interleaved — the text alone loses on real lots (X-code-text-mix)
+            notes.append(f"{why}; «История» — по коду и по тексту поочерёдно, «Новые» — по классу текста")
+            rep.searched_by = "код и текст поочерёдно"
+            history = interleave(search_mod.search(query, k=pool_k), by_text)
+            query = text_query
         elif query.okpd2:
             history = search_mod.search(query, k=pool_k)
         else:
@@ -296,9 +314,15 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
             pool: list[CounterpartyMatch] = []
         else:
             pool = res.pool
+        steps = {inn: discover_mod.STEP[r] for inn, r in res.relation.items()}
+        pool = _with_pool(pool, query, text_class, processed, rep, steps)
         rep.counts["new_found"] = len(pool)
-        strong = [m for m in pool if _fit(m) >= STRONG_FIT]
-        weak = [m for m in pool if WEAK_FIT <= _fit(m) < STRONG_FIT]
+
+        def step(m: CounterpartyMatch) -> float:
+            return steps.get(m.counterparty.inn or "", _fit(m))
+
+        strong = [m for m in pool if step(m) >= STRONG_FIT]
+        weak = sorted((m for m in pool if WEAK_FIT <= step(m) < STRONG_FIT), key=lambda m: -step(m))
         new = _pick(strong, top, pool_k, verify_fn, rep, "new")
         if len(new) < MIN_STRONG:  # 0.6 only when strong ones are few; below 0.6 never
             new += _pick(weak, top - len(new), pool_k, verify_fn, rep, "new")
@@ -312,6 +336,38 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
     rep.counts["history_shown"], rep.counts["new_shown"] = len(shown), len(new)
     rep.notes = notes
     return [*shown, *new], notes, rep
+
+
+def _with_pool(found: list[CounterpartyMatch], query: Query, text_class: str | None, processed: Path,
+               rep: LotReport, steps: dict[str, float]) -> list[CounterpartyMatch]:
+    """Add the offline МСП pool (#185) to the live registry answer: one row per INN (the live one wins),
+    best first. The pool is searched by the query's code, or by the class of the text when the code is
+    not used; a pool that is not loaded goes to the report, not to an error."""
+    from src.enrich import discover as discover_mod
+    from src.sources.cache import SourceCache
+
+    codes = list(query.okpd2) or ([text_class] if text_class else [])
+    if not codes:
+        return found
+    try:
+        weights = yaml.safe_load(discover_mod.SEARCH_CONFIG.read_text(encoding="utf-8"))["weights"]
+        extra, relation, checked = discover_mod.from_pool(query, codes, predicted=not query.okpd2, weights=weights,
+                                                   processed=processed, cache=SourceCache())
+    except Exception as e:  # noqa: BLE001 — a broken pool never breaks the lot
+        log.exception("pool, лот %s", rep.lot_id)
+        rep.unavailable.add(POOL_SOURCE)
+        rep.requests.append(f"пул МСП: ошибка {type(e).__name__}")
+        return found
+    if checked is None:
+        rep.unavailable.add(POOL_SOURCE)
+        rep.requests.append("пул МСП: не загружен (make pool-load)")
+        return found
+    have = {m.counterparty.inn for m in found}
+    added = [m for m in extra if m.counterparty.inn not in have]
+    for m in added:
+        steps[m.counterparty.inn or ""] = discover_mod.STEP[relation[m.counterparty.inn or ""]]
+    rep.requests.append(f"пул МСП: кандидатов {len(extra)}, новых к реестру {len(added)}")
+    return sorted([*found, *added], key=lambda m: (-m.score, m.counterparty.inn or "~"))
 
 
 def _done(out: Path) -> set[str]:

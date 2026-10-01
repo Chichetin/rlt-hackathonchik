@@ -8,8 +8,9 @@ the queries are dev lots, the holdout is never read. Two sets of the same lots:
   swap — one code of ANOTHER section, drawn from the codes of the other sampled lots (the organizers'
          «код не бьётся с текстом», research/feedback/2026-10-01-checkpoint1.md).
 Three answers per lot: `code` — search() with the codes (what /api/search does); `text` — search() without
-codes; `adaptive` — `make predict` full mode: the text when src.ingest.predict.code_disagrees() says the
-code's sections get < MISMATCH_SHARE of the votes of the lots similar by text, else the code.
+codes; `adaptive` — the text when src.ingest.predict.code_disagrees() says the code's sections get
+< MISMATCH_SHARE of the votes of the lots similar by text, else the code; `mixed` — when it says so, the
+answers by the code and by the text taken in turn (src.ingest.predict.interleave), else the code.
 Metric — recall@10 over the relevant INNs of the case (winner and offers), bootstrap CI over lots;
 `flagged` — the share of lots the adaptive rule sent to the text.
 """
@@ -31,6 +32,7 @@ from src.match import search as search_mod
 from src.match.store import processed_dir
 
 K = 10
+ANSWERS = ("code", "text", "adaptive", "mixed")
 
 
 def _swap_codes(cases: list[EvalCase], seed: int) -> dict[str, list[str]]:
@@ -67,10 +69,13 @@ def evaluate(cases: list[EvalCase], processed: Path, seed: int = 0) -> dict:
             by_code = search_mod.search(q.model_copy(update={"okpd2": codes}), k=K)
             code_ranked = [m.counterparty.inn or "" for m in by_code]
             why = predict_mod.code_disagrees(codes, shares, None, known)
+            mixed = [m.counterparty.inn or "" for m in predict_mod.interleave(by_code, by_text)] if why else code_ranked
             row[kind] = {"code": recall_at_k(code_ranked, rel, K), "text": recall_at_k(text_ranked, rel, K),
-                         "adaptive": recall_at_k(text_ranked if why else code_ranked, rel, K), "flagged": bool(why)}
+                         "adaptive": recall_at_k(text_ranked if why else code_ranked, rel, K),
+                         "mixed": recall_at_k(mixed, rel, K), "flagged": bool(why)}
         per.append(row)
-    metrics = {kind: {**{a: _ci([r[kind][a] for r in per]) for a in ("code", "text", "adaptive")},
+    metrics = {kind: {**{a: _ci([r[kind][a] for r in per]) for a in ANSWERS},
+                      **{f"{a}-code": _ci([r[kind][a] - r[kind]["code"] for r in per]) for a in ANSWERS[1:]},
                       "flagged": round(sum(r[kind]["flagged"] for r in per) / len(per), 4) if per else None}
                for kind in ("real", "swap")}
     return {"n_queries": len(per), "elapsed_s": round(time.monotonic() - started, 1), "metrics": metrics,
@@ -94,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=1, default=str) + "\n", encoding="utf-8")
     for kind, m in body["metrics"].items():
         cells = " · ".join(f"{a} {m[a]['mean']:.3f} [{m[a]['ci95'][0]:.3f}, {m[a]['ci95'][1]:.3f}]"
-                           for a in ("code", "text", "adaptive"))
+                           for a in ANSWERS)
         print(f"{kind}: recall@{K} {cells}; по тексту {m['flagged']:.0%} лотов")
     print(f"→ {out.relative_to(ROOT).as_posix()}, n={body['n_queries']}, {body['elapsed_s']} с")
     return 0

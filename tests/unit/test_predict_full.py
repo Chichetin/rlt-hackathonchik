@@ -36,6 +36,12 @@ def _ok(cp: Counterparty) -> V.Verdict:
                      True, "проверен: Действующая организация; в РНП нет")
 
 
+@pytest.fixture(autouse=True)
+def _no_pool(monkeypatch):
+    """The developer's built pool (data/external/rsmp/pool) never answers a unit test; a test sets its own."""
+    monkeypatch.setattr(discover_mod, "pool_source", lambda: (None, None))
+
+
 @pytest.fixture
 def card_cache(tmp_path: Path) -> SourceCache:
     c = SourceCache(tmp_path / "s.sqlite")
@@ -170,10 +176,10 @@ def test_code_text_mismatch_searches_by_text(search_data, tmp_path):
     out = tmp_path / "o.csv"
     P.run(d, out, top=5, offline=True, mode="full", verify_fn=_ok)
     rows = _rows(out)
-    assert all("кандидаты по тексту" in r["note"] for r in rows)
+    assert all("код и текст расходятся" in r["note"] and "поочерёдно" in r["note"] for r in rows)
     assert {r["inn"] for r in rows if r["block"] == "История"} & PAPER_SUPPLIERS
     rep = _rows(P.report_path(out))[0]
-    assert rep["searched_by"].startswith("текст") and rep["text_class"] == "17.12"
+    assert rep["searched_by"] == "код и текст поочерёдно" and rep["text_class"] == "17.12"
 
 
 def _new(inn: str, fit: float) -> CounterpartyMatch:
@@ -247,3 +253,91 @@ def test_discover_reads_next_pages_when_asked(tmp_path, monkeypatch):
     assert extra["inn"] in {m.counterparty.inn for m in many.pool}
     assert any("стр. 2" in r for r in many.requests)
     assert not any("стр. 3" in r for r in many.requests)  # page 2 had one row: the last page
+
+
+# --- offline МСП pool (#185) as a source of «Новые» ---------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def pool_dir(tmp_path_factory) -> Path:
+    import zipfile
+
+    from src.db import pool
+    from src.sources import msp_dump
+
+    tmp = tmp_path_factory.mktemp("pool")
+    zip_path = tmp / "dump.zip"
+    with zipfile.ZipFile(zip_path, "w") as z:
+        z.writestr("a.xml", (FIX / "msp_dump" / "sample.xml").read_text(encoding="utf-8"))
+    msp_dump.build(zip_path, tmp / "parts", workers=1)
+    pool.build(tmp / "parts", tmp / "pool", fetched_at=1_789_000_000.0)
+    return tmp / "pool"
+
+
+def _suppliers(tmp_path: Path, inns: list[str]) -> Path:
+    import duckdb
+
+    out = tmp_path / "processed"
+    out.mkdir()
+    con = duckdb.connect()
+    con.execute("CREATE TABLE s AS SELECT unnest(?) AS inn", [inns])
+    con.execute(f"COPY s TO '{out.as_posix()}/suppliers.parquet' (FORMAT parquet)")
+    con.close()
+    return out
+
+
+def test_from_pool_class_company_with_evidence(pool_dir, tmp_path):
+    from src.enrich.evidence import check_counterparty
+
+    cache = SourceCache(tmp_path / "c.sqlite")
+    q = Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])
+    found, relation, checked = discover_mod.from_pool(
+        q, q.okpd2, predicted=False, weights={"product_fit": 1.0}, processed=_suppliers(tmp_path, ["7801000012"]),
+        cache=cache, pool_dir=pool_dir)
+    assert checked is True and [m.counterparty.inn for m in found] == ["0078000013"]
+    m = found[0]
+    assert P._fit(m) == 1.0 and relation["0078000013"] == "class" and m.origin == "discovered"
+    assert check_counterparty(m.counterparty, cache.page_text) == []
+    (tmp_path / "k").mkdir()
+    known = _suppliers(tmp_path / "k", ["0078000013"])
+    again, _, _ = discover_mod.from_pool(q, q.okpd2, predicted=False, weights={"product_fit": 1.0}, processed=known,
+                                         cache=cache, pool_dir=pool_dir)
+    assert again == []  # already a supplier in organizers' data: not «новая»
+
+
+def test_from_pool_not_loaded(tmp_path):
+    q = Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])
+    assert discover_mod.from_pool(q, q.okpd2, predicted=False, weights={}, processed=tmp_path,
+                                  cache=SourceCache(tmp_path / "c.sqlite")) == ([], {}, None)
+
+
+def test_full_mode_reports_pool(search_data, tmp_path, monkeypatch, pool_dir):
+    out = tmp_path / "o.csv"
+    P.run(TESTSET, out, top=5, offline=True, mode="full", verify_fn=_ok)
+    assert all(P.POOL_SOURCE in r["unavailable"] for r in _rows(P.report_path(out)))
+    monkeypatch.setattr(discover_mod, "pool_source", lambda: (None, pool_dir))
+    out2 = tmp_path / "o2.csv"
+    P.run(TESTSET, out2, top=5, offline=True, mode="full", verify_fn=_ok)
+    rep = {r["lot_id"]: r for r in _rows(P.report_path(out2))}
+    assert "пул МСП: кандидатов 1" in rep["9001"]["requests"] and P.POOL_SOURCE not in rep["9001"]["unavailable"]
+    new = [r for r in _rows(out2) if r["lot_id"] == "9001" and r["block"] == "Новые"]
+    assert [r["inn"] for r in new] == ["0078000013"] and new[0]["status"]
+
+
+def test_interleave_takes_turns_without_duplicates():
+    a = [_new(i, 1.0) for i in ("7805772436", "7807032363", "7810400592")]
+    b = [_new(i, 1.0) for i in ("7807032363", "7811777270")]
+    assert [m.counterparty.inn for m in P.interleave(a, b)] == ["7805772436", "7807032363", "7811777270",
+                                                                "7810400592"]
+    assert P.interleave([], b) == b
+
+
+def test_new_block_steps_by_basis(search_data, monkeypatch):
+    """#186 steps: the OKVED class is 0.6 (shown only while strong < 5), wholesale 0.4 — never, whatever
+    product_fit the live registry block gives them (1.0 / 0.6 in /api/search)."""
+    pool = [_new("7805772436", 1.0), _new("7807032363", 1.0), _new("7810400592", 0.6)]
+    relation = {"7805772436": "class", "7807032363": "class", "7810400592": "wholesale"}
+    monkeypatch.setattr(discover_mod, "discover", lambda *a, **k: discover_mod.Discovery(
+        pool=pool, history_checked=True, relation=relation))
+    rows, _, _ = P.full_recommend(P.load_testset(TESTSET).lots[0], 10, offline=True, verify_fn=_ok)
+    assert sorted(r.match.counterparty.inn for r in rows if r.match.origin == "discovered") == [
+        "7805772436", "7807032363"]

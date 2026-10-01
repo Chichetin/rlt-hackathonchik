@@ -128,6 +128,7 @@ class Discovery:
     # after the legal status, before the user filters and top-10: X-Facets of the block in /api/search (#232)
     candidates: list[CounterpartyMatch] = field(default_factory=list)
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
+    relation: dict[str, str] = field(default_factory=dict)  # INN → why it matched: class / wholesale (STEP)
     notes: list[str] = field(default_factory=list)
 
 
@@ -548,12 +549,87 @@ def discover(
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
     matches.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
     res.pool = matches
+    res.relation = dict(relation)
     res.matches = _mix(matches, relation)
     if enqueue is not None:
         for m in res.matches:
             if m.counterparty.inn in no_card:
                 enqueue(m.counterparty.inn)
     return res
+
+
+# Step of product_fit by the basis of a «Новые» match (#186, human decision 01.10; v0): the name of the query
+# literally on the company's site 1.0, the goods in a catalog / marketplace 0.8, the main OKVED of the class
+# 0.6, an additional OKVED of the class 0.5 (decision 22), a wholesale OKVED 0.4. `make predict` shows by it.
+STEP = {"site": 1.0, "catalog": 0.8, "class": 0.6, "extra": 0.5, "wholesale": 0.4}
+POOL_LIMIT = 400  # pool candidates per region read for one query (main OKVED first)
+POOL_EXTRA_FIT = 0.5  # an additional OKVED of the class (decision 22 of IR630): below the 0.6 step of «Новые»
+
+
+def pool_source() -> tuple[str | None, Path | None]:
+    """(Postgres url, parquet dir) of the pool (#185, D-090): the parquet when built, else Postgres when
+    DATABASE_URL is one; (None, None) — the pool is not loaded."""
+    from src.db import pool as pool_mod
+
+    if (pool_mod.POOL / "okved.parquet").exists():
+        return None, pool_mod.POOL
+    url = os.environ.get("DATABASE_URL") or ""
+    return (url, None) if url.startswith("postgres") else (None, None)
+
+
+def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: dict[str, float],
+              processed: Path, cache: SourceCache, url: str | None = None, pool_dir: Path | None = None,
+              limit: int = POOL_LIMIT) -> tuple[list[CounterpartyMatch], dict[str, str], bool | None]:
+    """«Новые» from the offline МСП pool (#185) by the same OKVED plan as the live registry search: the
+    class (product_fit 1.0 for the main OKVED, POOL_EXTRA_FIT for an additional one) and the wholesale codes
+    (0.6). Regions: the query's, then the neighbour. Organizers' suppliers are dropped. The third value:
+    organizers' data checked (None — the pool is not loaded, nothing was searched)."""
+    from src.db import pool as pool_mod
+
+    if url is None and pool_dir is None:
+        url, pool_dir = pool_source()
+        if url is None and pool_dir is None:
+            return [], {}, None
+    plan = okved_plan(codes)
+    if not plan:
+        return [], {}, False
+    rows: dict[str, dict] = {}
+    for region in _regions(query):  # the query's region first: its rows win the limit
+        for r in pool_mod.candidates([ch.okved for ch in plan], regions=[region], limit=limit, url=url,
+                                     pool_dir=pool_dir or pool_mod.POOL):
+            rows.setdefault(r["inn"], r)
+    known = known_inns(list(rows), query.as_of, processed)
+    if known is None:
+        return [], {}, False
+    fresh = [inn for inn in rows if inn not in known]
+    cps = pool_mod.counterparties(fresh, cache, url=url, pool_dir=pool_dir or pool_mod.POOL)
+    target, target_note = search_mod.customer_region(query)
+    out: list[CounterpartyMatch] = []
+    relation: dict[str, str] = {}
+    for inn in fresh:
+        cp = cps.get(inn)
+        if cp is None:
+            continue
+        code, main = rows[inn]["code"], bool(rows[inn]["main"])
+        ch = max((c for c in plan if code.startswith(c.okved)), key=lambda c: len(c.okved), default=plan[0])
+        rc = next(((e.value or "").rsplit(": ", 1)[-1] for e in cp.evidence if e.field == "region"), "")
+        name = next((e.value or "" for e in cp.evidence if e.field == "okved" and main and ": " not in (e.value or "")),
+                    "")
+        row = {"okved1": code, "okved1name": name, "regioncode": rc}
+        comps = _components(cp, row, ch, predicted, False, target, weights, target_note)
+        if not main:
+            fit = POOL_EXTRA_FIT if ch.relation == "class" else min(FIT[ch.relation], POOL_EXTRA_FIT)
+            comps = [c.model_copy(update={"value": fit, "explanation": (
+                f"Дополнительный ОКВЭД {code} (реестр МСП) — класс ОКПД2 {ch.okpd_class}; основной вид деятельности "
+                "другой, поэтому ниже основного")}) if c.name == "product_fit" else c for c in comps]
+        comps = [c.model_copy(update={"explanation": c.explanation.replace("Реестр МСП", "Выгрузка реестра МСП")})
+                 if c.name == "geography" else c for c in comps]
+        relation[inn] = ch.relation if main or ch.relation == "wholesale" else "extra"
+        out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
+                                     score=round(sum(c.value * c.weight for c in comps), 4)))
+    out = apply_filters(out, query)
+    out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
+    return out, relation, True
 
 
 def _report(query: Query, res: Discovery, cache: SourceCache) -> None:
