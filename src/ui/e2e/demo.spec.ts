@@ -65,8 +65,10 @@ test("демо: запрос → два блока → карточка → фи
   // «Регион»: по реестру, иначе по КПП (78 — СПб; src/match/filters.py::in_region); остаются строки,
   // и у каждой регион из реестра — СПб, а без него КПП 78…
   const regional = page.waitForResponse(
-    // Query.region is always set by the UI; only filters.region marks the filtered request.
-    (r) => r.url().endsWith("/api/search") && JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
+    // the filtered request, not the parallel one without filters (both carry Query.region)
+    (r) =>
+      new URL(r.url()).pathname === "/api/search" &&
+      JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
   );
   await page.getByLabel("Регион").selectOption("Санкт-Петербург");
   const body = await (await regional).json();
