@@ -3,7 +3,26 @@ import { dropTestset, getTestset, PREDICT_CSV_URL, type Testset, uploadTestset }
 
 // The organizers' test export (#207): upload the CSV files, pick a procedure, see the recommendations.
 // Same format as the training data: «Извещения*.csv» (required), «ТРУ*.csv» (optional);
-// «Поставщики*.csv» is not read — the answer is never taken from it.
+// «Поставщики*.csv» is not even sent — the answer is never taken from it.
+
+// The server predicts offline ≈ 0.6 s per procedure (review #216): the wait shown before the download.
+const TENTHS_PER_LOT = 6;
+const MANY_LOTS = 300;
+const isSuppliers = (f: File) => f.name.normalize("NFC").toLowerCase().startsWith("поставщики");
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const d = n % 10;
+  const dd = n % 100;
+  if (d === 1 && dd !== 11) return one;
+  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return few;
+  return many;
+}
+
+/** «≈ N процедур, около M мин»: tenths of a second in integers, minutes rounded up. */
+export function predictEstimate(lots: number): string {
+  const minutes = Math.max(1, Math.ceil((lots * TENTHS_PER_LOT) / 600));
+  return `≈ ${lots} ${plural(lots, "процедура", "процедуры", "процедур")}, около ${minutes} мин`;
+}
 
 export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => void; busyLot: string | null }) {
   const [set, setSet] = useState<Testset | null>(null);
@@ -11,6 +30,7 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
   const [error, setError] = useState("");
   const [drag, setDrag] = useState(false);
   const [filter, setFilter] = useState("");
+  const [skipped, setSkipped] = useState(false); // «Поставщики*» were picked and left in the browser
   const input = useRef<HTMLInputElement>(null);
 
   // the active set survives a reload of the page (the server keeps it)
@@ -19,7 +39,8 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
   }, []);
 
   async function upload(files: File[]) {
-    const csv = files.filter((f) => f.name.toLowerCase().endsWith(".csv"));
+    setSkipped(files.some(isSuppliers));
+    const csv = files.filter((f) => !isSuppliers(f) && f.name.toLowerCase().endsWith(".csv"));
     if (!csv.length) {
       setState("error");
       setError("Нужны файлы .csv из выгрузки: «Извещения…csv» и, если есть, «ТРУ…csv».");
@@ -40,6 +61,7 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
   async function clear() {
     await dropTestset().catch(() => undefined);
     setSet(null);
+    setSkipped(false);
     setState("idle");
     setError("");
   }
@@ -94,6 +116,8 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
         </div>
       )}
 
+      {skipped && <p className="testset-note">Поставщики не загружаем — ответ из него не берём.</p>}
+
       {state === "error" && (
         <p className="testset-error" role="alert">
           {error}
@@ -142,6 +166,10 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
             ))}
             {shown.length === 0 && <li className="testset-empty">Ничего не найдено</li>}
           </ul>
+          <p className="testset-estimate">
+            {predictEstimate(set.lots)}
+            {set.lots > MANY_LOTS && " — быстрее через make predict на сервере"}
+          </p>
           <a className="testset-download" href={PREDICT_CSV_URL} download>
             Скачать прогноз по всем процедурам (CSV)
           </a>

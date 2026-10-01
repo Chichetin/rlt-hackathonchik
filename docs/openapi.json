@@ -76,7 +76,7 @@
     "/api/testset/predict.csv": {
       "get": {
         "summary": "Predict Testset",
-        "description": "`make predict` over the active set: per lot «История» and «Новые» with score and components.",
+        "description": "`make predict --offline` over the active set: per lot «История» and «Новые» with score and components.",
         "operationId": "predict_testset_api_testset_predict_csv_get",
         "parameters": [
           {
@@ -99,11 +99,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "«Новые» только из кеша, без сети",
+              "description": "только 1: «Новые» из кеша, без сети",
               "default": true,
               "title": "Offline"
             },
-            "description": "«Новые» только из кеша, без сети"
+            "description": "только 1: «Новые» из кеша, без сети"
           }
         ],
         "responses": {
@@ -117,14 +117,7 @@
             "description": "набор не загружен"
           },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "offline=0: живой прогон по всем лотам — только make predict"
           }
         }
       }

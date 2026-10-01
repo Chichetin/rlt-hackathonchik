@@ -35,7 +35,7 @@ export interface paths {
         };
         /**
          * Predict Testset
-         * @description `make predict` over the active set: per lot «История» and «Новые» with score and components.
+         * @description `make predict --offline` over the active set: per lot «История» and «Новые» with score and components.
          */
         get: operations["predict_testset_api_testset_predict_csv_get"];
         put?: never;
@@ -496,7 +496,7 @@ export interface operations {
             query?: {
                 /** @description кандидатов в каждом блоке */
                 top?: number;
-                /** @description «Новые» только из кеша, без сети */
+                /** @description только 1: «Новые» из кеша, без сети */
                 offline?: boolean;
             };
             header?: never;
@@ -521,14 +521,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description offline=0: живой прогон по всем лотам — только make predict */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };

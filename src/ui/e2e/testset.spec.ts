@@ -16,6 +16,7 @@ test("тестовая выгрузка: загрузка CSV → процеду
   await expect(panel.getByRole("status")).toContainText("Процедур: 3");
   const lots = panel.getByRole("list", { name: "Процедуры выгрузки" }).getByRole("button");
   await expect(lots).toHaveCount(3);
+  await expect(panel.getByText("≈ 3 процедуры, около 1 мин")).toBeVisible(); // the wait before the download
 
   await lots.first().click();
   await expect(page).toHaveURL(/\/results$/);
@@ -26,6 +27,7 @@ test("тестовая выгрузка: загрузка CSV → процеду
   await page.goto("/search");
   await expect(page.getByRole("region", { name: "Тестовая выгрузка" }).getByRole("status")).toContainText("Процедур: 3");
 
+  expect((await request.get("/api/testset/predict.csv?offline=0")).status()).toBe(422); // a live run is a mass crawl
   const csv = await request.get("/api/testset/predict.csv?top=3&offline=1");
   expect(csv.status()).toBe(200);
   expect(csv.headers()["content-disposition"]).toContain("attachment");

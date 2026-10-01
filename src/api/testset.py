@@ -3,13 +3,16 @@
     POST   /api/testset              {files: [{name, text}]} -> the set becomes active
     GET    /api/testset              the active set, 404 when none
     DELETE /api/testset              unset the active set (the files stay in the cache)
-    GET    /api/testset/predict.csv  src.ingest.predict.run over the active set -> the CSV file
+    GET    /api/testset/predict.csv  src.ingest.predict.run over the active set, cache only -> the CSV file
 
 By file name: `Извещения*.csv` -> Извещения.csv (required), `ТРУ*.csv` -> ТРУ.csv (optional),
 `Поставщики*.csv` is neither stored nor read (the answer must not come from it, D-065) — a warning.
 Stored in TESTSETS_DIR (default cache/testsets, outside git) under sha256(content)[:12]; the active id
 is the `active` file there, so a restarted API (or another worker process) keeps it. `/api/lot/{ident}`
 looks here first (src/api/lots.py). Format errors are 422 with the TestDataError message, never a path.
+The prediction file is per scoring config (sha256 of configs/search.yaml) and top-N; an upload drops the
+old ones, so uploading again always recomputes. A live (network) run over every lot is a mass crawl that
+needs the human's confirmation (CLAUDE.md, №4): only `make predict`, never this endpoint.
 """
 
 from __future__ import annotations
@@ -27,22 +30,25 @@ from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi import Query as Param
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.ingest import predict as predict_mod
 from src.ingest.testset import TestDataError, TestSet, load_testset
+from src.match import search as search_mod
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # file contents together, UTF-8
 NOTICES, ITEMS, SUPPLIERS = "Извещения", "ТРУ", "Поставщики"
 ACTIVE = "active"
+PREDICT_GLOB = "predict-*.csv"
 META = "meta.json"
 _ID = re.compile(r"[0-9a-f]{12}")
 _state_lock = threading.Lock()  # upload / activate / unset
-_predict_lock = threading.Lock()  # one predict run at a time: two appends to one file would duplicate rows
+_predict_lock = threading.Lock()  # one predict run at a time (two appends to one file duplicate rows); upload
+# takes it to drop the predict files, after _state_lock (the predict path never takes _state_lock: no deadlock)
 _memo: dict[Path, TestSet] = {}  # the active set parsed once per process (key: its folder)
 
 router = APIRouter()
@@ -221,7 +227,11 @@ def upload_testset(body: UploadTestsetRequest) -> UploadedTestset:
             except TestDataError as e:
                 raise HTTPException(422, _rename(str(e), names)) from e
             folder = root / set_id
-            if not folder.exists():  # the same content is already there: keep it and its predict files
+            if folder.exists():  # the same content again: same files, but the predictions are recomputed
+                with _predict_lock:
+                    for old in folder.glob(PREDICT_GLOB):
+                        old.unlink()
+            else:
                 tmp.rename(folder)
             _write(folder / META, json.dumps({"names": names, "warnings": upload_warnings}, ensure_ascii=False))
             _write(root / f"{ACTIVE}.tmp", set_id)
@@ -251,21 +261,30 @@ def delete_testset() -> Response:
     return Response(status_code=204)
 
 
-@router.get("/api/testset/predict.csv", response_class=FileResponse,
+def config_tag() -> str:
+    """sha256(configs/search.yaml)[:12]: another scoring config writes a new prediction file, not a resume."""
+    return hashlib.sha256(search_mod.SEARCH_CONFIG.read_bytes()).hexdigest()[:12]
+
+
+@router.get("/api/testset/predict.csv", response_class=Response,
             responses={200: {"content": {"text/csv": {}}, "description": "выдача по каждой процедуре (CSV «;»)"},
-                       404: {"description": "набор не загружен"}})
+                       404: {"description": "набор не загружен"},
+                       422: {"description": "offline=0: живой прогон по всем лотам — только make predict"}})
 def predict_testset(top: int = Param(10, ge=1, le=50, description="кандидатов в каждом блоке"),
-                    offline: bool = Param(True, description="«Новые» только из кеша, без сети")) -> FileResponse:
-    """`make predict` over the active set: per lot «История» and «Новые» with score and components."""
+                    offline: bool = Param(True, description="только 1: «Новые» из кеша, без сети")) -> Response:
+    """`make predict --offline` over the active set: per lot «История» and «Новые» with score and components."""
+    if not offline:
+        raise HTTPException(422, "живой прогон по всем лотам — массовый сбор, нужно подтверждение человека; "
+                                 "здесь только offline=1 (кеш), живой прогон — make predict")
     found = _active()
     if found is None:
         raise HTTPException(404, "тестовая выгрузка не загружена")
     set_id, folder, _ = found
-    # one file per (top, offline): a resume must not mix a top-3 file with a top-10 run
-    out = folder / f"predict-top{top}{'-offline' if offline else ''}.csv"
+    # one file per (config, top): a resume must not mix a top-3 file with a top-10 run or old weights with new ones
+    out = folder / f"predict-{config_tag()}-top{top}.csv"
     with _predict_lock:
         try:
-            stats = predict_mod.run(folder, out, top, True if offline else None)
+            stats = predict_mod.run(folder, out, top, offline=True)
         except TestDataError as e:  # the stored set was broken on disk after the upload: the path stays in the log
             log.warning("predict.csv %s: %s", set_id, e)
             raise HTTPException(422, "сохранённая выгрузка не читается — загрузите файлы заново") from e
@@ -273,6 +292,7 @@ def predict_testset(top: int = Param(10, ge=1, le=50, description="кандид�
             log.warning("predict.csv %s: %s", set_id, e)
             raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, "
                                      "make db-load) или база не отвечает") from e
+        data = out.read_bytes()  # read under the lock: a new upload may drop the file right after
     log.info("predict.csv %s: %s", set_id, stats)
-    return FileResponse(out, media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": f'attachment; filename="mitrandir-predict-{set_id}.csv"'})
+    return Response(data, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="mitrandir-predict-{set_id}.csv"'})

@@ -15,6 +15,8 @@ export default defineConfig({
   use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure", viewport: { width: 1440, height: 900 } },
   webServer: {
     command:
+      // a test export uploaded by an earlier run (cache/e2e-testsets/active) must not answer /api/lot (#207)
+      "uv run --frozen python -c \"import shutil; shutil.rmtree('cache/e2e-testsets', ignore_errors=True)\" && " +
       "uv run --frozen python -m src.ingest.build --raw-dir tests/fixtures/ingest --out-dir cache/e2e-processed && " +
       "uv run --frozen python -m src.sources.rmsp seed tests/fixtures/rmsp/e2e && " +
       `uv run --frozen uvicorn src.api.app:app --host 127.0.0.1 --port ${port}`,

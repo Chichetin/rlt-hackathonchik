@@ -216,3 +216,59 @@ def test_predict_csv_without_training_data_is_503(client, tmp_path, monkeypatch)
 def test_predict_csv_rejects_bad_params(client, query):
     _upload(client, _files())
     assert client.get(f"/api/testset/predict.csv?{query}").status_code == 422
+
+
+def _predict_files(root: Path, set_id: str) -> list[Path]:
+    return sorted((root / set_id).glob("predict-*.csv"))
+
+
+def test_upload_again_recomputes_the_prediction(client, search_data, root):
+    """Review #216: the same content uploaded again (new data, new code) must not serve the old file."""
+    set_id = _upload(client, _files()).json()["id"]
+    first = client.get("/api/testset/predict.csv?top=3").content
+    (path,) = _predict_files(root, set_id)
+    with path.open("a", encoding="utf-8", newline="") as f:
+        f.write("stale;row\n")  # what an older run left behind
+    assert b"stale;row" in client.get("/api/testset/predict.csv?top=3").content  # served from the file
+    assert _upload(client, _files()).json()["id"] == set_id
+    again = client.get("/api/testset/predict.csv?top=3").content
+    assert b"stale;row" not in again and again == first
+
+
+def test_another_scoring_config_is_another_file(client, search_data, root, tmp_path, monkeypatch):
+    from src.match import search as search_mod
+
+    set_id = _upload(client, _files()).json()["id"]
+    client.get("/api/testset/predict.csv?top=3")
+    (old,) = _predict_files(root, set_id)
+    assert old.name == f"predict-{T.config_tag()}-top3.csv"
+    cfg = tmp_path / "search.yaml"
+    cfg.write_bytes(search_mod.SEARCH_CONFIG.read_bytes() + b"\n# other weights\n")
+    monkeypatch.setattr(search_mod, "SEARCH_CONFIG", cfg)
+    assert client.get("/api/testset/predict.csv?top=3").status_code == 200
+    names = {p.name for p in _predict_files(root, set_id)}
+    assert names == {old.name, f"predict-{T.config_tag()}-top3.csv"} and len(names) == 2
+
+
+def test_live_run_over_every_lot_is_refused(client):
+    _upload(client, _files())
+    r = client.get("/api/testset/predict.csv?offline=0")
+    assert r.status_code == 422 and "массовый сбор" in r.json()["detail"]
+
+
+def test_predict_csv_makes_no_request_even_with_discovery_online(client, search_data, monkeypatch):
+    """offline=1 holds whatever DISCOVERY_OFFLINE says: zero requests to the open sources."""
+    import httpx
+
+    calls: list[str] = []
+
+    def count(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(503)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", count)
+    monkeypatch.setenv("DISCOVERY_OFFLINE", "0")
+    monkeypatch.delenv("ENRICH_OFFLINE", raising=False)
+    _upload(client, _files())
+    assert client.get("/api/testset/predict.csv?top=3&offline=1").status_code == 200
+    assert calls == []

@@ -206,7 +206,6 @@ export function App() {
   const [saved] = useState(loadSaved);
   const [path, go] = usePath();
   const [text, setText] = useState(saved.text ?? "");
-  const textState = text;
   const [filters, setFilters] = useState<Filters>(saved.filters ?? { only_msp: false, only_manufacturers: false, region: "" });
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
@@ -229,7 +228,6 @@ export function App() {
     setLotQueryId(undefined);
   };
   const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId });
-  const extraState = extra;
 
   // the query of a loaded lot, for a search that must not wait for the form state to update
   type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
@@ -313,21 +311,22 @@ export function App() {
   }
 
   async function run(nextFilters: Filters = filters, ready?: Ready) {
-    const text = ready?.text ?? textState;
-    const extra = ready ? () => ready.extra : extraState;
-    if (!text.trim()) return;
+    // the query of this run: a picked test lot (#207) or the form
+    const qText = ready?.text ?? text;
+    const qExtra = ready ? () => ready.extra : extra;
+    if (!qText.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
     setState("loading");
     setOpen(null);
     try {
       const active = nextFilters.only_msp || nextFilters.only_manufacturers || !!nextFilters.region;
       const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
-      const q = buildQuery(text, nextFilters, extra());
+      const q = buildQuery(qText, nextFilters, qExtra());
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
-        active ? search(buildQuery(text, none, extra()), { limit: ALL }) : Promise.resolve(null),
+        active ? search(buildQuery(qText, none, qExtra()), { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
@@ -338,8 +337,8 @@ export function App() {
       // weights switched on while this page-sized answer was in flight
       if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
       save(ready
-        ? { text, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id }
-        : { text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
+        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id }
+        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
       if (window.location.pathname === "/search") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
