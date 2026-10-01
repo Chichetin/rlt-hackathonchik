@@ -13,7 +13,7 @@
 #   демо-путь (граф src/api/app.py, src/ui, фикстуры, configs, Makefile) → make e2e
 #   API / контракт / типы / генератор OpenAPI → openapi-check
 #   хуки, issues.sh            → test-hooks
-#   src/…                      → seal-check, stubs (секунды)
+#   src/…, check_layers.py     → layers (импорты вниз по слоям, D-102), для src/ ещё seal-check, stubs (секунды)
 # Отбор упал — проверяется всё, а не ничего. BASE=<ref> — сравнить с другой веткой.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 2
@@ -80,6 +80,7 @@ if has '^src/'; then
   run bash scripts/seal_check.sh
   run "${PY[@]}" python scripts/check_stubs.py
 fi
+has '^(src/|scripts/(check_layers\.py|layers_allowlist\.txt)$)' && run "${PY[@]}" python scripts/check_layers.py
 e2e_needed && run make e2e
 
 if [ $fail -ne 0 ]; then echo "check-changed: ЕСТЬ ОШИБКИ"; exit 1; fi
