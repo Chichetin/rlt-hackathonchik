@@ -16,7 +16,7 @@ flowchart LR
   API -->|POST /api/enrich/inn → 202| Q[("Очередь: таблица задач в Postgres\nSKIP LOCKED")]
   Q --> W["worker (src/worker)\nобогащение, прогрев top-N"]
   W --> C[("Кеш источников SQLite, TTL\nsrc/sources/cache.py")]
-  C --> SRC["pb.nalog, реестр МСП, ГИР БО,\nЕИС РНП, estore"]
+  C --> SRC["pb.nalog, реестр МСП, ГИР БО,\nЕИС РНП"]
   W2["worker ×N на других машинах\n(план: общая БД и общий кеш)"]:::plan -.-> Q
   SCHED["Планировщик обновления\nреестров и новых закупок"]:::plan -.-> Q
   classDef plan stroke-dasharray: 5 5,color:#777
