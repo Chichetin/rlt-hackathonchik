@@ -1,5 +1,6 @@
 """The lock on the holdout period: only `make eval-final` for the frozen config reads it."""
 
+import re
 import shutil
 import subprocess
 from datetime import date
@@ -90,8 +91,10 @@ def test_gate_passes_frozen_clean_config(repo):
 def test_config_hash_changes_with_weights(repo):
     before = R.config_sha256(repo)
     p = repo / "configs" / "search.yaml"
-    text = p.read_text(encoding="utf-8").replace("product_fit: 0.35", "product_fit: 0.4")
-    p.write_text(text, encoding="utf-8")
+    text = p.read_text(encoding="utf-8")
+    changed = re.sub(r"product_fit: [0-9.]+", "product_fit: 0.5", text, count=1)
+    assert changed != text
+    p.write_text(changed, encoding="utf-8")
     assert R.config_sha256(repo) != before
 
 
