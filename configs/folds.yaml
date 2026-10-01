@@ -1,0 +1,14 @@
+# Скользящая проверка по времени (rolling-origin, #79, research/EVAL.md «Rolling-origin»).
+# Fold k: признаки — только лоты строго до cutoff_k, запросы — лоты из [cutoff_k, cutoff_{k+1}); окно
+# последнего fold кончается на holdout_from из configs/split.yaml (holdout не трогаем: cutoff на нём и позже
+# отклоняется, D-010). Последний fold = текущий dev (cutoff из split.yaml), его выборка — та же, что
+# eval/cases/dev.jsonl.
+#   `make eval-folds EXP=<id>`  или  `uv run python -m src.eval.run --exp <id> --part folds`
+cutoffs:
+  - "2025-01-01"   # fold 1: история 2024-01-08…2024-12-31, запросы январь–март 2025
+  - "2025-04-01"   # fold 2: запросы апрель–июнь
+  - "2025-07-01"   # fold 3 = dev: запросы июль–сентябрь
+# Стратифицированная подвыборка на fold — как D-032 (канал × класс ОКПД2 лота, наибольший остаток, seed);
+# значения равны build_cases.SAMPLE_N / SEED (тест это проверяет).
+sample: 2000
+seed: 20261001
