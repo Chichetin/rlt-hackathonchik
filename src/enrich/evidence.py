@@ -30,7 +30,8 @@ from src.enrich.role import basis_kind
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
-FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region"}
+FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region",
+          "contract", "contracts", "rnp"}
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
