@@ -105,13 +105,34 @@ python по `eval/results/bm25-dev-v1.json`, поле `per_query`):
 
 ## Производительность и масштаб
 
+Полные данные организаторов (`data/processed`: 604 452 лота, 1 010 107 участий, 2 550 089 позиций, 44 196 поставщиков), 16 ядер.
+Все замеры latency — серверное время `POST /api/search` внутри процесса (FastAPI `TestClient`, без сети), первая страница (20), 5 запросов
+прогрева не считаются; dev-запросы несут ОКПД2 лота. Источники не опрашивались: `DISCOVERY_OFFLINE=1`, кеш источников пуст, блок «Новые» пуст
+(массовые запросы во внешние источники — подтверждение человека №4). Условия каждого замера (load average, чужие процессы на старте) — в блоке
+`conditions` самого json; разброс между повторными прогонами на тихой машине ±6% по p50.
+
 | Утверждение | Число | Команда замера | Артефакт | Commit |
 |---|---|---|---|---|
 | Время прогона `bm25-dev-v1` | 12 мин 20 с на 2 000 запросов (≈ 0.37 с/запрос, CPU, с холодной сборкой индекса cutoff) | `make eval EXP=bm25-dev-v1` | `research/EXPERIMENTS.md` (строка `bm25-dev-v1`) | 8d76295 |
-| Latency поиска p50/p95 в продукте | нет артефакта (не замерена, `docs/tz-compliance.md` п. 8) | — | — | — |
+| Выдача из Postgres совпадает с выдачей из parquet (п. 8) | 2 000 dev-запросов: метрики и каждая строка `per_query` (в т.ч. top-k ИНН) совпадают; метрики равны `bm25-dev-v1`: recall@10 0.382 [0.363, 0.401], MRR 0.301 [0.284, 0.318], nDCG@10 0.284 [0.268, 0.299] | `DATA_STORE=parquet make eval EXP=bm25-dev-parquet`; `DATA_STORE=postgres make eval EXP=bm25-dev-pg`; `uv run python scripts/same_eval.py bm25-dev-parquet bm25-dev-pg` → «метрики и 2000 запросов совпадают» | `eval/results/bm25-dev-parquet.json`, `eval/results/bm25-dev-pg.json` | 5232e4c |
+| Время прогона eval на parquet | 512.5 с (8 мин 33 с) на 2 000 запросов, ≈ 0.26 с/запрос (индексы собраны заранее) | `DATA_STORE=parquet make eval EXP=bm25-dev-parquet` | `eval/results/bm25-dev-parquet.json` (`elapsed_s`) | 5232e4c |
+| Время прогона eval на Postgres | 2 793.3 с (46 мин 33 с), ≈ 1.4 с/запрос — в 5.5 раза дольше parquet; параллельно шли другие замеры, число — верхняя оценка | `DATA_STORE=postgres make eval EXP=bm25-dev-pg` | `eval/results/bm25-dev-pg.json` (`elapsed_s`) | 5232e4c |
+| Latency `/api/search` на Postgres (п. 8) | p50 **2 300 мс**, p95 **4 342 мс**, max 4 842 мс (n = 200) | `DATA_STORE=postgres make latency EXP=latency-pg-v1` | `eval/results/latency-pg-v1.json` | 4162c2c |
+| Latency `/api/search` на parquet (`make demo`) | p50 **559 мс**, p95 **624 мс**, max 688 мс (n = 200) | `DATA_STORE=parquet make latency EXP=latency-parquet-v1` | `eval/results/latency-parquet-v1.json` | 4162c2c |
+| Postgres против parquet | в 4.1 раза медленнее по p50 и в 7.0 по p95. Из 1.85 с на запрос `class_history` (глубочайший код ОКПД2 по истории 200 кандидатов) — 1.44 с (78%); профиль снят вручную, цифры — `conditions.profile` в `latency-pg-v1.json` | cProfile над `search()` на Postgres (скрипт вне репозитория) | `eval/results/latency-pg-v1.json` | 4162c2c |
+| Запрос без ОКПД2 (клиент набрал только название) | parquet p50 480 / p95 534 мс, Postgres p50 2 466 / p95 4 366 мс (n = 100) | `latency-variants-v1.json`, вариант `text` | `eval/results/latency-variants-v1.json` | 4ff96c6 |
+| Вклад discovery (#57) в p50/p95 | при пустом кеше и офлайн — в пределах шума: p50 487 и 517 мс с discovery против 486 и 482 без (≤ 35 мс). С живой сетью по коду добавляет до `LIVE_BUDGET_S` = 4 с на запрос при холодном кеше — **не измерено** | `latency-variants-v1.json`, варианты `asis` / `nodisc` | `eval/results/latency-variants-v1.json` | 4ff96c6 |
+| Вклад `_enriched` (карточки из кеша для 200 кандидатов, #38) | +55 мс к p50 и p95 уже при пустом кеше: parquet p50 544 и 540 мс с ним против 486 и 487 без; с прогретым кешем — **не измерено** | `latency-variants-v1.json`, варианты `asis` / `noenrich` | `eval/results/latency-variants-v1.json` | 4162c2c |
+| RSS процесса API (uvicorn) после 205 dev-запросов | parquet 1.09 ГБ (пик 1.48), Postgres 1.52 ГБ (пик 1.52); оба индекса (продукт `as_of=None` и eval `2025-07-01`) в одном процессе: 1.27 и 1.51 ГБ. Процесс `make latency` (пик): 1.42 и 1.18 ГБ | `rss-api-v1.json`, `runs_with_load` | `eval/results/rss-api-v1.json` | 5232e4c |
+| Первый запрос без ОКПД2, если `doc_codes.parquet` не заготовлен | пик RSS 2.88 ГБ (parquet) и 3.05 ГБ (Postgres) на индексе `as_of=None` против 1.38 и 1.16 ГБ, когда `python -m src.match.index` его уже построил; Postgres на `as_of=2025-07-01`: 2.29 против 1.00 ГБ | `rss-api-v1.json`, `runs` (`codes=cold` / `prebuilt`) | `eval/results/rss-api-v1.json` | 5232e4c |
+| Latency поиска p50/p95 с прогретым кешем источников | нет артефакта (кеш пуст, прогрев — подтверждение №4) | — | — | — |
 | Время обогащения одного контрагента, всей базы | нет артефакта | — | — | — |
 
-Оговорка: 0.37 с/запрос — среднее по прогону eval, включает холодную сборку индекса, не latency API.
+Оговорки: (1) 0.37, 0.26 и 1.4 с/запрос — среднее по прогону eval (0.37 — с холодной сборкой индекса), не latency API (там `as_of=None`). (2) Для слайда п. 8
+честная формулировка: «Postgres даёт ту же выдачу, что parquet; серверное время p50 2.3 с, p95 4.3 с (parquet — 0.56 и 0.62 с); основной
+вклад — один SQL по истории 200 кандидатов, оптимизация — следующий шаг», а не «Postgres быстрый». (3) Latency снят на одной машине разработчика (16 ядер, 14 ГБ), не на
+серверной, и одним клиентом без конкурентной нагрузки. (4) 4162c2c — состояние `main` на момент замера; `_enriched` появился в нём
+после 4ff96c6 (там parquet p50 474, p95 551, Postgres p50 2 251, p95 4 133 — те же условия).
 
 ## Финальная оценка на holdout
 
