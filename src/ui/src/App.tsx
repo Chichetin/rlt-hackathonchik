@@ -316,6 +316,7 @@ export function App() {
     <div inert={!!open}><ScrollTools /></div>
     <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
+      <header className="appbar">
       <div className="workspace-bar">
         <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
           <span className="brand-mark"><BrandMark /></span>
@@ -330,6 +331,8 @@ export function App() {
           ))}
         </nav>
       </div>
+      </header>
+      <div className="content">
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -339,10 +342,10 @@ export function App() {
       : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
-      <header className="top">
+      <div className="top">
         <h1>{path === "/results" ? "Поставщики для вашей закупки" : "Подбор поставщиков для закупки"}</h1>
         <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
-      </header>
+      </div>
 
       {res?.stub && (
         <div className="stub" role="status">
@@ -573,6 +576,13 @@ export function App() {
       </>}
       </motion.div>
       </AnimatePresence>
+      </div>
+      <footer className="appfoot">
+        <div className="appfoot-in">
+          <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
+          <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
+        </div>
+      </footer>
     </motion.div>
     <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} />}</AnimatePresence>
     </LayoutGroup>
