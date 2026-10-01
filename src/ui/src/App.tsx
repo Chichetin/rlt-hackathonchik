@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   buildQuery,
   COMPONENT_LABEL,
@@ -75,8 +75,11 @@ export function App() {
     }
   }
 
+  const runSeq = useRef(0);
+
   async function run(nextFilters: Filters = filters) {
     if (!text.trim()) return;
+    const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
     setState("loading");
     setOpen(null);
     try {
@@ -86,10 +89,12 @@ export function App() {
         search(buildQuery(text, nextFilters, extra())),
         active ? search(buildQuery(text, none, extra())) : Promise.resolve(null),
       ]);
+      if (seq !== runSeq.current) return;
       setRes(r);
       setBase(b ?? r);
       setState("idle");
     } catch (e) {
+      if (seq !== runSeq.current) return;
       setError(String(e));
       setState("error");
     }
