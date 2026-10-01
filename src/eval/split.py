@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import os
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -25,7 +26,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.contracts import Query
 
 ROOT = Path(__file__).resolve().parents[2]
-SPLIT_CONFIG = ROOT / "configs" / "split.yaml"
+# SPLIT_CONFIG env: another split file for rolling-origin folds (#79, #271); holdout stays sealed by its path
+SPLIT_CONFIG = Path(os.environ.get("SPLIT_CONFIG") or ROOT / "configs" / "split.yaml")
 
 _unsealed: contextvars.ContextVar[bool] = contextvars.ContextVar("holdout_unsealed", default=False)
 
