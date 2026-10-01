@@ -1,6 +1,7 @@
 """Lot lookup: notice number (lot_id or reqnum) -> Query built from organizers' data.
 
-Reads ingest parquet (data/processed/notices.parquet + items.parquet) when present, else `Извещения*.csv`
+Reads the Postgres store when search uses it (src/match/store.py, schema `data`), else ingest parquet
+(data/processed/notices.parquet + items.parquet) when present, else `Извещения*.csv`
 (and `ТРУ*.csv` for OKPD2) from DATA_RAW_DIR (default data/raw), `;`-separated (research/DATA_DICTIONARY.md).
 Data absent -> LotDataUnavailable (API answers 503, the UI falls back
 to free text); lot absent -> LotNotFound (404). Nothing is invented.
@@ -14,6 +15,7 @@ from pathlib import Path
 import duckdb
 
 from src.contracts import Query
+from src.match.store import StoreUnavailable, get_store
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,6 +61,19 @@ def _is_template(subject: str | None) -> bool:
 
 def find_lot(ident: str) -> Query:
     ident = ident.strip()
+    try:
+        store = get_store()
+    except StoreUnavailable as e:  # DATA_STORE=postgres and the schema is not loaded
+        raise LotDataUnavailable(str(e)) from e
+    if store.name == "postgres":
+        try:
+            row = store.lot(ident)
+            okpd2 = store.lot_okpd2(row[0]) if row else []
+        except StoreUnavailable as e:  # the database went down after it was chosen
+            raise LotDataUnavailable(str(e)) from e
+        if row is None:
+            raise LotNotFound(ident)
+        return _query(*row, okpd2=okpd2)
     n_src, i_src = _sources()
     con = duckdb.connect(":memory:")
     try:
@@ -73,8 +88,6 @@ def find_lot(ident: str) -> Query:
         if row is None:
             raise LotNotFound(ident)
         lot_id, subject, procedure_name, price, customer_inn, channel = row
-        if _is_template(subject) and procedure_name and str(procedure_name).strip():
-            subject = procedure_name
         okpd2: list[str] = []
         if i_src:
             okpd2 = [
@@ -89,6 +102,12 @@ def find_lot(ident: str) -> Query:
         raise LotDataUnavailable(f"не удалось прочитать данные: {e}") from e
     finally:
         con.close()
+    return _query(lot_id, subject, procedure_name, price, customer_inn, channel, okpd2=okpd2)
+
+
+def _query(lot_id, subject, procedure_name, price, customer_inn, channel, *, okpd2: list[str]) -> Query:
+    if _is_template(subject) and procedure_name and str(procedure_name).strip():
+        subject = procedure_name
     try:
         budget = float(price) if price not in (None, "") else None
     except ValueError:

@@ -59,7 +59,7 @@ test("демо: запрос → два блока → карточка → фи
   );
   await expect(history.locator(".empty")).toContainText("у кандидатов этот признак ещё не известен");
   await expect(discovered.locator(".empty")).toHaveText(
-    /^Под фильтр не попал никто из \d+ новых компаний из реестра МСП: тип поставщика у новых компаний не подтверждён/,
+    /^Под фильтр «Только производители» не попал никто из \d+ новых компаний из реестра МСП: тип поставщика реестр не подтверждает/,
   );
   await page.getByLabel("Только производители").uncheck();
   await expect(history.locator(".item").first()).toBeVisible();
@@ -67,8 +67,10 @@ test("демо: запрос → два блока → карточка → фи
   // «Регион»: по реестру, иначе по КПП (78 — СПб; src/match/filters.py::in_region); остаются строки,
   // и у каждой регион из реестра — СПб, а без него КПП 78…
   const regional = page.waitForResponse(
-    // Query.region is always set by the UI; only filters.region marks the filtered request.
-    (r) => r.url().endsWith("/api/search") && JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
+    // the filtered request, not the parallel one without filters (both carry Query.region)
+    (r) =>
+      new URL(r.url()).pathname === "/api/search" &&
+      JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
   );
   await page.getByLabel("Регион").selectOption("Санкт-Петербург");
   const body = await (await regional).json();

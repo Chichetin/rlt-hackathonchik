@@ -45,6 +45,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 .count { font-size: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; }
 .hint { margin: 2px 0 10px; color: var(--muted); font-size: 13px; }
 .empty { color: var(--muted); }
+.more { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 12px; }
+.shown { font-size: 13px; color: var(--muted); }
 .list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .item { width: 100%; text-align: left; background: var(--panel); color: var(--ink); border: 1px solid var(--line); display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 12px; }
 .item:hover { border-color: var(--accent); }

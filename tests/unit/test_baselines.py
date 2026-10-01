@@ -215,9 +215,9 @@ def test_bm25_passes_as_of_to_index_and_retriever(hist, monkeypatch):
         seen.append(("index", as_of))
         return real_index(processed, as_of)
 
-    def spy_retrieve(con, idx, hits, processed, as_of):
+    def spy_retrieve(store, idx, lots, as_of):
         seen.append(("retrieve", as_of))
-        return real_retrieve(con, idx, hits, processed, as_of)
+        return real_retrieve(store, idx, lots, as_of)
 
     monkeypatch.setattr(B, "get_index", spy_index)
     monkeypatch.setattr(search_mod, "_retrieve", spy_retrieve)

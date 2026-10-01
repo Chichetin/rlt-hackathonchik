@@ -18,7 +18,8 @@ else
   # STUB: synthetic fixture instead of organizers' data; marked stub=true in API, banner in UI (D-050)
   echo "[demo] ВНИМАНИЕ: данных организаторов нет (data/raw пуст) — синтетическая фикстура, выдача помечена" >&2
   echo "[demo] как получить данные: docs/demo-clean-clone.md" >&2
-  export DEMO_FIXTURE=1 DATA_PROCESSED_DIR=cache/demo-processed INDEX_DIR=cache/demo-indexes
+  # DATA_STORE=parquet: the fixture banner must match the data even if DATABASE_URL points at a loaded Postgres (D-051)
+  export DEMO_FIXTURE=1 DATA_STORE=parquet DATA_PROCESSED_DIR=cache/demo-processed INDEX_DIR=cache/demo-indexes
   "${PY[@]}" python -m src.ingest.build --raw-dir tests/fixtures/ingest --out-dir cache/demo-processed
 fi
 
