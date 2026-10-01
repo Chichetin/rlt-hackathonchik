@@ -406,3 +406,32 @@ def test_saturation_caps_spread_experience_of_active_suppliers(search_data):
               for m in search(q, config={**search_mod.load_config(), "options": {
                   **search_mod.load_config()["options"], "sat_lots": 500, "sat_wins": 250}})}
     assert base and all(capped[i] <= base[i] for i in base) and any(capped[i] < base[i] for i in base)
+
+
+def test_query_from_a_notice_does_not_find_that_notice(search_data):
+    """#249 (review #145 F-13): a query built from notice 6 (`/api/lot` → `lot-6`) does not get lot 6 back — its own
+    positions would put its own participants on top. 780100000090 stays, found by its other paper lot 1."""
+    q = Query(query_id="ui-1", text="Бумага офисная А4")
+    before = by_inn(search(q))
+    assert search_mod.excluded_lot() is None
+    assert "data:items#6" in {e.url for m in before.values() for e in m.counterparty.evidence}
+    after = by_inn(search(q.model_copy(update={"query_id": "lot-6"})))
+    assert search_mod.excluded_lot() == 6
+    assert "data:items#6" not in {e.url for m in after.values() for e in m.counterparty.evidence}
+    assert "780100000090" in after  # lots 1 and 6 before; lot 1 only now
+    assert "в 2 лот(ах)" in comp(before["780100000090"], "product_fit").explanation
+    assert "в 1 лот(ах)" in comp(after["780100000090"], "product_fit").explanation
+    search(q.model_copy(update={"query_id": "lot-999999"}))  # a notice that is not in the data: nothing removed
+    assert search_mod.excluded_lot() is None
+
+
+def test_query_from_a_notice_does_not_find_it_on_the_fallback_ladder(search_data):
+    """Review of #249: lot 9 «Вода питьевая» is the only lot with its text; without it nothing is found by text, and the
+    OKPD2 rung of the fallback ladder must not bring lot 9 back («Участвовал в лоте 9» under «не входит в подбор»)."""
+    q = Query(query_id="lot-9", text="Вода питьевая", okpd2=["11.07.11.130"])
+    res = search(q)
+    assert search_mod.excluded_lot() == 9
+    assert all(e.url != "data:items#9" for m in res for e in m.counterparty.evidence)
+    assert all("(лот 9)" not in comp(m, "product_fit").explanation for m in res)
+    free = search(q.model_copy(update={"query_id": "ui-1"}))
+    assert any(e.url == "data:items#9" for m in free for e in m.counterparty.evidence)  # the leak this guards against
