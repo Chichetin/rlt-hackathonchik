@@ -11,7 +11,7 @@ this INN — only the keys of BASIS_KEYS (`vyp.КодОКВЭД: 33.12`, `row.<i
 src/enrich/evidence.py keeps `kind` only when that line is on the cached page as a whole line and the rule
 applied to its code gives the same kind.
 
-Priority of the bases, v0 (#186, D-093) — `decide()`: the state registry of manufacturers (ГИСП / `СвПрод`;
+Priority of the bases, v0 (#186, D-096) — `decide()`: the state registry of manufacturers (ГИСП / `СвПрод`;
 the branch exists, there is no source of such records yet) → the company's site (a phrase of the dictionary of
 src/enrich/site_facts.py, literally on the page) → the main OKVED (the rule above). When two bases name
 different roles, both are returned. `Counterparty.kind` and its Evidence check still follow the OKVED rule

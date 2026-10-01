@@ -1,6 +1,6 @@
 """Facts a company states on its own site, and the product_fit step of a new company. Owner: SOURCES.
 
-#186, D-093. Deterministic, no LLM: phone, email and address are regular expressions, the role is a dictionary
+#186, D-096. Deterministic, no LLM: phone, email and address are regular expressions, the role is a dictionary
 of phrases — the phrase found is the basis shown to the user. The input is the CACHED text of a site page
 (src/sources/site.py: visible text, one block per line); nothing here goes to the network.
 

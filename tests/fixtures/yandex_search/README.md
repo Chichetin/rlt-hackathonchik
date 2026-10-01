@@ -6,4 +6,4 @@
   **Собраны по спецификации, не записаны с API**: поля — из `yandex/cloud/operation/operation.proto` и
   `yandex/cloud/searchapi/v2/search_service.proto` (github.com/yandex-cloud/cloudapi, прочитано 02.10.2026),
   идентификаторы и XML выдуманы для теста. **[ПРОВЕРИТЬ] вживую не проверено — агентам вызывать API запрещено**
-  (решение человека 02.10, D-093). `rawData` в `operation_done.json` — base64 от `operation_answer.xml`.
+  (решение человека 02.10, D-096). `rawData` в `operation_done.json` — base64 от `operation_answer.xml`.

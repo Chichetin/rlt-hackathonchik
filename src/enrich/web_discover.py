@@ -1,6 +1,6 @@
 """Discovery by web search (#194, #186): Yandex Search → company site → INN → registry. Owner: SOURCES.
 
-Yandex Search is paid, so it is the FALLBACK path only (decisions of the human of 02.10.2026, D-093):
+Yandex Search is paid, so it is the FALLBACK path only (decisions of the human of 02.10.2026, D-096):
 `lot_candidates()` asks it for one lot or query, and only when the free sources left fewer than MIN_STRONG
 strong candidates (product_fit 1.0 / 0.8) AND Yandex is switched on (the key and both ceilings in `.env` —
 off by default, src/sources/yandex_search.py::gate). Otherwise it does nothing and says why. `plan_run()` /
@@ -246,7 +246,7 @@ def read_pool(group: str, cache: SourceCache | None = None) -> list[Counterparty
     return [Counterparty.model_validate(d) for d in json.loads(page.body)] if page else []
 
 
-# --- the fallback path: one lot → candidates (#194 / #186, D-093) ------------------------------------------
+# --- the fallback path: one lot → candidates (#194 / #186, D-096) ------------------------------------------
 
 MIN_STRONG = 3  # fewer strong candidates from the free sources → Yandex may be asked (the human, 02.10)
 PurchaseKind = Literal["goods", "services"]

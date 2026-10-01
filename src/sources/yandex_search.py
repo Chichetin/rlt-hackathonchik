@@ -1,6 +1,6 @@
 """Yandex Search API v2 (Yandex Cloud, paid) — web search, the FALLBACK path of discovery. Owner: SOURCES.
 
-#194 / #186, decisions of the human (IR630, 02.10.2026, D-093):
+#194 / #186, decisions of the human (IR630, 02.10.2026, D-096):
 - the client is OFF by default: a live request needs the key (YANDEX_SEARCH_API_KEY) AND both ceilings
   (YANDEX_MAX_PER_LOT, YANDEX_MAX_PER_RUN — positive integers set by the human in `.env`); anything missing →
   `Disabled`, no network (`gate()`);
