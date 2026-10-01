@@ -18,6 +18,8 @@ from src.match import index as index_mod
 from src.match import search as search_mod
 from src.match.search import search
 
+pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py
+
 
 @pytest.fixture(autouse=True)
 def _no_postgres(monkeypatch):

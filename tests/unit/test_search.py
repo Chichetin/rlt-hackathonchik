@@ -20,6 +20,8 @@ from src.match import search as search_mod
 from src.match.search import search
 from src.match.text import tokenize, tokenizer_version
 
+pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py
+
 CUTOFF = date(2025, 7, 1)
 FIXTURE_INGEST = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
 PAPER_SUPPLIERS = {"7801000012", "7801000020", "780100000090", "4701000038", "470100000088"}
