@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<yandexsearch version="1.0"><response><found priority="all">2</found><results><grouping>
+<group><doc><url>https://brass.example.ru/catalog/</url><domain>brass.example.ru</domain><title>Брасс — оборудование оптом</title><passages><passage>Поставка оборудования</passage></passages></doc></group>
+<group><doc><url>https://spb.2gis.ru/firm/1</url><domain>spb.2gis.ru</domain><title>Справочник</title></doc></group>
+</grouping></results></response></yandexsearch>

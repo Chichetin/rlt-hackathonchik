@@ -1,0 +1,12 @@
+{
+  "id": "sppger465oq1example01",
+  "description": "WEB search async",
+  "createdAt": "2026-10-02T09:00:00Z",
+  "createdBy": "ajeexampleserviceacc0",
+  "modifiedAt": "2026-10-02T09:07:00Z",
+  "done": true,
+  "response": {
+    "@type": "type.googleapis.com/yandex.cloud.searchapi.v2.WebSearchResponse",
+    "rawData": "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPHlhbmRleHNlYXJjaCB2ZXJzaW9uPSIxLjAiPjxyZXNwb25zZT48Zm91bmQgcHJpb3JpdHk9ImFsbCI+MjwvZm91bmQ+PHJlc3VsdHM+PGdyb3VwaW5nPgo8Z3JvdXA+PGRvYz48dXJsPmh0dHBzOi8vYnJhc3MuZXhhbXBsZS5ydS9jYXRhbG9nLzwvdXJsPjxkb21haW4+YnJhc3MuZXhhbXBsZS5ydTwvZG9tYWluPjx0aXRsZT7QkdGA0LDRgdGBIOKAlCDQvtCx0L7RgNGD0LTQvtCy0LDQvdC40LUg0L7Qv9GC0L7QvDwvdGl0bGU+PHBhc3NhZ2VzPjxwYXNzYWdlPtCf0L7RgdGC0LDQstC60LAg0L7QsdC+0YDRg9C00L7QstCw0L3QuNGPPC9wYXNzYWdlPjwvcGFzc2FnZXM+PC9kb2M+PC9ncm91cD4KPGdyb3VwPjxkb2M+PHVybD5odHRwczovL3NwYi4yZ2lzLnJ1L2Zpcm0vMTwvdXJsPjxkb21haW4+c3BiLjJnaXMucnU8L2RvbWFpbj48dGl0bGU+0KHQv9GA0LDQstC+0YfQvdC40Lo8L3RpdGxlPjwvZG9jPjwvZ3JvdXA+CjwvZ3JvdXBpbmc+PC9yZXN1bHRzPjwvcmVzcG9uc2U+PC95YW5kZXhzZWFyY2g+Cg=="
+  }
+}
