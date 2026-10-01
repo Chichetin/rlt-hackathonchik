@@ -107,11 +107,12 @@ def health() -> Health:
 def _found(query: Query, uncached: set[str] | None = None) -> list[CounterpartyMatch]:
     """Every candidate of the query after the user filters, best first.
 
-    Order matters (#38): «Новые» are discovered first, so their INNs are the first in the enrichment
-    queue; then the cached enrichment is mixed into «С опытом»; the hard filters run on the enriched
-    rows (status, МСП, kind). The cached card passes strip_unverified BEFORE the filters (`_enriched`),
-    so «только производители» keeps only a role whose basis passed the check — the same role the card
-    then shows. `uncached` collects history INNs without a cache; the caller queues only the visible page.
+    «Новые» INNs are the first in the enrichment queue because discover() queues them here, while
+    `_enriched` only collects history INNs without a cache into `uncached` and the caller queues them
+    (the visible page only) after this function returns. The hard filters run on the enriched rows
+    (status, МСП, kind). The cached card passes strip_unverified BEFORE the filters, so «только
+    производители» keeps only a role whose basis passed the check; strip_unverified does not check
+    status / is_msp / name / region, so those filters rely on the cached card as is.
     """
     try:
         found = search_mod.search(query, k=search_mod.CANDIDATES)
