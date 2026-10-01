@@ -25,7 +25,8 @@ from src.contracts import Counterparty, Evidence, inn_is_valid
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
-FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp"}
+FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp",
+          "contract", "contracts", "rnp"}
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
