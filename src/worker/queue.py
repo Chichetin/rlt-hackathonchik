@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    func,
     select,
     text,
 )
@@ -58,24 +59,42 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def enqueue(eng: Engine, kind: str, key: str, *, retry_failed: bool = True) -> int:
+class QueueFull(Exception):
+    """A task would be added while `max_pending` tasks already wait: the caller answers 429 (F-10, #256)."""
+
+
+def enqueue(eng: Engine, kind: str, key: str, *, retry_failed: bool = True, max_pending: int | None = None) -> int:
     """Idempotent by (kind, key). `retry_failed=True` (explicit request: POST /api/enrich) turns a failed
     task back to pending with fresh attempts; False (background calls from the search, #38) leaves it
-    failed, so an unresolvable INN is not sent to the registries again on every search."""
+    failed, so an unresolvable INN is not sent to the registries again on every search.
+
+    `max_pending` (the HTTP callers) is a soft ceiling on the waiting tasks: a NEW task, or a revived failed one,
+    over it raises QueueFull; a task that is already waiting, running or done costs nothing and is returned as is.
+    Two concurrent calls may overshoot it by one each. Batch jobs (prefetch) pass None."""
     try:
-        return _enqueue(eng, kind, key, retry_failed)
+        return _enqueue(eng, kind, key, retry_failed, max_pending)
     except IntegrityError:  # a concurrent enqueue of the same (kind, key) won the insert
-        return _enqueue(eng, kind, key, retry_failed)
+        return _enqueue(eng, kind, key, retry_failed, max_pending)
 
 
-def _enqueue(eng: Engine, kind: str, key: str, retry_failed: bool) -> int:
+def _room(c, max_pending: int | None) -> None:
+    if max_pending is None:
+        return
+    waiting = c.execute(select(func.count()).select_from(tasks).where(tasks.c.status == "pending")).scalar_one()
+    if waiting >= max_pending:
+        raise QueueFull(f"{waiting} задач ждут в очереди (потолок {max_pending})")
+
+
+def _enqueue(eng: Engine, kind: str, key: str, retry_failed: bool, max_pending: int | None) -> int:
     with eng.begin() as c:
         row = c.execute(select(tasks.c.id, tasks.c.status).where(tasks.c.kind == kind, tasks.c.key == key)).first()
         if row is not None:
             if row.status == "failed" and retry_failed:
+                _room(c, max_pending)
                 c.execute(tasks.update().where(tasks.c.id == row.id)
                           .values(status="pending", attempts=0, error=None, updated_at=_now()))
             return row.id
+        _room(c, max_pending)
         res = c.execute(tasks.insert().values(kind=kind, key=key, status="pending", attempts=0,
                                               created_at=_now(), updated_at=_now()))
         return int(res.inserted_primary_key[0])  # type: ignore[index]
