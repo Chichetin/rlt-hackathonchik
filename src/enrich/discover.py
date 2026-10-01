@@ -539,6 +539,7 @@ def discover(
         url = rmsp.search_url(ch.okved, region, np_type)
         # no time left before the deadline → the client raises Paused without a request
         live = not offline and net_ok and cache.get(url) is None and not rmsp.blocked()
+        paused_source = not offline and rmsp.blocked()  # the source is resting after a failure (#287)
         try:
             page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live, deadline=deadline)
         except rmsp.Paused:  # no request was made: pause of the source or no time left
@@ -558,6 +559,7 @@ def discover(
             continue
         if page is None:
             res.requests.append(f"{label}: нет в кеше, в сеть не ходили")
+            res.source_failed = res.source_failed or paused_source  # not asked because the source failed before
             continue
         if live and cache.get(url) is None:  # the request failed and an outdated answer was used
             net_ok, live = False, False

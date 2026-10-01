@@ -109,7 +109,7 @@ test("no alert in «Новые» when the sources answered", async () => {
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(screen.queryByTestId("discovery-error")).toBeNull();
-  expect(screen.queryByLabelText("список может быть неполным")).toBeNull();
+  expect(screen.queryByText("список может быть неполным")).toBeNull();
 });
 
 test("API error is shown, not swallowed", async () => {

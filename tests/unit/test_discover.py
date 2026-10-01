@@ -352,6 +352,7 @@ def test_source_timeout_gives_empty_block_and_the_rest_of_the_query_is_cache_onl
     assert rmsp.blocked()  # the hanging source is left alone for a while: the next search does not wait either
     again = _run(SourceCache(tmp_path / "c2.sqlite"), processed, offline=False, client=_client(_no_network))
     assert again.matches == [] and all("в сеть не ходили" in r for r in again.requests)
+    assert again.source_failed  # the next search during the pause is still «may be incomplete» (#287)
 
 
 def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
