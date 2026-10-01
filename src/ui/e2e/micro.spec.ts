@@ -21,24 +21,42 @@ test("волны двигаются, reduced motion останавливает �
   await expect.poll(async () => { const a = await pixels(); await page.waitForTimeout(120); return a === await pixels(); }, frames).toBe(true);
 });
 
-test("колесо выбирает запрос с клавиатуры и сохраняет свободный ввод", async ({ page }) => {
+test("примеры выбираются с клавиатуры и сохраняют свободный ввод", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/search");
-  const next = page.getByRole("button", { name: "Следующий пример" });
+  const examples = page.getByRole("group", { name: "Примеры закупок" });
+  const paper = examples.getByRole("button", { name: "Бумага офисная А4, 80 г/м²", exact: true });
+  const furniture = examples.getByRole("button", { name: "Офисная мебель", exact: true });
+  const computers = examples.getByRole("button", { name: "Компьютерное оборудование", exact: true });
   const query = page.getByLabel("Что нужно закупить");
-  await next.focus();
+  await expect(paper).toBeVisible();
+  await expect(furniture).toBeVisible();
+  await expect(computers).toBeVisible();
+  await paper.focus();
   await page.keyboard.press("ArrowDown");
   await expect(query).toHaveValue("Офисная мебель");
+  await expect(furniture).toBeFocused();
+  await expect(furniture).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("ArrowLeft");
+  await expect(query).toHaveValue("Бумага офисная А4, 80 г/м²");
   await page.keyboard.press("End");
   await expect(query).toHaveValue("Компьютерное оборудование");
   await page.keyboard.press("Enter");
   await expect(query).toHaveValue("Компьютерное оборудование");
   await expect(query).toBeFocused();
-  await next.click();
+  await paper.click();
   await expect(query).toHaveValue("Бумага офисная А4, 80 г/м²");
-  await page.getByRole("button", { name: "Офисная мебель", exact: true }).click();
+  await furniture.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(query).toHaveValue("Компьютерное оборудование");
+  await page.keyboard.press("Home");
+  await expect(query).toHaveValue("Бумага офисная А4, 80 г/м²");
+  await page.keyboard.press("ArrowUp");
+  await expect(query).toHaveValue("Компьютерное оборудование");
+  await furniture.click();
   await expect(query).toBeFocused();
   await query.fill("Своя закупка");
-  await expect(page.locator('.wheel-option[aria-pressed="true"]')).toHaveCount(0);
+  await expect(examples.getByRole("button", { pressed: true })).toHaveCount(0);
 });
 
 test("подсказка меню доступна с клавиатуры, закрывается Escape и при переходе", async ({ page }) => {
