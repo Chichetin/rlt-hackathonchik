@@ -77,7 +77,7 @@ stub-dev-1,,ООО «…» (ИНН не подтверждён),0,llm:<моде�
 - Части — `configs/split.yaml`: `cutoff`, `holdout_from`, пути к кейсам. `dev` —
   `[cutoff, holdout_from)`, для настройки; `holdout` — с `holdout_from`, **запечатан**.
   Даты — `configs/split.yaml` (cutoff 2025-07-01, holdout 2025-10-01); исключаем лоты без участников и АИС ГЗ с «ст.93»/«единственный поставщик».
-- **Сборщик кейсов** (T-07, D-031): `uv run python -m src.eval.build_cases` читает
+- **Сборщик кейсов** (T-07, D-032): `uv run python -m src.eval.build_cases` читает
   `data/processed/{notices,participants,items}.parquet` (лоты с `publish_date ≥ cutoff`) и пишет:
   `dev` — `eval/cases/dev.jsonl`, стратифицированная выборка 2000 (канал × класс ОКПД2 лота, seed
   20261001), в git; `dev_full` — все кейсы dev, `holdout` — с `holdout_from`, оба в
