@@ -1,0 +1,32 @@
+{
+ "dtQueryEnd": "01.10.2026 14:52:51",
+ "dtQueryBegin": "01.10.2026 14:52:51",
+ "data": [
+  {
+   "id": 1099847036750,
+   "ogrn": "1099847036750",
+   "inn": "7804428656",
+   "isnew": 0,
+   "category": 1,
+   "regioncode": "78",
+   "dtregistry": "01.08.2016 00:00:00",
+   "is_active": 1,
+   "nptype": "UL",
+   "okved1": "33.12",
+   "okved1name": "Ремонт машин и оборудования",
+   "od2_sschr": 8,
+   "name_ex": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"БРАСС\"",
+   "has_licenses": 0,
+   "has_contracts": 0,
+   "is_hitech": 0,
+   "is_partnership": 0,
+   "pr_soc": 0,
+   "is_pp": 0,
+   "cnt": 1
+  }
+ ],
+ "queryTime": 2,
+ "rowCount": 1,
+ "rowLimit": 0,
+ "recorded_at": 1790866378
+}

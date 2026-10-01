@@ -206,6 +206,8 @@ export interface components {
             queue: {
                 [key: string]: number;
             };
+            /** Store */
+            store: string;
         };
         /**
          * Query
@@ -315,7 +317,12 @@ export interface operations {
     };
     api_search_api_search_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description строк в каждом блоке */
+                limit?: number;
+                /** @description сдвиг в каждом блоке */
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;

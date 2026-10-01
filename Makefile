@@ -9,7 +9,7 @@ EXP ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check lint typecheck test test-ui hooks-test stubs openapi openapi-check seal-check \
-        ui-build api worker ui-dev demo e2e eval eval-final up down db-load db-embed
+        ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -88,6 +88,10 @@ e2e: ui-build      ## e2e демо-сценария (Playwright), свой по�
 eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-часть)
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
 	$(PY) python -m src.eval.run --exp $(EXP)
+
+latency:           ## p50/p95 POST /api/search на dev-запросах (Q-22): make latency EXP=<id> [DATA_STORE=postgres|parquet]
+	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id>, например latency-pg-v1"; exit 2; }
+	$(PY) python -m src.eval.latency --exp $(EXP)
 
 eval-final:        ## запечатанный holdout: make eval-final CONFIRM=<sha256 конфигурации>
 	EVAL_FINAL_CONFIRM=$(CONFIRM) $(PY) python -m src.eval.final
