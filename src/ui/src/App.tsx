@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
+import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
 import { ResultInspector } from "./ResultInspector";
 import "./micro.css";
 import { GlassHeader } from "./GlassShell";
@@ -41,13 +42,15 @@ import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
 import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
 import "./filters.css";
+import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
 
-const REGIONS = ["", "Санкт-Петербург", "Ленинградская область"];
+// #242: the filter is by the CUSTOMER's region (where the goods go, where the work is done), not the supplier's
+const CUSTOMER_REGIONS = ["Санкт-Петербург", "Ленинградская область"];
 const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Компьютерное оборудование"];
 
 function SearchIcon({ className = "" }: { className?: string }) {
@@ -100,6 +103,18 @@ function atLeast(rows: CounterpartyMatch[], level: MinLevel): CounterpartyMatch[
   return min === undefined ? rows : rows.filter((m) => m.score >= min);
 }
 
+/** «Работал с заказчиками СПб» — a fact from the organizers' data (stats.customers_spb), only for a SPb customer (#242). */
+function WorkedWith({ cp, customerRegion }: { cp: Counterparty; customerRegion?: string }) {
+  const n = cp.stats?.customers_spb;
+  if (customerRegion !== "Санкт-Петербург" || typeof n !== "number" || n <= 0) return null;
+  return <span className="badge badge-worked">{`участвовал в закупках ${n.toLocaleString("ru-RU")} ${plural(n, "заказчика", "заказчиков", "заказчиков")} СПб`}</span>;
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+}
+
 /** Role chips: multiple choice; a count from X-Facets when the server sends it (#232). */
 function RoleChips({ filters, onChange, facets }: { filters: Filters; onChange: (f: Filters) => void; facets?: Facets }) {
   return (
@@ -122,6 +137,63 @@ function RoleChips({ filters, onChange, facets }: { filters: Filters; onChange: 
         );
       })}
     </fieldset>
+  );
+}
+
+const NEAR_LABEL: Record<NearChoice, string> = {
+  auto: "авто — по типу закупки",
+  // the server keeps the customer's region OR a bid for its customers (stats.customers_spb counts applications,
+  // not wins; «Новые» pass by the region alone) — the label says both halves
+  worked: "в регионе заказчика или участвовал в закупках заказчиков региона",
+  near: "в регионе заказчика или соседнем",
+  any: "любой регион",
+};
+
+function NearSelect({ value, onChange, facets }: { value: NearChoice; onChange: (v: NearChoice) => void; facets?: Facets }) {
+  return (
+    <select aria-label="Может работать у заказчика" value={value} onChange={(e) => onChange(e.target.value as NearChoice)}>
+      {(Object.keys(NEAR_LABEL) as NearChoice[]).map((k) => {
+        const n = k === "worked" || k === "near" ? facetCount(facets, "near", k) : undefined;
+        return (
+          <option key={k} value={k}>
+            {NEAR_LABEL[k]}
+            {n !== undefined ? ` (${n})` : ""}
+          </option>
+        );
+      })}
+    </select>
+  );
+}
+
+/** Who the customer is, what is bought and where the supplier may come from (#242): the server's decision over the
+ *  results, with the choice itself and what it hides (D-030) — no trip to the form to change it. */
+function ContextLine({ context, facets, near, onNear }: { context?: SearchContext; facets?: Facets; near: NearChoice; onNear: (v: NearChoice) => void }) {
+  const applied = context?.applied_near ?? context?.default_near;
+  const hidden = nearHidden(context, facets);
+  return (
+    <div className="search-context" role="group" aria-label="Заказчик и тип закупки">
+      {context && (
+        <span>
+          Заказчик: <strong>{context.customer_region}</strong> <small>({context.customer_basis})</small>
+        </span>
+      )}
+      {context?.purchase_label && (
+        <span>
+          Тип закупки: <strong>{context.purchase_label}</strong>
+          {context.type_basis.length > 0 && <small> (ОКПД2 {context.type_basis.join(", ")})</small>}
+        </span>
+      )}
+      <label>
+        Может работать у заказчика
+        <NearSelect value={near} onChange={onNear} facets={facets} />
+      </label>
+      {near === "auto" && applied && <small>авто: {NEAR_LABEL[applied]}</small>}
+      {hidden && (
+        <small role="note">
+          скрыто {hidden.hidden} из {hidden.of}: другой регион или регион не известен
+        </small>
+      )}
+    </div>
   );
 }
 
@@ -196,7 +268,7 @@ function usePath(): [Path, (next: Path) => void] {
 
 // the last query survives a reload of /results; storage may be unavailable — the page works without it
 const STORE = "mitrandir.query";
-type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string };
+type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string; customerRegion?: string };
 function loadSaved(): Partial<Saved> {
   try {
     return JSON.parse(window.sessionStorage.getItem(STORE) ?? "{}") as Partial<Saved>;
@@ -295,7 +367,6 @@ export function App() {
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
   const [more, setMore] = useState(false);
-  const [editQuery, setEditQuery] = useState(false);
   const [resultGroup, setResultGroup] = useState<"history" | "new">("history");
   const [selectedSuppliers, setSelectedSuppliers] = useState<Partial<Record<"history" | "new", string>>>({});
   // the same query without user filters: how many candidates a filter hides for an unknown attribute
@@ -309,13 +380,15 @@ export function App() {
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
+  // #242: the customer's region when the INN is not given (goes to Query.region); with an INN the server takes it from there
+  const [customerRegion, setCustomerRegion] = useState(saved.customerRegion ?? "Санкт-Петербург");
   const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [lotBusy, setLotBusy] = useState(false);
   const resetLot = () => {
     setLot(null);
     setLotQueryId(undefined);
   };
-  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId });
+  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId, customer_region: customerRegion });
 
   // the query of a loaded lot, for a search that must not wait for the form state to update
   type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
@@ -426,8 +499,8 @@ export function App() {
       // weights switched on while this page-sized answer was in flight
       if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
       save(ready
-        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id }
-        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
+        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
+        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
       if (window.location.pathname === "/search") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
@@ -529,6 +602,7 @@ export function App() {
   const newRows = res ? (weights ? atLeast(rerank(res.discovered, weights), filters.min_level) : res.discovered) : [];
   const historyTotal = res ? (weights ? rankedHistory.length : res.total.history) : 0;
   const newTotal = res ? (weights ? newRows.length : res.total.discovered) : 0;
+  const customerRatings = useRatingSummaries([...historyRows, ...newRows].map(m => m.counterparty.inn));
   const activeRows = resultGroup === "history" ? historyRows : newRows;
   const selectedResult = activeRows.find(m => supplierKey(m) === selectedSuppliers[resultGroup]) ?? activeRows[0] ?? null;
   const selectedIndex = selectedResult ? activeRows.indexOf(selectedResult) : -1;
@@ -591,20 +665,18 @@ export function App() {
         <p><span>Закупка</span><strong>{res.query.text}</strong></p>
         <div className="results-commands">
           <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
-          <button type="button" className="secondary" aria-expanded={editQuery} aria-controls="supplier-search" onClick={() => setEditQuery(v => !v)}>
-            {editQuery ? "Скрыть параметры" : "Изменить закупку"}
-          </button>
           <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
             setError(`выгрузка в Excel: ${String(e)}`); setState("error");
           })}>Выгрузить в Excel</button>
         </div>
+        <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
         {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
       </div>}
       <div className={`search-workbench ${path === "/search" ? "search-compose" : ""} ${path === "/results" && res ? "results-workspace" : ""}`}>
       <form
         id="supplier-search"
         className="query"
-        hidden={path === "/results" && !!res && !editQuery}
+        hidden={path === "/results" && !!res}
         onSubmit={(e) => {
           e.preventDefault();
           void run();
@@ -679,6 +751,19 @@ export function App() {
             ИНН заказчика
             <input value={customerInn} inputMode="numeric" placeholder="необязательно" onChange={(e) => setCustomerInn(e.target.value)} />
           </label>
+          {/* the server takes the customer's region from an INN 78 / 47 only (D-083); any other — from this select */}
+          {!/^(78|47)\d{8}$/.test(customerInn.trim()) && (
+            <label>
+              Регион заказчика
+              <select value={customerRegion} onChange={(e) => setCustomerRegion(e.target.value)}>
+                {CUSTOMER_REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         {(lot?.channel || lot?.okpd2?.length) && (
           <div className="chips">
@@ -689,10 +774,8 @@ export function App() {
         <div className="row">
           <div className="query-refinements">
             <a className="filter-link" {...link("/settings")}>Фильтры <span aria-hidden="true">↗</span></a>
-            <label className="query-region">Регион поставщика
-              <select aria-label="Регион" value={filters.region} onChange={(e) => toggle({ ...filters, region: e.target.value })}>
-                {REGIONS.map(r => <option key={r} value={r}>{r || "Любой регион"}</option>)}
-              </select>
+            <label className="query-region">Может работать у заказчика
+              <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} facets={res?.facets} />
             </label>
           </div>
           <div className="actions">
@@ -745,6 +828,14 @@ export function App() {
         </p>
       ))}
 
+      {path === "/results" && res?.excludedLot && state !== "loading" && (
+        <p className="lotmsg own-lot-note" role="note">
+          Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
+          выдачу только по другим своим закупкам. Для закупок июля–сентября 2025 места участников по истории до
+          01.07.2025 — кнопка «Проверить на истории».
+        </p>
+      )}
+
       {path === "/results" && res && (
         <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
           {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
@@ -758,11 +849,13 @@ export function App() {
             </div>
             <div className="result-list-scroll" hidden={resultGroup !== "history"}>
           <Block
+            customerRegion={res.context?.customer_region}
             selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
             variant="history"
             tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
+            ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             rows={historyRows}
             total={historyTotal}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
@@ -777,11 +870,13 @@ export function App() {
           </div>
           <div className="result-list-scroll" hidden={resultGroup !== "new"}>
           <Block
+            customerRegion={res.context?.customer_region}
             selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
             variant="new"
             tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
+            ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             rows={newRows}
             total={newTotal}
             onOpen={selectResult}
@@ -794,7 +889,7 @@ export function App() {
           />
           </div>
           </div>
-          <ResultInspector onBack={returnToList} loadingMore={more} onMore={resultGroup === "history" && selectedIndex === activeRows.length - 1 && activeRows.length < historyTotal ? (weights ? () => setShown(n => n + PAGE) : () => void showMore()) : undefined} match={selectedResult} weightsNote={weights ? presetTitle(weightSet) : undefined} onOpen={setOpen}
+          <ResultInspector customerRegion={res.context?.customer_region} onBack={returnToList} loadingMore={more} onMore={resultGroup === "history" && selectedIndex === activeRows.length - 1 && activeRows.length < historyTotal ? (weights ? () => setShown(n => n + PAGE) : () => void showMore()) : undefined} match={selectedResult} weightsNote={weights ? presetTitle(weightSet) : undefined} onOpen={setOpen}
             onPrevious={selectedIndex > 0 ? () => selectResult(activeRows[selectedIndex - 1]) : undefined}
             onNext={selectedIndex >= 0 && selectedIndex + 1 < activeRows.length ? () => selectResult(activeRows[selectedIndex + 1]) : undefined} />
           </div>
@@ -807,7 +902,7 @@ export function App() {
       </AnimatePresence>
       </div>
     </motion.div>
-    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} />}</AnimatePresence>
+    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} customerRegion={res?.context?.customer_region} />}</AnimatePresence>
     </LayoutGroup>
     </MotionConfig>
   );
@@ -819,6 +914,8 @@ function Block(props: {
   title: string;
   hint: string;
   rows: CounterpartyMatch[];
+  ratings: Record<string, RatingSummary>;
+  ratingsState: "loading" | "ready" | "error";
   total: number;
   onOpen: (m: CounterpartyMatch) => void;
   onMore?: () => void;
@@ -826,6 +923,7 @@ function Block(props: {
   empty?: string;
   variant: "history" | "new";
   tag: string;
+  customerRegion?: string;
   selectedKey?: string;
 }) {
   const reduced = useReducedMotion();
@@ -859,12 +957,15 @@ function Block(props: {
                   </span>
                   <span className="meta">
                     {regionLabel(cp)}
+                    {props.customerRegion && relationToCustomer(cp, props.customerRegion) && <> — {relationToCustomer(cp, props.customerRegion)}</>}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
                   <span className="badges">
                     <RoleBadge kind={cp.kind} />
                     <OriginBadge m={m} />
+                    <WorkedWith cp={cp} customerRegion={props.customerRegion} />
                   </span>
+                  <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
                   {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
                 </motion.button>
               </motion.li>
@@ -892,8 +993,8 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   const links = reviewLinks(cp.name, cp.inn);
   return (
     <section aria-label="Отзывы">
-      <h3>Отзывы</h3>
-      <p className="hint">Не влияет на оценку подбора. Рейтинг из отзывов не показываем: нет источника, который можно честно проверить.</p>
+      <h3>Отзывы в открытых источниках</h3>
+      <p className="hint">Внешние отзывы можно проверить по ссылкам. Их рейтинг не переносится в Митрандир и не влияет на подбор.</p>
       {links.length > 0 ? (
         <p className="review-links">
           Искать отзывы самостоятельно:{" "}
@@ -911,7 +1012,7 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   );
 }
 
-function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () => void; weightsNote?: string }) {
+function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatch; onClose: () => void; weightsNote?: string; customerRegion?: string }) {
   const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
@@ -994,6 +1095,15 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         <dd>{yesNo(cp.is_msp)}</dd>
         <dt>В РНП</dt>
         <dd>{yesNo(cp.in_rnp)}</dd>
+        {customerRegion && relationToCustomer(cp, customerRegion) && (
+          <>
+            <dt>Относительно заказчика</dt>
+            <dd>
+              {relationToCustomer(cp, customerRegion)} (заказчик — {customerRegion})
+              {customerRegion === "Санкт-Петербург" && typeof cp.stats?.customers_spb === "number" && `; заказчиков в СПб: ${cp.stats.customers_spb}`}
+            </dd>
+          </>
+        )}
         <dt>Регион</dt>
         <dd>{regionLabel(cp)}</dd>
         {Object.entries(cp.contacts ?? {}).map(([k, v]) => [<dt key={`k-${k}`}>{k}</dt>, <dd key={`v-${k}`}>{v}</dd>])}
@@ -1011,6 +1121,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         </>
       )}
 
+      <Ratings inn={cp.inn} />
       <ReviewsBlock cp={cp} />
 
       <h3>Источники фактов</h3>
@@ -1201,7 +1312,7 @@ function SettingsPage({ facets, onBack, filters, onChange, onReset, weightSet, o
     <section className="subpage" aria-labelledby="settings-title">
       <header className="top">
         <h1 id="settings-title">Фильтры подбора</h1>
-        <p className="sub">Требования к поставщикам применяются к подбору и выгрузке. Регион выбирается в подборе. Веса оценки — только у вас.</p>
+        <p className="sub">Требования к поставщикам применяются к подбору и выгрузке. Где может работать исполнитель — в подборе и над результатами. Веса оценки — только у вас.</p>
       </header>
       <div className="settings">
         <fieldset className="setting-group">
