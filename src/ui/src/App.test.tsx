@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App, noteText } from "./App";
+import { App, discoveryAlert, noteText } from "./App";
 import { reviewLinks } from "./reviews";
 import { buildQuery, type Counterparty, type Filters, filterNotes, NO_FILTERS, regionLabel, type SearchResponse } from "./api";
 
@@ -82,6 +82,31 @@ test("empty history block shows the server's reason from X-Search-Note (#166)", 
   expect(block).not.toHaveTextContent("Никого не нашли");
   expect(noteText(undefined)).toBeUndefined();
   expect(noteText("готово.")).toBe("Готово.");
+});
+
+test("a failed open source is shown in «Новые», not passed off as «nobody found» (#287)", async () => {
+  const empty = { ...response, discovered: [] } as SearchResponse;
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(empty), { status: 200, headers: { "X-Discovery-Error": "TimeoutError" } }),
+  );
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
+  const block = await screen.findByRole("region", { name: "Новые из открытых источников" });
+  expect(within(block).getByTestId("discovery-error")).toHaveTextContent("Источники не ответили — список может быть неполным.");
+  expect(discoveryAlert("history_unchecked")).toContain("сверка с историей закупок не выполнена");
+  expect(discoveryAlert(undefined)).toBeUndefined();
+});
+
+test("no alert in «Новые» when the sources answered", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
+  await screen.findByRole("region", { name: "Новые из открытых источников" });
+  expect(screen.queryByTestId("discovery-error")).toBeNull();
 });
 
 test("API error is shown, not swallowed", async () => {

@@ -16,6 +16,9 @@ remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_n
 worked | near | any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
+Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error header: the exception type when
+discover() failed (no message, no path), or `history_unchecked` when the companies were found but could not be
+checked against organizers' data (so none is called «новая»). Absent — the block is what the sources gave.
 """
 
 from __future__ import annotations
@@ -69,6 +72,7 @@ KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "
 ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or a natural person (DATA_DICTIONARY)
 # The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
 MAX_TEXT_CHARS = 20_000
+HISTORY_UNCHECKED = "history_unchecked"  # X-Discovery-Error: found, but novelty not checked (#287)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -168,9 +172,20 @@ def _context(query: Query) -> dict[str, object]:
     }
 
 
+def _discovery_error(res: pipeline.Picked) -> str | None:
+    """X-Discovery-Error (#287): why «Новые» may be incomplete; None — nothing went wrong."""
+    if res.discovery_error:  # an exception type name: an identifier, ASCII for the latin-1 header
+        return res.discovery_error if res.discovery_error.isascii() else "Error"
+    # a class was resolved and the registry searched, but organizers' data was not there to check novelty
+    if res.discovery is not None and res.discovery.okpd_classes and not res.discovery.history_checked:
+        return HISTORY_UNCHECKED
+    return None
+
+
 def _found(query: Query, uncached: set[str] | None = None
-           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]]]:
-    """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets.
+           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]], str | None]:
+    """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets;
+    X-Discovery-Error.
 
     The selection itself is src/match/pipeline.py — the same for make eval and make predict (#220).
     """
@@ -183,7 +198,7 @@ def _found(query: Query, uncached: set[str] | None = None
                                  "или база не отвечает") from e
     if uncached is not None:
         uncached.update(res.uncached)
-    return res.matches, res.note, res.facets
+    return res.matches, res.note, res.facets, _discovery_error(res)
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -212,9 +227,11 @@ def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
     uncached: set[str] = set()
-    matches, note, chips = _found(query, uncached)
+    matches, note, chips, discovery_error = _found(query, uncached)
     if note:
         response.headers["X-Search-Note"] = quote(note)
+    if discovery_error:
+        response.headers["X-Discovery-Error"] = discovery_error
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
     response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
     if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
