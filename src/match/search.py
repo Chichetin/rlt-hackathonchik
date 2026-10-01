@@ -170,7 +170,7 @@ def _doc_codes(con: duckdb.DuckDBPyConnection, idx: LotIndex, processed: Path) -
                 os.replace(tmp, base / DOC_CODES)
                 log.info("built %s for index %s", base / DOC_CODES, idx.key)
                 return pq_path(base / DOC_CODES)
-            except (OSError, duckdb.IOException) as e:
+            except (OSError, duckdb.Error) as e:
                 if n == len(places) - 1:
                     raise
                 log.warning("индекс %s не доступен на запись (%s) — коды позиций строятся в %s", idx.path, e, places[1])
@@ -187,17 +187,22 @@ def _predict_okpd2(con: duckdb.DuckDBPyConnection, idx: LotIndex, processed: Pat
     its positions. The heaviest group XX.XX wins, then the heaviest code inside it (9 digits
     scatter the votes).
     """
-    codes = _doc_codes(con, idx, processed)
-    con.execute(
-        f"""
-        CREATE OR REPLACE TEMP TABLE vote AS
-        WITH pos AS (SELECT h.doc_id, h.score, c.code, c.n FROM h JOIN read_parquet({codes}) c USING (doc_id)),
-        best AS (SELECT DISTINCT doc_id, score FROM pos ORDER BY score DESC, doc_id LIMIT {VOTE_DOCS})
-        SELECT pos.code, pos.score * pos.n / sum(pos.n) OVER (PARTITION BY pos.doc_id) AS w
-        FROM pos JOIN best USING (doc_id)
-        """
-    )
-    if not con.execute("SELECT 1 FROM vote LIMIT 1").fetchone():
+    try:
+        codes: str | None = _doc_codes(con, idx, processed)
+    except (OSError, duckdb.Error) as e:
+        log.warning("коды позиций не построены (%s) — класс определяют лучшие лоты", e)
+        codes = None
+    if codes is not None:
+        con.execute(
+            f"""
+            CREATE OR REPLACE TEMP TABLE vote AS
+            WITH pos AS (SELECT h.doc_id, h.score, c.code, c.n FROM h JOIN read_parquet({codes}) c USING (doc_id)),
+            best AS (SELECT DISTINCT doc_id, score FROM pos ORDER BY score DESC, doc_id LIMIT {VOTE_DOCS})
+            SELECT pos.code, pos.score * pos.n / sum(pos.n) OVER (PARTITION BY pos.doc_id) AS w
+            FROM pos JOIN best USING (doc_id)
+            """
+        )
+    if codes is None or not con.execute("SELECT 1 FROM vote LIMIT 1").fetchone():
         con.execute(
             f"""
             CREATE OR REPLACE TEMP TABLE vote AS

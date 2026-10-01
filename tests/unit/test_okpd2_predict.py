@@ -183,3 +183,14 @@ def test_read_only_index_dir_still_predicts(own_data, tmp_path, monkeypatch):
         idx.path.chmod(0o755)
     assert not (idx.path / search_mod.DOC_CODES).exists()
     assert (tmp_path / "tmp" / f"rlt-doc-codes-{idx.key}" / search_mod.DOC_CODES).exists()
+
+
+def test_unbuildable_position_codes_fall_back_to_the_lot_vote(own_data, monkeypatch):
+    """Neither the index dir nor the temp dir is writable: search() still answers, the best lots vote."""
+    own_data([(1, "2024-02-01", "Бумага офисная", [("Пачка А4", PAPER)])])
+
+    def unwritable(*a, **kw):
+        raise search_mod.duckdb.IOException("read-only file system")
+
+    monkeypatch.setattr(search_mod, "_doc_codes", unwritable)
+    assert predicted("бумага офисная") == PAPER
