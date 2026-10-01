@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("волны двигаются, reduced motion останавливает фон", async ({ page }) => {
   test.setTimeout(45_000); // up to ~6 shots of ≤ 4.5 s each under load: two 15 s polls must fit (#225)
+  await page.emulateMedia({ reducedMotion: "no-preference" }); // the project default is reduce (#255)
   await page.goto("/");
   // Reduced motion remounts the canvas; capture its stable host instead.
   const field = page.locator(".wave-field");
