@@ -194,7 +194,8 @@ def cpu_latency(model: str, texts: list[str], n: int = 50) -> dict:
         t0 = time.perf_counter()
         m.encode([q + t], normalize_embeddings=True, show_progress_bar=False)
         ms.append((time.perf_counter() - t0) * 1000)
-    return {"p50_ms": round(float(np.percentile(ms, 50)), 1), "p95_ms": round(float(np.percentile(ms, 95)), 1), "n": len(ms)}
+    p50, p95 = np.percentile(ms, [50, 95])
+    return {"p50_ms": round(float(p50), 1), "p95_ms": round(float(p95), 1), "n": len(ms)}
 
 
 def bench(models: list[str], n: int, seed: int, out_dir: Path) -> dict[str, dict]:
