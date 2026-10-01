@@ -304,6 +304,7 @@ export function App() {
   return (
     <>
     <div className="page" inert={!!open}>
+      <header className="appbar">
       <div className="workspace-bar">
         <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
           <span className="brand-mark"><BrandMark /></span>
@@ -316,14 +317,16 @@ export function App() {
           <a {...link("/about")}>Как это работает</a>
         </nav>
       </div>
+      </header>
+      <div className="content">
       {path === "/about" ? <AboutPage onStart={() => go("/")} />
       : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
       : path !== "/" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
-      <header className="top">
+      <div className="top">
         <h1>Подбор поставщиков для закупки</h1>
         <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
-      </header>
+      </div>
 
       {res?.stub && (
         <div className="stub" role="status">
@@ -549,6 +552,13 @@ export function App() {
       </div>
       </div>
       </>}
+      </div>
+      <footer className="appfoot">
+        <div className="appfoot-in">
+          <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
+          <span>Данные: АИС ГЗ 2024–2025 · реестр МСП ФНС</span>
+        </div>
+      </footer>
     </div>
     {open && <Card m={open} onClose={() => setOpen(null)} />}
     </>
