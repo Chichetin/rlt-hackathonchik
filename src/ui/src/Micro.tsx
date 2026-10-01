@@ -18,7 +18,7 @@ export function ExampleWheel({ options, value, onChange, onConfirm }: { options:
     if (delta) { e.preventDefault(); choose(cursor + delta, true); }
     if (e.key === "Home" || e.key === "End") { e.preventDefault(); choose(e.key === "Home" ? 0 : options.length - 1, true); }
   }}>
-    <div className="wheel-caption"><span>Попробуйте пример</span><small>Выберите тему закупки</small></div>
+    <div className="wheel-caption"><span>Примеры запросов</span><small>Можно ввести любую закупку выше</small></div>
     <div className="wheel-window">
       <div className="wheel-track" aria-hidden="true" />
       {options.map((option, i) => {

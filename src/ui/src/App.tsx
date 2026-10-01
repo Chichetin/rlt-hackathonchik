@@ -31,6 +31,8 @@ import {
   type Counterparty,
 } from "./api";
 import { reviewLinks } from "./reviews";
+import { TestsetPanel } from "./TestsetPanel";
+import "./testset.css";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
@@ -227,18 +229,30 @@ export function App() {
   };
   const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId });
 
-  async function loadLot() {
-    if (!lotId.trim()) return;
+  // the query of a loaded lot, for a search that must not wait for the form state to update
+  type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
+
+  async function loadLot(id: string = lotId): Promise<Ready | null> {
+    if (!id.trim()) return null;
     setLotBusy(true);
     setLotMsg(null);
     try {
-      const q = await fetchLot(lotId);
+      const q = await fetchLot(id);
       setText(q.text);
       setBudget(q.budget ? String(q.budget) : "");
       setCustomerInn(q.customer_inn ?? "");
       setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
       setLotQueryId(q.query_id);
-      setLotMsg({ kind: "ok", text: `Закупка ${lotId.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+      const budgetText = q.budget ? String(q.budget) : "";
+      const lotCtx = { okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget };
+      return {
+        text: q.text,
+        lotId: id,
+        budget: budgetText,
+        customerInn: q.customer_inn ?? "",
+        extra: { budget: budgetText, customer_inn: q.customer_inn ?? "", lot: lotCtx, query_id: q.query_id },
+      };
     } catch (e) {
       setLot(null);
       setLotQueryId(undefined);
@@ -252,8 +266,22 @@ export function App() {
               ? "Номер закупки — только цифры (lot_id или реестровый номер)."
               : `Не удалось загрузить закупку: ${String(e)}.`;
       setLotMsg({ kind: "err", text: `${why} Опишите предмет закупки текстом ниже.` });
+      return null;
     } finally {
       setLotBusy(false);
+    }
+  }
+
+  // a procedure of the uploaded test export (#207): load it by number and search at once
+  const [pickedLot, setPickedLot] = useState<string | null>(null);
+  async function pickTestLot(id: string) {
+    setPickedLot(id);
+    setLotId(id);
+    try {
+      const ready = await loadLot(id);
+      if (ready) await run(filters, ready);
+    } finally {
+      setPickedLot(null);
     }
   }
 
@@ -282,20 +310,23 @@ export function App() {
     }
   }
 
-  async function run(nextFilters: Filters = filters) {
-    if (!text.trim()) return;
+  async function run(nextFilters: Filters = filters, ready?: Ready) {
+    // the query of this run: a picked test lot (#207) or the form
+    const qText = ready?.text ?? text;
+    const qExtra = ready ? () => ready.extra : extra;
+    if (!qText.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
     setState("loading");
     setOpen(null);
     try {
       const active = nextFilters.only_msp || nextFilters.only_manufacturers || !!nextFilters.region;
       const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
-      const q = buildQuery(text, nextFilters, extra());
+      const q = buildQuery(qText, nextFilters, qExtra());
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
-        active ? search(buildQuery(text, none, extra()), { limit: ALL }) : Promise.resolve(null),
+        active ? search(buildQuery(qText, none, qExtra()), { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
@@ -305,7 +336,9 @@ export function App() {
       setState("idle");
       // weights switched on while this page-sized answer was in flight
       if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
-      save({ text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
+      save(ready
+        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id }
+        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
       if (window.location.pathname === "/search") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
@@ -409,7 +442,7 @@ export function App() {
     <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
-      {path === "/search" && <div className="search-background"><WaveField pattern="slats" /></div>}
+      {path !== "/" && <div className="search-background"><WaveField pattern="slats" /></div>}
       <div className="content">
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
@@ -447,6 +480,7 @@ export function App() {
             <p>Загрузите извещение или опишите, что вам нужно.</p>
           </div>
         </div>
+        <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
         <div className="lot-section">
           <label htmlFor="lot">Номер закупки (необязательно)</label>
           <div className="lotrow">

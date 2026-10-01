@@ -27,6 +27,8 @@ from openpyxl import Workbook
 from pydantic import BaseModel
 
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
+from src.api.testset import UploadLimit
+from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
@@ -75,6 +77,8 @@ app = FastAPI(
     version="0.1.0",
     description="Подбор поставщиков, производителей и дистрибьюторов с объяснением и источниками фактов.",
 )
+app.add_middleware(UploadLimit)  # 413 on an oversized test export before the body is read (#207)
+app.include_router(testset_router)  # /api/testset: the test export uploaded in the UI (#207), before the SPA route
 _engine = None
 
 
