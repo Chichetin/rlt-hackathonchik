@@ -27,6 +27,7 @@ import argparse
 import csv
 import logging
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -384,14 +385,14 @@ def _done(out: Path) -> set[str]:
 
 class _Csv:
     """Append-only `;` CSV with the header written once; every cell escaped (F-08). A file with another
-    header (an older format) is moved aside to `<name>.old.csv`, never appended to."""
+    header (an older format) is moved aside to `<name>.old-<time>.csv`, never appended to."""
 
     def __init__(self, path: Path, columns: Sequence[str]):
         if path.exists():
             with path.open(encoding="utf-8-sig", newline="") as f:
                 head = next(csv.reader(f, delimiter=";"), [])
             if head != list(columns):
-                old = path.with_name(f"{path.stem}.old.csv")
+                old = path.with_name(f"{path.stem}.old-{time.strftime('%Y%m%d-%H%M%S')}.csv")  # never overwritten
                 log.warning("predict: %s другого формата — перенесён в %s", path.name, old.name)
                 path.replace(old)
         new_file = not path.exists()

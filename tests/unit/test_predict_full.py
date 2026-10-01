@@ -198,7 +198,6 @@ def test_verify_offline_never_asks_rnp(card_cache, monkeypatch):
         raise AssertionError("RNP request in an offline run")
 
     monkeypatch.setattr(eis_rnp, "_get", no_network)
-    card_cache.put(eis_rnp.search_url(UL), "")  # placeholder, removed below: only the card stays cached
     page = card_cache.get(pb_nalog.card_url(UL))
     assert page is not None
     bare = SourceCache(card_cache.path.with_name("bare.sqlite"))
@@ -369,12 +368,16 @@ def test_full_mode_reports_pool(search_data, tmp_path, monkeypatch, pool_dir):
     P.run(TESTSET, out, top=5, offline=True, mode="full", verify_fn=_ok)
     assert all(P.POOL_SOURCE in r["unavailable"] for r in _rows(P.report_path(out)))
     monkeypatch.setattr(discover_mod, "pool_source", lambda: (None, pool_dir))
+    cache_path = tmp_path / "sources.sqlite"  # «Новые» go through the real check too (both blocks, #229)
+    monkeypatch.setenv("SOURCE_CACHE", str(cache_path))
+    _seed_cards(SourceCache(cache_path), [*_supplier_inns(search_data), "0078000013"])
     out2 = tmp_path / "o2.csv"
-    P.run(TESTSET, out2, top=5, offline=True, mode="full", verify_fn=_ok)
+    P.run(TESTSET, out2, top=5, offline=True, mode="full")
     rep = {r["lot_id"]: r for r in _rows(P.report_path(out2))}
     assert "пул МСП: кандидатов 1" in rep["9001"]["requests"] and P.POOL_SOURCE not in rep["9001"]["unavailable"]
     new = [r for r in _rows(out2) if r["lot_id"] == "9001" and r["block"] == "Новые"]
-    assert [r["inn"] for r in new] == ["0078000013"] and new[0]["status"]
+    assert [r["inn"] for r in new] == ["0078000013"] and new[0]["status"] == "Действующая организация"
+    assert new[0]["name"] and not new[0]["name"].startswith("ИНН ") and new[0]["check"].startswith("проверен")
 
 
 def test_interleave_takes_turns_without_duplicates():
@@ -403,4 +406,4 @@ def test_old_format_file_is_moved_aside(search_data, tmp_path):
                    encoding="utf-8-sig")
     stats = P.run(TESTSET, out, top=3, offline=True, mode="demo")
     assert stats["skipped"] == 0  # the old rows are not taken for finished lots
-    assert list(_rows(out)[0]) == list(P.COLUMNS) and out.with_name("o.old.csv").exists()
+    assert list(_rows(out)[0]) == list(P.COLUMNS) and len(list(tmp_path.glob("o.old-*.csv"))) == 1
