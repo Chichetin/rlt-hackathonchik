@@ -124,22 +124,6 @@ function logoHost(cp: CounterpartyMatch["counterparty"]): string | null {
   return domain && !FREE_MAIL.test(domain) ? domain : null;
 }
 
-function initials(name: string): string {
-  const words = name
-    .replace(/["«»'“”]/g, " ")
-    .replace(/^\s*(ООО|АО|ПАО|ЗАО|ОАО|ИП|ГУП|ГБУ|ФГУП|МУП|НАО)\s+/i, "")
-    .split(/\s+/)
-    .filter(Boolean);
-  return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? "")).toUpperCase() || "?";
-}
-
-const TONES = 6;
-function tone(key: string): number {
-  let h = 0;
-  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return h % TONES;
-}
-
 export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterparty"]; large?: boolean }) {
   const host = logoHost(cp);
   const [failed, setFailed] = useState(false);
@@ -151,13 +135,8 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
       </span>
     );
   }
-  // no name in the data: the INN length tells a legal entity (10 digits) from an individual or entrepreneur (12)
-  const text = /^ИНН\s/.test(cp.name) ? ((cp.inn ?? "").length === 12 ? "ФЛ" : (cp.inn ?? "").length === 10 ? "ЮЛ" : "?") : initials(cp.name);
-  return (
-    <span className={`${cls} logo-tone-${tone(cp.inn ?? cp.name)}`} aria-hidden="true">
-      {text}
-    </span>
-  );
+  // no real logo in the sources — show nothing rather than a placeholder
+  return null;
 }
 
 /** What puts the company in its block: its procurement record, or that it is new to АИС ГЗ. */
@@ -761,7 +740,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
   );
 }
 
-const SEG_COLORS = ["#c0acf6", "#8fd3c1", "#f0c27b", "#88b4f2", "#e99bb4", "#b9c97a"];
+const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa6b2"];
 
 /** Score as a stacked bar: each segment is value × weight of one component, so their sum is the total. */
 function Breakdown({ m }: { m: CounterpartyMatch }) {
