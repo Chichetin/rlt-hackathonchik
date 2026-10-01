@@ -273,6 +273,8 @@ def api_search(query: Query, response: Response,
     if note:
         response.headers["X-Search-Note"] = quote(note)
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
+    if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
+        response.headers["X-Excluded-Lot"] = str(own)
     history = [m for m in matches if m.origin == "history"]
     discovered = [m for m in matches if m.origin == "discovered"]
     response.headers["X-Total-History"] = str(len(history))
