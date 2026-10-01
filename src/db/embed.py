@@ -1,4 +1,4 @@
-"""Embeddings of distinct normalized product names → Postgres + pgvector (D-023).
+"""Embeddings of distinct normalized product names → Postgres + pgvector (D-054).
 
     DATABASE_URL=postgresql://app:app@127.0.0.1:5432/app uv run python -m src.db.embed [--limit N]   # make db-embed
 
@@ -173,7 +173,7 @@ def import_file(conn: psycopg.Connection, path: Path, data_schema: str = "data",
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="embeddings of product names → pgvector (D-023)")
+    ap = argparse.ArgumentParser(description="embeddings of product names → pgvector (D-054)")
     ap.add_argument("--limit", type=int, help="encode at most N texts (subsample first)")
     ap.add_argument("--batch", type=int, default=1024)
     ap.add_argument("--index", action="store_true", help="build the HNSW index after the fill")
