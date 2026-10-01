@@ -53,12 +53,14 @@ def config_sha256(root: Path | None = None) -> str:
     """sha256 of the evaluated configuration: config files + the committed method code (METHOD_PATHS).
 
     The code tree makes the hash name the method, not only its YAML; without git (no .git) the
-    hash cannot be computed and eval-final refuses.
+    hash cannot be computed and eval-final refuses. Config bytes are LF-normalized, so a Windows
+    checkout (core.autocrlf → CRLF) and a Linux one give the same hash (D-023).
     """
     root = root or ROOT
     h = hashlib.sha256()
     for rel in CONFIG_FILES:
-        h.update(rel.encode() + b"\0" + (root / rel).read_bytes() + b"\0")
+        data = (root / rel).read_bytes().replace(b"\r\n", b"\n")
+        h.update(rel.encode() + b"\0" + data + b"\0")
     h.update(b"method-tree\0" + git("ls-tree", "-r", "HEAD", "--", *METHOD_PATHS, root=root, strict=True).encode())
     return h.hexdigest()
 
