@@ -133,6 +133,9 @@ class CounterpartyMatch(_Model):
     score: float
     components: list[ScoreComponent]
     origin: Origin  # history — in organizers' data; discovered — found in open sources
+    # Why the ranker put this match above the next one (#278): the feature with the largest SHAP difference,
+    # with both values. score stays the formula of the components; None without a ranker.
+    rank_reason: str | None = None
 
 
 class SearchResponse(_Model):

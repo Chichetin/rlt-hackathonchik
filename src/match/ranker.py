@@ -8,8 +8,10 @@ is v2 (D-077) byte for byte. One feature function (`feature_row`) serves trainin
            weights are a readable formula; contribution of a feature = w_j · z_j.
   lgbm   — LightGBM LambdaMART; contribution of a feature = pred_contrib (SHAP values of the trees).
 
-The card says which features lifted the supplier the most (product_fit explanation); the contract and
-the six components are unchanged — they keep their values and weights, the order is the model's.
+The card says which features lifted the supplier the most (product_fit explanation); the six components
+are unchanged — they keep their values and weights, the order is the model's. The score stays the formula
+of the components (#278): the relevance level the customer reads, the same scale as «Новые» and the
+min_score filter; rank_reason says why the model put a supplier above its visible neighbour.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import json
 import logging
 import math
 import threading
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -225,26 +228,28 @@ _SHARE = {"bm25_rel", "win_rate", "spb_share", "channel_share", "top_class_share
 _FLAG = {"region_kpp", "region_inn", "class_match", "is_ip", "channel_em", "okpd_predicted"}
 
 
+def _value(name: str, x: float) -> str:
+    """The value of a feature as a person reads it — 7 (lots), 240 дн., 85%, да / нет."""
+    if math.isnan(x):
+        return "нет данных"
+    if name in _COUNT:
+        return str(round(math.expm1(x)))
+    if name in ("days_last", "days_first"):
+        return f"{round(math.expm1(x))} дн."
+    if name in _SHARE:
+        return f"{x:.0%}"
+    if name in _FLAG:
+        return "да" if x >= 0.5 else "нет"
+    if name == "price_gap":
+        return f"в {math.exp(x):.1f} раза"
+    if name == "okpd_level":
+        return str(round(x))
+    return f"{x:.2f}"
+
+
 def value_text(name: str, x: float) -> str:
     """'<feature>: <value as a person reads it>' — 7 lots, 240 days, 85%, да / нет."""
-    label = FEATURES[name]
-    if math.isnan(x):
-        return f"{label}: нет данных"
-    if name in _COUNT:
-        v = str(round(math.expm1(x)))
-    elif name in ("days_last", "days_first"):
-        v = f"{round(math.expm1(x))} дн."
-    elif name in _SHARE:
-        v = f"{x:.0%}"
-    elif name in _FLAG:
-        v = "да" if x >= 0.5 else "нет"
-    elif name == "price_gap":
-        v = f"в {math.exp(x):.1f} раза"
-    elif name == "okpd_level":
-        v = str(round(x))
-    else:
-        v = f"{x:.2f}"
-    return f"{label}: {v}"
+    return f"{FEATURES[name]}: {_value(name, x)}"
 
 
 def explain(model: Model, contrib: np.ndarray, row: np.ndarray, pro: int = 3, con: int = 1) -> str:
@@ -261,20 +266,81 @@ def explain(model: Model, contrib: np.ndarray, row: np.ndarray, pro: int = 3, co
     return ". ".join(parts)
 
 
+@dataclass
+class Ranked:
+    """What the model knew about one ordered supplier: rank_reason is built from it after the filters."""
+
+    raw: float
+    score: float  # the formula of the components (the relevance shown)
+    row: np.ndarray
+    contrib: np.ndarray
+
+
+# key -> Ranked of the last rerank() in this context (search() clears it): pipeline.pick() explains the order
+# of what is left after the hard and user filters, not of the list before them.
+_ranked: ContextVar[dict[str, Ranked] | None] = ContextVar("ranked", default=None)
+SAME = 1e-9
+
+
+def forget() -> None:
+    _ranked.set(None)
+
+
+def _key(m: CounterpartyMatch) -> str:
+    """The INN; without a valid one — the name, which then carries the raw INN and enrichment keeps it."""
+    return m.counterparty.inn or m.counterparty.name
+
+
 def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
-    """Top-k by the model; score = sigmoid(raw) in (0, 1); the product_fit explanation gets the contributions."""
+    """Top-k by the model; the score stays the formula of the components (#278), equal model scores — by it;
+    the product_fit explanation gets the contributions, rank_reason — why above the next one."""
+    forget()
     if not matches:
         return []
     x = np.asarray(rows, dtype=float)
     raw = model.raw(x)
-    order = sorted(range(len(matches)), key=lambda i: (-raw[i], matches[i].counterparty.inn or "~"))[:k]
+    order = sorted(range(len(matches)),
+                   key=lambda i: (-raw[i], -matches[i].score, matches[i].counterparty.inn or "~"))[:k]
     contrib = model.contrib(x[order])
-    out = []
+    out, seen = [], {}
     for j, i in enumerate(order):
         m = matches[i]
         line = explain(model, contrib[j], x[i])
         comps = [c.model_copy(update={"explanation": f"{c.explanation}; {line}"}) if c.name == "product_fit" else c
                  for c in m.components]
-        out.append(m.model_copy(update={"score": round(1.0 / (1.0 + math.exp(-float(raw[i]))), 4),
-                                        "components": comps}))
+        out.append(m.model_copy(update={"components": comps}))
+        seen[_key(m)] = Ranked(float(raw[i]), m.score, x[i], contrib[j])
+    _ranked.set(seen)
+    return reasons(out)
+
+
+def reason(a: Ranked, b: Ranked) -> str:
+    """Why the model put `a` right above `b`: the feature whose contribution differs the most in a's favour,
+    among those where the two really differ (a known value each); exact for trees and w·z alike."""
+    if a.raw - b.raw <= SAME:
+        if a.score != b.score:
+            return f"модель оценила одинаково со следующим; выше по релевантности — {a.score:.4f} против {b.score:.4f}"
+        return "модель и релевантность одинаковы со следующим — порядок условный (по ИНН)"
+    diff = a.contrib - b.contrib
+    for f in np.argsort(-diff, kind="stable"):
+        if diff[f] <= 0:
+            break
+        va, vb = float(a.row[f]), float(b.row[f])
+        if math.isnan(va) or math.isnan(vb) or abs(va - vb) <= SAME:
+            continue  # an interaction, or a missing value: not a reason a customer can check
+        name = NAMES[f]
+        return f"главное отличие от следующего: {FEATURES[name]} — {_value(name, va)} против {_value(name, vb)}"
+    return "модель оценила выше следующего по совокупности признаков — подробно в карточке"
+
+
+def reasons(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """rank_reason of each supplier the model ordered, against the next such supplier of THIS list — after the
+    filters it is the neighbour the customer sees. Others («Новые», v2 without a model) pass unchanged."""
+    seen = _ranked.get() or {}
+    at = [j for j, m in enumerate(matches) if m.origin == "history" and _key(m) in seen]
+    out = list(matches)
+    for n, a in enumerate(at):
+        b = at[n + 1] if n + 1 < len(at) else None
+        why = None if b is None else reason(seen[_key(matches[a])], seen[_key(matches[b])])
+        out[a] = matches[a].model_copy(update={"rank_reason": why})
     return out

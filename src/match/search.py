@@ -401,6 +401,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     `features_out`: gets (inn, ranker features) of every scored candidate — training of the ranker (#198).
     """
     fallback.reset_note()
+    ranker.forget()  # rank reasons of a previous search must not reach this one (#278)
     _excluded.set(None)
     own = own_lot(query)
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call

@@ -58,7 +58,18 @@ def test_model_reorders_and_explains(search_data, tmp_path):
     lots = {inn: r[ranker.NAMES.index("n_lots")] for inn, r in got}
     assert [lots[m.counterparty.inn] for m in res] == sorted(lots.values(), reverse=True)[:len(res)]
     top = lots[res[0].counterparty.inn]
-    assert res[0].score == round(1.0 / (1.0 + np.exp(-(top - 0.5) / 2.0)), 4)  # sigmoid of the standardized score
+    # #278: the score stays the formula of the components — the relevance level, not the model's raw score
+    plain = {m.counterparty.inn: m.score for m in search(Q, config=plain_cfg, k=search_mod.CANDIDATES)}
+    assert all(m.score == plain[m.counterparty.inn] for m in res)
+    assert all(m.score == round(sum(c.value * c.weight for c in m.components), 4) for m in res)
+    # why above the next one: n_lots is the only feature with a weight, so it is the reason whenever it differs
+    for a, b in zip(res, res[1:], strict=False):
+        la, lb = round(math.expm1(lots[a.counterparty.inn])), round(math.expm1(lots[b.counterparty.inn]))
+        if la != lb:
+            assert a.rank_reason == f"главное отличие от следующего: лоты с похожими позициями — {la} против {lb}"
+        else:
+            assert a.rank_reason is not None and a.rank_reason.startswith("модель")
+    assert res[-1].rank_reason is None
     fit = next(c for c in res[0].components if c.name == "product_fit")
     assert "порядок задаёт ранжировщик (логистическая регрессия), компоненты — его входы" in fit.explanation
     n_top = round(math.expm1(top))
@@ -76,6 +87,60 @@ def test_missing_model_falls_back_to_v2(search_data, tmp_path):
     assert search(Q, config=cfg) == search(Q, config=plain_cfg)
     search(Q, config=cfg)
     assert "ранжировщик недоступен" in (fallback.search_note() or "")
+    assert all(m.rank_reason is None for m in ranker.reasons(search(Q, config=plain_cfg)))  # v2: no reasons
+
+
+def _logreg_on_lots(tmp_path) -> dict:
+    n = len(ranker.NAMES)
+    coef = np.zeros(n)
+    coef[ranker.NAMES.index("n_lots")] = 1.0
+    model = tmp_path / "lr.json"
+    model.write_text(json.dumps({"features": ranker.NAMES, "fill": [0.0] * n, "mean": [0.0] * n, "std": [1.0] * n,
+                                 "coef": coef.tolist(), "intercept": 0.0}), encoding="utf-8")
+    return {**search_mod.load_config(), "ranker": {"kind": "logreg", "model": str(model)}}
+
+
+def test_reasons_follow_the_visible_neighbour(search_data, tmp_path):
+    """After the filters the next supplier on screen is another one: the reason compares with it (#278),
+    and a later search without the model leaves no stale reasons."""
+    cfg = _logreg_on_lots(tmp_path)
+    res = search(Q, config=cfg)
+    assert len(res) >= 3
+    shown = ranker.reasons([res[0], *res[2:]])  # the filters removed the second one
+    lots = {m.counterparty.inn: int(re.findall(r"(\d+) лот\(ов\)", next(
+        c for c in m.components if c.name == "experience").explanation)[0]) for m in res}
+    a, c = lots[res[0].counterparty.inn], lots[res[2].counterparty.inn]
+    if a != c:
+        assert shown[0].rank_reason == f"главное отличие от следующего: лоты с похожими позициями — {a} против {c}"
+    plain_cfg = {k: v for k, v in cfg.items() if k != "ranker"}
+    assert all(m.rank_reason is None for m in ranker.reasons(search(Q, config=plain_cfg)))
+
+
+def _ranked(raw: float, score: float, row: dict[str, float], contrib: dict[str, float]) -> ranker.Ranked:
+    r, c = np.full(len(ranker.NAMES), math.nan), np.zeros(len(ranker.NAMES))
+    for k, v in row.items():
+        r[ranker.NAMES.index(k)] = v
+    for k, v in contrib.items():
+        c[ranker.NAMES.index(k)] = v
+    return ranker.Ranked(raw, score, r, c)
+
+
+def test_reason_names_a_feature_the_customer_can_check():
+    wins = {"n_wins": math.log1p(771), "fit": 1.0}
+    # fit is equal (1.00 and 1.00): its contribution differs only by interaction — skipped for n_wins
+    a = _ranked(1.0, 0.9996, wins, {"fit": 0.9, "n_wins": 0.5})
+    b = _ranked(0.2, 0.9996, {"n_wins": math.log1p(515), "fit": 1.0}, {"fit": 0.3, "n_wins": 0.1})
+    assert ranker.reason(a, b) == "главное отличие от следующего: победы в лотах с похожими позициями — 771 против 515"
+    # a missing value is not a reason either
+    a2 = _ranked(1.0, 0.9, {"cust_lots": math.nan, "act": 0.99}, {"cust_lots": 0.8, "act": 0.2})
+    b2 = _ranked(0.5, 0.9, {"cust_lots": math.log1p(3), "act": 0.5}, {"cust_lots": 0.0, "act": 0.1})
+    assert ranker.reason(a2, b2) == "главное отличие от следующего: компонента «активность» — 0.99 против 0.50"
+    same = _ranked(0.4, 0.9996, wins, {})
+    assert ranker.reason(same, _ranked(0.4, 0.9993, wins, {})) == (
+        "модель оценила одинаково со следующим; выше по релевантности — 0.9996 против 0.9993")
+    assert ranker.reason(same, _ranked(0.4, 0.9996, wins, {})).endswith("порядок условный (по ИНН)")
+    assert "по совокупности признаков" in ranker.reason(_ranked(1.0, 0.9, wins, {"fit": 0.5}),
+                                                         _ranked(0.5, 0.9, wins, {"fit": 0.1}))
 
 
 def test_value_text_reads_like_a_card():
