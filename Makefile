@@ -52,9 +52,9 @@ openapi:           ## docs/openapi.json + TS-типы UI из src/contracts.py
 openapi-check:     ## контракты, OpenAPI и TS-типы UI не разошлись
 	@tmp=$$(mktemp -d); \
 	$(PY) python -c "import json; from src.api.app import app; print(json.dumps(app.openapi(), ensure_ascii=False, indent=2))" > $$tmp/openapi.json; \
-	diff -q $$tmp/openapi.json docs/openapi.json >/dev/null || { echo "openapi: docs/openapi.json устарел — make openapi"; rm -rf $$tmp; exit 1; }; \
+	diff -q --strip-trailing-cr $$tmp/openapi.json docs/openapi.json >/dev/null || { echo "openapi: docs/openapi.json устарел — make openapi"; rm -rf $$tmp; exit 1; }; \
 	(cd $(UI) && npx openapi-typescript $$tmp/openapi.json -o $$tmp/api-types.ts >/dev/null 2>&1); \
-	diff -q $$tmp/api-types.ts $(UI)/src/api-types.ts >/dev/null || { echo "openapi: src/ui/src/api-types.ts устарел — make openapi"; rm -rf $$tmp; exit 1; }; \
+	diff -q --strip-trailing-cr $$tmp/api-types.ts $(UI)/src/api-types.ts >/dev/null || { echo "openapi: src/ui/src/api-types.ts устарел — make openapi"; rm -rf $$tmp; exit 1; }; \
 	rm -rf $$tmp; echo "openapi: контракты, OpenAPI и типы UI совпадают"
 
 seal-check:        ## holdout читают только src/eval/split.py и final.py (D-010)
