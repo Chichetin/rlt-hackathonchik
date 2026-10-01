@@ -128,15 +128,19 @@ def winner_novelty(cases: list[EvalCase], cutoff: date) -> list[bool | None] | N
     return out
 
 
+def slice_names(q: dict) -> list[str]:
+    """Slices a per_query row belongs to: channel, winner novelty and their combination."""
+    ch = f"channel={q['channel']}" if q.get("channel") else None
+    nov = {True: "winner=new", False: "winner=known"}.get(q.get("winner_new"))  # type: ignore[arg-type]
+    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None) if name]
+
+
 def slices(per_query: list[dict]) -> dict:
     """Metrics with bootstrap CI per channel, per winner novelty and per their combination."""
     groups: dict[str, list[dict]] = {}
     for q in per_query:
-        ch = f"channel={q['channel']}" if q.get("channel") else None
-        nov = {True: "winner=new", False: "winner=known"}.get(q.get("winner_new"))  # type: ignore[arg-type]
-        for name in (ch, nov, f"{ch},{nov}" if ch and nov else None):
-            if name:
-                groups.setdefault(name, []).append(q)
+        for name in slice_names(q):
+            groups.setdefault(name, []).append(q)
     return {name: {"n_queries": len(rows), "metrics": _summary(rows)} for name, rows in sorted(groups.items())}
 
 

@@ -223,3 +223,30 @@ def test_bm25_passes_as_of_to_index_and_retriever(hist, monkeypatch):
     monkeypatch.setattr(search_mod, "_retrieve", spy_retrieve)
     B.rank(q([], text="бумага"), {"method": "bm25", "k": 20})
     assert seen == [("index", CUTOFF), ("retrieve", CUTOFF)]
+
+
+def _rec(exp: str, rows: list[tuple[str, float, str, bool | None]]) -> dict:
+    return {"exp_id": exp, "part": "dev", "per_query": [
+        {"query_id": qid, "recall@10": v, "mrr": v, "ndcg@10": v, "channel": ch, "winner_new": new}
+        for qid, v, ch, new in rows]}
+
+
+def test_compare_is_paired_by_query_id(tmp_path, capsys):
+    from src.eval import compare as C
+
+    a = _rec("A", [("q1", 1.0, "ЭМ", True), ("q2", 0.5, "ЭМ", False), ("q3", 0.0, "АИС ГЗ", None)])
+    b = _rec("B", [("q3", 1.0, "АИС ГЗ", None), ("q1", 0.0, "ЭМ", True), ("q2", 0.5, "ЭМ", False)])  # other order
+    t = C.paired(a, b)
+    assert list(t)[0] == "all" and t["all"]["n_queries"] == 3
+    assert t["all"]["metrics"]["recall@10"]["delta"] == pytest.approx(0.0)
+    assert t["winner=new"]["metrics"]["mrr"]["delta"] == 1.0
+    assert t["channel=АИС ГЗ"]["metrics"]["mrr"]["delta"] == -1.0
+    assert t["channel=ЭМ"]["metrics"]["ndcg@10"]["delta"] == 0.5
+    lo, hi = t["channel=ЭМ"]["metrics"]["ndcg@10"]["ci95"]
+    assert 0.0 <= lo <= 0.5 <= hi <= 1.0
+    with pytest.raises(ValueError, match="разные наборы"):
+        C.paired(a, _rec("B", [("q1", 0.0, "ЭМ", True)]))
+    for rec in (a, b):
+        (tmp_path / f"{rec['exp_id']}.json").write_text(json.dumps(rec), encoding="utf-8")
+    assert C.main(["A", "B"], results=tmp_path) == 0
+    assert "winner=new" in capsys.readouterr().out
