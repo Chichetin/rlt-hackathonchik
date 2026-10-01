@@ -1,7 +1,11 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
+import { ExampleWheel, RollingNumber } from "./Micro";
+import "./micro.css";
+import { GlassSidebar, GlassTopbar } from "./GlassShell";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
+import { okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
   buildQuery,
@@ -74,6 +78,14 @@ function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Quer
     ? `подтверждённых производителей среди них нет — у ${undetermined} из ${n} роль ещё не определена`
     : "по основному ОКВЭД среди них нет производителей";
   return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+}
+
+/** Server's reason for an empty answer (X-Search-Note, #166) as a sentence; none — the general empty text. */
+export function noteText(note: string | undefined): string | undefined {
+  const t = note?.trim();
+  if (!t) return undefined;
+  const sentence = t[0].toUpperCase() + t.slice(1);
+  return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
 type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
@@ -175,6 +187,7 @@ export function App() {
   const [open, setOpen] = useState<CounterpartyMatch | null>(null);
   const [lotId, setLotId] = useState(saved.lotId ?? "");
   const [lot, setLot] = useState<Extra["lot"]>(saved.lot ?? null);
+  const lotLabels = useOkpd2Labels(lot?.okpd2 ?? []);
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
@@ -290,6 +303,11 @@ export function App() {
     setState("idle");
   }
 
+  // stable, so the landing's scroll listener is not re-attached on every render
+  const goRef = useRef(go);
+  goRef.current = go;
+  const startSearch = useCallback(() => goRef.current("/search"), []);
+
   const link = (to: Path) => ({
     href: to,
     "aria-current": path === to ? ("page" as const) : undefined,
@@ -316,28 +334,14 @@ export function App() {
     <div inert={!!open}><ScrollTools /></div>
     <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
-      <header className="appbar">
-      <div className="workspace-bar">
-        <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
-          <span className="brand-mark"><BrandMark /></span>
-          митрандир
-        </a>
-        <nav className="workspace-nav" aria-label="Разделы страницы">
-          {[["/", "Главная"], ["/search", "Подбор"], ["/results", "Результаты"], ["/settings", "Настройки"], ["/about", "О сервисе"]].map(([to, label]) => (
-            <a key={to} {...link(to)}>
-              {path === to && <motion.span className="nav-indicator" layoutId="nav-current" transition={glide} aria-hidden="true" />}
-              <span className="nav-label">{label}</span>
-            </a>
-          ))}
-        </nav>
-      </div>
-      </header>
+      <GlassSidebar path={path} link={link} mark={<BrandMark />} />
       <div className="content">
+      <GlassTopbar path={path} link={link} />
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
-      {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} />
+      {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
       : path === "/about" ? <AboutPage onStart={() => go("/search")} />
       : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
@@ -409,19 +413,10 @@ export function App() {
             resetLot();
           }}
         />
-        <div className="examples">
-          <span>Например</span>
-          {EXAMPLES.map((example) => (
-            <motion.button type="button" key={example} aria-pressed={text === example && !lot} whileTap={reduced ? undefined : { scale: 0.96 }} onClick={() => {
-              setText(example);
-              resetLot();
-              document.getElementById("q")?.focus();
-            }}>
-              {text === example && !lot && <motion.span className="example-indicator" layoutId="query-example" transition={glide} aria-hidden="true" />}
-              <span>{example}</span>
-            </motion.button>
-          ))}
-        </div>
+        <ExampleWheel onConfirm={() => document.getElementById("q")?.focus()} options={EXAMPLES} value={lot ? "" : text} onChange={example => {
+          setText(example);
+          resetLot();
+        }} />
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -435,7 +430,7 @@ export function App() {
         {(lot?.channel || lot?.okpd2?.length) && (
           <div className="chips">
             {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
-            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
+            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {okpd2Text(lot.okpd2, lotLabels)}</span> : null}
           </div>
         )}
         <div className="row">
@@ -535,7 +530,7 @@ export function App() {
             <h2 className="results-title">Результаты подбора</h2>
             <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
             <span className="result-total" role="status">
-              С опытом: <strong>{res.total.history}</strong> · Новых: <strong>{res.total.discovered}</strong>
+              С опытом: <strong><RollingNumber value={res.total.history} /></strong> · Новых: <strong><RollingNumber value={res.total.discovered} /></strong>
             </span>
           </header>
           <Block
@@ -551,7 +546,7 @@ export function App() {
             empty={
               filterNotes(base, filters).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
-                : undefined
+                : noteText(res.note)
             }
           />
           <Block
@@ -607,7 +602,7 @@ function Block(props: {
     <section className={`block block-${props.variant}`} aria-label={props.title}>
       <span className="block-tag">{props.tag}</span>
       <h2>
-        {props.title} <span className="count">{props.total}</span>
+        {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
       {props.rows.length === 0 ? (
@@ -637,7 +632,7 @@ function Block(props: {
                   <span className="badges">
                     <OriginBadge m={m} />
                   </span>
-                  {top && <span className="why">{top.explanation}</span>}
+                  {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
                 </motion.button>
               </motion.li>
             );
@@ -687,6 +682,8 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
   const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
+  const topOkpd2 = String(cp.stats?.top_okpd2 ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+  const okpd2Labels = useOkpd2Labels(topOkpd2);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overflow = document.body.style.overflow;
@@ -773,7 +770,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
           <dl className="facts stats">
             {Object.entries(cp.stats ?? {}).map(([k, v]) => [
               <dt key={`k-${k}`}>{STAT_LABEL[k] ?? k}</dt>,
-              <dd key={`v-${k}`}>{formatStat(k, v)}</dd>,
+              <dd key={`v-${k}`}>{k === "top_okpd2" ? okpd2Text(topOkpd2, okpd2Labels) : formatStat(k, v)}</dd>,
             ])}
           </dl>
         </>

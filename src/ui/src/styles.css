@@ -440,13 +440,6 @@ html { scrollbar-gutter: stable; }
 .title-line > span { display: block; }
 .landing-description { color: #9da8b8; font-size: 15px; line-height: 1.8; max-width: 440px; margin: 0 0 32px; }
 .landing-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; }
-.supplier-map { position: relative; min-width: 0; aspect-ratio: 6 / 5; }
-.supplier-map svg { display: block; width: 100%; height: auto; overflow: visible; }
-.map-label { position: absolute; display: flex; align-items: center; gap: 7px; font-size: 11px; color: #b4c4e5; background: #131d2a; border: 1px solid #9db4ff26; padding: 8px 11px; border-radius: 8px; box-shadow: 0 8px 24px #0004; }
-.map-label i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.map-label-history { left: 0; top: 29%; }
-.map-label-new { right: 0; bottom: 28%; color: #a6daca; border-color: #7fd1b92b; }
-.map-caption { position: absolute; bottom: -14px; width: 100%; text-align: center; color: #8a97a9; font-size: 11px; }
 .landing-section { padding: 76px 0; border-top: 1px solid var(--line); scroll-margin-top: 36px; }
 .section-intro { margin-bottom: 36px; }
 .section-intro > p, .section-kicker { margin: 0 0 18px; color: #8294ad; font-size: 12px; }
@@ -474,7 +467,6 @@ html { scrollbar-gutter: stable; }
 @media (max-width: 1000px) {
   .landing-hero { padding: 60px 0 75px; }
   .landing h1 { font-size: 43px; letter-spacing: -1.8px; }
-  .map-label { font-size: 10px; padding: 6px 8px; }
   .landing-description { font-size: 14px; }
   .decision-section { gap: 36px; }
 }
@@ -486,7 +478,6 @@ html { scrollbar-gutter: stable; }
   .landing h1 { font-size: clamp(38px, 7.8vw, 58px); letter-spacing: -1.8px; }
   .landing-intro { margin-bottom: 22px; }
   .landing-description { max-width: 480px; }
-  .supplier-map { max-width: 490px; width: 100%; margin: 0 auto; }
   .discovery-pair, .decision-section { grid-template-columns: 1fr; }
   .landing-section { padding: 48px 0; }
   .discovery-panel { padding: 26px; }
@@ -501,8 +492,6 @@ html { scrollbar-gutter: stable; }
   .landing-description { font-size: 14px; }
   .landing-actions { align-items: flex-start; flex-direction: column; gap: 22px; }
   .primary-link { padding: 14px 18px; font-size: 13px; }
-  .map-label { font-size: 9px; }
-  .map-caption { font-size: 10px; bottom: -16px; }
   .landing h2 { font-size: 27px; }
   .discovery-panel h3 { font-size: 21px; }
   .back-to-top { right: 18px; bottom: 18px; }
@@ -534,3 +523,44 @@ html { scroll-padding-top: 80px; }
 .query { max-height: calc(100dvh - 92px); overflow-y: auto; }
 @media (max-width: 760px) { .query { max-height: none; overflow: visible; } }
 @media (min-width: 1101px) { .page-home .content { padding-inline: 48px; } }
+
+/* #164: calmer list — the reason is clamped to three lines here, in full in the card */
+.item { row-gap: 8px; padding: 16px 18px; }
+.item .why { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.item .name { font-size: 15px; line-height: 1.35; }
+.item .badges { margin-top: 2px; }
+.item .name-inn { font-size: 13.5px; }
+@media (max-width: 480px) { .item { padding: 14px; } }
+
+/* #168: hero shows the brand mark alone */
+.hero-mark { display: grid; place-items: center; min-width: 0; color: #dfe6f5; }
+@media (max-width: 760px) { .hero-mark { display: none; } }
+
+/* #171: the hero mark as glass — clear body, chrome rim with a dispersive rainbow glint, colour-split «М» */
+@property --glint { syntax: "<angle>"; initial-value: 210deg; inherits: false; }
+.glass-diamond {
+  position: relative; display: grid; place-items: center; width: min(230px, 56%); aspect-ratio: 1;
+  transform: rotate(45deg); border-radius: 24%;
+  background: linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.02) 46%, rgba(0,0,0,.32));
+  backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow: 0 0 0 6px #05060880, 0 40px 90px -30px #000, inset 0 2px 1px #ffffff2a, inset 0 -14px 34px #0006, inset 14px 14px 44px #9db4ff14; }
+/* the rim only: the conic gradient is masked to a 2px ring */
+.glass-diamond::after {
+  content: ""; position: absolute; inset: 0; padding: 2px; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(from var(--glint),
+    #34373e 0deg, #eef1f6 26deg, #6b7079 58deg, #24272d 104deg, #c4cad3 140deg,
+    #ffd27a 150deg, #ff7ab8 156deg, #7ad7ff 162deg, #f2f4f8 172deg, #4b4f57 214deg,
+    #24272d 250deg, #f2f4f8 282deg, #9cf0ff 292deg, #ffe9a8 298deg, #8a8f98 318deg, #34373e 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: glint-turn 14s linear infinite; }
+/* a soft specular streak across the glass */
+.glass-diamond::before { content: ""; position: absolute; inset: 3px; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.12) 43%, rgba(255,255,255,.02) 52%, transparent 60%); }
+.glass-m { width: 74%; transform: rotate(-45deg); overflow: visible; filter: drop-shadow(0 0 10px #dfe8ff55); }
+.m-split { fill: none; stroke-width: 3.2; stroke-linejoin: round; vector-effect: non-scaling-stroke; mix-blend-mode: screen; opacity: .65; }
+.m-split-warm { stroke: #ff6f9a; }
+.m-split-cool { stroke: #63d9ff; }
+@keyframes glint-turn { to { --glint: 570deg; } }
+@media (prefers-reduced-motion: reduce) { .glass-diamond::after { animation: none; } }
+.hero-mark .glass-m { width: 74%; } /* beats glass.css `.hero-mark svg` */

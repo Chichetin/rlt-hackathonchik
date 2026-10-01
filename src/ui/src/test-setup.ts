@@ -1,10 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach } from "vitest";
+import { resetOkpd2Labels } from "./okpd2";
 
 // the app keeps the page in the URL and the last query in sessionStorage: every test starts on a clean "/"
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
   window.sessionStorage.clear();
+  resetOkpd2Labels();
 });
 
 // jsdom has no media queries; behavior tests use the accessible, instant-motion preference.
