@@ -95,18 +95,22 @@ def resolve(code: str, names: dict[str, str]) -> tuple[str, str, str] | None:
 
 @functools.cache
 def _names() -> dict[str, str]:
-    return read_snapshot()
+    try:
+        return read_snapshot()
+    except FileNotFoundError:  # explanations fall back to bare codes, search keeps working
+        return {}
 
 
 def label(code: str, max_len: int = 50) -> str:
-    """`17.12 «Бумага и картон»` for explanations (#181). A code of an older edition is named after its
-    parent down to the class (`XX.XX`); a code without such a parent — the code alone, not a section name."""
+    """`17.12 «Бумага и картон»` for explanations (#181). A code the current edition lacks is named after
+    its parent, shown explicitly, down to the class (`XX.XX`): `80.10.12.000 (по 80.10.12 «Услуги охраны»)`;
+    a code without such a parent — the code alone, not the name of a whole division."""
     code = code.strip()
     hit = resolve(code, _names())
-    if hit is None or len(hit[0]) < 5:
+    if hit is None or (hit[2] == "parent" and len(hit[0]) < 5):
         return code
     name = hit[1] if len(hit[1]) <= max_len else hit[1][:max_len - 1].rstrip() + "…"
-    return f"{code} «{name}»"
+    return f"{code} «{name}»" if hit[2] == "exact" else f"{code} (по {hit[0]} «{name}»)"
 
 
 def build_table(items: Path, out: Path, snapshot: Path = SNAPSHOT) -> dict[str, int]:
