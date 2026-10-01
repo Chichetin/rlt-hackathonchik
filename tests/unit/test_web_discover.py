@@ -1,17 +1,23 @@
-"""Company site → INN (src/sources/site.py) and the discovery funnel (src/enrich/web_discover.py), #194.
+"""Company site → INN (src/sources/site.py), the discovery funnel and the fallback path «one lot → candidates»
+with its plan (src/enrich/web_discover.py), #194 / #186.
 
 Sites are synthetic HTML served by httpx.MockTransport or put into the cache; the registry card is the
 recorded pb.nalog.ru card of tests/fixtures/pb_nalog (7804428656). No network.
 """
 
+import base64
+import json
+import logging
+import unittest.mock
 from collections import Counter
 from pathlib import Path
 
 import httpx
 import pytest
 
-from src.contracts import Counterparty, inn_is_valid
+from src.contracts import Counterparty, CounterpartyMatch, ScoreComponent, inn_is_valid
 from src.enrich import web_discover as W
+from src.enrich.enrich import enrich as real_enrich
 from src.enrich.evidence import check_counterparty
 from src.sources import pb_nalog, site, yandex_search
 from src.sources.cache import SourceCache
@@ -32,6 +38,13 @@ PAGE_REQ = f"<html><body><table><tr><td>ИНН/КПП</td><td>{INN}/780401001</t
 def _fast(monkeypatch, tmp_path):
     monkeypatch.setattr(site, "MIN_INTERVAL_S", 0.0)
     monkeypatch.setenv("YANDEX_BUDGET_DB", str(tmp_path / "budget.sqlite"))
+    # Yandex is OFF unless a test switches it on (`yandex_on`); a developer's .env never decides a test
+    for name in ("YANDEX_SEARCH_API_KEY", "YANDEX_MAX_PER_LOT", "YANDEX_MAX_PER_RUN", "YANDEX_SEARCH_MODE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(yandex_search, "_dotenv", lambda name: None)
+    monkeypatch.setattr(yandex_search, "_run_caps", None)
+    monkeypatch.setattr(yandex_search, "_blocked_until", 0.0)
+    monkeypatch.setattr(yandex_search, "MIN_INTERVAL_S", 0.0)
 
 
 def _client(pages: dict[str, tuple[int, str]], calls: list[str] | None = None) -> httpx.Client:
@@ -258,3 +271,334 @@ def test_without_organizers_data_nobody_is_new_and_no_paid_run(tmp_path, monkeyp
     with pytest.raises(SystemExit):  # argparse error before any request is counted
         W.main(["Y-test", "--groups", "21.20", "--max-requests", "1"])
     assert yandex_search.Budget().used() == 0
+
+
+# --- the fallback path: one lot → candidates (#194 / #186) ----------------------------------------------------
+
+YFIX = Path(__file__).resolve().parents[1] / "fixtures" / "yandex_search"
+LOT_TEXT = "Насосы дренажные на 2025 год (в 1 точке)"
+LOT_QUERIES = ["Насосы дренажные производитель", "Насосы дренажные оптом", "Насосы дренажные официальный дилер"]
+SITE_HOME = """<html><body><nav><a href="/rekvizity/">Реквизиты</a></nav>
+<h1>Насосы дренажные и фекальные</h1><p>Мы — официальный дистрибьютор завода «Пример».</p>
+<div>Отдел продаж: +7 (812) 000-00-07, sales@brass.example.ru</div>
+<div>Менеджер Сидоров Иван Иванович: +7 (921) 000-00-08</div></body></html>"""
+
+
+@pytest.fixture
+def yandex_on(monkeypatch):
+    monkeypatch.setenv("YANDEX_SEARCH_API_KEY", "test-key")
+    monkeypatch.setenv("YANDEX_MAX_PER_LOT", "3")
+    monkeypatch.setenv("YANDEX_MAX_PER_RUN", "10")
+    monkeypatch.setenv("YANDEX_SEARCH_MODE", "sync")
+    # live mode of the test: the registry card comes from the cache, never from the network
+    monkeypatch.setattr(W, "enrich", lambda inn, cache, offline: real_enrich(inn, cache, offline=True))
+
+
+def _forbidden() -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"a request was sent while nothing may be sent: {request.method} {request.url}")
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def _yandex(calls: list[httpx.Request]) -> httpx.Client:
+    """The stub of Yandex Search: sync answers and deferred operations from tests/fixtures/yandex_search."""
+    xml = (YFIX / "operation_answer.xml").read_text(encoding="utf-8")
+    pending = json.loads((YFIX / "operation_pending.json").read_text(encoding="utf-8"))
+    done = json.loads((YFIX / "operation_done.json").read_text(encoding="utf-8"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        url = str(request.url)
+        if url == yandex_search.ENDPOINT:
+            return httpx.Response(200, json={"rawData": base64.b64encode(xml.encode("utf-8")).decode()})
+        if url == yandex_search.ASYNC_ENDPOINT:
+            n = sum(1 for c in calls if c.method == "POST")
+            return httpx.Response(200, json={**pending, "id": f"op{n}"})
+        assert request.method == "GET" and url.startswith(yandex_search.OPERATION_ENDPOINT)
+        return httpx.Response(200, json=done)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def _site(cache: SourceCache) -> None:
+    """The company site of the search answer, cached as src/sources/site.py caches it, and its ФНС card."""
+    cache.put(site.robots_url(HOME), "", status=404)
+    cache.put(HOME, site.page_body(SITE_HOME, HOME))
+    cache.put(HOME + "rekvizity/", site.page_body(PAGE_REQ, HOME + "rekvizity/"))
+    cache.put(pb_nalog.card_url(INN), (PB / f"{INN}.txt").read_text(encoding="utf-8"))
+
+
+def _match(fit: float) -> CounterpartyMatch:
+    comps = [ScoreComponent(name="product_fit", value=fit, weight=0.35, explanation="x"),
+             ScoreComponent(name="geography", value=1.0, weight=0.1, explanation="x")]
+    return CounterpartyMatch(counterparty=Counterparty(inn=None, name="ООО Тест"), origin="discovered",
+                             components=comps, score=0.5)
+
+
+@pytest.mark.parametrize(("text", "clean"), [
+    ("Насосы дренажные на 2025 год (в 1 точке)", "Насосы дренажные"),
+    ("Поставка бумаги офисной в 2025 году", "Поставка бумаги офисной"),
+    ("Услуги связи 2024-2025 гг.", "Услуги связи"),
+    ("Молоко питьевое, 2025 г., в 12 точках", "Молоко питьевое"),
+    ("Картридж HP 2055 для принтера", "Картридж HP 2055 для принтера"),  # a model number is not a year
+    ("Вывоз отходов за 2026 год; в 3-х точках", "Вывоз отходов"),
+    ("  2025  ", ""),
+])
+def test_clean_text(text, clean):
+    assert W.clean_text(text) == clean
+
+
+def test_clean_names_drops_okpd_names_and_repeats():
+    names = ["Бумага офисная А4 2025 год", "Бумага и картон", "бумага  И КАРТОН.", "Бумага офисная А4", "2025"]
+    assert W.clean_names(names, okpd_names=["Бумага и картон"]) == ["Бумага офисная А4"]
+
+
+@pytest.mark.parametrize(("okpd2", "kind"), [
+    (["17.12.14"], "goods"), (["01.11"], "goods"), (["33.12"], "goods"), (["34.00"], "services"),
+    (["71.20.19", "17.12"], "services"), (["81.21"], "services"), (["43.21"], "services"), ([], "goods"),
+    (["", "x", "86.10"], "services"),
+])
+def test_purchase_kind(okpd2, kind):
+    assert W.purchase_kind(okpd2) == kind
+
+
+def test_lot_queries_by_purchase_type():
+    assert W.lot_queries(LOT_TEXT, ["28.13.14"]) == LOT_QUERIES
+    assert W.lot_queries("Испытания воды в 2025 году", ["71.20.19"]) == [
+        "Испытания воды исполнитель", "Испытания воды подрядчик", "Испытания воды аккредитованная лаборатория"]
+    assert W.lot_queries("Испытания воды", ["71.20.19"], kind="goods")[0] == "Испытания воды производитель"
+    assert W.lot_queries(" 2025 год ", ["28.13"]) == []
+    long = W.lot_queries("слово " * 300, [])
+    assert all(len(q) <= W.MAX_QUERY_CHARS and len(q.split()) <= W.MAX_QUERY_WORDS + 2 for q in long)
+
+
+def test_strong_count_takes_steps_1_0_and_0_8():
+    assert W.strong_count([_match(1.0), _match(0.8), _match(0.79), _match(0.6), _match(0.4)]) == 2
+    assert W.strong_count([]) == 0
+
+
+@pytest.mark.parametrize(("env", "reason"), [
+    ({}, "выключен: нет ключа"),
+    ({"YANDEX_SEARCH_API_KEY": "k", "YANDEX_MAX_PER_RUN": "10"}, "выключен: нет потолка (YANDEX_MAX_PER_LOT)"),
+    ({"YANDEX_SEARCH_API_KEY": "k", "YANDEX_MAX_PER_LOT": "3"}, "выключен: нет потолка (YANDEX_MAX_PER_RUN)"),
+    ({"YANDEX_MAX_PER_LOT": "3", "YANDEX_MAX_PER_RUN": "10"}, "выключен: нет ключа"),
+])
+def test_fallback_is_off_by_default_and_sends_nothing(env, reason, monkeypatch, tmp_path, fixture_processed):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    budget = yandex_search.Budget(limit=10)
+    res = W.lot_candidates("L1", LOT_TEXT, 0, okpd2=["28.13.14"], cache=cache, budget=budget, cfg=CFG,
+                           processed=fixture_processed, client=_forbidden(), site_client=_forbidden(),
+                           offline=False)
+    assert not res.used and reason in res.reason
+    assert res.candidates == [] and res.queries == [] and res.requests_live == 0 and budget.used() == 0
+    assert W.fallback_needed(0) == (False, res.reason)
+
+
+@pytest.mark.parametrize(("strong", "need"), [(0, True), (2, True), (3, False), (4, False), (50, False)])
+def test_fallback_only_with_fewer_than_three_strong(strong, need, yandex_on, tmp_path, fixture_processed):
+    got, why = W.fallback_needed(strong)
+    assert got is need and (f"{strong} < 3" in why if need else "не нужен: сильных кандидатов" in why)
+    if not need:
+        budget = yandex_search.Budget(limit=10)
+        res = W.lot_candidates("L1", LOT_TEXT, strong, cache=SourceCache(tmp_path / "c.sqlite"), budget=budget,
+                               cfg=CFG, processed=fixture_processed, client=_forbidden(), offline=False)
+        assert not res.used and res.reason == why and f"{strong} ≥ 3" in why and budget.used() == 0
+
+
+def test_fallback_finds_a_new_company_with_facts_of_its_site(yandex_on, tmp_path, fixture_processed):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    calls: list[httpx.Request] = []
+    budget, caps = yandex_search.Budget(limit=10), yandex_search.Caps(3, 10)
+    kw = {"okpd2": ["28.13.14"], "cache": cache, "budget": budget, "caps": caps, "cfg": CFG,
+          "processed": fixture_processed, "site_client": _forbidden(), "offline": False}
+    res = W.lot_candidates("L1", LOT_TEXT, 2, client=_yandex(calls), **kw)
+
+    assert res.used and res.queries == LOT_QUERIES
+    assert [json.loads(c.content)["query"]["queryText"] for c in calls] == LOT_QUERIES
+    assert res.requests_live == 3 and budget.used() == 3 and caps.used_lot == {"L1": 3} and res.pending == 0
+    assert [s.domain for s in res.sites] == ["brass.example.ru"]  # 2gis is a directory, each domain once
+    assert "платных 3" in res.reason and "новых компаний 1" in res.reason
+
+    (cp,) = res.candidates
+    assert cp.inn == INN and check_counterparty(cp, cache.page_text) == []
+    assert cp.contacts["phone"] == "+7 (812) 000-00-07" and cp.contacts["email"] == "sales@brass.example.ru"
+    assert "000-00-08" not in cp.model_dump_json() and "Сидоров" not in cp.model_dump_json()  # the manager
+    by_source = {e.source for e in cp.evidence}
+    assert {site.SOURCE, yandex_search.SOURCE, pb_nalog.SOURCE} <= by_source
+    assert all(e.url and e.fetched_at for e in cp.evidence)
+
+    fit = res.fits[INN]
+    assert (fit.value, fit.step) == (1.0, "site_name") and "Насосы дренажные" in fit.basis
+    decision = res.roles[INN]
+    assert decision.kind == "distributor" and decision.basis is not None and decision.basis.source == "site"
+    assert "официальный дистрибьютор" in decision.basis.why and not decision.conflict  # OKVED 33.12 → unknown
+    assert [b.source for b in decision.bases] == ["site", "okved"]
+
+    again = W.lot_candidates("L1", LOT_TEXT, 2, client=_forbidden(), **kw)  # everything is cached now
+    assert [c.inn for c in again.candidates] == [INN] and again.requests_live == 0 and budget.used() == 3
+
+
+def test_fallback_stops_at_the_ceiling_of_the_lot_and_of_the_run(yandex_on, tmp_path, fixture_processed):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    calls: list[httpx.Request] = []
+    budget, caps = yandex_search.Budget(limit=10), yandex_search.Caps(per_lot=2, per_run=3)
+    kw = {"cache": cache, "budget": budget, "caps": caps, "cfg": CFG, "processed": fixture_processed,
+          "client": _yandex(calls), "site_client": _forbidden(), "offline": False}
+    first = W.lot_candidates("L1", LOT_TEXT, 0, **kw)
+    assert first.requests_live == 2 and "на лот" in first.reason and len(calls) == 2
+    second = W.lot_candidates("L2", "Задвижки чугунные", 0, **kw)
+    assert second.requests_live == 1 and "на прогон" in second.reason and len(calls) == 3
+    third = W.lot_candidates("L3", "Клапаны обратные", 0, **kw)
+    assert third.requests_live == 0 and third.candidates == [] and len(calls) == 3 and budget.used() == 3
+
+
+def test_fallback_stops_at_the_hard_limit(yandex_on, tmp_path, fixture_processed):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    calls: list[httpx.Request] = []
+    budget = yandex_search.Budget(limit=1)
+    res = W.lot_candidates("L1", LOT_TEXT, 0, cache=cache, budget=budget, caps=yandex_search.Caps(3, 10), cfg=CFG,
+                           processed=fixture_processed, client=_yandex(calls), site_client=_forbidden(),
+                           offline=False)
+    assert res.requests_live == 1 and len(calls) == 1 and "лимит 1 запросов исчерпан" in res.reason
+    assert [c.inn for c in res.candidates] == [INN]  # the answer that was paid for is still used
+
+
+def test_fallback_deferred_submits_first_and_collects_on_the_next_run(yandex_on, tmp_path, fixture_processed,
+                                                                      monkeypatch):
+    monkeypatch.setenv("YANDEX_SEARCH_MODE", "deferred")
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    calls: list[httpx.Request] = []
+    budget = yandex_search.Budget(limit=10)
+    kw = {"okpd2": ["28.13.14"], "cache": cache, "budget": budget, "cfg": CFG, "processed": fixture_processed,
+          "client": _yandex(calls), "site_client": _forbidden(), "offline": False}
+    first = W.lot_candidates("L1", LOT_TEXT, 0, caps=yandex_search.Caps(3, 10), **kw)
+    assert (first.requests_live, first.pending, first.candidates) == (3, 3, [])
+    assert [c.method for c in calls] == ["POST"] * 3 and budget.used() == 3
+    assert "ответ ещё не готов у 3" in first.reason
+    second = W.lot_candidates("L1", LOT_TEXT, 0, caps=yandex_search.Caps(3, 10), **kw)  # the next run
+    assert [c.method for c in calls[3:]] == ["GET"] * 3 and budget.used() == 3  # collecting is not paid again
+    assert (second.requests_live, second.pending) == (0, 0) and [c.inn for c in second.candidates] == [INN]
+
+
+def test_fallback_offline_reads_the_cache_only(yandex_on, tmp_path, fixture_processed, monkeypatch):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    budget = yandex_search.Budget(limit=10)
+    kw = {"cache": cache, "budget": budget, "cfg": CFG, "processed": fixture_processed, "client": _forbidden(),
+          "site_client": _forbidden()}  # offline comes from DISCOVERY_OFFLINE=1 of conftest
+    empty = W.lot_candidates("L1", LOT_TEXT, 0, **kw)
+    assert empty.used and empty.candidates == [] and empty.pending == 0 and budget.used() == 0
+    xml = (YFIX / "operation_answer.xml").read_text(encoding="utf-8")
+    cache.put(yandex_search.search_url(LOT_QUERIES[1], 0, "2"), yandex_search.flatten(LOT_QUERIES[1], 0, "2", xml))
+    warm = W.lot_candidates("L1", LOT_TEXT, 0, **kw)
+    assert [c.inn for c in warm.candidates] == [INN] and budget.used() == 0
+
+
+def test_fallback_site_fact_that_fails_evidence_is_not_added(yandex_on, tmp_path, fixture_processed, monkeypatch):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    made_up = W.site_facts.SiteFacts(url=HOME)
+    made_up.phones.append(W.Evidence(source=site.SOURCE, url=HOME, fetched_at=W.datetime.now(W.UTC),
+                                     fact="Телефон на сайте", field="phone", value="+7 (812) 999-99-99"))
+    monkeypatch.setattr(W.site_facts, "merge", lambda pages: made_up)
+    res = W.lot_candidates("L1", LOT_TEXT, 0, cache=cache, budget=yandex_search.Budget(limit=10),
+                           caps=yandex_search.Caps(3, 10), cfg=CFG, processed=fixture_processed,
+                           client=_yandex([]), site_client=_forbidden(), offline=False)
+    (cp,) = res.candidates
+    assert "999-99-99" not in cp.model_dump_json() and "phone" not in cp.contacts
+    assert check_counterparty(cp, cache.page_text) == []
+
+
+def test_fallback_takes_no_contacts_of_an_individual_from_a_site(tmp_path):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    ip = "500100732259"  # 12 digits: an individual entrepreneur
+    page = cache.put(HOME, site.page_body(SITE_HOME + f"<p>ИНН {ip}</p>", HOME))
+    ev = W.Evidence(source=site.SOURCE, url=HOME, fetched_at=W.datetime.fromtimestamp(page.fetched_at, tz=W.UTC),
+                    fact=f"ИНН {ip} указан на сайте", field="inn", value=ip)
+    s = W.Site(domain="brass.example.ru", home=HOME, search_url="", query="", pages=[HOME])
+    out = W.Fallback(lot="L1", used=True, reason="")
+    cp = W._with_site_facts(Counterparty(inn=ip, name="ИП Тест", evidence=[ev]), s, "Насосы дренажные", [], cache, out)
+    assert cp.contacts == {} and all(e.field not in ("phone", "email", "address") for e in cp.evidence)
+    assert out.roles[ip].kind == "distributor"  # what the site says about the business is kept
+    org = W._with_site_facts(Counterparty(inn=INN, name="ООО Тест", evidence=[
+        ev.model_copy(update={"value": INN, "fact": "ИНН указан на сайте"})]), s, "Насосы", [], cache, out)
+    assert org.contacts == {}  # INN 7804428656 is not on this page: the card fails Evidence, nothing is added
+    cache.put(HOME, site.page_body(SITE_HOME + f"<p>ИНН {INN}</p>", HOME))
+    org = W._with_site_facts(Counterparty(inn=INN, name="ООО Тест", evidence=[
+        ev.model_copy(update={"value": INN, "fact": "ИНН указан на сайте"})]), s, "Насосы", [], cache, out)
+    assert org.contacts == {"phone": "+7 (812) 000-00-07", "email": "sales@brass.example.ru"}
+
+
+# --- the plan of a run and its log line -----------------------------------------------------------------------
+
+STRONG = {"L1": 0, "L2": 1, "L3": 2, "L4": 3, "L5": 7}
+
+
+def test_plan_off_means_zero(caplog):
+    plan = W.plan_run(STRONG)
+    assert not plan.enabled and (plan.lots, plan.lots_yandex, plan.requests_max, plan.rub_max) == (5, 0, 0, 0.0)
+    with caplog.at_level(logging.WARNING, logger=W.log.name):
+        line = W.log_plan(plan)
+    assert "выключен: нет ключа" in line and "запросов 0, 0 ₽" in line and line in caplog.text
+
+
+@pytest.mark.parametrize(("per_lot", "per_run", "left", "mode", "requests", "rub"), [
+    ("3", "100", 2500, "deferred", 9, 0.27),  # 3 lots × 3 queries
+    ("2", "100", 2500, "deferred", 6, 0.18),  # the ceiling of the lot
+    ("10", "100", 2500, "sync", 9, 4.39),  # a lot has only 3 queries; the sync price
+    ("3", "4", 2500, "deferred", 4, 0.12),  # the ceiling of the run
+    ("3", "100", 5, "deferred", 5, 0.15),  # the rest of the hard limit
+    ("3", "100", 0, "deferred", 0, 0.0),
+])
+def test_plan_counts_lots_requests_and_roubles(per_lot, per_run, left, mode, requests, rub, yandex_on, monkeypatch,
+                                               caplog):
+    monkeypatch.setenv("YANDEX_MAX_PER_LOT", per_lot)
+    monkeypatch.setenv("YANDEX_MAX_PER_RUN", per_run)
+    plan = W.plan_run(STRONG, mode=mode, budget_left=left)
+    assert plan.enabled and (plan.lots, plan.lots_yandex) == (5, 3)
+    assert (plan.requests_max, plan.rub_max) == (requests, rub)
+    with caplog.at_level(logging.WARNING, logger=W.log.name):
+        line = W.log_plan(plan)
+    assert "под Yandex попадают 3 из 5 лотов" in line and f"максимум {requests} запросов ≈ {rub:.2f} ₽" in line
+    assert f"режим {mode}" in line and line in caplog.text
+
+
+def test_plan_reads_the_rest_of_the_hard_limit(yandex_on):
+    yandex_search.Budget().record(2497, "прежние")
+    plan = W.plan_run(STRONG)
+    assert plan.budget_left == 3 and plan.requests_max == 3 and plan.mode == "sync"
+    assert W.plan_run({}).requests_max == 0 and W.plan_run({"L": 5}).lots_yandex == 0
+
+
+def test_group_run_is_behind_the_same_gate(tmp_path, monkeypatch, fixture_processed):
+    monkeypatch.setattr(W, "processed_dir", lambda: fixture_processed)
+    monkeypatch.setattr(W, "SourceCache", lambda: SourceCache(tmp_path / "c.sqlite"))
+    monkeypatch.setattr(W, "RESULTS", tmp_path / "results")  # a broken gate must not write into the repository
+    with pytest.raises(SystemExit):  # Yandex is off: the paid group run does not start
+        W.main(["Y-test", "--groups", "21.20", "--max-requests", "1"])
+    assert yandex_search.Budget().used() == 0
+
+
+def test_group_counts_as_one_lot(yandex_on, tmp_path, fixture_processed):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _site(cache)
+    cfg = {**CFG, "templates": ["{p} оптом", "{p} производитель", "{p} дилер"]}
+    calls: list[httpx.Request] = []
+    caps = yandex_search.Caps(per_lot=2, per_run=10)
+    orig = yandex_search.search
+
+    def search(*a, **kw):
+        return orig(*a, **{**kw, "client": _yandex(calls)})
+
+    with unittest.mock.patch.object(yandex_search, "search", search):
+        rep, _ = W.run_group("21.20", cfg, cache, yandex_search.Budget(limit=10), fixture_processed, False, 50, set(),
+                             caps=caps)
+    assert rep.requests_live == 2 and len(calls) == 2 and caps.used_lot == {"group:21.20": 2}
