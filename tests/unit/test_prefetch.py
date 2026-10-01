@@ -121,3 +121,38 @@ def test_worker_night_mode_sleeps_on_captcha_and_continues(eng, monkeypatch):
     monkeypatch.setattr(W.time, "sleep", sleeps.append)
     assert W.run(once=True, pause_s=0, captcha_sleep_s=900) == 1
     assert calls == [GOOD[0], GOOD[0]] and 900 in sleeps and status_counts(eng) == {"done": 1}
+
+
+def test_worker_survives_db_errors_and_pauses_only_after_live_fetch(eng, monkeypatch, tmp_path):
+    from sqlalchemy.exc import OperationalError
+
+    from src.sources.cache import SourceCache
+    from src.worker import worker as W
+    from src.worker.queue import enqueue
+
+    for inn in GOOD[:2]:
+        enqueue(eng, "enrich", inn)
+    real_claim = W.claim
+    state = {"n": 0}
+
+    def flaky_claim(e, kind):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise OperationalError("select", {}, Exception("could not translate host name db"))
+        return real_claim(e, kind)
+
+    cache = SourceCache(tmp_path / "c.sqlite")
+
+    def enrich_fn(inn):
+        if inn == GOOD[0]:
+            cache.put("https://x/" + inn, "live")  # a live answer was written to the cache
+        # GOOD[1]: served from cache, nothing written
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(W, "claim", flaky_claim)
+    monkeypatch.setattr(W, "enrich", enrich_fn)
+    monkeypatch.setattr(W.time, "sleep", sleeps.append)
+    assert W.run(once=True, pause_s=1.5, db_retry_s=7) == 2
+    assert 7 in sleeps  # waited for the database instead of crashing
+    assert sleeps.count(1.5) == 1  # pause only after the live fetch, not after the cache hit
+    assert status_counts(eng) == {"done": 2}

@@ -12,59 +12,99 @@ import logging
 import time
 
 from src.enrich.enrich import enrich
+from sqlalchemy.exc import OperationalError
+
+from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired
 from src.worker.queue import claim, engine_from_env, finish, release, requeue_stale, status_counts
 
 log = logging.getLogger("worker")
 
 
-CACHE_HIT_S = 0.05  # a task faster than this was served by the cache: no source was hit, no pause
-PROGRESS_EVERY = 25
+PROGRESS_EVERY = 10
+DB_RETRY_S = 10.0  # the database is down (container restart, network): wait and try again, never exit
+_live_writes = 0  # pages written to the source cache = answers fetched from a source (not served from cache)
 
 
-def run(once: bool = False, pause_s: float = 1.0, captcha_sleep_s: float | None = None) -> int:
+def _count_live_writes() -> None:
+    """A task that wrote nothing to the cache was served from it: no source was hit, no pause needed.
+    Explicit counter instead of a timing guess (a cache read on a slow volume, /mnt/c, is not «fast»)."""
+    if getattr(SourceCache.put, "_counts_live", False):
+        return
+    orig = SourceCache.put
+
+    def put(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        global _live_writes
+        _live_writes += 1
+        return orig(self, *args, **kwargs)
+
+    put._counts_live = True  # type: ignore[attr-defined]
+    SourceCache.put = put  # type: ignore[method-assign]
+
+
+def _connect(retry_s: float):  # type: ignore[no-untyped-def]
+    while True:
+        try:
+            eng = engine_from_env()
+            requeue_stale(eng)
+            return eng
+        except OperationalError as e:
+            log.error("database unavailable (%s) — retry in %.0f s", str(e).splitlines()[0][:160], retry_s)
+            time.sleep(retry_s)
+
+
+def run(once: bool = False, pause_s: float = 1.0, captcha_sleep_s: float | None = None,
+        db_retry_s: float = DB_RETRY_S) -> int:
     """Drain the queue. `captcha_sleep_s`: None = stop on captcha (default); a number = night mode: the task
-    goes back, the worker sleeps that long (sources' own 15-min cooldown) and continues, so a container
-    with `restart` does not restart into the same block and hit the host again."""
-    eng = engine_from_env()
-    requeue_stale(eng)
+    goes back, the worker sleeps that long (sources' own 15-min cooldown) and continues. The cooldown
+    lives in the process: a container restart forgets it (D-080), so the sleep is the only protection.
+    Database errors never end the run: wait `db_retry_s` and continue (the `running` task of a lost
+    connection returns to the queue by requeue_stale)."""
+    _count_live_writes()
+    eng = _connect(db_retry_s)
     done, errors, last_requeue, t0 = 0, 0, time.monotonic(), time.monotonic()
     while True:
-        if time.monotonic() - last_requeue > 60:  # a sibling worker may have crashed meanwhile
-            requeue_stale(eng)
-            last_requeue = time.monotonic()
-        task = claim(eng, "enrich")
-        if task is None:
-            if once:
-                return done
-            time.sleep(pause_s)
-            continue
-        task_id, inn = task
-        started = time.monotonic()
         try:
-            enrich(inn)
-            finish(eng, task_id)
-            done += 1
-        except CaptchaRequired:
-            # research/SOURCES.md: captcha → never solve it, never keep hitting the host
-            release(eng, task_id)
-            if captcha_sleep_s is None:
-                log.error("captcha on %s — worker stops, task %s back in the queue", inn, task_id)
-                return done
-            log.error("captcha on %s and no fallback answered — sleeping %.0f s, task %s back in the queue",
-                      inn, captcha_sleep_s, task_id)
-            time.sleep(captcha_sleep_s)
-            continue
-        except Exception as e:  # noqa: BLE001 — a task failure must not kill the worker
-            errors += 1
-            log.warning("task %s (%s) failed: %s", task_id, inn, e)
-            finish(eng, task_id, error=str(e)[:500])
-        n = done + errors
-        if n % PROGRESS_EVERY == 0:
-            log.info("progress: this run %d (errors %d, %.1f INN/min), queue %s", n, errors,
-                     n / max((time.monotonic() - t0) / 60, 1e-9), status_counts(eng))
-        if time.monotonic() - started >= CACHE_HIT_S:
-            time.sleep(pause_s)
+            if time.monotonic() - last_requeue > 60:  # a sibling worker may have crashed meanwhile
+                requeue_stale(eng)
+                last_requeue = time.monotonic()
+            task = claim(eng, "enrich")
+            if task is None:
+                if once:
+                    return done
+                time.sleep(pause_s)
+                continue
+            task_id, inn = task
+            writes_before = _live_writes
+            try:
+                enrich(inn)
+                finish(eng, task_id)
+                done += 1
+            except CaptchaRequired:
+                # research/SOURCES.md: captcha → never solve it, never keep hitting the host
+                release(eng, task_id)
+                if captcha_sleep_s is None:
+                    log.error("captcha on %s — worker stops, task %s back in the queue", inn, task_id)
+                    return done
+                log.error("captcha on %s and no fallback answered — sleeping %.0f s, task %s back in the queue",
+                          inn, captcha_sleep_s, task_id)
+                time.sleep(captcha_sleep_s)
+                continue
+            except OperationalError:
+                raise
+            except Exception as e:  # noqa: BLE001 — a task failure must not kill the worker
+                errors += 1
+                log.warning("task %s (%s) failed: %s", task_id, inn, e)
+                finish(eng, task_id, error=str(e)[:500])
+            n = done + errors
+            if n % PROGRESS_EVERY == 0:
+                log.info("progress: this run %d (errors %d, %.1f INN/min incl. cache hits), queue %s", n, errors,
+                         n / max((time.monotonic() - t0) / 60, 1e-9), status_counts(eng))
+            if _live_writes > writes_before:
+                time.sleep(pause_s)
+        except OperationalError as e:
+            log.error("database unavailable (%s) — retry in %.0f s", str(e).splitlines()[0][:160], db_retry_s)
+            time.sleep(db_retry_s)
 
 
 def main() -> None:
