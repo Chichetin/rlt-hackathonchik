@@ -37,6 +37,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 
 IS_STUB = False
+RETRIEVERS = ("bm25", "pg_hybrid")  # pg_hybrid: + pgvector, RRF (src/match/pg_retriever.py, #39)
+# eval sets True: a configured pg_hybrid that is unavailable is an error, not a silent BM25 measurement.
+STRICT_RETRIEVER = False
 
 TOP_DOCS = 500  # BM25 documents (distinct position texts) taken per query
 CANDIDATES = 200  # suppliers scored per query (by best BM25 of their lots)
@@ -60,8 +63,8 @@ UNAVAILABLE = {
 
 def load_config(path: Path = SEARCH_CONFIG) -> dict:
     cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if cfg.get("retriever") != "bm25":
-        raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: bm25)")
+    if cfg.get("retriever") not in RETRIEVERS:
+        raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     return cfg
 
 
@@ -187,10 +190,11 @@ def _period(as_of: date | None) -> str:
     return f"до {_fmt(as_of)}" if as_of else "за весь период данных"
 
 
-def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: bool) -> tuple[float, str]:
+def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: bool,
+                 how: str = "") -> tuple[float, str]:
     sim = c.bm25 / top_bm25 if top_bm25 > 0 else 0.0
     best = c.best_text if len(c.best_text) <= 60 else c.best_text[:57] + "…"
-    head = f"Похожие позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
+    head = f"Похожие{how} позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
     if not codes:
         return sim, f"{head}; ОКПД2 запроса не определён"
     src = "ОКПД2 определён по похожим позициям" if predicted else "ОКПД2 запроса"
@@ -242,11 +246,23 @@ def _component(name: str, value: float, weights: dict[str, float], explanation: 
 
 def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -> list[CounterpartyMatch]:
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built."""
-    w = weights or load_config()["weights"]
+    cfg = load_config()  # every call: eval passes weights, the retriever still comes from the config
+    w = weights or cfg["weights"]
     processed = processed_dir()
     as_of = query.as_of
     idx = get_index(processed, as_of)
     hits = idx.retrieve(tokenize(query.text), TOP_DOCS)
+    how = ""
+    if cfg["retriever"] == "pg_hybrid":
+        from src.match import pg_retriever
+
+        try:
+            hits = pg_retriever.hybrid(idx, query.text, hits, TOP_DOCS)
+            how = " по словам и смыслу"
+        except pg_retriever.VectorsUnavailable as e:
+            if STRICT_RETRIEVER:
+                raise
+            log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
     if not hits:
         return []
     con = duckdb.connect()
@@ -272,7 +288,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
         cp = parties.get(c.inn)
         if cp is None:
             continue
-        fit, fit_why = _product_fit(c, top_bm25, codes, predicted)
+        fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how)
         exp, exp_why = _experience(c, codes, as_of)
         act, act_why = _activity(cp, ref, as_of)
         geo, geo_why = _geography(cp, query.region)

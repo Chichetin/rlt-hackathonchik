@@ -8,6 +8,8 @@ from __future__ import annotations
 import io
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -32,7 +34,25 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
 
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Q-24: with retriever pg_hybrid load the query model and check the vectors before the first request."""
+    try:
+        retriever = search_mod.load_config()["retriever"]
+    except (OSError, ValueError, KeyError):
+        retriever = None
+    if retriever == "pg_hybrid":
+        from src.match import pg_retriever
+
+        try:
+            log.info("pg_hybrid прогрет: %s", pg_retriever.warm())
+        except pg_retriever.VectorsUnavailable as e:
+            log.warning("pg_hybrid недоступен, поиск пойдёт по BM25: %s", e)
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="RLT.Hack — подбор поставщиков для АИС ГЗ",
     version="0.1.0",
     description="Подбор поставщиков, производителей и дистрибьюторов с объяснением и источниками фактов.",
