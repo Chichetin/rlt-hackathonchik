@@ -5,7 +5,8 @@ where this INN took part (the contract in src/contracts.py requires it: without 
 strip_unverified() shows "ИНН не подтверждён"). Organizers' data has no names: name is
 "ИНН <inn>" until enrich() (D-019). An INN that fails the checksum becomes inn=None.
 Region is not derived here: a KPP/INN prefix is the tax office, not a fact with Evidence
-(`geography` in search reads `kpp` itself). Pass a shared `con` from search() per request.
+(`geography` in search reads `kpp` itself). Rows come from a store (src/match/store.py): search()
+passes the Postgres or parquet rows to `from_rows`, `counterparties` reads parquet.
 """
 
 from __future__ import annotations
@@ -13,8 +14,6 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 from pathlib import Path
-
-import duckdb
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
 from src.ingest.build import DEFAULT_OUT
@@ -29,6 +28,26 @@ STATS_KEYS = (
     "last_seen",
     "median_start_price",
     "top_okpd2",
+    # profile (D-064)
+    "okpd2_classes",
+    "top_class",
+    "okpd2_groups",
+    "top_class_share",
+    "assortment_breadth",
+    "distinct_codes",
+    "items_per_lot",
+    "p90_start_price",
+    "top_customer_share",
+    "repeat_win_share",
+    "active_months",
+    "lots_last_90d",
+    "em_offers",
+    "em_wins",
+    "aisgz_contracts",
+    "avg_rivals",
+    "entity_type",
+    "kpp_count",
+    "smp_contracts",
 )
 
 
@@ -63,49 +82,21 @@ def _stats(row: dict) -> dict[str, float | int | str]:
 
 
 def counterparties(
-    inns: list[str],
-    as_of: date | None = None,
-    processed: Path = DEFAULT_OUT,
-    con: duckdb.DuckDBPyConnection | None = None,
+    inns: list[str], as_of: date | None = None, processed: Path = DEFAULT_OUT
 ) -> dict[str, Counterparty]:
-    """Counterparty per INN found in the history before as_of; unknown INNs are absent."""
+    """Counterparty per INN found in the history before as_of (ingest parquet); unknown INNs are absent."""
+    from src.match.store import ParquetStore
+
     if not inns:
         return {}
-    own = con is None
-    con = con or duckdb.connect()
-    try:
-        return _counterparties(con, inns, as_of, processed)
-    finally:
-        if own:
-            con.close()
+    suppliers_path(as_of, processed)  # the error names the command that builds it
+    return from_rows(ParquetStore(processed).supplier_rows(inns, as_of), built_at(processed))
 
 
-def _counterparties(
-    con: duckdb.DuckDBPyConnection, inns: list[str], as_of: date | None, processed: Path
-) -> dict[str, Counterparty]:
-    sup = str(suppliers_path(as_of, processed)).replace("\\", "/")
-    part = str(processed / "participants.parquet").replace("\\", "/")
-    cond = "publish_date < $2" if as_of else "TRUE"
-    params: list = [inns] + ([as_of] if as_of else [])
-    rel = con.execute(
-        f"""
-        SELECT s.*, last.lot_id AS last_lot, last.channel AS last_channel
-        FROM read_parquet('{sup}') s
-        LEFT JOIN (
-            SELECT supplier_inn, arg_max(lot_id, (publish_date, lot_id)) AS lot_id,
-                   arg_max(channel, (publish_date, lot_id)) AS channel
-            FROM read_parquet('{part}') WHERE supplier_inn IN (SELECT unnest($1)) AND {cond}
-            GROUP BY supplier_inn
-        ) last ON last.supplier_inn = s.inn
-        WHERE s.inn IN (SELECT unnest($1))
-        """,
-        params,
-    )
-    cols = [d[0] for d in rel.description]
-    fetched = built_at(processed)
+def from_rows(rows: list[dict], fetched: datetime) -> dict[str, Counterparty]:
+    """Store rows (suppliers.* + last_lot, last_channel) -> Counterparty with the INN Evidence."""
     out: dict[str, Counterparty] = {}
-    for values in rel.fetchall():
-        row = dict(zip(cols, values, strict=True))
+    for row in rows:
         raw_inn: str = row["inn"]
         valid = inn_is_valid(raw_inn)
         evidence = []

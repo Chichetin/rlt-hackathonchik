@@ -77,8 +77,37 @@ async function post(path: string, body: unknown): Promise<Response> {
   return r;
 }
 
-export async function search(q: Query): Promise<SearchResponse> {
-  return (await post("/api/search", q)).json();
+// Пагинация и фильтры — на сервере (D-024): страница каждого блока, размер блока после фильтров —
+// в заголовках X-Total-History / X-Total-Discovered (в замороженном SearchResponse поля total нет).
+export const PAGE = 20;
+export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
+export type Totals = { history: number; discovered: number };
+// note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
+export type SearchPage = SearchResponse & { total: Totals; note?: string };
+
+function searchNote(r: Response): string | undefined {
+  const raw = r.headers.get("X-Search-Note");
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return undefined; // malformed encoding: fall back to the general empty text
+  }
+}
+
+export async function search(q: Query, page: { limit?: number; offset?: number } = {}): Promise<SearchPage> {
+  const qs = new URLSearchParams({ limit: String(page.limit ?? PAGE), offset: String(page.offset ?? 0) });
+  const r = await post(`/api/search?${qs}`, q);
+  const body: SearchResponse = await r.json();
+  const total = (header: string, shown: number) => {
+    const v = Number(r.headers.get(header) ?? NaN);
+    return Number.isFinite(v) ? v : shown + (page.offset ?? 0);
+  };
+  return {
+    ...body,
+    total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
+    note: searchNote(r),
+  };
 }
 
 export async function exportXlsx(q: Query): Promise<void> {
@@ -129,8 +158,16 @@ export function filterNotes(base: SearchResponse | null, f: Filters): string[] {
   const notes: string[] = [];
   const unknown = (pred: (cp: Counterparty) => boolean) => rows.filter((m) => pred(m.counterparty)).length;
   if (f.only_manufacturers) {
-    const n = unknown((cp) => !cp.kind || cp.kind === "unknown");
+    // kind = null: no main OKVED yet, the role appears after enrichment; "unknown": the rule (D-057) was
+    // applied to the main OKVED and set no role — the basis is in the card, enrichment will not change it
+    const n = unknown((cp) => !cp.kind);
     if (n) notes.push(`Тип поставщика ещё не определён у ${n} из ${total} — признак появится после обогащения.`);
+    const u = unknown((cp) => cp.kind === "unknown");
+    if (u) {
+      notes.push(
+        `У ${u} из ${total} основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).`,
+      );
+    }
   }
   if (f.only_msp) {
     const n = unknown((cp) => cp.is_msp == null);

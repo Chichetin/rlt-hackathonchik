@@ -10,11 +10,16 @@ Gate (as `make eval-test` in FloodValue):
 4. the search is not a # STUB.
 A git failure refuses (fail closed). The attempt is recorded BEFORE the holdout is read, so a
 crash after reading still leaves a trace; the result row is appended after the run.
+
+What is scored: `holdout_sample` cases of configs/split.yaml (null — all), the n lowest
+sha256(holdout_seed:query_id). The whole holdout is 88 848 cases at 0.25–0.30 s each — a 6–7.5 h
+one-shot run that does not fit the window before code freeze (#145, docs/REVIEW.md); the sample
+is fixed in the hashed config before the run, so it cannot depend on any result.
 """
 
 from __future__ import annotations
 
-import json
+import hashlib
 import os
 import sys
 from datetime import UTC, datetime
@@ -23,12 +28,20 @@ from pathlib import Path
 import yaml
 
 from src.eval import run as R
-from src.eval.split import ROOT, load_cases, split_config, unseal
+from src.eval.split import ROOT, EvalCase, load_cases, split_config, unseal
 from src.match import search as search_mod
 
 CONFIRM_ENV = "EVAL_FINAL_CONFIRM"
 FROZEN_PATHS = ("src", "configs", "pyproject.toml", "uv.lock")
 FINAL_LOG = ROOT / "eval" / "final-log.md"
+
+
+def holdout_sample(cases: list[EvalCase], n: int | None, seed: int) -> list[EvalCase]:
+    """The n cases with the lowest sha256(seed:query_id), in query_id order; no n or n ≥ all — every case."""
+    if not n or n >= len(cases):
+        return cases
+    picked = sorted(cases, key=lambda c: hashlib.sha256(f"{seed}:{c.query.query_id}".encode()).hexdigest())[:n]
+    return sorted(picked, key=lambda c: c.query.query_id)
 
 
 def seen_file(root: Path) -> Path:
@@ -38,6 +51,8 @@ def seen_file(root: Path) -> Path:
 
 def gate(confirm: str | None, root: Path = ROOT, log: Path = FINAL_LOG) -> str:
     """Returns the config sha256 if the holdout may be read, else raises PermissionError."""
+    if "BM25_TOKENIZER" in os.environ:
+        raise PermissionError("BM25_TOKENIZER задан: eval-final оценивает только токенизатор из configs/search.yaml")
     try:
         sha = R.config_sha256(root)
         dirty = R.git("status", "--porcelain", "--", *FROZEN_PATHS, root=root, strict=True)
@@ -66,16 +81,26 @@ def main() -> int:
         print(f"eval-final: отказ — {e}", file=sys.stderr)
         return 2
     cfg = yaml.safe_load(R.SEARCH_CONFIG.read_text(encoding="utf-8"))
+    split = split_config()
+    n, seed = split.get("holdout_sample"), split.get("holdout_seed") or 0
+    # checked before the marker: a typo in the config must not burn the configuration without a result
+    if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n <= 0) or not isinstance(seed, int):
+        print(f"eval-final: отказ — holdout_sample = {n!r}, holdout_seed = {seed!r}: нужны целые (n > 0 или null)",
+              file=sys.stderr)
+        return 2
     with seen_file(ROOT).open("a", encoding="utf-8") as f:  # the attempt, before the holdout is read
         f.write(f"{sha} {datetime.now(UTC).isoformat(timespec='seconds')} {os.environ.get('USER', '?')}\n")
     with unseal():
-        cases = load_cases("holdout", split_config())
+        every = load_cases("holdout", split)
+        cases = holdout_sample(every, n, seed)
         rec = R.result_record(f"final-{sha[:8]}", "holdout", cfg, R.evaluate(cases, cfg))
+    rec["sample"] = {"n": len(cases), "of": len(every), "seed": seed}
     out = R.RESULTS / f"final-{sha[:8]}.json"
-    out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # one line per case: the 3 000-case sample is ≈ 1.2 MiB; the whole holdout (null) ≈ 11 MiB — over the 5 MB guard
+    out.write_text(R.dump_record(rec), encoding="utf-8")
     m = rec["metrics"]
     row = (f"| {datetime.now(UTC):%Y-%m-%d %H:%M} UTC | {rec['commit'][:8]} | {sha} | "
-           f"{os.environ.get('USER', '?')} | {rec['n_queries']} | "
+           f"{os.environ.get('USER', '?')} | {rec['n_queries']} из {len(every)} (seed {seed}) | "
            + " | ".join(f"{m[k]['value']:.3f} [{m[k]['ci95'][0]:.3f}, {m[k]['ci95'][1]:.3f}]" for k in m)
            + f" | {out.relative_to(ROOT)} |\n")
     with FINAL_LOG.open("a", encoding="utf-8") as f:

@@ -4,10 +4,12 @@ Document = one distinct text among ТРУ.product_name and Извещения.su
 participants published strictly before `as_of` (all lots when as_of is None) — no leak (D-018).
 Each document maps to the lots where the text occurs (docs.parquet: doc_id, lot_id).
 
-The index is built lazily on the first query and cached on disk in INDEX_DIR (default
-`indexes/`, outside git) under a key of the ingest manifest (built_at, row counts, path), as_of
-and the tokenizer version; a rebuilt ingest gives a new key. In-process the loaded index is
-kept in memory, so a query never rebuilds it.
+Texts come from the data store (src/match/store.py: Postgres or ingest parquet — the same rows in the
+same bytewise order). The index is built lazily on the first query and cached on disk in INDEX_DIR
+(default `indexes/`, outside git) under a key of the ingest manifest (built_at, row counts), as_of
+and the tokenizer version: a rebuilt ingest gives a new key, and Postgres loaded from that ingest
+shares the index with parquet. In-process the loaded index is kept in memory, so a query never
+rebuilds it.
 """
 
 from __future__ import annotations
@@ -18,55 +20,41 @@ import logging
 import os
 import shutil
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
 import bm25s
-import duckdb
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.match.text import TOKENIZER_VERSION, tokenize
+from src.match.store import LotHits, ParquetStore, Store, get_store
+from src.match.store import processed_dir as processed_dir
+from src.match.text import tokenize, tokenizer_version
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
-REQUIRED = ("manifest.json", "notices.parquet", "participants.parquet", "items.parquet", "suppliers.parquet")
-
-
-def _dir(env: str, default: str) -> Path:
-    d = Path(os.environ.get(env) or ROOT / default)
-    return d if d.is_absolute() else ROOT / d
-
-
-def processed_dir() -> Path:
-    """DATA_PROCESSED_DIR (as src/api/lots.py), default data/processed."""
-    return _dir("DATA_PROCESSED_DIR", "data/processed")
 
 
 def index_root() -> Path:
-    return _dir("INDEX_DIR", "indexes")
+    d = Path(os.environ.get("INDEX_DIR") or ROOT / "indexes")
+    return d if d.is_absolute() else ROOT / d
 
 
 def check_processed(processed: Path) -> dict:
-    """Manifest of the ingest output, or FileNotFoundError with the command that builds it."""
-    missing = [f for f in REQUIRED if not (processed / f).exists()]
-    if missing:
-        raise FileNotFoundError(
-            f"нет данных для поиска в {processed}: {', '.join(missing)} — соберите "
-            "`uv run python -m src.ingest.build` (DATA_RAW_DIR → DATA_PROCESSED_DIR)"
-        )
-    return json.loads((processed / "manifest.json").read_text(encoding="utf-8"))
+    """Manifest of the ingest parquet, or FileNotFoundError with the command that builds it."""
+    return ParquetStore(processed).manifest()
 
 
 def pq_path(path: Path) -> str:
     return "'" + path.as_posix().replace("'", "''") + "'"
 
 
-def index_key(processed: Path, manifest: dict, as_of: date | None) -> str:
+def index_key(manifest: dict, as_of: date | None) -> str:
+    """Store-independent: Postgres loaded from an ingest carries its manifest (src/db/load.py)."""
     raw = json.dumps(
-        [str(processed.resolve()), manifest.get("built_at"), manifest.get("rows"),
-         as_of.isoformat() if as_of else None, TOKENIZER_VERSION],
+        [manifest.get("built_at"), manifest.get("rows"), as_of.isoformat() if as_of else None, tokenizer_version()],
         sort_keys=True,
     )
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -80,6 +68,9 @@ class LotIndex:
     vocab: frozenset[str]
     n_docs: int
     data_end: date | None  # latest publish_date in the indexed history
+    as_of: date | None = None
+    sidecars: dict = field(default_factory=dict, repr=False, compare=False)  # derived data loaded once (search.py)
+    _cached: tuple[np.ndarray, np.ndarray, pa.Array] | None = field(default=None, repr=False, compare=False)
 
     @property
     def docs_parquet(self) -> str:
@@ -93,41 +84,40 @@ class LotIndex:
         docs, scores = self.retriever.retrieve([known], k=min(top, self.n_docs), show_progress=False)
         return [(int(d), float(s)) for d, s in zip(docs[0], scores[0], strict=True) if s > 0]
 
+    def _maps(self) -> tuple[np.ndarray, np.ndarray, pa.Array]:
+        """(lot_id by doc, offsets: lots of doc d = [off[d], off[d+1]), texts) — read once per index."""
+        if self._cached is None:
+            docs = pq.read_table(self.path / "docs.parquet")  # written sorted by doc_id (_build)
+            lots = docs.column("lot_id").to_numpy()
+            offsets = np.searchsorted(docs.column("doc_id").to_numpy(), np.arange(self.n_docs + 1))
+            texts = pq.read_table(self.path / "texts.parquet", columns=["text"]).column("text").combine_chunks()
+            self._cached = (lots, offsets, texts)
+        return self._cached
+
+    def lot_hits(self, hits: list[tuple[int, float]]) -> LotHits:
+        """Documents -> their lots; a lot keeps its best document (the first one in `hits`: score desc)."""
+        lots_by_doc, off, _ = self._maps()
+        parts = [(lots_by_doc[off[d]:off[d + 1]], s, d, r) for r, (d, s) in enumerate(hits)]
+        if not parts:
+            return LotHits(np.empty(0, np.int64), np.empty(0), np.empty(0, np.int32))
+        lot = np.concatenate([p[0] for p in parts]).astype(np.int64)
+        score = np.concatenate([np.full(len(p[0]), p[1]) for p in parts])
+        doc = np.concatenate([np.full(len(p[0]), p[2], np.int32) for p in parts])
+        rank = np.concatenate([np.full(len(p[0]), p[3]) for p in parts])
+        order = np.lexsort((rank, lot))  # by lot, then by rank: the first row of a lot is its best document
+        pick = order[np.unique(lot[order], return_index=True)[1]]
+        return LotHits(lot[pick], score[pick], doc[pick])
+
+    def text(self, doc_id: int) -> str:
+        return self._maps()[2][doc_id].as_py()
+
 
 _cache: dict[str, LotIndex] = {}
 _lock = threading.Lock()
 
 
-def _build(processed: Path, as_of: date | None, out: Path) -> None:
-    cond = "publish_date < $as_of" if as_of else "TRUE"
-    params = {"as_of": as_of} if as_of else {}
-    con = duckdb.connect()
-    try:
-        rows = con.execute(
-            f"""
-            WITH lots AS (
-                SELECT DISTINCT lot_id FROM read_parquet({pq_path(processed / "participants.parquet")})
-                WHERE {cond}
-            ),
-            texts AS (
-                SELECT i.lot_id, i.product_name AS t
-                FROM read_parquet({pq_path(processed / "items.parquet")}) i JOIN lots USING (lot_id)
-                WHERE i.product_name IS NOT NULL
-                UNION
-                SELECT n.lot_id, n.subject AS t
-                FROM read_parquet({pq_path(processed / "notices.parquet")}) n JOIN lots USING (lot_id)
-                WHERE n.subject IS NOT NULL
-            )
-            SELECT t, list(DISTINCT lot_id ORDER BY lot_id) FROM texts GROUP BY t ORDER BY t
-            """,
-            params,
-        ).fetchall()
-        data_end = con.execute(
-            f"SELECT max(publish_date) FROM read_parquet({pq_path(processed / 'participants.parquet')}) WHERE {cond}",
-            params,
-        ).fetchone()
-    finally:
-        con.close()
+def _build(store: Store, as_of: date | None, out: Path) -> None:
+    rows, end = store.index_rows(as_of)
     corpus: list[list[str]] = []
     texts: list[str] = []
     doc_ids: list[int] = []
@@ -150,10 +140,9 @@ def _build(processed: Path, as_of: date | None, out: Path) -> None:
                    out / "docs.parquet")
     pq.write_table(pa.table({"doc_id": pa.array(range(len(texts)), pa.int32()), "text": texts}),
                    out / "texts.parquet")
-    end = data_end[0] if data_end else None
     (out / "meta.json").write_text(
         json.dumps({"n_docs": len(corpus), "n_pairs": len(lot_ids), "as_of": as_of.isoformat() if as_of else None,
-                    "data_end": end.isoformat() if end else None, "tokenizer": TOKENIZER_VERSION},
+                    "data_end": end.isoformat() if end else None, "tokenizer": tokenizer_version()},
                    ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -168,22 +157,29 @@ def _load(key: str, path: Path) -> LotIndex:
     else:
         retriever, vocab = bm25s.BM25(), frozenset()
     end = meta.get("data_end")
-    return LotIndex(key, path, retriever, vocab, n_docs, date.fromisoformat(end) if end else None)
+    as_of = meta.get("as_of")
+    return LotIndex(key, path, retriever, vocab, n_docs, date.fromisoformat(end) if end else None,
+                    date.fromisoformat(as_of) if as_of else None)
 
 
-def get_index(processed: Path, as_of: date | None) -> LotIndex:
-    """Cached index for (ingest manifest, as_of): memory, then disk, else built once."""
-    manifest = check_processed(processed)
-    key = index_key(processed, manifest, as_of)
+def get_index(store: Store | Path | None, as_of: date | None) -> LotIndex:
+    """Cached index for (ingest manifest, as_of): memory, then disk, else built once from the store.
+
+    `store`: a Store, an ingest directory (parquet) or None — the store of the environment."""
+    if store is None:
+        store = get_store()
+    elif isinstance(store, Path):
+        store = ParquetStore(store)
+    key = index_key(store.manifest(), as_of)
     with _lock:
         if key in _cache:
             return _cache[key]
         path = index_root() / f"bm25-{key}"
         if not (path / "meta.json").exists():
-            log.info("building BM25 index %s (as_of=%s) from %s", key, as_of, processed)
+            log.info("building BM25 index %s (as_of=%s) from %r", key, as_of, store)
             tmp = path.with_name(path.name + f".tmp{os.getpid()}")
             shutil.rmtree(tmp, ignore_errors=True)
-            _build(processed, as_of, tmp)
+            _build(store, as_of, tmp)
             shutil.rmtree(path, ignore_errors=True)
             tmp.rename(path)
         idx = _load(key, path)
@@ -199,28 +195,39 @@ def clear_memory_cache() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Prebuild the product index (as_of=None) and the eval one (split cutoff): no wait on the first query.
+    """Prebuild the product index (as_of=None) and the eval one (split cutoff), each with its position
+    codes (#83): no wait on the first query, with or without an OKPD2 code.
 
         uv run python -m src.match.index
     """
     import sys
     import time
 
-    from src.eval.split import split_config
+    import duckdb
 
-    processed = processed_dir()
+    from src.eval.split import split_config
+    from src.match.search import prebuild_doc_codes
+
     for as_of in (None, date.fromisoformat(str(split_config()["cutoff"]))):
         t0 = time.time()
         try:
-            idx = get_index(processed, as_of)
+            store = get_store()
+            idx = get_index(store, as_of)
         except FileNotFoundError as e:
             print(e, file=sys.stderr)
             return 2
-        print(f"as_of={as_of}: {idx.n_docs} документов, {idx.path} ({time.time() - t0:.1f} с)")
+        try:
+            codes = prebuild_doc_codes(store, idx)
+            where = ("рядом с индексом" if codes.parent == idx.path
+                     else f"ВНЕ индекса ({codes}): контейнер его не увидит")
+        except (OSError, ValueError, duckdb.Error) as e:  # search falls back to the lot vote (D-045)
+            where = f"НЕ построены ({e}) — запрос без кода определит класс по лотам"
+        print(f"as_of={as_of}: {idx.n_docs} документов из {store.name}, {idx.path}; коды позиций {where} "
+              f"({time.time() - t0:.1f} с)")
     return 0
 
 
-__all__ = ["LotIndex", "check_processed", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
+__all__ = ["LotHits", "LotIndex", "check_processed", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
 
 
 if __name__ == "__main__":

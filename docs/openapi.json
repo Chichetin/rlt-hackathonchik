@@ -28,15 +28,44 @@
       "post": {
         "summary": "Api Search",
         "operationId": "api_search_api_search_post",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "строк в каждом блоке",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "строк в каждом блоке"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "сдвиг в каждом блоке",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "сдвиг в каждом блоке"
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Query"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -490,6 +519,10 @@
             },
             "type": "object",
             "title": "Queue"
+          },
+          "store": {
+            "type": "string",
+            "title": "Store"
           }
         },
         "type": "object",
@@ -497,7 +530,8 @@
           "status",
           "stub",
           "llm",
-          "queue"
+          "queue",
+          "store"
         ],
         "title": "Health"
       },

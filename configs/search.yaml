@@ -1,13 +1,29 @@
 # Конфигурация поиска, которую оценивает `make eval` и замораживает `make eval-final`.
 # Любая правка = новая конфигурация (новый sha256). Источник: разделы 5 и 7 workflow.
 retriever: bm25          # T-02: stub → bm25 (v1, D-029) → bm25+okpd2 → hybrid_rrf (только через эксперимент)
+tokenizer: prefix5       # prefix5 | snowball | pymorphy (#116); переопределение — переменная BM25_TOKENIZER
 k: 20
-# Стартовые экспертные веса (research/DECISIONS.md D-004). Изменение состава компонент или
-# формулы — подтверждение человека №3 (CLAUDE.md): это слайд.
+# Веса H-15f (#22, #174, подтверждение человека №3 01.10; research/DECISIONS.md D-077), нормированные к 1:
+# 0.8 / 0.2 / 0.05 из configs/experiments.yaml, делённые на 1.05 — порядок как у H-15f с точностью до
+# округления балла до 4 знаков, максимум балла 1.0.
+# Было (D-004, v1): 0.35 / 0.2 / 0.2 / 0.1 / 0.1 / 0.05. Изменение состава компонент или формулы — подтверждение
+# человека №3 (CLAUDE.md): это слайд.
 weights:
-  product_fit: 0.35
-  experience: 0.2
-  reliability: 0.2
-  activity: 0.1
-  geography: 0.1
-  price: 0.05
+  product_fit: 0.762
+  experience: 0.19
+  reliability: 0.0
+  activity: 0.048
+  geography: 0.0          # показывается в карточке, в балл не входит (H-15f: регион КПП штрафовал ИП)
+  price: 0.0
+# Опции скоринга H-15f (src/match/search.py OPTIONS): product_fit = 0.8 · BM25 + 0.2 · глубина ОКПД2;
+# experience — лоты и победы среди лотов с похожими позициями, а не во всей группе ОКПД2; равные баллы — по BM25.
+options:
+  fit_bm25_share: 0.8
+  experience_by: similar
+  tie_break: bm25
+# Сигналы экспериментов (#22, src/match/signals.py): доля в [0, 1], по умолчанию 0 = v1 без изменений.
+# incumbent — участие в лотах того же заказчика до as_of, подмешивается в experience.
+signals:
+  incumbent: 0.0
+  # inn_region (H-15c) — регион ИП без КПП / с КПП 000000000 по первым двум цифрам ИНН, доля geography.
+  inn_region: 0.0
