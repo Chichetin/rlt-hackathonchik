@@ -1,4 +1,4 @@
-"""F-10 (#256, D-098): the endpoints that spend the registries' patience have a key, a queue ceiling and a live cap."""
+"""F-10 (#256, D-099): the endpoints that spend the registries' patience have a key, a queue ceiling and a live cap."""
 
 import pytest
 from fastapi.testclient import TestClient

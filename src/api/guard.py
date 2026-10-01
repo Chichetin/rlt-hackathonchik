@@ -1,4 +1,4 @@
-"""Limits of the endpoints that spend the registries' patience (F-10, #256, D-098).
+"""Limits of the endpoints that spend the registries' patience (F-10, #256, D-099).
 
 `POST /api/enrich` feeds the worker, `GET /api/counterparty` calls pb.nalog.ru inside the request: an open flood
 of either ends in a captcha, and the enrichment on the venue stops. Three limits (`.env`; the first two are read
