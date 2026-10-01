@@ -160,18 +160,43 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
 }
 
 /** What puts the company in its block: its procurement record, or that it is new to АИС ГЗ. */
+function OriginIcon({ origin }: { origin: "history" | "new" }) {
+  return <svg className="origin-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {origin === "history"
+      ? <><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /><path d="M12 7v5l3 2" /></>
+      : <><circle cx="12" cy="12" r="8" /><path d="M12 8v8M8 12h8" /></>}
+  </svg>;
+}
+
 function OriginBadge({ m }: { m: CounterpartyMatch }) {
   const st = m.counterparty.stats ?? {};
-  if (m.origin !== "history") return <span className="badge badge-new">Новый · нет в АИС ГЗ</span>;
+  if (m.origin !== "history") return <span className="badge badge-new"><OriginIcon origin="new" />Новый · нет в АИС ГЗ</span>;
   const lots = st.lots_participated;
-  if (typeof lots !== "number") return <span className="badge badge-history">Участник закупок АИС ГЗ</span>;
+  if (typeof lots !== "number") return <span className="badge badge-history"><OriginIcon origin="history" />Участник закупок АИС ГЗ</span>;
   const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
-  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
+  return <span className="badge badge-history"><OriginIcon origin="history" />{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
+}
+
+// the usual short legal forms: the list stays readable in a narrow column; the full name is in the tooltip and the card
+const LEGAL_FORMS: [RegExp, string][] = [
+  [/^ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ\s+/i, "ООО "],
+  [/^ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ПАО "],
+  [/^НЕПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "НАО "],
+  [/^ЗАКРЫТОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ЗАО "],
+  [/^ОТКРЫТОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ОАО "],
+  [/^АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "АО "],
+  [/^ИНДИВИДУАЛЬНЫЙ ПРЕДПРИНИМАТЕЛЬ\s+/i, "ИП "],
+];
+
+export function shortName(name: string): string {
+  for (const [re, short] of LEGAL_FORMS) if (re.test(name)) return name.replace(re, short);
+  return name;
 }
 
 function CompanyName({ name }: { name: string }) {
   // the organizers' data has no supplier names (contracts.py): such a row is named by its INN
-  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"}>{name}</span>;
+  const short = shortName(name);
+  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={short !== name ? name : undefined}>{short}</span>;
 }
 
 export function App() {
@@ -381,7 +406,7 @@ export function App() {
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
     <div inert={!!open}><ScrollTools /></div>
-    <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
+    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
       {path === "/search" && <div className="search-background"><WaveField pattern="slats" /></div>}
@@ -406,7 +431,7 @@ export function App() {
         </div>
       )}
 
-      <div className="search-workbench">
+      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""}`}>
       <form
         id="supplier-search"
         className="query"
@@ -415,6 +440,7 @@ export function App() {
           void run();
         }}
       >
+        <div className="query-main">
         <div className="section-heading">
           <div>
             <h2>Параметры закупки</h2>
@@ -466,6 +492,12 @@ export function App() {
           setText(example);
           resetLot();
         }} />
+        </div>
+        <div className="query-options">
+        {path === "/search" && <div className="section-heading"><div>
+          <h2>Уточнить подбор</h2>
+          <p>Необязательно. Поможет сузить круг компаний.</p>
+        </div></div>}
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -517,7 +549,7 @@ export function App() {
               <SearchIcon />
               {state === "loading" ? "Ищем…" : "Найти поставщиков"}
             </button>
-            <button
+            {path === "/results" && <button
               type="button"
               className="secondary"
               disabled={!res}
@@ -529,9 +561,10 @@ export function App() {
               }
             >
               Выгрузить в Excel
-            </button>
-            {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
+            </button>}
+            {path === "/results" && weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
           </div>
+        </div>
         </div>
       </form>
       <div className="output">
@@ -590,7 +623,7 @@ export function App() {
           </header>
           <Block
             variant="history"
-            tag="Проверенные"
+            tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             rows={weights ? rerank(res.history, weights).slice(0, shown) : res.history}
@@ -606,7 +639,7 @@ export function App() {
           />
           <Block
             variant="new"
-            tag="Новые"
+            tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             rows={rerank(res.discovered, weights)}
@@ -627,12 +660,6 @@ export function App() {
       </motion.div>
       </AnimatePresence>
       </div>
-      {path !== "/" && <footer className="appfoot">
-        <div className="appfoot-in">
-          <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
-          <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
-        </div>
-      </footer>}
     </motion.div>
     <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} />}</AnimatePresence>
     </LayoutGroup>
@@ -655,7 +682,7 @@ function Block(props: {
   const reduced = useReducedMotion();
   return (
     <section className={`block block-${props.variant}`} aria-label={props.title}>
-      <span className="block-tag">{props.tag}</span>
+      <span className="block-tag"><OriginIcon origin={props.variant} />{props.tag}</span>
       <h2>
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
@@ -780,7 +807,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         <Logo cp={cp} large />
         <h2>{cp.name}</h2>
       </div>
-      <div className="card-summary">
+      <div className={`card-summary card-summary-${m.origin === "history" ? "history" : "new"}`}>
         <span>{m.origin === "history" ? "С опытом госзакупок" : "Из открытых источников"}</span>
         <span>Оценка <strong>{m.score.toFixed(2)}</strong></span>
       </div>
