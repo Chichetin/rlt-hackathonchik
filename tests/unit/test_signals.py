@@ -29,7 +29,7 @@ def with_signal(monkeypatch):
 
 
 def test_default_config_has_no_active_signal():
-    assert signal_shares(search_mod.load_config()) == {"incumbent": 0.0}
+    assert signal_shares(search_mod.load_config()) == {"incumbent": 0.0, "inn_region": 0.0}
 
 
 def test_signal_shares_validate():
@@ -39,7 +39,7 @@ def test_signal_shares_validate():
         signal_shares({"signals": {"incumbent": -0.1}})
     with pytest.raises(ValueError):
         signal_shares({"signals": {"bogus": 0.1}})
-    assert signal_shares({"signals": {"incumbent": 1}}) == {"incumbent": 1.0}
+    assert signal_shares({"signals": {"incumbent": 1}}) == {"incumbent": 1.0, "inn_region": 0.0}
 
 
 def test_mix_zero_share_is_identity_and_saturates():
