@@ -132,12 +132,14 @@ def print_table(rec: dict) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--exp", required=True, help="experiment id, e.g. H-07 (research/EXPERIMENTS.md)")
+    ap.add_argument("--part", default="dev", choices=("dev", "dev_full", "real"),
+                    help="dev sample (default), all dev cases or the 5–10 real cases; never holdout")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
         return 2
     cfg = yaml.safe_load(SEARCH_CONFIG.read_text(encoding="utf-8"))
-    rec = result_record(args.exp, "dev", cfg, evaluate(load_cases("dev", split_config()), cfg))
+    rec = result_record(args.exp, args.part, cfg, evaluate(load_cases(args.part, split_config()), cfg))
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
