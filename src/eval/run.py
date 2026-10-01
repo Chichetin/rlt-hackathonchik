@@ -261,6 +261,9 @@ def load_method_config(exp: str, baseline: str | None = None, config_of: str | N
         cfg[key] = {**(cfg.get(key) or {}), **value} if isinstance(value, dict) else value
     if applied:
         log.warning("эксперимент %s: поверх %s наложено %s", config_of or exp, SEARCH_CONFIG.name, applied)
+    else:
+        log.warning("id %s: записи в %s нет — конфигурация продукта (%s)", exp, EXPERIMENTS_CONFIG.name,
+                    SEARCH_CONFIG.name)
     return cfg
 
 
