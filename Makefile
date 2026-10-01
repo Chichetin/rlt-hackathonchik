@@ -6,10 +6,11 @@ PY := uv run --frozen
 UI := src/ui
 PORT ?= 8000
 EXP ?=
+PART ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs openapi openapi-check \
-        seal-check ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed okpd2
+        seal-check ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed okpd2 data
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -25,6 +26,9 @@ setup-ml:          ## + sentence-transformers/torch (CPU) для эмбедди�
 
 models:            ## скачать эмбеддинг-модели в кеш HF (до площадки!)
 	bash scripts/download-models.sh
+
+data:              ## датасет организаторов из релиза репозитория: make data [PART=processed|raw]
+	bash scripts/data.sh $(PART)
 
 lint:
 	$(PY) ruff check src tests scripts .claude/hooks
