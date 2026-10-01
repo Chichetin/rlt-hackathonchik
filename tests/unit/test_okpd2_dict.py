@@ -88,3 +88,14 @@ def test_committed_snapshot_is_readable():
     assert names["17.12.14"].startswith("Бумага")
     assert names["96.09.11.190"] == "Услуги по уходу за домашними животными прочие"
     assert all(okpd2.CODE.fullmatch(c) for c in names)
+
+
+def test_label_adds_official_name_to_code():
+    assert okpd2.label("17.12") == "17.12 «Бумага и картон»"
+    assert okpd2.label(" 17.12.14.110 ") == "17.12.14.110 «Бумага для печати»"
+    assert okpd2.label("17") == "17 «Бумага и изделия из бумаги»"
+    # excluded code: the parent is named and shown
+    assert okpd2.label("80.10.12.000") == "80.10.12.000 (по 80.10.12 «Услуги охраны»)"
+    long = okpd2.label("26.20.15")  # the official name is ~250 characters
+    assert long.startswith("26.20.15 «Машины вычислительные") and long.endswith("…»") and len(long) <= 70
+    assert okpd2.label("99.99.99.999") == "99.99.99.999"  # unknown: the code alone
