@@ -30,6 +30,8 @@ log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 # Baselines (T-08): experiment id -> method and its parameters; configs/search.yaml stays the product method.
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
+# Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
+EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
 RANKED_LIMIT = 5000  # per-case top-k lists are stored for parts up to this size
 RESULTS = ROOT / "eval" / "results"
 # Files whose bytes define the evaluated configuration (sha256 for eval-final).
@@ -88,7 +90,7 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
 
 def _rank_search(query: Query, cfg: dict) -> list[str]:
     """What the user sees: search() + strip_unverified(), as /api/search (D-015)."""
-    matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"))
+    matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"), config=cfg)
     if not getattr(search_mod, "IS_STUB", False):
         cache = SourceCache()
         matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
@@ -233,14 +235,19 @@ def dump_record(rec: dict) -> str:
 
 
 def load_method_config(exp: str, baseline: str | None = None) -> dict:
-    """configs/baselines.yaml entry for `baseline` (default: the experiment id), else configs/search.yaml."""
+    """configs/baselines.yaml entry for `baseline` (default: the experiment id), else configs/search.yaml
+    with the overrides of configs/experiments.yaml for this experiment id (none — the product configuration)."""
     known = yaml.safe_load(BASELINES_CONFIG.read_text(encoding="utf-8")) if BASELINES_CONFIG.exists() else {}
     name = baseline or exp
     if name in known:
         return {"baseline": name, **known[name]}
     if baseline:
         raise ValueError(f"baseline {baseline!r} нет в {BASELINES_CONFIG.name}: {sorted(known)}")
-    return yaml.safe_load(SEARCH_CONFIG.read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(SEARCH_CONFIG.read_text(encoding="utf-8"))
+    overrides = yaml.safe_load(EXPERIMENTS_CONFIG.read_text(encoding="utf-8")) if EXPERIMENTS_CONFIG.exists() else {}
+    for key, value in ((overrides or {}).get(exp) or {}).items():  # one level deep: weights, signals, options
+        cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
+    return cfg
 
 
 def main(argv: list[str] | None = None) -> int:

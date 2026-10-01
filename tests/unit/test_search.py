@@ -232,3 +232,59 @@ def test_prebuild_cli_builds_product_and_cutoff_indexes(search_data, tmp_path, c
 def test_prebuild_cli_without_data_exits_2(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "none"))
     assert index_mod.main() == 2
+
+
+# --- scoring options of experiments (#22): v1 is the default, every option is opt-in ---
+
+def _cfg(**options) -> dict:
+    return {**search_mod.load_config(), "options": options}
+
+
+def test_scoring_options_default_is_v1_and_unknown_is_an_error():
+    assert search_mod.scoring_options({}) == {"fit_bm25_share": search_mod.FIT_BM25_SHARE, "experience_by": "class",
+                                              "ip_region_by_inn": False, "tie_break": "inn"}
+    for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"}):
+        with pytest.raises(ValueError):
+            search_mod.scoring_options({"options": bad})
+    with pytest.raises(ValueError, match="retriever"):
+        search_mod.check_config({"retriever": "nope"})
+
+
+def test_config_argument_without_options_equals_product(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    assert search(q, config=search_mod.load_config()) == search(q)
+
+
+def test_experience_by_similar_counts_matched_lots(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    by_class = {m.counterparty.inn: m for m in search(q)}
+    for m in search(q, config=_cfg(experience_by="similar")):
+        exp = next(c for c in m.components if c.name == "experience")
+        assert "с похожими позициями" in exp.explanation
+        other = next(c for c in by_class[m.counterparty.inn].components if c.name == "experience")
+        assert "по ОКПД2" in other.explanation
+
+
+def test_ip_region_by_inn_only_with_the_option():
+    from src.contracts import Counterparty
+
+    ip = Counterparty(inn="780443398976", kpp="000000000", name="ИНН 780443398976")
+    assert search_mod._geography(ip, "Санкт-Петербург")[0] == 0.0  # v1: placeholder KPP — region 00
+    value, why = search_mod._geography(ip, "Санкт-Петербург", ip_by_inn=True)
+    assert value == 1.0 and "ИНН выдан" in why
+    lo = Counterparty(inn="470000000091", kpp=None, name="x")
+    assert search_mod._geography(lo, "Санкт-Петербург", ip_by_inn=True)[0] == search_mod.NEIGHBOUR_VALUE
+    far = Counterparty(inn="540000000000", kpp=None, name="x")
+    assert search_mod._geography(far, "Санкт-Петербург", ip_by_inn=True)[0] == 0.0
+    org = Counterparty(inn="7701000040", kpp="770101001", name="x")  # an organization keeps its KPP region
+    assert search_mod._geography(org, "Санкт-Петербург", ip_by_inn=True)[0] == 0.0
+
+
+def test_tie_break_bm25_orders_equal_scores_by_similarity(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    zero = {"product_fit": 0.0, "experience": 0.0, "activity": 0.0, "geography": 0.0}  # every score ties at 0
+    inns = [m.counterparty.inn or "~" for m in search(q, weights=zero)]
+    assert inns == sorted(inns)
+    fits = [next(c.value for c in m.components if c.name == "product_fit")
+            for m in search(q, weights=zero, config=_cfg(tie_break="bm25", fit_bm25_share=1.0))]
+    assert fits == sorted(fits, reverse=True)
