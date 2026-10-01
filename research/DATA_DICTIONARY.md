@@ -97,7 +97,7 @@
 | `items.parquet` | 2 550 089 | `lot_id`, `product_name`, `okpd2_code`, `okpd2_l2`, `okpd2_l4`, `okpd2_l6` | `DISTINCT` после `trim` (≈ 4.22 позиции/лот; на 9 485 строк меньше, чем `distinct` по сырым строкам — отличались только пробелами); уровень ОКПД2 есть, только если код достаточно длинный (`85.1` → только `l2`) |
 | `suppliers.parquet` | 44 196 | `inn`, `kpp`, `inn_valid`, ключи `Counterparty.stats`: `lots_participated`, `lots_won`, `win_rate`, `customers`, `customers_spb` (ИНН заказчика 78…), `first_seen`, `last_seen`, `median_start_price`, `top_okpd2` (3 частых группы `XX.XX`) | вся история (продукт) |
 | `suppliers_2025-07-01.parquet` | — | те же | только лоты с `publish_date` < cutoff (`configs/split.yaml`) — для eval без утечки |
-| `okpd2.parquet` (#154, D-073) | 21 166 | `code`, `name`, `matched_code`, `match` (`exact` / `parent`) | справочник ОКПД2 из снимка `configs/okpd2.csv` (data.mos.ru) + 75 кодов позиций из старых редакций с названием ближайшего родителя; `items.okpd2_code = okpd2.code` — название у 100 % позиций. `make okpd2` |
+| `okpd2.parquet` (#154, D-073) | 21 165 | `code`, `name`, `matched_code`, `match` (`exact` / `parent`) | справочник ОКПД2 из снимка `configs/okpd2.csv` (data.mos.ru) + 74 кода позиций из старых редакций с названием ближайшего родителя; `items.okpd2_code = okpd2.code` — название у 100 % позиций. `make okpd2` |
 | `manifest.json` | — | `built_at`, `rows`, `as_of`, `cutoff`, `invalid_supplier_inns` (22) | `fetched_at` для Evidence `data:` |
 
 **Профиль поставщика (D-064, `suppliers.parquet`, 19 ключей `Counterparty.stats`; считаются по лотам до `as_of`, в score не входят).** Распределение на полных данных (44 196 ИНН; квантили 10 / 25 / 50 / 75 / 90 / 99 % и максимум; сборка `--no-cutoff`):

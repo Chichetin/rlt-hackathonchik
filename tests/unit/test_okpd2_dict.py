@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from src.ingest import okpd2
 
@@ -26,10 +27,10 @@ NAMES = {"85": "Услуги в области образования", "17.12":
          "17.12.14.110": 'Бумага офисная "для принтеров"'}
 
 
-def _zip(tmp_path: Path) -> Path:
+def _zip(tmp_path: Path, text: str = EXPORT) -> Path:
     path = tmp_path / "okpd2.zip"
     with zipfile.ZipFile(path, "w") as z:
-        z.writestr("data-2752-01-10-2026.csv", ("﻿" + EXPORT).encode("utf-8"))
+        z.writestr("data-2752-01-10-2026.csv", ("﻿" + text).encode("utf-8"))
     return path
 
 
@@ -39,6 +40,19 @@ def test_import_export_writes_snapshot_and_meta(tmp_path: Path):
     assert okpd2.read_snapshot(snap) == NAMES
     m = json.loads(meta.read_text(encoding="utf-8"))
     assert m["file"] == "data-2752-01-10-2026.csv" and m["rows"] == 4 and m["url"].startswith("https://data.mos.ru/")
+
+
+def test_import_repairs_known_typo_and_rejects_unknown_malformed(tmp_path: Path):
+    # data.mos.ru release 113 lost «11.» in two codes of 96.09.11 (checked on classifikators.ru, 01.10.2026)
+    typo = EXPORT + '"Услуги по уходу за домашними животными прочие";"S.96.09.190";"S";"96.09.190";"";"6";\n'
+    snap, meta = tmp_path / "okpd2.csv", tmp_path / "okpd2.meta.json"
+    okpd2.import_export(_zip(tmp_path, typo), snap, meta)
+    names = okpd2.read_snapshot(snap)
+    assert names["96.09.11.190"] == "Услуги по уходу за домашними животными прочие" and "96.09.190" not in names
+
+    bad = EXPORT + '"Что-то";"C.17.12.999";"C";"17.12.999";"";"7";\n'
+    with pytest.raises(ValueError, match="17.12.999"):
+        okpd2.import_export(_zip(tmp_path, bad), snap, meta)
 
 
 def test_resolve_exact_parent_unknown():
@@ -72,3 +86,5 @@ def test_committed_snapshot_is_readable():
     names = okpd2.read_snapshot()
     assert len(names) > 20_000
     assert names["17.12.14"].startswith("Бумага")
+    assert names["96.09.11.190"] == "Услуги по уходу за домашними животными прочие"
+    assert all(okpd2.CODE.fullmatch(c) for c in names)

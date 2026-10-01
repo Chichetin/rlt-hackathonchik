@@ -21,6 +21,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import sys
 import zipfile
 from datetime import UTC, datetime
@@ -33,6 +34,10 @@ SNAPSHOT = ROOT / "configs/okpd2.csv"
 META = ROOT / "configs/okpd2.meta.json"
 URL = ("https://data.mos.ru/opendata/7710168515-obshcherossiyskiy-klassifikator-produktsii-po-vidam-"
        "ekonomicheskoy-deyatelnosti-okpd-2-ok-034-2014-kpes-2008")
+# Valid OKPD2 code: 01 / 01.1 / 01.11 / 01.11.1 / 01.11.11 / 01.11.11.1 … 01.11.11.111
+CODE = re.compile(r"\d{2}(\.\d(\d(\.\d(\d(\.\d{1,3})?)?)?)?)?", re.ASCII)
+# Typos of the source (release 113: «11.» lost in 96.09.11.*), checked on classifikators.ru 01.10.2026.
+FIXES = {"96.09.110": "96.09.11.110", "96.09.190": "96.09.11.190"}
 
 
 def _export_text(path: Path) -> tuple[str, str]:
@@ -50,7 +55,13 @@ def import_export(path: Path, dest: Path = SNAPSHOT, meta: Path = META) -> int:
     reader = csv.DictReader(io.StringIO(text), delimiter=";")
     if next(reader, {}).get("Kod") != "Код":  # second header row: Russian column names
         raise ValueError(f"{name}: не формат выгрузки data.mos.ru (нет второй строки заголовка «Код»)")
-    rows = {r["Kod"].strip(): (r["Name"].strip(), r["Razdel"].strip()) for r in reader if r["Kod"].strip()}
+    rows: dict[str, tuple[str, str]] = {}
+    for r in reader:
+        code = FIXES.get(r["Kod"].strip(), r["Kod"].strip())
+        if code and not CODE.fullmatch(code):
+            raise ValueError(f"{name}: код неправильной формы {code!r} — сверить со вторым источником, в FIXES")
+        if code:
+            rows[code] = (r["Name"].strip(), r["Razdel"].strip())
     with dest.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f, delimiter=";", lineterminator="\n")
         w.writerow(["code", "name", "section"])
