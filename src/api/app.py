@@ -22,6 +22,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -329,8 +330,10 @@ def api_okpd2(codes: str = "") -> dict[str, str]:
     return {c: okpd2_label(c) for c in items}
 
 
-_LIMITED = {401: {"description": "нужен ключ API (X-API-Key), если на сервере задан API_KEY"},
-            429: {"description": "лимит очереди или живых обогащений; повторите через Retry-After секунд"}}
+_LIMITED: dict[int | str, dict[str, Any]] = {
+    401: {"description": "нужен ключ API (X-API-Key), если на сервере задан API_KEY"},
+    429: {"description": "лимит очереди или живых обогащений; повторите через Retry-After секунд"},
+}
 
 
 @app.get("/api/counterparty/{inn}", response_model=Counterparty, dependencies=[Depends(guard.require_api_key)],

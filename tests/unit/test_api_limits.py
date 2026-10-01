@@ -36,7 +36,10 @@ def test_without_a_configured_key_the_endpoints_stay_open(client):
     assert client.post(f"/api/enrich/{_inn(1)}").status_code == 202
 
 
-@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "wrong"}, {"X-API-Key": KEY[:-1]}, {"X-API-Key": "ключ".encode()}])
+WRONG_HEADERS = [{}, {"X-API-Key": "wrong"}, {"X-API-Key": KEY[:-1]}, {"X-API-Key": "ключ".encode()}]
+
+
+@pytest.mark.parametrize("headers", WRONG_HEADERS)
 def test_enqueue_needs_the_key_when_it_is_set(client, monkeypatch, headers):
     monkeypatch.setenv("API_KEY", KEY)
     r = client.post(f"/api/enrich/{_inn(2)}", headers=headers)
@@ -127,7 +130,8 @@ def test_reviving_a_failed_task_is_a_new_waiting_task(tmp_path, monkeypatch):
     with pytest.raises(Q.QueueFull):
         Q.enqueue(eng, "enrich", _inn(50), max_pending=1)
     assert Q.status_counts(eng) == {"failed": 1, "pending": 1}  # a refused revival changed nothing
-    assert Q.enqueue(eng, "enrich", _inn(50), retry_failed=False, max_pending=1) == failed  # stays failed, no room needed
+    # no revival asked: the failed task stays failed and needs no room
+    assert Q.enqueue(eng, "enrich", _inn(50), retry_failed=False, max_pending=1) == failed
 
 
 # --- live cap of /api/counterparty -----------------------------------------------------------------------------------
