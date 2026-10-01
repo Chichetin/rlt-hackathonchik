@@ -378,8 +378,8 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
         geo, geo_why = NEIGHBOUR_VALUE, f"Реестр МСП: соседний регион — {where}"
     else:
         geo, geo_why = 0.0, f"Реестр МСП: {where}; регион запроса — {region}"
-    if region_note:
-        geo_why = f"{geo_why}; {region_note}"
+    if region_note:  # the comparison is with the customer's region, say so
+        geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {region_note}"
 
     parts: dict[str, tuple[float, float, str]] = {
         "product_fit": (FIT[ch.relation], weights.get("product_fit", 0.0), fit_why),

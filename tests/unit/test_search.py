@@ -148,6 +148,11 @@ def test_geography_by_kpp_region(search_data):
     assert comp(lo["7801000012"], "geography").value == pytest.approx(0.8)
     msk = by_inn(search(Query(query_id="q", text="бумага", region="Москва")))
     assert comp(msk["7801000012"], "geography").value == 0.0
+    # #218: through search() — the customer's region (INN 47…) wins over the default query region
+    cust = by_inn(search(Query(query_id="q", text="бумага", customer_inn="4700000003")))
+    assert comp(cust["4701000038"], "geography").value == 1.0
+    assert comp(cust["7801000012"], "geography").value == pytest.approx(0.8)
+    assert "ИНН заказчика выдан в Ленинградской области" in comp(cust["7801000012"], "geography").explanation
 
 
 def test_activity_decays_with_days_since_last_participation(search_data):
@@ -369,7 +374,7 @@ def test_customer_region(customer_inn, target, noted):
     assert region == target
     assert (note is not None) == noted
     if noted:
-        assert note is not None and "заказчик" in note
+        assert note is not None and "ИНН заказчика выдан" in note
 
 
 def test_geography_follows_the_customer():
