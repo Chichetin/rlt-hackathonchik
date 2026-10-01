@@ -10,7 +10,7 @@ What goes to the cache (src/sources/cache.py):
   src/enrich/evidence.py can check every extracted value against this text (D-028);
 - `raw_url(inn)` → the raw JSON answers, for audit.
 
-`captchaRequired: true` → CaptchaRequired: we stop, never solve captchas (research/SOURCES.md).
+`captchaRequired: true` or HTTP 400 with a captcha error → CaptchaRequired: we stop, never solve captchas (research/SOURCES.md).
 Requests are paced (MIN_INTERVAL_S between any two requests to the host).
 """
 
@@ -61,9 +61,15 @@ def _post(client: httpx.Client, path: str, data: dict[str, str]) -> httpx.Respon
         if wait > 0:
             time.sleep(wait)
         try:
-            return client.post(BASE + path, data=data)
+            r = client.post(BASE + path, data=data)
         finally:
             _last_request = time.monotonic()
+    # Seen live 01.10: the captcha demand is HTTP 400 `{"ERRORS": {"pbSearchCaptcha": [...]}}`,
+    # not `captchaRequired` in a 200 body. Without this the worker would count it as a failed
+    # task and keep knocking.
+    if r.status_code == 400 and "captcha" in r.text.lower():
+        raise CaptchaRequired("pb.nalog.ru требует капчу (HTTP 400) — останавливаемся (не решаем)")
+    return r
 
 
 def _json(r: httpx.Response) -> dict[str, Any]:
