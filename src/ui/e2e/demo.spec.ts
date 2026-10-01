@@ -52,9 +52,10 @@ test("демо: запрос → два блока → карточка → фи
 
   // «Регион»: по реестру, иначе по КПП (78 — СПб); остаются строки, и у всех КПП 78…
   const regional = page.waitForResponse(
+    // the filtered request, not the parallel one without filters (both carry Query.region)
     (r) =>
       new URL(r.url()).pathname === "/api/search" &&
-      (r.request().postData() ?? "").includes('"region":"Санкт-Петербург"'),
+      JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
   );
   await page.getByLabel("Регион").selectOption("Санкт-Петербург");
   const body = await (await regional).json();
