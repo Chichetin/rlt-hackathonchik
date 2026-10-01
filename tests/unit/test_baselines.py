@@ -201,3 +201,25 @@ def test_dump_record_is_json_with_one_line_per_case():
     assert json.loads(text) == rec
     assert sum("query_id" in line for line in text.splitlines()) == 2
     assert json.loads(R.dump_record({"exp_id": "x", "per_query": []})) == {"exp_id": "x", "per_query": []}
+
+
+def test_bm25_passes_as_of_to_index_and_retriever(hist, monkeypatch):
+    # each of the two alone hides lot 7 on the fixture, so check both: the index (corpus statistics)
+    # and the participants filter must be cut at as_of
+    from src.match import search as search_mod
+
+    seen: list[tuple[str, date | None]] = []
+    real_index, real_retrieve = B.get_index, search_mod._retrieve
+
+    def spy_index(processed, as_of):
+        seen.append(("index", as_of))
+        return real_index(processed, as_of)
+
+    def spy_retrieve(con, idx, hits, processed, as_of):
+        seen.append(("retrieve", as_of))
+        return real_retrieve(con, idx, hits, processed, as_of)
+
+    monkeypatch.setattr(B, "get_index", spy_index)
+    monkeypatch.setattr(search_mod, "_retrieve", spy_retrieve)
+    B.rank(q([], text="бумага"), {"method": "bm25", "k": 20})
+    assert seen == [("index", CUTOFF), ("retrieve", CUTOFF)]
