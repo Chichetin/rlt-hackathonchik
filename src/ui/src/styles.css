@@ -279,4 +279,5 @@ button.secondary:disabled, button:disabled { opacity: .55; cursor: not-allowed; 
 @media (max-width: 480px) { .badges { grid-column: 1 / -1; } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .optional label { flex: 1 1 140px; }
+@media (max-width: 480px) { .optional label { flex-basis: auto; } }
 .steps > li > * { grid-column: 2; }
