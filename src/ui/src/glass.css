@@ -9,12 +9,12 @@ body::before { display: none; }
 .appbar .workspace-bar { max-width: 1480px; min-height: 96px; padding: 20px 48px; display: flex; justify-content: space-between; align-items: center; flex-wrap: nowrap; gap: 28px; }
 .brand { display: flex; align-items: center; gap: 11px; font-size: 20px; }
 .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; }
-.workspace-nav { display: flex; gap: 5px; align-items: center; width: auto; padding: 6px; border: 1px solid #ffffff24; border-top-color: #ffffff44; border-radius: 40px; background: linear-gradient(120deg,#ffffff0d,#ffffff04); box-shadow: inset 0 1px #ffffff0b; }
-.workspace-nav a { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 10px 15px; border-radius: 28px; font-size: 12px; color: #a8a8b5; }
-.workspace-nav a:hover { color: #fff; background: #ffffff05; }
+.workspace-nav { display: flex; gap: 8px; align-items: center; width: auto; padding: 6px 0; border: 0; border-block: 1px solid #ffffff2a; border-radius: 0; background: transparent; box-shadow: none; }
+.workspace-nav a { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 10px 15px; border: 1px solid #ffffff24; border-radius: 28px; font-size: 12px; color: #a8a8b5; }
+.workspace-nav a:hover { color: #fff; border-color: #ffffff55; background: #ffffff05; }
 .workspace-nav a[aria-current="page"] { color: #f5f5fa; background: transparent; box-shadow: none; }
 .nav-icon { display: none; }
-.nav-indicator { border-radius: 28px; border: 1px solid #ffffff24; border-top-color: #ffffff4d; background: linear-gradient(120deg,#e9e7ff20,#ffffff09); box-shadow: inset 0 1px #ffffff0a; }
+.nav-indicator { inset: -1px; border-radius: 28px; border: 1px solid #ffffff24; border-top-color: #ffffff4d; background: linear-gradient(120deg,#e9e7ff20,#ffffff09); box-shadow: inset 0 1px #ffffff0a; }
 .content, .page-home .content { position: relative; z-index: 1; width: 100%; max-width: 1480px; margin-inline: auto; padding: 0 48px 40px; min-width: 0; }
 .page-home .content { max-width: none; padding: 0; flex: 1; display: flex; flex-direction: column; }
 .page-home .content > div { flex: 1; display: flex; flex-direction: column; }
@@ -79,8 +79,8 @@ body::before { display: none; }
 .block h2 { color: #f1f1f5; font-size: 20px; }
 .block .count { color: var(--group); border-color: rgb(var(--group-rgb) / .3); background: rgb(var(--group-rgb) / .09); border-radius: 8px; }
 .block .hint { min-height: 3.4em; line-height: 1.7; }
-.block .item { border: 1px solid rgb(var(--group-rgb) / .21); border-left: 3px solid var(--group); background: rgb(var(--group-rgb) / .045); }
-.block .item:hover:not(:disabled) { border-color: var(--group); background: rgb(var(--group-rgb) / .085); }
+.block .item { border: 1px solid #ffffff20; background: rgb(var(--group-rgb) / .045); }
+.block .item:hover:not(:disabled) { border-color: #ffffff40; background: rgb(var(--group-rgb) / .085); }
 .block .score { color: var(--group); }
 .block .score-meter > span { background: var(--group); }
 .block .badge { display: inline-flex; align-items: center; gap: 6px; border-color: rgb(var(--group-rgb) / .25); background: rgb(var(--group-rgb) / .1); color: var(--group); }
@@ -117,8 +117,8 @@ input:not([type="checkbox"]):focus, textarea:focus, select:focus { background: #
   .appbar .workspace-bar { min-height: 120px; padding: 15px 18px 12px; flex-wrap: wrap; justify-content: center; gap: 12px; }
   .brand { font-size: 18px; gap: 8px; }
   .brand-mark { width: 24px; height: 24px; }
-  .workspace-nav { width: min(460px,100%); justify-content: space-between; gap: 1px; padding: 4px; flex-wrap: nowrap; }
-  .workspace-nav a { flex: 1; justify-content: center; min-height: 34px; padding: 8px 6px; font-size: 10px; }
+  .workspace-nav { width: min(460px,100%); justify-content: space-between; gap: 4px; padding: 8px 0; flex-wrap: nowrap; }
+  .workspace-nav a { flex: 1; justify-content: center; min-height: 34px; padding: 8px 5px; font-size: 10px; }
   .content, .page-home .content { padding-inline: 18px; }
   .page-home .content { padding: 0; }
   .landing-hero { min-height: calc(100svh - 120px); grid-template-columns: minmax(0,1fr); align-content: center; gap: 0; padding: 36px 28px 44px; }
