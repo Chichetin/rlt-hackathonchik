@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
-import { ExampleWheel, RollingNumber, WarmHints } from "./Micro";
+import { ExampleWheel, RollingNumber } from "./Micro";
 import "./micro.css";
+import { GlassSidebar, GlassTopbar } from "./GlassShell";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
 import {
@@ -326,23 +327,9 @@ export function App() {
     <div inert={!!open}><ScrollTools /></div>
     <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
-      <header className="appbar">
-      <div className="workspace-bar">
-        <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
-          <span className="brand-mark"><BrandMark /></span>
-          митрандир
-        </a>
-        <WarmHints route={path}><nav className="workspace-nav" aria-label="Разделы страницы">
-          {[["/", "Главная", "Возможности Митрандира"], ["/search", "Подбор", "Опишите закупку или загрузите извещение"], ["/results", "Результаты", "Найденные компании и основания подбора"], ["/settings", "Настройки", "Регион и требования к поставщикам"], ["/about", "О сервисе", "Источники данных и критерии оценки"]].map(([to, label, hint]) => (
-            <a key={to} data-hint={hint} {...link(to)}>
-              {path === to && <motion.span className="nav-indicator" layoutId="nav-current" transition={glide} aria-hidden="true" />}
-              <span className="nav-label">{label}</span>
-            </a>
-          ))}
-        </nav></WarmHints>
-      </div>
-      </header>
+      <GlassSidebar path={path} link={link} mark={<BrandMark />} />
       <div className="content">
+      <GlassTopbar path={path} link={link} />
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}

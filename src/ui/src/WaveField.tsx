@@ -13,6 +13,7 @@ export function WaveField() {
     return () => media.removeEventListener("change", update);
   }, []);
   const [paused, setPaused] = useState(false);
+  const [pattern, setPattern] = useState<"waves" | "slats">("waves");
   useEffect(() => {
     const el = canvas.current;
     if (!el) return;
@@ -21,24 +22,29 @@ export function WaveField() {
     let width = 1, height = 1, frame = 0, last = 0, visible = true;
     const draw = () => {
       ctx.clearRect(0, 0, width, height);
-      const step = width < 600 ? 17 : 14;
-      for (let y = -30; y < height + 30; y += step) {
+      const step = width < 600 ? 12 : 10;
+      const rowStep = pattern === "slats" ? step * 2.5 : step;
+      for (let y = -30; y < height + 30; y += rowStep) {
         for (let x = 0; x < width; x += step) {
           const u = x / width, v = y / height;
           const wave = Math.sin(u * 11 + v * 5 + phase.current) * .55
             + Math.cos(v * 9 - u * 4 - phase.current * .65) * .45;
-          const crest = Math.pow((wave + 1) / 2, 2);
-          const fade = Math.min(1, u * 2) * Math.sin(Math.max(0, Math.min(1, v)) * Math.PI);
-          ctx.fillStyle = `rgba(${143 + Math.round(crest * 30)}, ${183 + Math.round(crest * 28)}, 224, ${(.08 + crest * .48) * fade})`;
+          const crest = Math.pow((wave + 1) / 2, 2.5);
+          const fade = (.4 + .6 * u) * Math.sin(Math.max(0, Math.min(1, v)) * Math.PI);
+          ctx.fillStyle = `rgba(222, 225, 223, ${(.06 + crest * .85) * fade})`;
           ctx.beginPath();
-          ctx.arc(x, y + wave * 24, .6 + crest * 2.3, 0, Math.PI * 2);
+          if (pattern === "slats") {
+            ctx.roundRect(x, y, step * .65, rowStep * .82, 2);
+          } else {
+            ctx.arc(x, y + wave * 24, .45 + crest * 2.6, 0, Math.PI * 2);
+          }
           ctx.fill();
         }
       }
     };
     const tick = (now: number) => {
       if (now - last >= 32) {
-        phase.current += last ? Math.min(now - last, 60) * .00024 : 0;
+        phase.current += last ? Math.min(now - last, 60) * .00038 : 0;
         last = now;
         draw();
       }
@@ -65,11 +71,17 @@ export function WaveField() {
       cancelAnimationFrame(frame); resize.disconnect(); observer.disconnect();
       document.removeEventListener("visibilitychange", sync);
     };
-  }, [paused, reduced]);
+  }, [paused, reduced, pattern]);
   return <>
     <canvas ref={canvas} className="wave-field" aria-hidden="true" />
+    <div className="wave-tools">
+    <div className="wave-patterns" role="group" aria-label="Рисунок фона">
+      <button type="button" aria-pressed={pattern === "waves"} onClick={() => setPattern("waves")}>Волны</button>
+      <button type="button" aria-pressed={pattern === "slats"} onClick={() => setPattern("slats")}>Рёбра</button>
+    </div>
     {!reduced && <button type="button" className="wave-control" aria-pressed={paused} onClick={() => setPaused(p => !p)}>
       <span aria-hidden="true">{paused ? "▷" : "Ⅱ"}</span> {paused ? "Продолжить фон" : "Пауза фона"}
     </button>}
+    </div>
   </>;
 }
