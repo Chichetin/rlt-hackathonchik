@@ -406,7 +406,7 @@ export function App() {
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
     <div inert={!!open}><ScrollTools /></div>
-    <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
+    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
       {path === "/search" && <div className="search-background"><WaveField pattern="slats" /></div>}
@@ -431,7 +431,7 @@ export function App() {
         </div>
       )}
 
-      <div className="search-workbench">
+      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""}`}>
       <form
         id="supplier-search"
         className="query"
@@ -440,6 +440,7 @@ export function App() {
           void run();
         }}
       >
+        <div className="query-main">
         <div className="section-heading">
           <div>
             <h2>Параметры закупки</h2>
@@ -491,6 +492,12 @@ export function App() {
           setText(example);
           resetLot();
         }} />
+        </div>
+        <div className="query-options">
+        {path === "/search" && <div className="section-heading"><div>
+          <h2>Уточнить подбор</h2>
+          <p>Необязательно. Поможет сузить круг компаний.</p>
+        </div></div>}
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -542,7 +549,7 @@ export function App() {
               <SearchIcon />
               {state === "loading" ? "Ищем…" : "Найти поставщиков"}
             </button>
-            <button
+            {path === "/results" && <button
               type="button"
               className="secondary"
               disabled={!res}
@@ -554,9 +561,10 @@ export function App() {
               }
             >
               Выгрузить в Excel
-            </button>
-            {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
+            </button>}
+            {path === "/results" && weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
           </div>
+        </div>
         </div>
       </form>
       <div className="output">
