@@ -96,3 +96,28 @@ def test_run_after_stop_processes_the_rest(eng):
 def test_exit_code_nonzero_when_incomplete(eng, suppliers, monkeypatch):
     monkeypatch.setattr(prefetch, "enrich", lambda inn: (_ for _ in ()).throw(RuntimeError("x")))
     assert prefetch.main(["--top", "2", "--pause", "0", "--suppliers", str(suppliers)]) == 1
+
+
+def test_enqueue_only_fills_queue_idempotently(eng):
+    assert prefetch.enqueue_only(GOOD[:3], eng) == {"pending": 3}
+    assert prefetch.enqueue_only(GOOD[:4], eng) == {"pending": 4}  # no duplicates
+
+
+def test_worker_night_mode_sleeps_on_captcha_and_continues(eng, monkeypatch):
+    from src.sources.pb_nalog import CaptchaRequired
+    from src.worker import worker as W
+    from src.worker.queue import enqueue
+
+    enqueue(eng, "enrich", GOOD[0])
+    calls: list[str] = []
+
+    def flaky(inn):
+        calls.append(inn)
+        if len(calls) == 1:
+            raise CaptchaRequired("captcha")
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(W, "enrich", flaky)
+    monkeypatch.setattr(W.time, "sleep", sleeps.append)
+    assert W.run(once=True, pause_s=0, captcha_sleep_s=900) == 1
+    assert calls == [GOOD[0], GOOD[0]] and 900 in sleeps and status_counts(eng) == {"done": 1}

@@ -23,7 +23,7 @@ from sqlalchemy.engine import Engine
 
 from src.enrich.enrich import enrich
 from src.sources.pb_nalog import CaptchaRequired
-from src.worker.queue import claim_keys, engine_from_env, enqueue, finish, release, requeue_stale, tasks
+from src.worker.queue import claim_keys, engine_from_env, enqueue, finish, release, requeue_stale, status_counts, tasks
 
 log = logging.getLogger("prefetch")
 CACHE_HIT_S = 0.05  # a task faster than this was served by the cache: no source was hit, no pause
@@ -104,14 +104,26 @@ def run(inns: list[str], eng: Engine, pause_s: float = 1.0,
     return res
 
 
+def enqueue_only(inns: list[str], eng: Engine) -> dict[str, int]:
+    """Night mode: only fill the queue (priority = enqueue order = activity rank); the compose `worker`
+    drains it. Idempotent: done tasks stay done, a failed one goes back to pending."""
+    for inn in inns:
+        enqueue(eng, "enrich", inn)
+    return status_counts(eng)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Warm the source cache for the top-N active suppliers")
     ap.add_argument("--top", type=int, default=200)
     ap.add_argument("--pause", type=float, default=1.0, help="seconds between live source calls")
     ap.add_argument("--suppliers", type=Path, default=None)
+    ap.add_argument("--enqueue-only", action="store_true", help="fill the queue and exit; `worker` drains it")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     path = args.suppliers or Path(os.environ.get("DATA_PROCESSED_DIR", "data/processed")) / "suppliers.parquet"
+    if args.enqueue_only:
+        print(enqueue_only(top_inns(path, args.top), engine_from_env()))
+        return 0
     res = run(top_inns(path, args.top), engine_from_env(), pause_s=args.pause)
     return 0 if res["done_total"] == res["total"] else 1
 
