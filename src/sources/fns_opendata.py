@@ -199,7 +199,7 @@ def evidence(ds: Dataset, pairs: Pairs, url: str, at: datetime) -> list[Evidence
         elif ds.id == "snr" and v == "1" and (name := REGIMES.get(key.removeprefix("СведСНР."))):
             add("tax_regime", key, v, f"Применяет {name} (сведения на {as_of})")
     if ds.id == "debtam" and (debts := _debts(pairs)):
-        total = sum(Decimal(s) for _, s in debts)
+        total = sum((Decimal(s) for _, s in debts), Decimal(0))
         top_name, top = max(debts, key=lambda d: Decimal(d[1]))
         n = len(debts)
         noun = "позиция" if n % 10 == 1 and n % 100 != 11 else (
