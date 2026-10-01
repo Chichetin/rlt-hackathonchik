@@ -50,8 +50,8 @@ test("подсказка меню доступна с клавиатуры, за
   await page.keyboard.press("Escape");
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await expect(link).not.toHaveAttribute("aria-describedby");
-  await page.getByRole("navigation").getByRole("link", { name: "Настройки" }).focus();
-  await expect(page.getByRole("tooltip")).toContainText("Регион");
+  await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).focus();
+  await expect(page.getByRole("tooltip")).toContainText("Требования к поставщикам");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
