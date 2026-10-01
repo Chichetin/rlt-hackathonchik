@@ -78,14 +78,15 @@ HISTORY_UNCHECKED = "history_unchecked"  # X-Discovery-Error: found, but novelty
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Q-24: with retriever pg_hybrid load the query model and check the vectors before the first request."""
     try:
-        retriever = search_mod.load_config()["retriever"]
+        cfg = search_mod.load_config()
+        retriever, model = cfg["retriever"], cfg.get("embedding_model")
     except (OSError, ValueError, KeyError):
-        retriever = None
+        retriever = model = None
     if retriever == "pg_hybrid":
         from src.match import pg_retriever
 
         try:
-            log.info("pg_hybrid прогрет: %s", pg_retriever.warm())
+            log.info("pg_hybrid прогрет: %s", pg_retriever.warm(model))
         except pg_retriever.VectorsUnavailable as e:
             log.warning("pg_hybrid недоступен, поиск пойдёт по BM25: %s", e)
     yield
