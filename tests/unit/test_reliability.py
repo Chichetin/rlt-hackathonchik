@@ -184,6 +184,7 @@ def test_shadow_shows_value_but_keeps_score_and_order(search_data, mode):
     mode("off")
     off = search(q)
     assert all(rel(m).value == 0.0 and rel(m).explanation.startswith("Нет данных") for m in off)
+    assert all(rel(m).explanation == search_mod.UNAVAILABLE["reliability"] for m in off)  # off = D-029, no history
     mode("shadow")
     shadow = search(q)
     assert _ranking(shadow) == _ranking(off)
@@ -220,3 +221,26 @@ def test_months_count_to_the_day_before_as_of(search_data):
 def test_no_wins_yet_is_said_in_words():
     _, why = history_reliability(h(wins=0, won=0, rep=0), PRIOR, REF)
     assert "побед у заказчиков ещё не было" in why and "из 0" not in why
+
+
+@pytest.mark.parametrize("exp", ["H-15b", "H-15c", "H-15d-tie", "H-15e", "H-15f", "H-15g"])
+def test_shadow_keeps_score_and_order_under_experiment_options(search_data, exp):
+    """main's scoring options (#22: experience_by, fit_bm25_share, tie_break, signals) — shadow changes nothing."""
+    from src.eval.run import load_method_config
+
+    base = load_method_config(exp)
+    q = Query(query_id="q", text="бумага офисная", as_of=CUTOFF, customer_inn="7801000051")
+    off = search(q, k=200, config={**base, "reliability": {"mode": "off"}})
+    shadow = search(q, k=200, config={**base, "reliability": {"mode": "shadow"}})
+    assert off and _ranking(shadow) == _ranking(off)
+    assert any(rel(m).value > 0 for m in shadow)  # the value is computed, only not weighted
+
+
+def test_rel_on_experiment_is_reproducible_from_the_repository():
+    """rel-on-s500 (research/EXPERIMENTS.md) is an entry of configs/experiments.yaml, not a tree copy."""
+    from src.eval.run import load_method_config
+
+    cfg = search_mod.check_config(load_method_config("rel-on-s500"))
+    assert reliability_mode(cfg) == "on"
+    assert cfg["weights"]["reliability"] == pytest.approx(0.2)
+    assert reliability_mode(search_mod.load_config()) == "shadow"  # the product stays in shadow
