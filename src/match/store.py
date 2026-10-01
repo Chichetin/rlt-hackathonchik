@@ -103,7 +103,8 @@ texts AS (
 SELECT t, array_agg(DISTINCT lot_id ORDER BY lot_id) FROM texts GROUP BY t ORDER BY t{c}
 """
 
-# Per supplier: best BM25 of its lots, matched lots and wins; the best lot = max (score, date, lot_id).
+# Per supplier: best BM25 of its lots, matched lots and wins; the best lot = max (score, date, lot_id);
+# the date of its latest matched lot (#105, options.activity_by: similar).
 _CANDIDATES = """
 WITH j AS (
     SELECT p.supplier_inn, p.lot_id, p.is_winner, p.publish_date, l.score, l.doc_id
@@ -111,7 +112,7 @@ WITH j AS (
 ),
 agg AS (
     SELECT supplier_inn, max(score) AS bm25, count(DISTINCT lot_id) AS n_lots,
-           count(DISTINCT lot_id) FILTER (WHERE is_winner) AS n_wins
+           count(DISTINCT lot_id) FILTER (WHERE is_winner) AS n_wins, max(publish_date) AS last_similar
     FROM j GROUP BY supplier_inn
     ORDER BY bm25 DESC, n_lots DESC, supplier_inn{c} LIMIT %(limit)s
 ),
@@ -120,7 +121,8 @@ best AS (
     FROM j JOIN agg USING (supplier_inn)
     ORDER BY j.supplier_inn, j.score DESC, j.publish_date DESC NULLS LAST, j.lot_id DESC
 )
-SELECT agg.supplier_inn, agg.bm25, agg.n_lots, agg.n_wins, best.lot_id, best.doc_id, best.publish_date
+SELECT agg.supplier_inn, agg.bm25, agg.n_lots, agg.n_wins, best.lot_id, best.doc_id, best.publish_date,
+       agg.last_similar
 FROM agg JOIN best USING (supplier_inn)
 ORDER BY agg.bm25 DESC, agg.n_lots DESC, agg.supplier_inn{c}
 """

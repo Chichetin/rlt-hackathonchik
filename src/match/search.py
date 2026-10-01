@@ -88,6 +88,8 @@ OPTIONS: dict[str, tuple] = {
     "sat_wins": (SAT_WINS, None),
     # price (#105): none — «нет данных» (v1); scale — НМЦК запроса против медианы НМЦК лотов поставщика
     "price": ("none", ("none", "scale")),
+    # activity (#105): all — the last participation of any kind; similar — the last lot with similar positions
+    "activity_by": ("all", ("all", "similar")),
 }
 PRICE_DECADES = 2.0  # price = 1 − |log10(budget / median)| / 2: 0 at a 100× difference
 
@@ -143,13 +145,14 @@ class Candidate:
     class_lots: int = 0
     class_wins: int = 0
     found_by: str = ""  # fallback ladder (src/match/fallback.py): the first phrase of product_fit
+    last_similar: date | None = None  # the latest matched lot (#105, options.activity_by: similar)
 
 
 def _retrieve(store: Store, idx: LotIndex, lots: LotHits, as_of: date | None) -> list[Candidate]:
     """Participants of the matched lots before as_of, best BM25 first (src/match/store.py: _CANDIDATES)."""
     rows = store.candidates(lots, as_of, CANDIDATES)
-    return [Candidate(inn, bm25, n_lots, n_wins, best_lot, idx.text(doc), best_date)
-            for inn, bm25, n_lots, n_wins, best_lot, doc, best_date in rows]
+    return [Candidate(inn, bm25, n_lots, n_wins, best_lot, idx.text(doc), best_date, last_similar=last)
+            for inn, bm25, n_lots, n_wins, best_lot, doc, best_date, last in rows]
 
 
 _codes_lock = threading.Lock()
@@ -314,9 +317,15 @@ def _activity(cp: Counterparty, ref: date | None, as_of: date | None) -> tuple[f
     last = cp.stats.get("last_seen")
     if not isinstance(last, str) or ref is None:
         return 0.0, "Нет данных о последнем участии"
-    days = max(0, (ref - date.fromisoformat(last)).days)
+    return _recency(date.fromisoformat(last), ref, as_of, "Последнее участие")
+
+
+def _recency(last: date, ref: date | None, as_of: date | None, what: str) -> tuple[float, str]:
+    if ref is None:
+        return 0.0, "Нет данных о последнем участии"
+    days = max(0, (ref - last).days)
     anchor = f"до {_fmt(ref)}" if as_of else f"до конца данных ({_fmt(ref)})"
-    return 0.5 ** (days / HALF_LIFE_DAYS), f"Последнее участие {_fmt(date.fromisoformat(last))} — {days} дн. {anchor}"
+    return 0.5 ** (days / HALF_LIFE_DAYS), f"{what} {_fmt(last)} — {days} дн. {anchor}"
 
 
 def _rub(x: float) -> str:
@@ -486,7 +495,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)
-        act, act_why = _activity(cp, ref, as_of)
+        if opts["activity_by"] == "similar" and c.last_similar is not None:
+            act, act_why = _recency(c.last_similar, ref, as_of, "Последнее участие в закупке с похожими позициями")
+        else:
+            act, act_why = _activity(cp, ref, as_of)
         price = _price(cp, query.budget, as_of) if opts["price"] == "scale" else None
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so

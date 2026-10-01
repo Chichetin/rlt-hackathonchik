@@ -59,3 +59,9 @@ H-105-price05:
 H-105-price10:
   weights: {price: 0.10}
   options: {price: scale}
+# #105: свежесть опыта — activity по последней закупке с похожими позициями, а не по последнему участию вообще
+H-105-fresh:
+  options: {activity_by: similar}
+H-105-fresh10:   # то же, вес activity 0.10 вместо 0.048
+  weights: {activity: 0.10}
+  options: {activity_by: similar}

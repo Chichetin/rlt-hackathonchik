@@ -170,7 +170,7 @@ def ladder(store: Store, idx: LotIndex, query: Query, tokens: list[str], codes: 
         what = f"{LEVEL_WORD[level]} ОКПД2 {', '.join(prefixes)}"
         cands = []
         for inn, n_lots, n_wins, lot_id, text, day in rows:
-            c = s.Candidate(inn, 0.0, int(n_lots), int(n_wins), int(lot_id), text or "", day)
+            c = s.Candidate(inn, 0.0, int(n_lots), int(n_wins), int(lot_id), text or "", day, last_similar=day)
             c.found_by = (f"{NOT_BY_NAME}; поставщик {what} по частоте участия: {c.n_lots} лот(ов), "
                           f"последний «{_short(c.best_text)}» (лот {c.best_lot})")
             cands.append(c)
