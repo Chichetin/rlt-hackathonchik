@@ -128,6 +128,7 @@ class Discovery:
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
     leads: list[str] = field(default_factory=list)  # web leads (#108): what happened to them, one line
     notes: list[str] = field(default_factory=list)
+    source_failed: bool = False  # a registry request was refused or failed: the block may be incomplete (#287)
 
 
 def predicted_class_allowed() -> bool:
@@ -547,11 +548,13 @@ def discover(
             log.error("discovery: %s", e)
             res.requests.append(f"{label}: источник отказал — остановлено")
             res.notes.append(str(e))
+            res.source_failed = True
             continue
         except (httpx.HTTPError, ValueError) as e:
             net_ok = False
             log.warning("discovery: %s: %s", label, e)
             res.requests.append(f"{label}: источник не ответил ({type(e).__name__})")
+            res.source_failed = True
             continue
         if page is None:
             res.requests.append(f"{label}: нет в кеше, в сеть не ходили")

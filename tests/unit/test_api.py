@@ -460,6 +460,25 @@ def test_discovery_failure_is_a_header_and_history_survives(search_client, monke
     assert r.json()["discovered"] == []
     assert r.headers["X-Discovery-Error"] == "TimeoutError"  # the type only: no message, no path
 
+    class ОшибкаИсточника(RuntimeError):  # a non-ASCII type name must not make a latin-1 header fail (500)
+        pass
+
+    def broken_ru(q, h, **k):
+        raise ОшибкаИсточника()
+
+    monkeypatch.setattr(discover_mod, "discover", broken_ru)
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.status_code == 200 and r.headers["X-Discovery-Error"] == "Error"
+
+
+def test_registry_refusal_inside_discovery_is_a_header(search_client, monkeypatch):
+    """discover() catches a refused / failed registry request and goes on: still, the block may be incomplete."""
+    from src.enrich import discover as discover_mod
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        okpd_classes=["17.12"], history_checked=True, source_failed=True))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.headers["X-Discovery-Error"] == app_mod.SOURCE_UNAVAILABLE
+
 
 def test_discovery_without_history_check_is_a_header(search_client, monkeypatch):
     from src.enrich import discover as discover_mod

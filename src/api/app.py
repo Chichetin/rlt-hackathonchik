@@ -17,8 +17,9 @@ worked | near | any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
 Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error header: the exception type when
-discover() failed (no message, no path), or `history_unchecked` when the companies were found but could not be
-checked against organizers' data (so none is called «новая»). Absent — the block is what the sources gave.
+discover() failed (no message, no path), `source_unavailable` when a registry request was refused or failed and
+discover() went on with the rest, or `history_unchecked` when the companies were found but could not be checked
+against organizers' data (so none is called «новая»). Absent — the block is what the sources gave.
 """
 
 from __future__ import annotations
@@ -73,6 +74,7 @@ ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or 
 # The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
 MAX_TEXT_CHARS = 20_000
 HISTORY_UNCHECKED = "history_unchecked"  # X-Discovery-Error: found, but novelty not checked (#287)
+SOURCE_UNAVAILABLE = "source_unavailable"  # X-Discovery-Error: a registry request was refused or failed (#287)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -177,9 +179,13 @@ def _discovery_error(res: pipeline.Picked) -> str | None:
     """X-Discovery-Error (#287): why «Новые» may be incomplete; None — nothing went wrong."""
     if res.discovery_error:  # an exception type name: an identifier, ASCII for the latin-1 header
         return res.discovery_error if res.discovery_error.isascii() else "Error"
+    if res.discovery is None:
+        return None
     # a class was resolved and the registry searched, but organizers' data was not there to check novelty
-    if res.discovery is not None and res.discovery.okpd_classes and not res.discovery.history_checked:
+    if res.discovery.okpd_classes and not res.discovery.history_checked:
         return HISTORY_UNCHECKED
+    if res.discovery.source_failed:  # captcha, refusal, timeout: discover() kept going with what it had
+        return SOURCE_UNAVAILABLE
     return None
 
 

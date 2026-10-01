@@ -863,7 +863,8 @@ export function App() {
           <div className="result-list-pane">
             <div className="result-groups" role="group" aria-label="Группа поставщиков">
               <button type="button" className="group-history" aria-pressed={resultGroup === "history"} onClick={() => setResultGroup("history")}>С опытом <span>{historyTotal}</span></button>
-              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span></button>
+              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span>
+                {res.discoveryError && <span className="group-alert" title={discoveryAlert(res.discoveryError)} aria-label="список может быть неполным">!</span>}</button>
             </div>
             <div className="result-list-scroll" hidden={resultGroup !== "history"}>
           <Block

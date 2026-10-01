@@ -92,6 +92,8 @@ test("a failed open source is shown in «Новые», not passed off as «nobod
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  // seen without opening the tab: the «Новые» button carries the mark (#287)
+  expect(await screen.findByRole("button", { name: /^Новые.*список может быть неполным/ })).toBeInTheDocument();
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const block = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(within(block).getByTestId("discovery-error")).toHaveTextContent("Источники не ответили — список может быть неполным.");
@@ -107,6 +109,7 @@ test("no alert in «Новые» when the sources answered", async () => {
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(screen.queryByTestId("discovery-error")).toBeNull();
+  expect(screen.queryByLabelText("список может быть неполным")).toBeNull();
 });
 
 test("API error is shown, not swallowed", async () => {
