@@ -28,6 +28,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
+from src.enrich.role import LABEL as ROLE_LABEL
 from src.llm.provider import get_provider
 from src.match import search as search_mod
 from src.match.filters import apply_filters
@@ -41,6 +42,8 @@ if os.environ.get("DEMO_FIXTURE") == "1":
     log.warning("DEMO_FIXTURE=1: synthetic fixture, not the organizers' data")
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
+# «Тип» of the xlsx: the captions of KIND_LABEL in src/ui/src/api.ts, from the role captions of D-057
+KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Тип не определён"}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -204,7 +207,7 @@ def api_export(query: Query) -> StreamingResponse:
         for m in rows:
             cp = m.counterparty
             ws.append([
-                block, cp.name, cp.inn or "ИНН не подтверждён", cp.kind or "", cp.region or "",
+                block, cp.name, cp.inn or "ИНН не подтверждён", KIND_LABEL[cp.kind or "unknown"], cp.region or "",
                 {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], round(m.score, 3),
                 "; ".join(c.explanation for c in m.components),
                 "; ".join(f"{e.source}: {e.url}" for e in cp.evidence),
