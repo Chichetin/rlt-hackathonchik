@@ -26,6 +26,8 @@ const bt: Backtest = {
 test("summary names the winner place and the top share", () => {
   expect(summary(bt)).toBe("победитель на 2-м месте, 2 из 4 участников в топ-10");
   expect(summary({ ...bt, winner_rank: null })).toMatch(/^победитель вне выдачи/);
+  const aisgz = { ...bt, channel: "АИС ГЗ", participants: [bt.participants[0]], in_top: 1 };
+  expect(summary(aisgz)).toBe("исполнитель на 2-м месте (в данных АИС ГЗ — только исполнитель контракта)");
 });
 
 test("panel shows places of participants and the no-leak note", async () => {
@@ -35,7 +37,7 @@ test("panel shows places of participants and the no-leak note", async () => {
   expect(await screen.findByText(/победитель на 2-м месте/)).toBeInTheDocument();
   expect(screen.getByText("место 7")).toBeInTheDocument();
   expect(screen.getByText("вне выдачи")).toBeInTheDocument();
-  expect(screen.getByText(/только по истории до 01\.07\.2025/)).toBeInTheDocument();
+  expect(screen.getByText(/Отдельный прогон, не тот список, что ниже: поиск только по истории до 01\.07\.2025/)).toBeInTheDocument();
   expect(fetch).toHaveBeenCalledWith("/api/lot/6/backtest");
 });
 

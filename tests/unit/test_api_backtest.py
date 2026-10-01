@@ -38,10 +38,20 @@ def test_no_leak_search_gets_cutoff_as_of(client, monkeypatch):
     assert [str(q.as_of) for q in seen] == ["2025-07-01"]
 
 
-def test_aisgz_lot_counts_the_winner_only(client):
-    """Lot 8 is АИС ГЗ (2025-09-01): EVAL.md — the winner only; here it has no participant with a valid INN."""
+def test_aisgz_lot_counts_the_winner_only(client, monkeypatch):
+    """research/EVAL.md: in АИС ГЗ only the contractor is relevant — lot 6 read as АИС ГЗ keeps the winner and drops
+    the losing offer of 7801000012 (in ЭМ both count, test_recorded_lot_ranks_winner_and_participants)."""
+    real = bt.find_lot
+    monkeypatch.setattr(bt, "find_lot", lambda ident: real(ident).model_copy(update={"channel": "АИС ГЗ"}))
+    b = client.get("/api/lot/6/backtest").json()
+    assert [(p["inn"], p["is_winner"]) for p in b["participants"]] == [("780100000090", True)]
+    assert b["channel"] == "АИС ГЗ" and b["in_top"] == 1
+
+
+def test_lot_without_participants_is_refused(client):
+    """Lot 8 (АИС ГЗ, 2025-09-01) has no participant with a valid INN in the fixture: nothing to compare."""
     r = client.get("/api/lot/8/backtest")
-    assert r.status_code == 422
+    assert r.status_code == 422 and "нет участников" in r.json()["detail"]
 
 
 def test_lot_before_cutoff_is_refused_as_circular(client):
