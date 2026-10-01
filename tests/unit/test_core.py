@@ -1,12 +1,9 @@
-"""Metrics, cache, queue, stub warning, filters."""
-
-import logging
+"""Metrics, cache, queue, filters."""
 
 import pytest
 
 from src.contracts import Query
 from src.eval.metrics import bootstrap_ci, ndcg_at_k, recall_at_k, reciprocal_rank
-from src.match import search as search_mod
 from src.match.filters import apply_filters
 from src.sources.cache import SourceCache
 from src.worker import queue as Q
@@ -29,21 +26,23 @@ def test_bootstrap_ci_brackets_mean_and_is_deterministic():
     assert bootstrap_ci([0.3]) == (0.3, 0.3)
 
 
-def test_stub_search_warns_and_is_schema_valid(caplog):
-    with caplog.at_level(logging.WARNING):
-        res = search_mod.search(Query(query_id="q", text="бумага"))
-    assert "STUB" in caplog.text
-    assert {m.origin for m in res} == {"history", "discovered"}
+def _match(i: int, kind: str | None, msp: bool | None, region: str | None = None, status: str | None = None):
+    from src.contracts import Counterparty, CounterpartyMatch, ScoreComponent
+    cp = Counterparty(inn=None, name=f"c{i}", kind=kind, is_msp=msp, region=region, status=status)  # type: ignore[arg-type]
+    return CounterpartyMatch(counterparty=cp, score=0.1, origin="history",
+                             components=[ScoreComponent(name="product_fit", value=0.1, weight=1, explanation="x")])
 
 
 def test_filters():
-    res = search_mod.search(Query(query_id="q", text="x"))
-    only_man = apply_filters(res, Query(query_id="q", text="x", filters={"only_manufacturers": True}))
-    assert only_man and all(m.counterparty.kind == "manufacturer" for m in only_man)
-    only_msp = apply_filters(res, Query(query_id="q", text="x", filters={"only_msp": True}))
-    assert only_msp and all(m.counterparty.is_msp for m in only_msp)
+    res = [_match(1, "manufacturer", True, "Санкт-Петербург"), _match(2, "distributor", False),
+           _match(3, None, None), _match(4, "manufacturer", None, status="В процессе ликвидации")]
+    q = lambda **f: Query(query_id="q", text="x", filters=f)  # noqa: E731
+    assert [m.counterparty.name for m in apply_filters(res, q(only_manufacturers=True))] == ["c1"]
+    assert [m.counterparty.name for m in apply_filters(res, q(only_msp=True))] == ["c1"]
+    assert [m.counterparty.name for m in apply_filters(res, q(region="Санкт-Петербург"))] == ["c1"]
+    assert [m.counterparty.name for m in apply_filters(res, q())] == ["c1", "c2", "c3"]  # liquidation dropped
     res[0].counterparty.in_rnp = True
-    assert res[0] not in apply_filters(res, Query(query_id="q", text="x"))
+    assert res[0] not in apply_filters(res, q())
 
 
 def test_cache_ttl_and_stale_fallback(tmp_path):
