@@ -439,9 +439,12 @@ def lead_matches(
     out: list[CounterpartyMatch] = []
     relation: dict[str, Relation] = {}
     no_card: list[str] = []
-    other_okved = other_region = 0
+    other_okved = other_region = no_region = other_type = 0
     for inn, lead in leads.items():
-        if inn in known or ("UL" if len(inn) == 10 else "IP") not in np_types:
+        if inn in known:
+            continue
+        if ("UL" if len(inn) == 10 else "IP") not in np_types:
+            other_type += 1
             continue
         try:
             cp = enrich(inn, cache, offline=True)
@@ -454,7 +457,10 @@ def lead_matches(
             other_okved += 1
             continue
         regioncode = cp.kpp[:2] if cp.kpp else REGION_CODE.get(cp.region or "", "")
-        if regioncode not in regions:  # another region, or none established (KPP 99 of the largest taxpayers)
+        if not regioncode or regioncode == "99":  # ГИР БО without KPP; KPP 99 of the largest taxpayers
+            no_region += 1
+            continue
+        if regioncode not in regions:
             other_region += 1
             continue
         # the OKVED name only from a fact «Основной ОКВЭД <code> — <name>» (ГИР БО gives the code alone)
@@ -473,7 +479,8 @@ def lead_matches(
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                      score=round(sum(c.value * c.weight for c in comps), 4)))
     line = (f"веб-лиды: по классу {len(leads)}, уже в данных {len(known)}, без карточки ФНС в кеше {len(no_card)}, "
-            f"ОКВЭД не подтвердил класс {other_okved}, другой регион {other_region}, в блок {len(out)}")
+            f"тип ИНН не из DISCOVERY_NP_TYPES {other_type}, ОКВЭД не подтвердил класс {other_okved}, "
+            f"другой регион {other_region}, регион не установлен {no_region}, в блок {len(out)}")
     return out, relation, no_card, line
 
 

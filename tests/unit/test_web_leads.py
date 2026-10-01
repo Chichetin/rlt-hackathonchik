@@ -148,4 +148,4 @@ def test_card_without_okved_name_and_fallback_without_region(leads_dir, cache, t
         mp.setattr(D, "enrich", lambda inn, *a, **kw: fallback if inn == TRADER else real(inn, *a, **kw))
         res = _discover(cache, processed)
     assert TRADER not in {m.counterparty.inn for m in res.matches}
-    assert "другой регион 2" in res.leads[0]  # TRADER (region unknown) and MOSCOW
+    assert "другой регион 1" in res.leads[0] and "регион не установлен 1" in res.leads[0]  # MOSCOW; TRADER
