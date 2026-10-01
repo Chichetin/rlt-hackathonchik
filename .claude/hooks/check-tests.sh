@@ -36,7 +36,7 @@ if [ -f pyproject.toml ] && [ -d tests ] && find tests -name 'test_*.py' | grep 
   if [ "$SELECTED" -eq 1 ]; then
     if [ ${#CHANGED[@]} -eq 0 ]; then RUN_PY=0
     else
-      mapfile -t TARGETS < <(PYTHONUTF8=1 uv run --frozen python scripts/select_tests.py pytest "${CHANGED[@]}" | tr -d '\r')
+      mapfile -t TARGETS < <(PYTHONUTF8=1 uv run --frozen python scripts/select_tests.py pytest "${CHANGED[@]}" | tr -d '\r' | grep -v '^$')
       [ ${#TARGETS[@]} -eq 0 ] && RUN_PY=0
       [ "${TARGETS[0]:-}" = ALL ] && TARGETS=()
     fi

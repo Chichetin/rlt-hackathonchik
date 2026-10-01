@@ -22,7 +22,7 @@ base_ref="${BASE:-origin/main}"
 base="$(git merge-base HEAD "$base_ref" 2>/dev/null)" || { echo "check-changed: нет $base_ref — make check"; exec make check; }
 
 # Changed paths, deleted included (the selection needs them); tr -d '\r' — Python на Windows.
-mapfile -t changed < <("${PY[@]}" python scripts/select_tests.py changed "$base_ref" | tr -d '\r')
+mapfile -t changed < <("${PY[@]}" python scripts/select_tests.py changed "$base_ref" | tr -d '\r' | grep -v '^$')
 mapfile -t files < <(for f in "${changed[@]}"; do [ -e "$f" ] && echo "$f"; done)
 
 if [ ${#changed[@]} -eq 0 ]; then echo "check-changed: изменений относительно $base_ref нет"; exit 0; fi
@@ -50,7 +50,7 @@ if [ ${#py[@]} -gt 0 ]; then
   [ ${#typed[@]} -gt 0 ] && run "${PY[@]}" pyright "${typed[@]}"
 fi
 
-mapfile -t tests < <("${PY[@]}" python scripts/select_tests.py pytest "${changed[@]}" | tr -d '\r')
+mapfile -t tests < <("${PY[@]}" python scripts/select_tests.py pytest "${changed[@]}" | tr -d '\r' | grep -v '^$')
 if [ "${tests[0]:-}" = ALL ]; then
   run "${PY[@]}" pytest
 elif [ ${#tests[@]} -gt 0 ]; then
