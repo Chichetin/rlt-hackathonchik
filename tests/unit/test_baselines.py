@@ -264,8 +264,12 @@ def test_lost_relevant_only_where_other_run_is_better():
     assert lost_relevant(b, a, rel) == []
 
 
-def test_lost_explain_on_fixture(hist):
+def test_lost_explain_on_fixture(hist, monkeypatch):
+    """src/eval/lost.py explains the losses of E-002 (v1): run on `v1` of configs/experiments.yaml (#174)."""
     from src.eval.lost import explain
+
+    v1 = R.load_method_config("v1")
+    monkeypatch.setattr(R.search_mod, "load_config", lambda *a, **k: v1)
 
     c = case(6, "7801000051", {"7802000020": 2})
     assert explain([], {c.query.query_id: c}, CUTOFF)["lost"] == 0
