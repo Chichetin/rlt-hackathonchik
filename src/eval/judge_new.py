@@ -1,4 +1,4 @@
-"""LLM judge tooling for the block «Новые» (#82, research/EVAL.md B, D-067).
+"""LLM judge tooling for the block «Новые» (#82, research/EVAL.md B, D-070).
 
     python -m src.eval.judge_new export [--todo ...] [--out eval/judge/packets]
         -> one blind JSON packet per query (no label / labeled_by / score / rank)
@@ -57,9 +57,12 @@ def export(todo: Path, out: Path) -> int:
         if not key:
             continue
         qid = (r.get("query_id") or "").strip()
-        p = packets.setdefault(qid, {"query_id": qid, "query_text": r.get("query_text", ""),
-                                     "okpd2": r.get("okpd2", ""), "candidates": []})
+        p = packets.setdefault(
+            qid, {"query_id": qid, "query_text": r.get("query_text", ""), "okpd2": r.get("okpd2", ""), "candidates": []}
+        )
         p["candidates"].append({"key": key, **{f: r.get(f, "") for f in CANDIDATE_FIELDS}})
+    for p in packets.values():
+        p["candidates"].sort(key=lambda c: c["key"])  # not the rank order: position would be a hint
     out.mkdir(parents=True, exist_ok=True)
     for qid, p in packets.items():
         (out / _query_file(qid)).write_text(json.dumps(p, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -67,12 +70,17 @@ def export(todo: Path, out: Path) -> int:
     return 0
 
 
-def _existing(labels: Path) -> tuple[list[dict[str, str]], str]:
+def _existing(labels: Path) -> tuple[list[dict[str, str]], str, list[str]]:
+    """Rows, delimiter and header of the label file (BOM-safe); a new file gets LABEL_COLUMNS."""
     if not labels.exists() or not labels.read_text(encoding="utf-8-sig").strip():
-        return [], ";"
+        return [], ";", list(LABEL_COLUMNS)
     text = labels.read_text(encoding="utf-8-sig")
     head = text.splitlines()[0]
-    return ln.read_labels(labels), (";" if head.count(";") > head.count(",") else ",")
+    delim = ";" if head.count(";") > head.count(",") else ","
+    fields = [c.strip() for c in head.split(delim)]
+    if missing := [c for c in LABEL_COLUMNS if c not in fields]:
+        raise ValueError(f"{labels.name}: в заголовке нет колонок {missing}")
+    return ln.read_labels(labels), delim, fields
 
 
 def import_answer(answer: Path, model: str, packets: Path, labels: Path, now: str | None = None) -> int:
@@ -84,6 +92,8 @@ def import_answer(answer: Path, model: str, packets: Path, labels: Path, now: st
         raise ValueError(f"{answer.name}: нет пакета для query_id {qid!r} в {packets}")
     cands = {c["key"]: c for c in json.loads(packet_path.read_text(encoding="utf-8"))["candidates"]}
     answers = data.get("labels") or {}
+    if not isinstance(answers, dict):
+        raise ValueError(f"{answer.name}: labels должен быть объектом ключ -> ответ")
     bad = [k for k in answers if k not in cands]
     if bad:
         raise ValueError(f"{answer.name}: неизвестные ключи {bad}")
@@ -92,12 +102,15 @@ def import_answer(answer: Path, model: str, packets: Path, labels: Path, now: st
         label = v.get("label") if isinstance(v, dict) else v
         if label is None:
             continue
-        if label not in (0, 1) or isinstance(label, bool):
+        if type(label) is not int or label not in (0, 1):
             raise ValueError(f"{answer.name}: невалидная метка {label!r} у {k!r} (нужно 0, 1 или null)")
         parsed[k] = label
-    rows, delim = _existing(labels)
-    done = {(r["query_id"].strip(), ln._key(r)) for r in rows
-            if ln._kind(r) == ln.LLM and r.get("label", "").strip() in ("0", "1")}
+    rows, delim, fields = _existing(labels)
+    done = {
+        (r["query_id"].strip(), ln._key(r))
+        for r in rows
+        if ln._kind(r) == ln.LLM and r.get("label", "").strip() in ("0", "1")
+    }
     who = f"llm:{model}"
     stamp = now or datetime.now().strftime("%Y-%m-%dT%H:%M")
     new = []
@@ -105,8 +118,16 @@ def import_answer(answer: Path, model: str, packets: Path, labels: Path, now: st
         if (qid, k) in done:
             continue
         unconfirmed = k == cands[k]["name"].strip() and not k.isdigit()
-        new.append({"query_id": qid, "inn": "" if unconfirmed else k, "name": cands[k]["name"] if unconfirmed else "",
-                    "label": str(label), "labeled_by": who, "labeled_at": stamp})
+        new.append(
+            {
+                "query_id": qid,
+                "inn": "" if unconfirmed else k,
+                "name": cands[k]["name"] if unconfirmed else "",
+                "label": str(label),
+                "labeled_by": who,
+                "labeled_at": stamp,
+            }
+        )
     if new:
         fresh = not labels.exists() or not labels.read_text(encoding="utf-8-sig").strip()
         labels.parent.mkdir(parents=True, exist_ok=True)
@@ -114,12 +135,14 @@ def import_answer(answer: Path, model: str, packets: Path, labels: Path, now: st
             with labels.open("ab") as f:
                 f.write(b"\n")
         with labels.open("a", encoding="utf-8-sig" if fresh else "utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=LABEL_COLUMNS, delimiter=delim)
+            w = csv.DictWriter(f, fieldnames=fields, delimiter=delim, restval="")
             if fresh:
                 w.writeheader()
             w.writerows(new)
-    print(f"{answer.name}: {qid} добавлено {len(new)}, уже было {len(parsed) - len(new)}, "
-          f"пропущено null {len(answers) - len(parsed)}")
+    print(
+        f"{answer.name}: {qid} добавлено {len(new)}, уже было {len(parsed) - len(new)}, "
+        f"пропущено null {len(answers) - len(parsed)}, без ответа {len(cands) - len(answers)}"
+    )
     return len(new)
 
 
