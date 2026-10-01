@@ -215,10 +215,11 @@ test("history is paged on the server: total from the header, «Показать 
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const history = await screen.findByRole("region", { name: "С опытом госзакупок" });
   expect(within(history).getByText("Показаны 2 из 3")).toBeInTheDocument();
-  expect(urls[0]).toBe("/api/search?limit=20&offset=0");
+  const searches = () => urls.filter((u) => u.startsWith("/api/search")); // the form also asks /api/testset (#207)
+  expect(searches()[0]).toBe("/api/search?limit=20&offset=0");
   await userEvent.click(within(history).getByRole("button", { name: "Показать ещё" }));
   expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
-  expect(urls[1]).toBe("/api/search?limit=20&offset=2");
+  expect(searches()[1]).toBe("/api/search?limit=20&offset=2");
   expect(within(history).getAllByRole("listitem")).toHaveLength(3);
   expect(within(history).queryByRole("button", { name: "Показать ещё" })).not.toBeInTheDocument();
 });
