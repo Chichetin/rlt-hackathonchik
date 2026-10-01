@@ -1,4 +1,4 @@
-"""enrich(inn): РНП ЕИС merged in (D-067, #111).
+"""enrich(inn): РНП ЕИС merged in (D-068, #111).
 
 Электронный магазин СПб is explicitly NOT a source of enrich() (D-061): nothing here touches
 src/sources/estore.py.
@@ -177,7 +177,7 @@ def test_api_counterparty_never_reaches_zakupki(pb_cache, tmp_path, monkeypatch)
 
     def guard(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
         if "dishonestsupplier" in str(request.url):
-            pytest.fail("GET /api/counterparty must not reach zakupki.gov.ru (D-067, #111)")
+            pytest.fail("GET /api/counterparty must not reach zakupki.gov.ru (D-068, #111)")
         raise httpx.ConnectError("no other network expected in this test")
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guard)

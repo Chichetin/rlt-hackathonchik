@@ -20,7 +20,9 @@ import {
   type Filters,
   type Query,
   type SearchResponse,
+  type Counterparty,
 } from "./api";
+import { reviewLinks } from "./reviews";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -125,15 +127,6 @@ function logoHost(cp: CounterpartyMatch["counterparty"]): string | null {
   return domain && !FREE_MAIL.test(domain) ? domain : null;
 }
 
-function initials(name: string): string {
-  const words = name
-    .replace(/["«»'“”]/g, " ")
-    .replace(/^\s*(ООО|АО|ПАО|ЗАО|ОАО|ИП|ГУП|ГБУ|ФГУП|МУП|НАО)\s+/i, "")
-    .split(/\s+/)
-    .filter(Boolean);
-  return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? "")).toUpperCase() || "?";
-}
-
 export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterparty"]; large?: boolean }) {
   const host = logoHost(cp);
   const [failed, setFailed] = useState(false);
@@ -145,9 +138,18 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
       </span>
     );
   }
-  // no name in the data — nothing to draw; keep the column so rows stay aligned
-  if (/^ИНН\s/.test(cp.name)) return <span className={`${cls} logo-none`} aria-hidden="true" />;
-  return <span className={cls} aria-hidden="true">{initials(cp.name)}</span>;
+  // no real logo in the sources — show nothing rather than a placeholder
+  return null;
+}
+
+/** What puts the company in its block: its procurement record, or that it is new to АИС ГЗ. */
+function OriginBadge({ m }: { m: CounterpartyMatch }) {
+  const st = m.counterparty.stats ?? {};
+  if (m.origin !== "history") return <span className="badge badge-new">Новый · нет в АИС ГЗ</span>;
+  const lots = st.lots_participated;
+  if (typeof lots !== "number") return <span className="badge badge-history">Участник закупок АИС ГЗ</span>;
+  const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
+  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
 }
 
 function CompanyName({ name }: { name: string }) {
@@ -405,9 +407,13 @@ export function App() {
             ИНН заказчика
             <input value={customerInn} inputMode="numeric" placeholder="необязательно" onChange={(e) => setCustomerInn(e.target.value)} />
           </label>
-          {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
-          {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
         </div>
+        {(lot?.channel || lot?.okpd2?.length) && (
+          <div className="chips">
+            {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
+            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
+          </div>
+        )}
         <div className="row">
           <fieldset className="filters">
             <legend>Фильтры</legend>
@@ -509,8 +515,10 @@ export function App() {
             </span>
           </header>
           <Block
+            variant="history"
+            tag="Проверенные"
             title="С опытом госзакупок"
-            hint="Есть в данных АИС ГЗ"
+            hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             rows={res.history}
             total={res.total.history}
             onMore={() => void showMore()}
@@ -523,8 +531,10 @@ export function App() {
             }
           />
           <Block
+            variant="new"
+            tag="Новые"
             title="Новые из открытых источников"
-            hint="Нет в данных АИС ГЗ, найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
+            hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             rows={res.discovered}
             total={res.total.discovered}
             onOpen={setOpen}
@@ -555,9 +565,12 @@ function Block(props: {
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
+  variant: "history" | "new";
+  tag: string;
 }) {
   return (
-    <section className="block" aria-label={props.title}>
+    <section className={`block block-${props.variant}`} aria-label={props.title}>
+      <span className="block-tag">{props.tag}</span>
       <h2>
         {props.title} <span className="count">{props.total}</span>
       </h2>
@@ -584,6 +597,9 @@ function Block(props: {
                     {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
+                  <span className="badges">
+                    <OriginBadge m={m} />
+                  </span>
                   {top && <span className="why">{top.explanation}</span>}
                 </button>
               </li>
@@ -602,6 +618,29 @@ function Block(props: {
             </button>
           )}
         </div>
+      )}
+    </section>
+  );
+}
+
+function ReviewsBlock({ cp }: { cp: Counterparty }) {
+  const links = reviewLinks(cp.name, cp.inn);
+  return (
+    <section aria-label="Отзывы">
+      <h3>Отзывы</h3>
+      <p className="hint">Не влияет на оценку подбора. Рейтинг из отзывов не показываем: нет источника, который можно честно проверить.</p>
+      {links.length > 0 ? (
+        <p className="review-links">
+          Искать отзывы самостоятельно:{" "}
+          {links.map((l, i) => (
+            <span key={l.url}>
+              {i > 0 && " · "}
+              <a href={l.url} target="_blank" rel="noreferrer">{l.label}</a>
+            </span>
+          ))}
+        </p>
+      ) : (
+        <p className="empty">Название и ИНН не определены — искать отзывы не по чему.</p>
       )}
     </section>
   );
@@ -702,6 +741,8 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
         </>
       )}
 
+      <ReviewsBlock cp={cp} />
+
       <h3>Источники фактов</h3>
       {(cp.evidence ?? []).length === 0 && <p className="empty">Подтверждённых фактов с источником нет.</p>}
       <ul className="evidence">
@@ -727,7 +768,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
   );
 }
 
-const SEG_COLORS = ["#c0acf6", "#8fd3c1", "#f0c27b", "#88b4f2", "#e99bb4", "#b9c97a"];
+const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa6b2"];
 
 /** Score as a stacked bar: each segment is value × weight of one component, so their sum is the total. */
 function Breakdown({ m }: { m: CounterpartyMatch }) {
