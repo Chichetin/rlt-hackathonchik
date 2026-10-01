@@ -46,6 +46,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Ratings Batch */
+        get: operations["api_ratings_batch_api_ratings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ratings/{inn}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Ratings */
+        get: operations["api_ratings_api_ratings__inn__get"];
+        put?: never;
+        /** Api Rate */
+        post: operations["api_rate_api_ratings__inn__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -361,6 +396,96 @@ export interface components {
                 [key: string]: string | boolean | number;
             };
         };
+        /** RatingDetail */
+        RatingDetail: {
+            /** Inn */
+            inn: string;
+            /**
+             * Count
+             * @description опубликованных оценок
+             */
+            count: number;
+            /**
+             * Average
+             * @description None, пока оценок меньше MIN_SHOWN
+             */
+            average: number | null;
+            /**
+             * Min Shown
+             * @default 3
+             */
+            min_shown: number;
+            /**
+             * Disclaimer
+             * @default Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены.
+             */
+            disclaimer: string;
+            /** Reviews */
+            reviews: components["schemas"]["Review"][];
+        };
+        /** RatingIn */
+        RatingIn: {
+            /**
+             * Author Inn
+             * @description ИНН заказчика, который оценивает (контрольная сумма)
+             */
+            author_inn: string;
+            /**
+             * Browser Sig
+             * @description локальный ключ браузера, не удостоверяет личность
+             */
+            browser_sig: string;
+            /** Stars */
+            stars: number;
+            /** Text */
+            text: string;
+        };
+        /** RatingSaved */
+        RatingSaved: {
+            /**
+             * Status
+             * @description published / quarantine / hidden
+             */
+            status: string;
+            summary: components["schemas"]["RatingSummary"];
+        };
+        /** RatingSummary */
+        RatingSummary: {
+            /** Inn */
+            inn: string;
+            /**
+             * Count
+             * @description опубликованных оценок
+             */
+            count: number;
+            /**
+             * Average
+             * @description None, пока оценок меньше MIN_SHOWN
+             */
+            average: number | null;
+            /**
+             * Min Shown
+             * @default 3
+             */
+            min_shown: number;
+            /**
+             * Disclaimer
+             * @default Отзывы пользователей сервиса. Личность автора и опыт поставки не проверены.
+             */
+            disclaimer: string;
+        };
+        /** Review */
+        Review: {
+            /** Stars */
+            stars: number;
+            /** Text */
+            text: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** ScoreComponent */
         ScoreComponent: {
             /**
@@ -583,6 +708,106 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    api_ratings_batch_api_ratings_get: {
+        parameters: {
+            query: {
+                /** @description ИНН через запятую */
+                inns: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["RatingSummary"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_ratings_api_ratings__inn__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inn: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_rate_api_ratings__inn__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inn: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RatingIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
