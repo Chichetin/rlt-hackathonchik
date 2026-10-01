@@ -17,6 +17,7 @@ import {
   yesNo,
   type CounterpartyMatch,
   type Filters,
+  type Query,
   type SearchResponse,
 } from "./api";
 
@@ -24,6 +25,18 @@ import {
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
 
 const REGIONS = ["", "Санкт-Петербург", "Ленинградская область"];
+
+/** «Новые» emptied by «Только производители», judged by the filters of the shown answer (#84): the type
+ *  of a new company is never confirmed (D-036), so this filter hides all of them. Other filters keep the
+ *  general text: region and МСП of new companies are known, their empty block has other reasons. */
+function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Query | null): string | undefined {
+  const n = base?.discovered.length ?? 0;
+  if (res.discovered.length || !n || base === res || !shown?.filters?.only_manufacturers) return undefined;
+  return (
+    `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ` +
+    "тип поставщика реестр не подтверждает (по ОКВЭД известно только «вероятно»). Снимите фильтр, чтобы их увидеть."
+  );
+}
 
 export function App() {
   const [text, setText] = useState("");
@@ -280,9 +293,10 @@ export function App() {
             total={res.total.discovered}
             onOpen={setOpen}
             empty={
-              res.query.okpd2?.length
+              hiddenNew(res, base, shownQuery) ??
+              (res.query.okpd2?.length
                 ? "В открытых источниках новых компаний по этому запросу не найдено: реестр МСП ФНС не ответил, в нём нет компаний с подходящим ОКВЭД в СПб и области, либо все найденные уже есть в данных АИС ГЗ."
-                : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках."
+                : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
         </main>
