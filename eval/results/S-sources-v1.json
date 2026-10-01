@@ -1,0 +1,95 @@
+{
+  "exp_id": "S-sources-v1",
+  "kind": "source-table",
+  "created_at": "2026-10-01T19:44:56+00:00",
+  "commit": "44c2d1f7b022105290936959e7f2f0ac73b8969b",
+  "dirty": false,
+  "config": {
+    "cache": "sources.sqlite",
+    "pages_in_cache": 76,
+    "organizers_data_checked": true
+  },
+  "sources": [
+    {
+      "source": "rmsp.nalog.ru — поиск по ОКВЭД и региону",
+      "role": "поиск новых",
+      "requests": 38,
+      "found": 360,
+      "verified": 164,
+      "new": 152,
+      "dropped": {
+        "исключён из реестра МСП (не действующий)": 196,
+        "уже есть в данных организаторов (проверено, но не «новая»)": 12
+      },
+      "fetched_at_min": "2026-10-01T19:07:35+00:00",
+      "fetched_at_max": "2026-10-01T19:22:35+00:00",
+      "registry_data_date": "01.10.2026 22:22:38",
+      "note": ""
+    },
+    {
+      "source": "rmsp.nalog.ru — по ИНН (статус МСП)",
+      "role": "проверка",
+      "requests": 0,
+      "found": 0,
+      "verified": 0,
+      "new": null,
+      "dropped": {},
+      "fetched_at_min": null,
+      "fetched_at_max": null,
+      "registry_data_date": null,
+      "note": "кеш по источнику пуст — запросов не было"
+    },
+    {
+      "source": "pb.nalog.ru — карточка ФНС «Прозрачный бизнес»",
+      "role": "проверка",
+      "requests": 0,
+      "found": 0,
+      "verified": 0,
+      "new": null,
+      "dropped": {},
+      "fetched_at_min": null,
+      "fetched_at_max": null,
+      "registry_data_date": null,
+      "note": "кеш по источнику пуст — запросов не было"
+    },
+    {
+      "source": "bo.nalog.gov.ru — ГИР БО",
+      "role": "проверка",
+      "requests": 0,
+      "found": 0,
+      "verified": 0,
+      "new": null,
+      "dropped": {},
+      "fetched_at_min": null,
+      "fetched_at_max": null,
+      "registry_data_date": null,
+      "note": "кеш по источнику пуст — запросов не было"
+    },
+    {
+      "source": "zakupki.gov.ru — РНП ЕИС",
+      "role": "проверка",
+      "requests": 0,
+      "found": 0,
+      "verified": 0,
+      "new": null,
+      "dropped": {},
+      "fetched_at_min": null,
+      "fetched_at_max": null,
+      "registry_data_date": null,
+      "note": "кеш по источнику пуст — запросов не было"
+    },
+    {
+      "source": "estore.gz-spb.ru — реестр контрактов ЭМ",
+      "role": "сверка (первоисточник данных, не источник новых)",
+      "requests": 0,
+      "found": 0,
+      "verified": 0,
+      "new": null,
+      "dropped": {},
+      "fetched_at_min": null,
+      "fetched_at_max": null,
+      "registry_data_date": null,
+      "note": "кеш по источнику пуст — запросов не было"
+    }
+  ]
+}
