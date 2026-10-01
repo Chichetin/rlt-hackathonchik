@@ -352,4 +352,5 @@ def test_tokenizers_merge_forms_and_a4_and_switch_version(monkeypatch, name):
 def test_explanations_name_the_okpd2_class(search_data):
     given = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])))["7801000012"]
     assert "совпадает код 17.12.14.110 «Бумага для печати»" in comp(given, "product_fit").explanation
-    assert "по ОКПД2 17.12 «Бумага и картон» за" in comp(given, "experience").explanation
+    by_class = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]), config=v1()))["7801000012"]
+    assert "по ОКПД2 17.12 «Бумага и картон» за" in comp(by_class, "experience").explanation  # experience by class
