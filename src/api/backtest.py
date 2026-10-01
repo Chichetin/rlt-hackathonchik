@@ -18,7 +18,7 @@ import yaml
 from pydantic import BaseModel
 
 from src.api.lots import LotNotFound, find_lot
-from src.match import search as search_mod
+from src.match import pipeline
 from src.match.store import get_store
 
 SPLIT = Path(__file__).resolve().parents[2] / "configs" / "split.yaml"
@@ -83,8 +83,9 @@ def lot_backtest(ident: str) -> Backtest:
     relevant = [(inn, bool(win)) for inn, win, _ in rows if win or channel == "ЭМ"]
     if not relevant:
         raise NotBacktestable("у закупки нет победителя с верным ИНН в данных — сравнивать не с чем")
-    found = search_mod.search(query, k=search_mod.CANDIDATES)
-    order = [m.counterparty.inn for m in found if m.origin == "history" and m.counterparty.inn]
+    # the eval pipeline in its backtest mode: nothing from today's cache, no «Новые» (#220, D-097)
+    found = pipeline.verified(pipeline.pick(query, backtest=True).history)
+    order = [m.counterparty.inn for m in found if m.counterparty.inn]
     place = {inn: i + 1 for i, inn in reversed(list(enumerate(order)))}
     people = sorted((ParticipantRank(inn=inn, is_winner=win, rank=place.get(inn)) for inn, win in relevant),
                     key=lambda p: (not p.is_winner, p.rank is None, p.rank or 0, p.inn))
