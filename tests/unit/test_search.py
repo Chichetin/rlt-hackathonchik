@@ -232,3 +232,27 @@ def test_prebuild_cli_builds_product_and_cutoff_indexes(search_data, tmp_path, c
 def test_prebuild_cli_without_data_exits_2(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "none"))
     assert index_mod.main() == 2
+
+
+def _sole_trader(kpp):
+    from src.contracts import Counterparty
+    return Counterparty(inn="780100000090", kpp=kpp, name="ИНН 780100000090")
+
+
+@pytest.mark.parametrize("kpp", ["000000000", None])
+def test_geography_kpp_stub_is_not_region_00(kpp):
+    value, why = search_mod._geography(_sole_trader(kpp), "Санкт-Петербург")
+    assert value == 0.0 and "регион не определён" in why
+    assert "00" not in why.replace("000000000", "")  # no "region with code 00"
+
+
+def test_geography_inn_region_signal_h15c():
+    stub = _sole_trader("000000000")
+    assert search_mod._geography(stub, "Санкт-Петербург", 1.0)[0] == 1.0
+    assert search_mod._geography(stub, "Ленинградская область", 1.0)[0] == pytest.approx(search_mod.NEIGHBOUR_VALUE)
+    value, why = search_mod._geography(_sole_trader(None), "Санкт-Петербург", 0.5)
+    assert value == 0.5 and "ИНН выдан в Санкт-Петербурге" in why and "регион выдачи ИНН" in why
+    # a real KPP is untouched by the signal
+    from src.contracts import Counterparty
+    org = Counterparty(inn="4701000038", kpp="470101001", name="x")
+    assert search_mod._geography(org, "Санкт-Петербург", 1.0) == search_mod._geography(org, "Санкт-Петербург")
