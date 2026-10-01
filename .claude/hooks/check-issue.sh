@@ -21,7 +21,18 @@ case "$tool" in
   Bash)
     cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // ""')"
     case "$cmd" in *git*) ;; *) exit 0 ;; esac
-    mapfile -t targets < <(printf '%s' "$cmd" | python3 "$HOOKS/git_targets.py" "$cwd" 2>/dev/null || echo "$cwd")
+    # Windows often has only the `py` launcher; without an interpreter every "git" command is blocked.
+    if command -v python3 >/dev/null 2>&1; then PY=(python3)
+    elif command -v py >/dev/null 2>&1; then PY=(py -3)
+    else PY=(python); fi
+    # UTF-8 out (py -3 on Windows writes cp1251 to a pipe and mangles a Cyrillic repo path), no \r.
+    mapfile -t targets < <(printf '%s' "$cmd" | PYTHONUTF8=1 "${PY[@]}" -X utf8 "$HOOKS/git_targets.py" "$cwd" 2>/dev/null | tr -d '\r' || echo "$cwd")
+    # A git target that does not exist is a parsing failure, not "outside the repo": fail closed on cwd.
+    # (Empty output = no commit/push in the command: nothing to check. pipefail sends a python
+    # failure to the `|| echo "$cwd"` branch.)
+    for i in "${!targets[@]}"; do
+      [ -z "${targets[$i]}" ] || [ -e "${targets[$i]}" ] || targets[$i]="$cwd"
+    done
     ;;
   *) exit 0 ;;
 esac

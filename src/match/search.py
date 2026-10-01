@@ -15,7 +15,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, Scor
 
 log = logging.getLogger(__name__)
 
-# Starting expert weights (research/DECISIONS.md D-004). [ОБНОВИТЬ 01.10] after backtest.
+# Starting expert weights (research/DECISIONS.md D-004). Tuned after backtest — T-15.
 DEFAULT_WEIGHTS: dict[str, float] = {
     "product_fit": 0.35,
     "experience": 0.2,

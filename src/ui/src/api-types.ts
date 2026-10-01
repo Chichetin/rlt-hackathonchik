@@ -97,6 +97,8 @@ export interface components {
         Counterparty: {
             /** Inn */
             inn: string | null;
+            /** Kpp */
+            kpp?: string | null;
             /** Name */
             name: string;
             /** Kind */
@@ -188,6 +190,9 @@ export interface components {
         /**
          * Query
          * @description Customer need: an item name, a description or a fragment of the spec.
+         *
+         *     Mirrors one notice (lot) of organizers' data (research/DATA_DICTIONARY.md): in the product
+         *     the user fills `text` (and optionally the rest); in backtest every field comes from the lot.
          */
         Query: {
             /** Query Id */
@@ -195,7 +200,7 @@ export interface components {
             /** Text */
             text: string;
             /** Okpd2 */
-            okpd2?: string | null;
+            okpd2?: string[];
             /** Ktru */
             ktru?: string | null;
             /**
@@ -205,6 +210,12 @@ export interface components {
             region: string;
             /** Budget */
             budget?: number | null;
+            /** Customer Inn */
+            customer_inn?: string | null;
+            /** Channel */
+            channel?: ("ЭМ" | "АИС ГЗ") | null;
+            /** As Of */
+            as_of?: string | null;
             /** Filters */
             filters?: {
                 [key: string]: string | boolean | number;

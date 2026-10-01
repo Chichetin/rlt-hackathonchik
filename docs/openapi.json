@@ -192,6 +192,17 @@
             ],
             "title": "Inn"
           },
+          "kpp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kpp"
+          },
           "name": {
             "type": "string",
             "title": "Name"
@@ -462,14 +473,10 @@
             "title": "Text"
           },
           "okpd2": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
             "title": "Okpd2"
           },
           "ktru": {
@@ -499,6 +506,44 @@
             ],
             "title": "Budget"
           },
+          "customer_inn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Inn"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ЭМ",
+                  "АИС ГЗ"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
           "filters": {
             "additionalProperties": {
               "anyOf": [
@@ -524,7 +569,7 @@
           "text"
         ],
         "title": "Query",
-        "description": "Customer need: an item name, a description or a fragment of the spec."
+        "description": "Customer need: an item name, a description or a fragment of the spec.\n\nMirrors one notice (lot) of organizers' data (research/DATA_DICTIONARY.md): in the product\nthe user fills `text` (and optionally the rest); in backtest every field comes from the lot."
       },
       "ScoreComponent": {
         "properties": {

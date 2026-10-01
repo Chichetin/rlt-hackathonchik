@@ -109,7 +109,7 @@ bash scripts/issues.sh board             # мои задачи, занятые a
 ## Remote и сдача
 
 `origin` — `https://github.com/Chichetin/rlt-hackathonchik`. Хостинг и формат сдачи
-`[ОБНОВИТЬ 01.10]` (возможно, понадобится зеркало на площадку организаторов — отдельная задача
+`[СПРОСИТЬ Q-12]` (возможно, понадобится зеркало на площадку организаторов — отдельная задача
 `area:app`). Тег сдачи — после скилла `submission-checklist`, на commit из `origin/main`:
 
 ```bash

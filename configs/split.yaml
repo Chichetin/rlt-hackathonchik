@@ -1,9 +1,10 @@
 # Разбиение по времени (research/EVAL.md, раздел 7 workflow). Признаки — только из данных до
 # cutoff; dev — запросы из [cutoff, holdout_from); holdout — с holdout_from, запечатан
 # (читает только `make eval-final`).
-# [ОБНОВИТЬ 01.10] даты — по реальному диапазону дат в данных организаторов (DATA).
-cutoff: "2026-01-01"
-holdout_from: "2026-07-01"
+# Даты — по профилю (research/PROBLEM.md, `uv run python -m src.ingest.profile`): данные 2024-01-08…2025-12-31;
+# dev 2025-07…09 — 51 600 лотов с участниками, holdout 2025-10…12 — 88 853. Поле даты — Извещения.publish_date.
+cutoff: "2025-07-01"
+holdout_from: "2025-10-01"
 cases:
-  dev: eval/cases/dev.jsonl                         # [ОБНОВИТЬ 01.10] собирает DATA из данных
+  dev: eval/cases/dev.jsonl                         # собирает T-07 (docs/plans/2026-10-01-plan.md)
   holdout: data/processed/eval/holdout.jsonl        # вне git; собирает DATA, читает только eval-final

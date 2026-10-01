@@ -7,7 +7,7 @@ description: Демо, питч и масштабирование — схема
 
 Источник — разделы 11 и 12 `docs/source/hackathon-research-workflow.md`. Тексты пишет агент
 `pitch`, числа — `scribe` в `pitch/facts.md`, вопросы проверяет `jury`. Регламент защиты в
-минутах и формат сдачи — `[ОБНОВИТЬ 01.10]` (`docs/timeline.md`).
+минутах и формат сдачи — `[СПРОСИТЬ Q-06, Q-12]` (`docs/timeline.md`).
 
 Файлы: `pitch/outline.md` (основная и раздел «Защита Топ-5»), `pitch/QA.md`,
 `pitch/facts.md`, `pitch/demo-insurance.md`, `pitch/architecture.md`.

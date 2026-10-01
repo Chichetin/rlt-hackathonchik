@@ -1,6 +1,7 @@
 # Одна команда на действие. Стек — стартовая ставка (CLAUDE.md, «Стек»).
 SHELL := /bin/bash
 export PYTHONPATH := $(CURDIR)
+export PYTHONUTF8 := 1
 PY := uv run --frozen
 UI := src/ui
 PORT ?= 8000
