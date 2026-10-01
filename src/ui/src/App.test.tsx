@@ -369,3 +369,23 @@ test("card falls back to bare OKPD2 codes when names fail", async () => {
   await new Promise((r) => setTimeout(r, 0)); // the 500 is handled before the check
   expect(within(screen.getByRole("dialog")).getByText("17.12, 26.20")).toBeInTheDocument();
 });
+
+test("long legal forms are shortened in the list only", async () => {
+  const long = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БЕТА"';
+  const res = JSON.parse(JSON.stringify(response));
+  res.history[0].counterparty.name = long;
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(res), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const row = within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText('ООО "БЕТА"');
+  expect(row).toHaveAttribute("title", long);
+  await userEvent.click(row);
+  expect(screen.getByRole("dialog", { name: `Карточка: ${long}` })).toBeInTheDocument();
+
+  const { shortName } = await import("./App");
+  expect(shortName('ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "КОМПЬЮТЕРНЫЕ СИСТЕМЫ"')).toBe('ООО "КОМПЬЮТЕРНЫЕ СИСТЕМЫ"');
+  expect(shortName("ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО «РОМАШКА»")).toBe("ПАО «РОМАШКА»");
+  expect(shortName("ООО «Альфа»")).toBe("ООО «Альфа»");
+  expect(shortName("ИНН 7801234567")).toBe("ИНН 7801234567");
+});
