@@ -25,5 +25,5 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
-rel-on-s500:     # reliability в балле с весом weights.reliability (#72, D-070); "on" в кавычках — иначе YAML 1.1 bool
+rel-on-s500:     # reliability в балле с весом weights.reliability (#72, D-072); "on" в кавычках — иначе YAML 1.1 bool
   reliability: {mode: "on"}
