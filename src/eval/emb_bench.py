@@ -198,16 +198,23 @@ def cpu_latency(model: str, texts: list[str], n: int = 50) -> dict:
     return {"p50_ms": round(float(p50), 1), "p95_ms": round(float(p95), 1), "n": len(ms)}
 
 
-def bench(models: list[str], n: int, seed: int, out_dir: Path) -> dict[str, dict]:
+def short_text(text: str) -> str:
+    """A user-like query: the first position name of the lot (Query.text = subject; name; name ...)."""
+    parts = [p.strip() for p in text.split("; ") if p.strip()]
+    return parts[1] if len(parts) > 1 else parts[0]
+
+
+def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = False) -> dict[str, dict]:
     cfg = split_config()
     as_of = date.fromisoformat(str(cfg["cutoff"]))
     store = ParquetStore(processed_dir())
     idx = get_index(store, as_of)
     cases = load_cases("dev", cfg)
     cases = random.Random(seed).sample(cases, min(n, len(cases)))
-    texts = [normalize(c.query.text) for c in cases]
+    raw = [short_text(c.query.text) if short else c.query.text for c in cases]
+    texts = [normalize(t) for t in raw]
     t0 = time.time()
-    bm25_hits = [idx.retrieve(tokenize(c.query.text), TOP_DOCS) for c in cases]
+    bm25_hits = [idx.retrieve(tokenize(t), TOP_DOCS) for t in raw]
     base = [_row(_cands(store, idx, h, as_of), c) for h, c in zip(bm25_hits, cases, strict=True)]
     log.info("BM25: %.0f с", time.time() - t0)
     empty = [i for i, h in enumerate(bm25_hits) if not h]
@@ -218,7 +225,8 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path) -> dict[str, dict
         s["bm25_empty"] = _summary([rows[i] for i in empty])
         return s
 
-    meta = {"part": "dev", "n": len(cases), "seed": seed, "as_of": as_of.isoformat(), "commit": _commit(),
+    meta = {"part": "dev", "query": "short" if short else "lot", "n": len(cases), "seed": seed,
+            "as_of": as_of.isoformat(), "commit": _commit(),
             "created": datetime.now(UTC).isoformat(timespec="seconds"), "top_docs": TOP_DOCS, "knn": KNN,
             "candidates": CANDIDATES, "store": store.name, "index_docs": idx.n_docs}
     results = {"bm25": {**meta, "retriever": "bm25", "metrics": _summary(base), "slices": slices(base)}}
@@ -249,7 +257,8 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path) -> dict[str, dict
                  results["bm25"]["metrics"]["cand_recall@200"]["mean"])
     out_dir.mkdir(parents=True, exist_ok=True)
     for key, res in results.items():
-        (out_dir / f"emb-{key}-s1.json").write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+        name = f"emb-{key}-s1{'-short' if short else ''}.json"
+        (out_dir / name).write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
     return results
 
 
@@ -263,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--n", type=int, default=500)
     b.add_argument("--seed", type=int, default=20261001)
     b.add_argument("--out-dir", type=Path, default=ROOT / "eval" / "results")
+    b.add_argument("--short", action="store_true", help="query = the first position name (user-like)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -270,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         for model in args.model:
             print({"model": model, "out": str(encode_corpus(model))}, flush=True)
         return 0
-    res = bench(args.model, args.n, args.seed, args.out_dir)
+    res = bench(args.model, args.n, args.seed, args.out_dir, args.short)
     print(json.dumps({k: (v.get("metrics") or {kk: v[kk]["metrics"] for kk in ("vector", "hybrid_rrf")})
                       for k, v in res.items()}, ensure_ascii=False, indent=1))
     return 0
