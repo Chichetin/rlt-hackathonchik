@@ -3,8 +3,8 @@
 v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
 1. BM25 (`bm25s`, src/match/index.py) over lot positions published strictly before `as_of`;
    matched lots -> their participants (Поставщики) = candidates, `origin="history"`.
-2. OKPD2 class of the query: `Query.okpd2`, or — when empty — the code with the largest BM25
-   weight among the positions of the top matched lots.
+2. OKPD2 class of the query: `Query.okpd2`, or — when empty — a vote of the positions that
+   matched the query themselves (D-045): group XX.XX first, then the code inside it.
 3. Components in [0, 1], one explanation line each:
    product_fit — BM25 similarity (normalized by the best candidate) + depth of the OKPD2 match;
    experience  — lots and wins in the query's OKPD2 group (level 4) before as_of;
@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -43,7 +46,9 @@ STRICT_RETRIEVER = False
 
 TOP_DOCS = 500  # BM25 documents (distinct position texts) taken per query
 CANDIDATES = 200  # suppliers scored per query (by best BM25 of their lots)
-VOTE_LOTS = 20  # top lots that vote for the query's OKPD2 when the query has none
+VOTE_DOCS = 100  # best matched position texts that vote for the query's OKPD2 when it has none (D-045)
+DOC_CODES = "doc_codes.parquet"  # sidecar of the index: OKPD2 codes of the positions carrying each text
+VOTE_LOTS = 20  # fallback: only lot subjects matched — top lots vote, a lot's vote split over its positions
 FIT_BM25_SHARE = 0.6  # product_fit = 0.6 · BM25 + 0.4 · OKPD2 depth (BM25 only without a class)
 OKPD_DEPTH = {4: 1.0, 3: 0.75, 2: 0.5, 1: 0.25, 0: 0.0}
 OKPD_LEVEL_TEXT = {4: "совпадает код", 3: "совпадает до подкатегории", 2: "совпадает до группы",
@@ -129,13 +134,88 @@ def _retrieve(con: duckdb.DuckDBPyConnection, idx: LotIndex, hits: list[tuple[in
     return [Candidate(*r) for r in rows]
 
 
-def _predict_okpd2(con: duckdb.DuckDBPyConnection, processed: Path) -> str | None:
-    row = con.execute(
+_codes_lock = threading.Lock()
+
+
+def _doc_codes(con: duckdb.DuckDBPyConnection, idx: LotIndex, processed: Path) -> str:
+    """SQL path of the sidecar (doc_id, code, n): codes of the positions whose name is the document's text.
+
+    Derived from the index's own docs/texts (lots before its as_of) and items of those lots — no
+    leak. Built once per index next to it (the index files and its key are untouched); when the
+    index directory is read-only (docker mount) — in the temp directory.
+    """
+    places = (idx.path, Path(tempfile.gettempdir()) / f"rlt-doc-codes-{idx.key}")
+    with _codes_lock:
+        for base in places:
+            if (base / DOC_CODES).exists():
+                return pq_path(base / DOC_CODES)
+        for n, base in enumerate(places):
+            tmp = base / f"{DOC_CODES}.tmp{os.getpid()}"
+            try:
+                base.mkdir(parents=True, exist_ok=True)
+                con.execute(
+                    f"""
+                    COPY (
+                        SELECT d.doc_id, i.okpd2_code AS code, count(*)::INTEGER AS n
+                        FROM read_parquet({idx.docs_parquet}) d
+                        JOIN read_parquet({pq_path(idx.path / "texts.parquet")}) t USING (doc_id)
+                        JOIN read_parquet({pq_path(processed / "items.parquet")}) i
+                          ON i.lot_id = d.lot_id AND i.product_name = t.text
+                        WHERE i.okpd2_code IS NOT NULL
+                        GROUP BY d.doc_id, i.okpd2_code ORDER BY d.doc_id, code
+                    ) TO {pq_path(tmp)} (FORMAT parquet)
+                    """
+                )
+                os.replace(tmp, base / DOC_CODES)
+                log.info("built %s for index %s", base / DOC_CODES, idx.key)
+                return pq_path(base / DOC_CODES)
+            except (OSError, duckdb.IOException) as e:
+                if n == len(places) - 1:
+                    raise
+                log.warning("индекс %s не доступен на запись (%s) — коды позиций строятся в %s", idx.path, e, places[1])
+    raise AssertionError("unreachable")
+
+
+def _predict_okpd2(con: duckdb.DuckDBPyConnection, idx: LotIndex, processed: Path) -> str | None:
+    """OKPD2 of a query without a code, from the documents that matched it (temp tables h, lot); D-045.
+
+    A matched text votes with the codes of the positions that carry this very text — not with the
+    other positions of their lots. One vote per text, its score split over its codes; the
+    VOTE_DOCS best texts vote. Texts that are only lot subjects have no code of their own: they
+    vote only when no position matched at all — the VOTE_LOTS best lots, a lot's score split over
+    its positions. The heaviest group XX.XX wins, then the heaviest code inside it (9 digits
+    scatter the votes).
+    """
+    codes = _doc_codes(con, idx, processed)
+    con.execute(
         f"""
-        WITH top AS (SELECT lot_id, score FROM lot ORDER BY score DESC, lot_id LIMIT {VOTE_LOTS})
-        SELECT i.okpd2_code FROM read_parquet({pq_path(processed / "items.parquet")}) i JOIN top USING (lot_id)
-        WHERE i.okpd2_code IS NOT NULL
-        GROUP BY i.okpd2_code ORDER BY sum(top.score) DESC, i.okpd2_code LIMIT 1
+        CREATE OR REPLACE TEMP TABLE vote AS
+        WITH pos AS (SELECT h.doc_id, h.score, c.code, c.n FROM h JOIN read_parquet({codes}) c USING (doc_id)),
+        best AS (SELECT DISTINCT doc_id, score FROM pos ORDER BY score DESC, doc_id LIMIT {VOTE_DOCS})
+        SELECT pos.code, pos.score * pos.n / sum(pos.n) OVER (PARTITION BY pos.doc_id) AS w
+        FROM pos JOIN best USING (doc_id)
+        """
+    )
+    if not con.execute("SELECT 1 FROM vote LIMIT 1").fetchone():
+        con.execute(
+            f"""
+            CREATE OR REPLACE TEMP TABLE vote AS
+            WITH top AS (SELECT lot_id, score FROM lot ORDER BY score DESC, lot_id LIMIT {VOTE_LOTS}),
+            pos AS (
+                SELECT top.lot_id, top.score, i.okpd2_code AS code, count(*) AS n
+                FROM read_parquet({pq_path(processed / "items.parquet")}) i JOIN top USING (lot_id)
+                WHERE i.okpd2_code IS NOT NULL
+                GROUP BY top.lot_id, top.score, i.okpd2_code
+            )
+            SELECT code, score * n / sum(n) OVER (PARTITION BY lot_id) AS w FROM pos
+            """
+        )
+    row = con.execute(
+        """
+        WITH v AS (SELECT code, left(code, 5) AS grp, sum(w) AS w FROM vote GROUP BY code)
+        SELECT code FROM v
+        WHERE grp = (SELECT grp FROM v GROUP BY grp ORDER BY sum(w) DESC, grp LIMIT 1)
+        ORDER BY w DESC, code LIMIT 1
         """
     ).fetchone()
     return row[0] if row else None
@@ -273,7 +353,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
         codes = list(dict.fromkeys(c.strip() for c in query.okpd2 if c.strip()))
         predicted = False
         if not codes:
-            guess = _predict_okpd2(con, processed)
+            guess = _predict_okpd2(con, idx, processed)
             codes, predicted = ([guess], True) if guess else ([], False)
         if codes:
             _class_history(con, cands, codes, processed, as_of)
