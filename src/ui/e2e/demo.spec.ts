@@ -35,7 +35,7 @@ test("демо: запрос → два блока → карточка → фи
   await history.locator(".item").first().click();
   const card = page.getByRole("dialog");
   await expect(card.getByText("Почему в списке")).toBeVisible();
-  await expect(card.getByRole("region", { name: "Отзывы" }).getByText(/Не влияет на рейтинг/)).toBeVisible();
+  await expect(card.getByRole("region", { name: "Отзывы" }).getByText(/Не влияет на оценку подбора/)).toBeVisible();
   await expect(card.locator(".components li")).toHaveCount(6);
   await expect(card.locator(".evidence li").first()).toContainText(/\d{2}\.\d{2}\.\d{4}/);
   await expect(card.getByText("Статистика из данных АИС ГЗ")).toBeVisible();
