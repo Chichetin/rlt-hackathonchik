@@ -533,3 +533,4 @@ html { scroll-padding-top: 80px; }
 /* the sticky form must fit a 1366×768 / 1280×720 projector: scroll inside instead of hiding «Выгрузить» */
 .query { max-height: calc(100dvh - 92px); overflow-y: auto; }
 @media (max-width: 760px) { .query { max-height: none; overflow: visible; } }
+@media (min-width: 1101px) { .page-home .content { padding-inline: 48px; } }
