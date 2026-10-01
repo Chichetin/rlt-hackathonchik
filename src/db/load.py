@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -28,7 +29,7 @@ INDEXES = [
     ("notices_reqnum", "notices", "(reqnum)"),
     ("notices_publish_date", "notices", "(publish_date)"),
     ("notices_customer_inn", "notices", "(customer_inn)"),
-    ("notices_channel", "notices", "(channel)"),
+    ("notices_channel_date", "notices", "(channel, publish_date)"),
     ("items_lot_id", "items", "(lot_id)"),
     ("items_okpd2", "items", "(okpd2_code text_pattern_ops)"),
     ("participants_lot_id", "participants", "(lot_id)"),
@@ -57,6 +58,8 @@ def _tables(processed: Path, manifest: dict) -> dict[str, Path]:
 
 def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
     """Load all tables into `schema`; returns row counts per table."""
+    if not re.fullmatch(r"[a-z_][a-z0-9_]*", schema) or schema == "public" or schema.startswith("pg_"):
+        raise ValueError(f"недопустимая схема {schema!r}: нужна своя, не public (там очередь и pgvector)")
     manifest = json.loads((processed / "manifest.json").read_text(encoding="utf-8"))
     tables = _tables(processed, manifest)
     new = f"{schema}_new"
@@ -82,11 +85,15 @@ def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
     pg(f"ALTER TABLE {new}.notices ADD CONSTRAINT notices_pkey PRIMARY KEY (lot_id)")
     for idx, table, cols in INDEXES:
         pg(f"CREATE INDEX {idx} ON {new}.{table} {cols}")
+    for name in tables:
+        if name.startswith("suppliers_"):  # supplier stats as of the eval cutoff
+            pg(f"CREATE INDEX {name}_inn ON {new}.{name} (inn)")
     pg(f"CREATE TABLE {new}.manifest (built_at timestamptz, body jsonb)")
     pg(f"INSERT INTO {new}.manifest VALUES ({_lit(manifest['built_at'])}, {_lit(json.dumps(manifest))})")
-    pg(f"BEGIN; DROP SCHEMA IF EXISTS {schema} CASCADE; ALTER SCHEMA {new} RENAME TO {schema}; COMMIT")
     for name in tables:
-        pg(f"ANALYZE {schema}.{name}")
+        pg(f"ANALYZE {new}.{name}")  # statistics survive the rename
+    # One simple-query string = one implicit transaction in Postgres: readers see the old or the new schema.
+    pg(f"DROP SCHEMA IF EXISTS {schema} CASCADE; ALTER SCHEMA {new} RENAME TO {schema}")
     return counts
 
 

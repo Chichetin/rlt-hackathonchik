@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 from datetime import date
 from pathlib import Path
 
@@ -25,6 +27,15 @@ def processed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("processed")
     build(FIXTURE, out, as_of=None, cutoff=date(2025, 7, 1))
     return out
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _drop_test_schema():
+    yield
+    con = duckdb.connect()
+    con.execute("LOAD postgres")
+    con.execute(f"ATTACH '{pg_dsn(URL)}' AS pg (TYPE postgres)")
+    con.execute(f"CALL postgres_execute('pg', 'DROP SCHEMA IF EXISTS {SCHEMA}, {SCHEMA}_new CASCADE')")
 
 
 def _pg(sql: str) -> list[tuple]:
@@ -52,9 +63,27 @@ def test_indexes_for_filters_and_lookup(processed: Path) -> None:
     load(processed, URL, schema=SCHEMA)
     names = {r[0] for r in _pg(f"SELECT indexname FROM pg_indexes WHERE schemaname = '{SCHEMA}'")}
     for idx in ("notices_pkey", "notices_reqnum", "items_lot_id", "items_okpd2", "participants_lot_id",
-                "participants_supplier_inn", "suppliers_inn"):
+                "participants_supplier_inn", "suppliers_inn", "suppliers_2025_07_01_inn"):
         assert idx in names, idx
     assert _pg(f"SELECT built_at IS NOT NULL FROM {SCHEMA}.manifest") == [(True,)]
+
+
+def test_count_mismatch_keeps_previous_schema(processed: Path, tmp_path: Path) -> None:
+    load(processed, URL, schema=SCHEMA)
+    bad = tmp_path / "bad"
+    shutil.copytree(processed, bad)
+    manifest = json.loads((bad / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"]["items"] += 1
+    (bad / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="items"):
+        load(bad, URL, schema=SCHEMA)
+    assert _pg(f"SELECT count(*) FROM {SCHEMA}.items") == [(13,)]
+
+
+@pytest.mark.parametrize("schema", ["public", "pg_temp", "Data", "data; drop"])
+def test_rejects_unsafe_schema(processed: Path, schema: str) -> None:
+    with pytest.raises(ValueError):
+        load(processed, URL, schema=schema)
 
 
 def test_pg_dsn_drops_sqlalchemy_driver() -> None:
