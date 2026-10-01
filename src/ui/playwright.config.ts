@@ -19,7 +19,11 @@ export default defineConfig({
   // One file alone, without the «rest» dependency: npx playwright test e2e/demo.spec.ts --no-deps
   projects: [
     { name: "rest", testIgnore: /demo\.spec\.ts/ },
-    { name: "demo", testMatch: /demo\.spec\.ts/, dependencies: ["rest"] },
+    // Without WebGL: headless Chromium draws the background waves in software, and that, not the scenario, took the
+    // clock — alone, one worker: 16.6 s with WebGL, 6.8 s without, UI animations kept (#225, D-088). micro.spec
+    // («rest», WebGL on) checks the waves.
+    { name: "demo", testMatch: /demo\.spec\.ts/, dependencies: ["rest"],
+      use: { launchOptions: { args: ["--disable-webgl", "--disable-3d-apis"] } } },
   ],
   webServer: {
     command:
