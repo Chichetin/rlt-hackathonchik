@@ -76,7 +76,6 @@ test("демо: запрос → два блока → карточка → фи
       new URL(r.url()).pathname === "/api/search" &&
       JSON.parse(r.request().postData() ?? "{}").filters?.only_manufacturers === true,
   );
-  await page.getByRole("button", { name: "Изменить закупку" }).click();
   await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).click();
   await page.getByRole("checkbox", { name: /^Только производители/ }).check();
   await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
@@ -105,6 +104,7 @@ test("демо: запрос → два блока → карточка → фи
       new URL(r.url()).pathname === "/api/search" &&
       JSON.parse(r.request().postData() ?? "{}").filters?.region === "Санкт-Петербург",
   );
+  await page.getByRole("button", { name: "Изменить закупку" }).click();
   await page.getByLabel("Регион").selectOption("Санкт-Петербург");
   const body = await (await regional).json();
   expect(body.history.length).toBeGreaterThan(0);
