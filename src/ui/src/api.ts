@@ -1,6 +1,7 @@
 // Клиент API. Типы — из OpenAPI (src/api-types.ts генерирует `make openapi` из src/contracts.py);
 // руками типы контрактов не дублируем.
 import type { components } from "./api-types";
+import { REGIONS } from "./geo/regions";
 import { KINDS, minScore, type Kind, type MinLevel } from "./roles";
 
 export type Query = components["schemas"]["Query"];
@@ -222,11 +223,13 @@ export function yesNo(v: boolean | null | undefined): string {
 
 // Регион: из реестра (enrich, с Evidence), иначе — по коду КПП из данных АИС ГЗ (78 / 47), как фильтр
 // «Регион» на сервере (src/match/filters.py, D-030).
-const KPP_REGION: Record<string, string> = { "78": "Санкт-Петербург", "47": "Ленинградская область" };
+// The names come from geo/regions.ts (the single client copy of «code → name»); only 78 / 47 are named by KPP.
+const KPP_NAMED = ["78", "47"];
+const kppRegionName = (code: string): string | undefined => (KPP_NAMED.includes(code) ? REGIONS[code]?.name : undefined);
 
 export function regionLabel(cp: Pick<Counterparty, "region" | "kpp">): string {
   if (cp.region) return cp.region;
-  const byKpp = cp.kpp ? KPP_REGION[cp.kpp.slice(0, 2)] : undefined;
+  const byKpp = cp.kpp ? kppRegionName(cp.kpp.slice(0, 2)) : undefined;
   return byKpp ? `${byKpp} (по КПП)` : "регион не указан";
 }
 
@@ -337,7 +340,7 @@ export async function dropTestset(): Promise<void> {
 export const PREDICT_CSV_URL = "/api/testset/predict.csv?top=10&offline=1";
 
 // Where the supplier is relative to the customer (#242): same region / the neighbour (78 ↔ 47) / another
-const NEIGHBOUR: Record<string, string> = { "Санкт-Петербург": "Ленинградская область", "Ленинградская область": "Санкт-Петербург" };
+const NEIGHBOUR: Record<string, string> = { [REGIONS["78"].name]: REGIONS["47"].name, [REGIONS["47"].name]: REGIONS["78"].name };
 export function relationToCustomer(cp: Pick<Counterparty, "region" | "kpp"> & { inn?: string | null }, customerRegion: string | undefined): string | null {
   if (!customerRegion) return null;
   // the server's order (src/match/filters.py, #242): registry region → KPP (not a stub of zeros, not 99 — the
@@ -346,7 +349,7 @@ export function relationToCustomer(cp: Pick<Counterparty, "region" | "kpp"> & { 
   const kpp = /^\d{2}$/.test(head) && head !== "00" && head !== "99" ? head : "";
   const ip = !cp.region && !kpp && cp.inn && /^\d{12}$/.test(cp.inn) ? cp.inn.slice(0, 2) : "";
   const code = kpp || ip;
-  const where = cp.region || KPP_REGION[code] || (code ? `регион с кодом ${code}` : "");
+  const where = cp.region || kppRegionName(code) || (code ? `регион с кодом ${code}` : "");
   if (!where) return null;
   const basis = ip ? " (по ИНН)" : "";
   if (where === customerRegion) return `в регионе заказчика${basis}`;
