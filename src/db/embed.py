@@ -150,24 +150,28 @@ def nearest(vec_schema: str, q: np.ndarray, k: int, explain: bool = False,
     return query, [v, v, k]
 
 
-def export_missing(conn: psycopg.Connection, path: Path, vec_schema: str = "vec") -> int:
+def export_missing(conn: psycopg.Connection, path: Path, vec_schema: str = "vec", model: str | None = None,
+                   data_schema: str = "data") -> int:
+    ensure_table(conn, data_schema, vec_schema, model)  # a new model's table is filled from data.items first
     rows = conn.execute(sql.SQL("SELECT norm FROM {} WHERE emb IS NULL ORDER BY norm")
-                        .format(sql.Identifier(vec_schema, TABLE))).fetchall()
+                        .format(sql.Identifier(vec_schema, spec(model).table))).fetchall()
     pq.write_table(pa.table({"norm": [r[0] for r in rows]}), path)
     return len(rows)
 
 
-def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000) -> int:
-    """texts.parquet → vecs.parquet (norm, emb float16[DIM]); no database needed."""
+def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000, model: str | None = None) -> int:
+    """texts.parquet → vecs.parquet (norm, emb float16[dim of the model]); no database needed."""
     texts = pq.read_table(src, columns=["norm"]).column("norm").to_pylist()
-    schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), DIM))],
-                       metadata={"model": MODEL, "prefix": PASSAGE})
+    sp = spec(model)
+    schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), sp.dim))],
+                       metadata={"model": model or MODEL, "prefix": sp.passage})
     started = time.monotonic()
     with pq.ParquetWriter(dst, schema) as w:
         for i in range(0, len(texts), chunk):
             part = texts[i:i + chunk]
             emb = np.asarray(encode(part), dtype=np.float16).reshape(-1)
-            w.write_table(pa.table({"norm": part, "emb": pa.FixedSizeListArray.from_arrays(emb, DIM)}, schema=schema))
+            arr = pa.FixedSizeListArray.from_arrays(emb, sp.dim)
+            w.write_table(pa.table({"norm": part, "emb": arr}, schema=schema))
             done = i + len(part)
             rate = _rate(done, started)
             left = (len(texts) - done) / rate / 60
@@ -219,12 +223,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=Path("vecs.parquet"))
     ap.add_argument("--import", dest="import_", type=Path, help="fill missing vectors from this parquet")
     ap.add_argument("--model", default=MODEL, choices=sorted(SPECS),
-                    help="model of --import / --index (its own table); encoding here stays e5-small")
+                    help="model of --export / --encode / --import / --index (its own table)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # HF Hub HEAD requests on model load
     if args.encode:
-        print({"encoded": encode_file(args.encode, args.out, model_encoder()), "out": str(args.out)})
+        enc = model_encoder(prefix=spec(args.model).passage, name=args.model)
+        print({"encoded": encode_file(args.encode, args.out, enc, model=args.model), "out": str(args.out)})
         return 0
     url = os.environ.get("DATABASE_URL", "")
     if not url.startswith("postgres"):
@@ -232,13 +237,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     with psycopg.connect(pg_dsn(url), autocommit=True) as conn:
         if args.export:
-            print({"exported": export_missing(conn, args.export), "path": str(args.export)})
+            print({"exported": export_missing(conn, args.export, model=args.model), "path": str(args.export)})
             return 0
         if args.import_:
             print({"imported": import_file(conn, args.import_, model=args.model)})
             if args.index:
                 ensure_hnsw(conn, model=args.model)
             return 0
+        if args.model != MODEL:
+            print(f"{args.model}: в базе кодируется только {MODEL}; другая модель — --export → --encode → --import",
+                  file=sys.stderr)
+            return 2
         print(embed(conn, model_encoder(), batch=args.batch, limit=args.limit))
         if args.index:
             ensure_hnsw(conn)
