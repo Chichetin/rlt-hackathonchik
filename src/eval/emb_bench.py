@@ -53,7 +53,15 @@ PREFIX = {
     "intfloat/multilingual-e5-base": ("query: ", "passage: "),
     "deepvk/USER-base": ("query: ", "passage: "),
     "cointegrated/rubert-tiny2": ("", ""),
+    # #267 (E2), from the HF model cards: bge-m3 "no longer requires adding instructions to the queries",
+    # USER-bge-m3 encodes plain texts, both CLS pooling; e5-large as e5; FRIDA retrieval prefixes, CLS pooling.
+    "BAAI/bge-m3": ("", ""),
+    "deepvk/USER-bge-m3": ("", ""),
+    "intfloat/multilingual-e5-large": ("query: ", "passage: "),
+    "ai-forever/FRIDA": ("search_query: ", "search_document: "),
 }
+# T5 encoders overflow in fp16 (inf/NaN activations): bf16 keeps the range at the same speed
+BF16 = {"ai-forever/FRIDA"}
 # vectors already encoded for production (#48): model -> files
 EXISTING = {"intfloat/multilingual-e5-small": ("vecs-e5-small.parquet", "vecs-rest.parquet")}
 
@@ -79,7 +87,11 @@ def load_model(model: str, device: str | None = None):
         pool = models.Pooling(tr.get_word_embedding_dimension(), pooling_mode="mean")
         m = SentenceTransformer(modules=[tr, pool, models.Normalize()], device=device)
     m.max_seq_length = MAX_SEQ
-    if m.device.type == "cuda":
+    if m.device.type == "cuda" and model in BF16:
+        import torch
+
+        m.to(torch.bfloat16)
+    elif m.device.type == "cuda":
         m.half()  # fp16 on the laptop GPU: ~2x faster, retrieval quality unchanged at this precision
     return m
 
