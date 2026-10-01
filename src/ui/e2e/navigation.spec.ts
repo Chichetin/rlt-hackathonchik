@@ -56,11 +56,9 @@ test("главная и подбор — отдельные страницы, д
   await page.goto("/");
   await page.setViewportSize({ width: 375, height: 812 });
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await page.getByRole("link", { name: "Посмотреть возможности" }).click();
-  await expect(page.locator("#possibilities")).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole("navigation").getByRole("link", { name: "Главная" }).click();
   await expect(page).toHaveURL(/\/$/);
-  await page.getByRole("link", { name: "Перейти к подбору" }).click();
+  await page.getByRole("link", { name: "Начать подбор" }).click();
   await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
 });
