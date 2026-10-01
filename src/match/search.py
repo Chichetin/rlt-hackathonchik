@@ -30,6 +30,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, Scor
 from src.ingest.load import from_rows
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
+from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
 
@@ -184,6 +185,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built."""
     cfg = load_config()  # every call: eval passes weights, the retriever still comes from the config
     w = weights or cfg["weights"]
+    shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
     store = get_store()
     as_of = query.as_of
     idx = get_index(store, as_of)
@@ -212,6 +214,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
         codes, predicted = ([guess], True) if guess else ([], False)
     if codes:
         _class_history(store, cands, codes, as_of)
+    incumbent: dict[str, int] = {}
+    if shares["incumbent"] > 0 and query.customer_inn:
+        incumbent = customer_lots(store, [c.inn for c in cands], query.customer_inn, as_of)
     fetched = store.built_at()
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
@@ -223,6 +228,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how)
         exp, exp_why = _experience(c, codes, as_of)
+        if query.customer_inn:
+            exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         act, act_why = _activity(cp, ref, as_of)
         geo, geo_why = _geography(cp, query.region)
         comps = [

@@ -64,6 +64,7 @@ class Store(Protocol):
     def candidates(self, lots: LotHits, as_of: date | None, limit: int) -> list[tuple]: ...
     def lot_codes(self, lot_ids: list[int]) -> list[tuple[int, str]]: ...
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]: ...
+    def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]: ...
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
@@ -148,6 +149,13 @@ code AS (
 )
 SELECT agg.supplier_inn, agg.lvl, code.okpd2_code, agg.class_lots, agg.class_wins
 FROM agg JOIN code USING (supplier_inn)
+"""
+
+# Lots of one customer per supplier before as_of: the incumbent signal (src/match/signals.py, #22).
+_CUSTOMER_LOTS = """
+SELECT supplier_inn, count(DISTINCT lot_id) FROM {t[participants]}
+WHERE supplier_inn IN (SELECT unnest(%(inns)s{text_arr})) AND customer_inn = %(cust)s AND {cond}
+GROUP BY supplier_inn
 """
 
 # Supplier aggregates (as of the cutoff for eval) + the latest lot: the INN Evidence of src/ingest/load.py.
@@ -255,6 +263,10 @@ class ParquetStore:
         _, rows = self._fetch(_CLASS_HISTORY, {"inns": inns, "as_of": as_of, **class_params(codes)}, as_of=as_of)
         return {r[0]: tuple(r[1:]) for r in rows}
 
+    def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]:
+        _, rows = self._fetch(_CUSTOMER_LOTS, {"inns": inns, "cust": customer_inn, "as_of": as_of}, as_of=as_of)
+        return {r[0]: int(r[1]) for r in rows}
+
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]:
         cols, rows = self._fetch(_SUPPLIERS, {"inns": inns, "as_of": as_of}, as_of=as_of,
                                  suppliers=self._suppliers(as_of))
@@ -348,6 +360,10 @@ class PgStore:
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]:
         _, rows = self._fetch(_CLASS_HISTORY, {"inns": inns, "as_of": as_of, **class_params(codes)}, as_of=as_of)
         return {r[0]: tuple(r[1:]) for r in rows}
+
+    def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]:
+        _, rows = self._fetch(_CUSTOMER_LOTS, {"inns": inns, "cust": customer_inn, "as_of": as_of}, as_of=as_of)
+        return {r[0]: int(r[1]) for r in rows}
 
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]:
         table = f"suppliers_{as_of.isoformat().replace('-', '_')}" if as_of else "suppliers"
