@@ -371,15 +371,18 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
     budget = 0.6
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
     monkeypatch.setattr(rmsp, "_last_request", 0.0)
+    monkeypatch.setattr(rmsp, "TIMEOUT_S", 3.0)
     calls: list = []
     res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),
                offline=False, budget_s=budget, client=_client(_hang(calls, ok_first)))
-    # coarse guard against a request waiting its full default timeout; the clock starts at the first request
-    # (the deadline starts after the query setup) with slack for result handling on a loaded machine
+    # the budget itself is checked on the timeouts below; the clock only guards against a request that waited
+    # its full default timeout (wall time on a loaded machine is not reliable, the clock starts at the first
+    # request because the deadline starts after the query setup)
     elapsed = time.monotonic() - calls[0]["at"]
-    assert elapsed < budget + 1.0, f"{elapsed:.2f} s of network for a {budget} s budget"
+    assert elapsed < rmsp.TIMEOUT_S, f"{elapsed:.2f} s of network for a {budget} s budget"
     assert len(calls) == expected_calls and len(res.requests) == 4 and res.matches == []
-    # every request is allowed to wait only for what is left before the deadline
+    # every request may wait only for what is left before the deadline (0.1 s: monotonic clock step on Windows)
+    assert calls[0]["connect"] + calls[0]["read"] <= budget + 1e-6
     assert all(t["at"] - calls[0]["at"] + t["connect"] + t["read"] <= budget + 0.1 for t in calls)
 
 
