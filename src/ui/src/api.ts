@@ -108,7 +108,8 @@ export const PAGE = 20;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
-export type SearchPage = SearchResponse & { total: Totals; note?: string; facets?: Facets };
+// excludedLot: the loaded notice is in the data and was left out of its own results — X-Excluded-Lot (#249, F-13)
+export type SearchPage = SearchResponse & { total: Totals; note?: string; facets?: Facets; excludedLot?: string };
 
 function searchNote(r: Response): string | undefined {
   const raw = r.headers.get("X-Search-Note");
@@ -133,6 +134,7 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
     total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
     note: searchNote(r),
     facets: facets(r),
+    excludedLot: r.headers.get("X-Excluded-Lot") ?? undefined,
   };
 }
 
@@ -231,6 +233,20 @@ export function filterNotes(base: SearchResponse | null, f: Filters, facets?: Fa
   return notes;
 }
 
+export type Backtest = components["schemas"]["Backtest"];
+
+// Места реальных участников закупки в нашей выдаче (backtest, #192). Ошибка — текст причины от сервера.
+export async function fetchBacktest(ident: string): Promise<Backtest> {
+  const r = await fetch(`/api/lot/${encodeURIComponent(ident.trim())}/backtest`);
+  if (r.ok) return r.json();
+  let detail = "";
+  try {
+    detail = (await r.json()).detail ?? "";
+  } catch {
+    /* тело не JSON */
+  }
+  throw new Error(detail || `HTTP ${r.status}`);
+}
 // Organizers' test export uploaded from the UI (#207): CSV of the training format, sent as text in JSON
 // (no multipart). The server keeps it in cache/testsets and makes it the active set: /api/lot finds its lots.
 export type TestsetLot = { lot_id: string; reqnum: string | null; text: string; okpd2: string[]; notes: string[] };

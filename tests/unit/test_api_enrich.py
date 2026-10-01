@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from src.api import app as app_mod
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, ScoreComponent
+from src.match import pipeline
 from src.match import search as search_mod
 from src.sources import bo_nalog, pb_nalog, rmsp
 from src.sources.cache import SourceCache
@@ -180,7 +181,7 @@ def test_invalid_inn_is_not_queued(env):
     cp = Counterparty.model_construct(**{**good.counterparty.model_dump(), "inn": bad})
     rows = [CounterpartyMatch.model_construct(**{**good.__dict__, "counterparty": cp}), good]
     uncached: set[str] = set()
-    out = app_mod._enriched(rows, uncached)
+    out = pipeline.enriched(rows, uncached)
     app_mod._queue_uncached(out, uncached)
     assert uncached == {UNCACHED} and _keys() == [UNCACHED]
 
