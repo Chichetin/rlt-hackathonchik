@@ -347,10 +347,14 @@ def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
     assert len(calls) == 1 and len(res.matches) == 5 and "кеш" in res.requests[0]
 
 
-def _hang(calls: list, ok_first: float | None = None):
-    """A source that keeps silent exactly as long as the client agreed to wait (connect + read)."""
+def _hang(calls: list, ok_first: float | None = None, ends: list | None = None):
+    """A source that keeps silent exactly as long as the client agreed to wait (connect + read).
+    `ends` gets the moment each request may end at the latest: its arrival + connect + read."""
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.extensions["timeout"])
+        if ends is not None:
+            t = request.extensions["timeout"]
+            ends.append(time.monotonic() + t["connect"] + t["read"])
         if ok_first is not None and len(calls) == 1:
             time.sleep(ok_first)
             return httpx.Response(200, json={"rowCount": 0, "data": []})
@@ -372,14 +376,17 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
     monkeypatch.setattr(rmsp, "_last_request", 0.0)
     calls: list = []
+    ends: list = []
     cache, processed = SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, [])  # fixtures are not timed
-    _run(cache, processed, query=_query(okpd2=["17.12.14.110"]), offline=True)  # warm-up: first DuckDB query
+    # warm-up: the first read of suppliers.parquet (known_inns) is slow on Windows and is not what is measured
+    _run(cache, processed, query=_query(okpd2=["17.12.14.110"]), offline=True)
     started = time.monotonic()
     res = _run(cache, processed, query=_query(okpd2=["17.12.14.110"]),
-               offline=False, budget_s=budget, client=_client(_hang(calls, ok_first)))
+               offline=False, budget_s=budget, client=_client(_hang(calls, ok_first, ends)))
     elapsed = time.monotonic() - started
-    # the exact bound is the per-request check below; this one only catches a wait past the budget
-    # (without a deadline the hang lasts TIMEOUT_S = 3 s) and leaves room for DuckDB on a loaded machine
+    # exact bound, independent of DuckDB: every request (pacing pause included) ends by the deadline
+    assert max(ends) <= started + budget + 0.1, f"a request ends {max(ends) - started:.2f} s after the start"
+    # coarse bound on the whole query: room for a loaded machine (without a deadline the hang lasts 3 s)
     assert elapsed < budget + 0.6, f"{elapsed:.2f} s for a {budget} s budget"
     assert len(calls) == expected_calls and len(res.requests) == 4 and res.matches == []
     assert all(t["connect"] + t["read"] <= budget + 1e-6 for t in calls)
