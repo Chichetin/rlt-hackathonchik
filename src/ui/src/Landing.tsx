@@ -4,7 +4,7 @@ import { WaveField } from "./WaveField";
 import { easeOut, Reveal } from "./Motion";
 
 type LinkProps = Pick<AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "onClick">;
-// The brand mark alone, no frame: the same diamond-M as in the header.
+// The same diamond-M mark, suspended over the animated field.
 function HeroMark() {
   const reduced = useReducedMotion();
   return <motion.div className="hero-mark" aria-hidden="true" initial={reduced ? false : { opacity: 0, scale: 0.96 }}
@@ -34,7 +34,7 @@ export function Landing({ searchLink, aboutLink }: { searchLink: LinkProps; abou
           </div>
         </motion.div>
       </div>
-      <HeroMark />
+      <div className="hero-object"><div className="hero-object-glass"><HeroMark /><span>Митрандир</span></div><div className="hero-object-caption"><span />Закупка. Поиск. Совпадение.</div></div>
     </section>
 
     <section id="possibilities" className="landing-section" aria-labelledby="possibilities-title">
