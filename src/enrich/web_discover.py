@@ -75,7 +75,8 @@ class Site:
     query: str
     inn: str | None = None
     inn_url: str | None = None
-    outcome: str = ""  # new / in_data / no_inn / ambiguous / refused / not_in_registry / dead / evidence_failed
+    # new / in_data / unchecked / no_inn / ambiguous / refused / not_in_registry / dead / evidence_failed
+    outcome: str = ""
     reason: str = ""
     name: str | None = None
     region: str | None = None
@@ -99,7 +100,7 @@ class GroupReport:
                 "domains": self.domains, "domains_skipped": self.domains_skipped,
                 "sites_checked": len(self.sites), "inn_on_site": sum(1 for s in self.sites if s.inn),
                 **{k: c.get(k, 0) for k in ("new", "in_data", "no_inn", "ambiguous", "refused", "not_in_registry",
-                                             "dead", "evidence_failed", "unreachable")}}
+                                             "dead", "evidence_failed", "unreachable", "unchecked")}}
 
 
 def known(inn: str, processed: Path) -> bool | None:
@@ -148,7 +149,11 @@ def check_site(s: Site, cache: SourceCache, processed: Path, offline: bool) -> C
     if is_dead(cp.status):
         s.outcome, s.reason = "dead", cp.status or ""
         return None
-    if known(found.inn, processed):
+    in_data = known(found.inn, processed)
+    if in_data is None:  # as discover(): without organizers' data nobody is called «new»
+        s.outcome, s.reason = "unchecked", "данные организаторов не загружены — сверка не выполнена"
+        return None
+    if in_data:
         s.outcome = "in_data"
         return None
     cp = with_web_evidence(cp, s, cache)
@@ -257,6 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.offline and args.max_requests > budget.left():
         ap.error(f"--max-requests {args.max_requests} больше остатка лимита {budget.left()}")
     cache, processed = SourceCache(), processed_dir()
+    if not args.offline and known("0000000000", processed) is None:  # paid answers would give no «new» at all
+        ap.error("данные организаторов не загружены (нет suppliers.parquet) — платный прогон не запускаем")
     reports, seen, spent = [], set(), 0
     for g in groups:
         rep, _ = run_group(g, cfg, cache, budget, processed, args.offline, args.max_requests - spent, seen)

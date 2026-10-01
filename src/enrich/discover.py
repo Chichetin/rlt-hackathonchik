@@ -399,13 +399,18 @@ def web_candidates(res: Discovery, seen: set[str], query: Query, processed: Path
     cached pool, never a network call here; minus those the registry channel already found and those in
     organizers' data before `query.as_of`."""
     pool: dict[str, Counterparty] = {}
+    by_class: dict[str, list[str]] = {}
     for cls in res.okpd_classes:
         found = [cp for cp in read_pool(cls, cache) if cp.inn and cp.inn not in seen and cp.inn not in pool]
         pool.update((cp.inn or "", cp) for cp in found)
-        if found:
-            res.requests.append(f"Яндекс Поиск, ОКПД2 {cls}: в пуле прошлого прогона {len(found)} компаний (кеш)")
+        by_class[cls] = [cp.inn or "" for cp in found]
     known = known_inns(list(pool), query.as_of, processed) or set()
     res.known += len(known)
+    for cls, inns in by_class.items():
+        new = sum(1 for inn in inns if inn not in known)
+        if inns:  # counted after organizers' suppliers are dropped: the line matches the block
+            res.requests.append(f"Яндекс Поиск, ОКПД2 {cls}: из пула прошлого прогона (кеш) новых {new}, "
+                                f"уже в данных организаторов {len(inns) - new}")
     return [cp for inn, cp in pool.items() if inn not in known]
 
 

@@ -81,7 +81,7 @@ def test_site_inn_follows_requisites_link(tmp_path):
     assert res.inn == INN and res.url == HOME + "rekvizity/"
     assert res.pages == [HOME, HOME + "rekvizity/"]
     # the INN is literally in the cached text: an Evidence on this page passes
-    assert INN in cache.page_text(HOME + "rekvizity/")
+    assert INN in (cache.page_text(HOME + "rekvizity/") or "")
     again = site.site_inn(HOME, cache, client)  # all cached: no new requests
     assert again.inn == INN and calls.count(HOME) == 1
 
@@ -182,3 +182,79 @@ def test_unresolved_inn_is_never_guessed(tmp_path, fixture_processed, monkeypatc
     monkeypatch.setattr(W, "enrich", not_found)
     rep, pool = W.run_group("21.20", CFG, cache, yandex_search.Budget(limit=0), fixture_processed, True, 0, set())
     assert rep.funnel()["not_in_registry"] == 1 and pool == []
+
+
+# --- the pool in the block «Новые» (src/enrich/discover.py) ------------------------------------------------
+
+RMSP = Path(__file__).resolve().parents[1] / "fixtures" / "rmsp"
+WEIGHTS = {"product_fit": 0.35, "experience": 0.2, "reliability": 0.2, "activity": 0.1, "geography": 0.1,
+           "price": 0.05}
+
+
+def _no_network(request: httpx.Request) -> httpx.Response:
+    raise AssertionError(f"network call in an offline path: {request.url}")
+
+
+def _discover(cache: SourceCache, processed: Path):
+    from src.contracts import Query
+    from src.enrich import discover as D
+
+    q = Query(query_id="q", text="папки канцелярские", okpd2=["17.23.13.130"])
+    return D.discover(q, cache=cache, weights=WEIGHTS, processed=processed, offline=True,
+                      client=httpx.Client(transport=httpx.MockTransport(_no_network)))
+
+
+def test_pool_joins_the_new_block_from_cache_with_evidence(tmp_path, fixture_processed):
+    from src.enrich import discover as D
+    from src.sources import rmsp
+
+    cache = SourceCache(tmp_path / "c.sqlite")
+    assert rmsp.seed(RMSP, cache) == 1  # the registry channel of class 17.23
+    _seed(cache, "оборудование оптом")
+    cache.put(pb_nalog.card_url(INN), (PB / f"{INN}.txt").read_text(encoding="utf-8"))
+    cfg = {**CFG, "groups": {"17.23": ["оборудование"]}}
+    W.run_group("17.23", cfg, cache, yandex_search.Budget(limit=0), fixture_processed, True, 0, set())
+
+    res = _discover(cache, fixture_processed)
+    web = [m for m in res.pool if m.counterparty.inn == INN]
+    assert len(web) == 1 and web[0].origin == "discovered"
+    m = web[0]
+    assert check_counterparty(m.counterparty, cache.page_text) == []
+    assert [c.name for c in m.components] == list(D.COMPONENT_ORDER)
+    fit = m.components[0]
+    assert fit.value == D.FIT["web"] and "Яндекс Поиске" in fit.explanation and "brass.example.ru" in fit.explanation
+    assert m.score == round(sum(c.value * c.weight for c in m.components), 4)
+    assert any("Яндекс Поиск, ОКПД2 17.23" in r for r in res.requests)
+    assert len({x.counterparty.inn for x in res.pool}) == len(res.pool)  # no company twice
+
+
+def test_pool_skips_registry_duplicates_and_organizers_suppliers(tmp_path, fixture_processed):
+    from src.sources import rmsp
+
+    cache = SourceCache(tmp_path / "c.sqlite")
+    assert rmsp.seed(RMSP, cache) == 1
+    dup = "4703173460"  # active in the recorded registry answer of 17.23: the registry channel keeps it
+    pool = [Counterparty(inn=dup, name="ООО Дубль"), Counterparty(inn=IN_DATA, name="ООО Уже в данных"),
+            Counterparty(inn=None, name="ООО Без ИНН")]
+    cache.put(W.pool_url("17.23"), "[" + ",".join(cp.model_dump_json() for cp in pool) + "]")
+
+    res = _discover(cache, fixture_processed)
+    inns = [m.counterparty.inn for m in res.pool]
+    assert inns.count(dup) == 1 and IN_DATA not in inns and None not in inns
+    line = next(r for r in res.requests if r.startswith("Яндекс Поиск, ОКПД2 17.23"))
+    assert "новых 0" in line and "уже в данных организаторов 1" in line
+
+
+def test_without_organizers_data_nobody_is_new_and_no_paid_run(tmp_path, monkeypatch):
+    cache = SourceCache(tmp_path / "c.sqlite")
+    _seed(cache, "оборудование оптом")
+    cache.put(pb_nalog.card_url(INN), (PB / f"{INN}.txt").read_text(encoding="utf-8"))
+    empty = tmp_path / "no-data"
+    rep, pool = W.run_group("21.20", CFG, cache, yandex_search.Budget(limit=0), empty, True, 0, set())
+    assert rep.funnel()["unchecked"] == 1 and rep.funnel()["new"] == 0 and pool == []
+
+    monkeypatch.setattr(W, "processed_dir", lambda: empty)
+    monkeypatch.setattr(W, "SourceCache", lambda: cache)
+    with pytest.raises(SystemExit):  # argparse error before any request is counted
+        W.main(["Y-test", "--groups", "21.20", "--max-requests", "1"])
+    assert yandex_search.Budget().used() == 0
