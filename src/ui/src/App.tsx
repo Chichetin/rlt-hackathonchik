@@ -746,7 +746,7 @@ export function App() {
       ))}
 
       {path === "/results" && res?.excludedLot && state !== "loading" && (
-        <p className="filternote" role="note">
+        <p className="lotmsg own-lot-note" role="note">
           Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
           выдачу только по другим своим закупкам. Места участников без учёта этой закупки — «Проверить на истории».
         </p>
