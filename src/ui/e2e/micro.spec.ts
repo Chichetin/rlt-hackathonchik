@@ -1,21 +1,14 @@
 import { expect, test } from "@playwright/test";
 
-test("волны двигаются, пауза и reduced motion останавливают фон", async ({ page }) => {
+test("волны двигаются, reduced motion останавливает фон", async ({ page }) => {
   await page.goto("/");
   const field = page.locator(".wave-field");
   const pixels = () => field.evaluate((el: HTMLCanvasElement) => el.toDataURL());
   await expect(field).toBeVisible();
   const moving = await pixels();
   await expect.poll(pixels).not.toBe(moving);
-  await page.getByRole("button", { name: "Пауза фона" }).click();
-  await expect(page.getByRole("button", { name: "Продолжить фон" })).toHaveAttribute("aria-pressed", "true");
-  const stopped = await pixels();
-  await page.waitForTimeout(180);
-  expect(await pixels()).toBe(stopped);
-  await page.getByRole("button", { name: "Продолжить фон" }).click();
-  await expect.poll(pixels).not.toBe(stopped);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(page.getByRole("button", { name: "Пауза фона" })).toHaveCount(0);
+  await page.waitForTimeout(100);
   const reduced = await pixels();
   await page.waitForTimeout(180);
   expect(await pixels()).toBe(reduced);
@@ -55,4 +48,16 @@ test("подсказка меню доступна с клавиатуры, за
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("прокрутка на главной сразу ведёт в «Подбор»", async ({ page }) => {
+  await page.goto("/");
+  await page.mouse.move(400, 400);
+  await page.mouse.wheel(0, 400);
+  await expect(page).toHaveURL(/\/search$/);
+  await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
+  // keyboard: ↓ outside of a control does the same
+  await page.goto("/");
+  await page.locator("body").press("ArrowDown");
+  await expect(page).toHaveURL(/\/search$/);
 });

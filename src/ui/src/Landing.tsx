@@ -1,22 +1,76 @@
-import type { AnchorHTMLAttributes } from "react";
+import { useEffect, type AnchorHTMLAttributes } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { WaveField } from "./WaveField";
 import { easeOut, Reveal } from "./Motion";
 
 type LinkProps = Pick<AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "onClick">;
-// The brand mark alone, no frame: the same diamond-M as in the header.
+const M = "M18 44V21l14 17 14-17v23M14 44h9m18 0h9";
+
+// The brand mark as a glass diamond: chrome rim with a dispersive rainbow glint, the «М» with a slight colour split.
 function HeroMark() {
   const reduced = useReducedMotion();
   return <motion.div className="hero-mark" aria-hidden="true" initial={reduced ? false : { opacity: 0, scale: 0.96 }}
     animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduced ? 0 : 0.9, ease: easeOut }}>
-    <svg viewBox="0 0 64 64" fill="none">
-      <path d="M32 3 60 32 32 61 4 32Z" stroke="currentColor" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
-      <path d="M18 44V21l14 17 14-17v23M14 44h9m18 0h9" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <div className="glass-diamond">
+      <svg className="glass-m" viewBox="0 0 64 64" fill="none">
+        <defs>
+          <linearGradient id="m-chrome" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#ffffff" /><stop offset=".32" stopColor="#c9ced6" /><stop offset=".5" stopColor="#ffffff" />
+            <stop offset=".72" stopColor="#b3b9c2" /><stop offset="1" stopColor="#f2f4f8" />
+          </linearGradient>
+        </defs>
+        <path className="m-split m-split-warm" d={M} transform="translate(-.45 0)" />
+        <path className="m-split m-split-cool" d={M} transform="translate(.45 0)" />
+        <path d={M} stroke="url(#m-chrome)" strokeWidth="3.2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      </svg>
+    </div>
   </motion.div>;
 }
 
-export function Landing({ searchLink, aboutLink }: { searchLink: LinkProps; aboutLink: LinkProps }) {
+/** The first scroll down on the landing goes straight to the search page (#172). */
+function useScrollToSearch(onStart: () => void) {
+  useEffect(() => {
+    let done = false;
+    let touchY: number | null = null;
+    const start = () => {
+      if (done) return;
+      done = true;
+      onStart();
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY > 8 && !e.ctrlKey) {
+        e.preventDefault();
+        start();
+      }
+    };
+    const onTouchStart = (e: TouchEvent) => { touchY = e.touches[0]?.clientY ?? null; };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY;
+      if (touchY != null && y != null && touchY - y > 40) start();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName))) return;
+      if (["ArrowDown", "PageDown", " ", "End"].includes(e.key)) {
+        e.preventDefault();
+        start();
+      }
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onStart]);
+}
+
+export function Landing({ searchLink, aboutLink, onStart }: { searchLink: LinkProps; aboutLink: LinkProps; onStart: () => void }) {
+  useScrollToSearch(onStart);
   const reduced = useReducedMotion();
   return <main className="landing">
     <section className="landing-hero" aria-labelledby="landing-title">

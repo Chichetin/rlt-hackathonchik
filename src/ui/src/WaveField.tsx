@@ -12,7 +12,6 @@ export function WaveField() {
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  const [paused, setPaused] = useState(false);
   useEffect(() => {
     const el = canvas.current;
     if (!el) return;
@@ -48,7 +47,7 @@ export function WaveField() {
       cancelAnimationFrame(frame);
       last = 0;
       draw();
-      if (!paused && !reduced && visible && !document.hidden) frame = requestAnimationFrame(tick);
+      if (!reduced && visible && !document.hidden) frame = requestAnimationFrame(tick);
     };
     const resize = new ResizeObserver(() => {
       const rect = el.getBoundingClientRect();
@@ -65,11 +64,7 @@ export function WaveField() {
       cancelAnimationFrame(frame); resize.disconnect(); observer.disconnect();
       document.removeEventListener("visibilitychange", sync);
     };
-  }, [paused, reduced]);
-  return <>
-    <canvas ref={canvas} className="wave-field" aria-hidden="true" />
-    {!reduced && <button type="button" className="wave-control" aria-pressed={paused} onClick={() => setPaused(p => !p)}>
-      <span aria-hidden="true">{paused ? "▷" : "Ⅱ"}</span> {paused ? "Продолжить фон" : "Пауза фона"}
-    </button>}
-  </>;
+  }, [reduced]);
+  // the field stops by itself under prefers-reduced-motion, off-screen and in a hidden tab
+  return <canvas ref={canvas} className="wave-field" aria-hidden="true" />;
 }
