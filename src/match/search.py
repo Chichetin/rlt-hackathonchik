@@ -65,6 +65,7 @@ SAT_LOTS, SAT_WINS = 20, 10  # experience saturates at 20 lots / 10 wins in the 
 HALF_LIFE_DAYS = 90  # activity halves every 90 days without participation
 REGION_NAME = {v: k for k, v in REGION_CODE.items()}
 REGION_IN = {"78": "в Санкт-Петербурге", "47": "в Ленинградской области"}
+REGION_PREP = {"78": "Санкт-Петербурге", "47": "Ленинградской области"}
 NEIGHBOUR = {"78": "47", "47": "78"}
 NEIGHBOUR_VALUE = 0.8
 # Components without data (D-029): shown with value 0 and weight 0, not invented.
@@ -80,6 +81,9 @@ OPTIONS: dict[str, tuple] = {
     "fit_bm25_share": (FIT_BM25_SHARE, None),  # share of BM25 in product_fit, [0, 1]
     "experience_by": ("class", ("class", "similar")),  # lots in the OKPD2 group | lots with similar positions
     "tie_break": ("inn", ("inn", "bm25")),  # order of equal scores
+    # lots / wins at which experience reaches 1.0 (#196): low caps make active suppliers indistinguishable
+    "sat_lots": (SAT_LOTS, None),
+    "sat_wins": (SAT_WINS, None),
 }
 
 
@@ -95,6 +99,9 @@ def scoring_options(cfg: dict) -> dict:
     out["fit_bm25_share"] = float(out["fit_bm25_share"])
     if not 0.0 <= out["fit_bm25_share"] <= 1.0:
         raise ValueError(f"options.fit_bm25_share = {out['fit_bm25_share']}: доля должна быть в [0, 1]")
+    for name in ("sat_lots", "sat_wins"):
+        if isinstance(out[name], bool) or not isinstance(out[name], int) or out[name] < 1:
+            raise ValueError(f"options.{name} = {out[name]!r}: ожидается целое число ≥ 1")
     return out
 
 
@@ -268,13 +275,14 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
                    f"{label(_prefix(c.okpd_code, c.okpd_level))}")
 
 
-def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class") -> tuple[float, str]:
+def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class",
+                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS) -> tuple[float, str]:
     if codes and by == "class":
         groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
         lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
-    value = 0.5 * _sat(lots, SAT_LOTS) + 0.5 * _sat(wins, SAT_WINS)
+    value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(wins, sat_wins)
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
 
@@ -319,6 +327,22 @@ def _inn_geography(inn: str | None, want: str | None, share: float, why: str) ->
     if want is not None and NEIGHBOUR.get(want) == code:
         return share * NEIGHBOUR_VALUE, f"{note}; соседний регион"
     return 0.0, note
+
+
+def customer_region(query: Query) -> tuple[str, str | None]:
+    """The region «География» is measured against (#218): the customer's, else the query region.
+
+    The first two INN digits are the region where the INN was issued, not necessarily where the customer is
+    (the customer's KPP would be better, but Query has none). АИС ГЗ customers work in St Petersburg or the
+    Leningrad region, so only INN 78 / 47 is taken; another prefix (a federal body registered in Moscow, a
+    branch) says nothing about where the goods go — then the query region stays. The second value is the
+    note for the explanation, or None.
+    """
+    inn = (query.customer_inn or "").strip()
+    code = inn[:2] if len(inn) in (10, 12) and inn.isdigit() else ""
+    if code in REGION_NAME:
+        return REGION_NAME[code], f"ИНН заказчика выдан в {REGION_PREP[code]} — сравниваем с этим регионом"
+    return query.region, None
 
 
 def _geography(cp: Counterparty, region: str, inn_share: float = 0.0) -> tuple[float, str]:
@@ -400,17 +424,20 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
+    target, target_note = customer_region(query)  # «География» against the customer's region (#218)
     for c in cands:
         cp = parties.get(c.inn)
         if cp is None:
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
-        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"])
+        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"])
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)
         act, act_why = _activity(cp, ref, as_of)
-        geo, geo_why = _geography(cp, query.region, shares["inn_region"])
+        geo, geo_why = _geography(cp, target, shares["inn_region"])
+        if target_note:  # the comparison is with the customer's region, say so
+            geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),

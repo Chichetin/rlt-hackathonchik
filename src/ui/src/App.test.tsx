@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App, noteText } from "./App";
@@ -215,10 +215,11 @@ test("history is paged on the server: total from the header, «Показать 
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const history = await screen.findByRole("region", { name: "С опытом госзакупок" });
   expect(within(history).getByText("Показаны 2 из 3")).toBeInTheDocument();
-  expect(urls[0]).toBe("/api/search?limit=20&offset=0");
+  const searches = () => urls.filter((u) => u.startsWith("/api/search")); // the form also asks /api/testset (#207)
+  expect(searches()[0]).toBe("/api/search?limit=20&offset=0");
   await userEvent.click(within(history).getByRole("button", { name: "Показать ещё" }));
   expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
-  expect(urls[1]).toBe("/api/search?limit=20&offset=2");
+  expect(searches()[1]).toBe("/api/search?limit=20&offset=2");
   expect(within(history).getAllByRole("listitem")).toHaveLength(3);
   expect(within(history).queryByRole("button", { name: "Показать ещё" })).not.toBeInTheDocument();
 });
@@ -325,4 +326,67 @@ test("reviewLinks: a placeholder name «ИНН …» is not used as a query; not
   expect(reviewLinks("ИНН 7804428656", "7804428656")[0].url).toContain("text=7804428656");
   expect(reviewLinks("ИНН 7804428656", "7804428656")[0].url).not.toContain("%D0%98%D0%9D%D0%9D");
   expect(reviewLinks("ИНН ", null)).toEqual([]);
+});
+
+const LABELS: Record<string, string> = { "17.12": "17.12 «Бумага и картон»", "26.20": "26.20 «Компьютеры и периферийное оборудование»" };
+function okpd2Route(body: unknown) {
+  return async (url: RequestInfo | URL) =>
+    String(url).startsWith("/api/okpd2")
+      ? new Response(JSON.stringify(LABELS), { status: 200 })
+      : new Response(JSON.stringify(body), { status: 200 });
+}
+
+test("lot chip names the OKPD2 class", async () => {
+  const lotQuery = { query_id: "lot-9", text: "Бумага из извещения", okpd2: ["17.12"], budget: 1000, customer_inn: null, channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
+  vi.spyOn(globalThis, "fetch").mockImplementation(okpd2Route(lotQuery));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
+  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
+  expect(await screen.findByText("ОКПД2: 17.12 «Бумага и картон»")).toBeInTheDocument();
+});
+
+test("card names the supplier's main OKPD2 classes", async () => {
+  const withStats = structuredClone(response);
+  withStats.history[0].counterparty.stats = { top_okpd2: "17.12,26.20" };
+  vi.spyOn(globalThis, "fetch").mockImplementation(okpd2Route(withStats));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  const card = screen.getByRole("dialog");
+  expect(await within(card).findByText("17.12 «Бумага и картон», 26.20 «Компьютеры и периферийное оборудование»")).toBeInTheDocument();
+});
+
+test("card falls back to bare OKPD2 codes when names fail", async () => {
+  const withStats = structuredClone(response);
+  withStats.history[0].counterparty.stats = { top_okpd2: "17.12,26.20" };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+    String(url).startsWith("/api/okpd2") ? new Response("boom", { status: 500 }) : new Response(JSON.stringify(withStats), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/okpd2")));
+  await new Promise((r) => setTimeout(r, 0)); // the 500 is handled before the check
+  expect(within(screen.getByRole("dialog")).getByText("17.12, 26.20")).toBeInTheDocument();
+});
+
+test("long legal forms are shortened in the list only", async () => {
+  const long = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БЕТА"';
+  const res = JSON.parse(JSON.stringify(response));
+  res.history[0].counterparty.name = long;
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(res), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const row = within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText('ООО "БЕТА"');
+  expect(row).toHaveAttribute("title", long);
+  await userEvent.click(row);
+  expect(screen.getByRole("dialog", { name: `Карточка: ${long}` })).toBeInTheDocument();
+
+  const { shortName } = await import("./App");
+  expect(shortName('ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "КОМПЬЮТЕРНЫЕ СИСТЕМЫ"')).toBe('ООО "КОМПЬЮТЕРНЫЕ СИСТЕМЫ"');
+  expect(shortName("ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО «РОМАШКА»")).toBe("ПАО «РОМАШКА»");
+  expect(shortName("ООО «Альфа»")).toBe("ООО «Альфа»");
+  expect(shortName("ИНН 7801234567")).toBe("ИНН 7801234567");
 });
