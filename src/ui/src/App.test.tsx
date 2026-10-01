@@ -300,7 +300,7 @@ test("card has a «Отзывы» block: not-in-score note, links by name and IN
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   const block = within(screen.getByRole("region", { name: "Отзывы" }));
   expect(block.getByText(/Не влияет на оценку подбора/)).toBeInTheDocument();
-  expect(block.getByText(/Рейтинг не показываем/)).toBeInTheDocument();
+  expect(block.getByText(/Рейтинг из отзывов не показываем/)).toBeInTheDocument();
   expect(block.getByRole("link", { name: "2ГИС" })).toHaveAttribute("href", expect.stringContaining(encodeURIComponent("ООО Альфа 7804428656")));
 });
 
