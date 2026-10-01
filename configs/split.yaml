@@ -5,6 +5,12 @@
 # dev 2025-07…09 — 51 600 лотов с участниками, holdout 2025-10…12 — 88 853. Поле даты — Извещения.publish_date.
 cutoff: "2025-07-01"
 holdout_from: "2025-10-01"
+# `make eval-final` оценивает детерминированную выборку holdout (#145, docs/REVIEW.md): весь holdout —
+# 88 848 кейсов по 0.25–0.30 с → 6–7 ч одним запуском, не помещается в окно до code freeze. 3 000 кейсов —
+# ≈ 15 мин, 95% CI recall@10 ≈ ±0.016. Выборка задана здесь до запуска (входит в sha256 конфигурации):
+# n кейсов с наименьшим sha256(holdout_seed:query_id). null — весь holdout.
+holdout_sample: 3000
+holdout_seed: 20261002
 cases:
   # собирает `uv run python -m src.eval.build_cases` (T-07, #14); счётчики — eval/cases/build_stats.json
   dev: eval/cases/dev.jsonl                         # стратифицированная подвыборка dev, в git (D-032)

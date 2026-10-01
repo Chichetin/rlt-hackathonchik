@@ -52,6 +52,30 @@ def test_search_rejects_empty_text(client):
     assert client.post("/api/search", json={"query_id": "q", "text": ""}).status_code == 422
 
 
+def test_search_rejects_client_as_of_without_building_an_index(search_client, search_data):
+    """as_of is the backtest knob (eval calls search() directly). Through the API a client date built a new BM25
+    index for that date under the global index lock: on the full data 46 s and 110 MB per date, every other
+    search waiting (40 s instead of 0.5 s), then 503 (#145, docs/REVIEW.md F-01)."""
+    import os
+    from pathlib import Path
+
+    for path in ("/api/search", "/api/export"):
+        r = search_client.post(path, json={"query_id": "q", "text": "бумага", "as_of": "2025-03-01"})
+        assert r.status_code == 422 and "as_of" in r.json()["detail"]
+    built = Path(os.environ["INDEX_DIR"])
+    assert not built.exists() or not any(built.iterdir())  # nothing was built for the client's date
+
+
+def test_search_rejects_oversized_text(search_client):
+    """Unbounded text held a worker: 1 MB — 18 s on the full data; the longest eval query is 4.5k chars (#145, F-02)."""
+    big = "бумага офисная " * 1400  # 21 000 chars
+    for path in ("/api/search", "/api/export"):
+        r = search_client.post(path, json={"query_id": "q", "text": big})
+        assert r.status_code == 422 and "символов" in r.json()["detail"]
+    fits = search_client.post("/api/search", json={"query_id": "q", "text": "бумага офисная " * 1300})  # 19 500
+    assert fits.status_code == 200 and fits.json()["history"]
+
+
 def test_search_pages_on_server_with_totals(search_client):
     q = {"query_id": "q", "text": "бумага"}
     full = search_client.post("/api/search", json=q)
