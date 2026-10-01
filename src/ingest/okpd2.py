@@ -6,7 +6,7 @@
 Source: «Общероссийский классификатор продукции по видам экономической деятельности ОКПД 2
 (ОК 034-2014 (КПЕС 2008))», Портал открытых данных Правительства Москвы, dataset 2752 (`URL`).
 robots.txt of data.mos.ru closes `/api` and `/opendata/download` to robots, so the refresh is manual:
-«Экспорт → csv (архив zip)» on the dataset page, then `--import`. The snapshot lives in git (≈ 1 МБ),
+«Экспорт → csv (архив zip)» on the dataset page, then `--import`. The snapshot lives in git (2,7 МБ),
 the product never goes to the site.
 
 okpd2.parquet: the whole dictionary (match = "exact") plus the codes of items.parquet that the current
@@ -48,7 +48,8 @@ def import_export(path: Path, dest: Path = SNAPSHOT, meta: Path = META) -> int:
     """data.mos.ru export → snapshot `code;name;section` sorted by code; returns the number of codes."""
     name, text = _export_text(path)
     reader = csv.DictReader(io.StringIO(text), delimiter=";")
-    next(reader)  # second header row: Russian column names
+    if next(reader, {}).get("Kod") != "Код":  # second header row: Russian column names
+        raise ValueError(f"{name}: не формат выгрузки data.mos.ru (нет второй строки заголовка «Код»)")
     rows = {r["Kod"].strip(): (r["Name"].strip(), r["Razdel"].strip()) for r in reader if r["Kod"].strip()}
     with dest.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f, delimiter=";", lineterminator="\n")
