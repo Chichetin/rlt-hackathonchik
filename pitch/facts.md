@@ -9,7 +9,7 @@
 из `research/PROBLEM.md` дословно; на машине сборки слайдов данных организаторов нет
 (`data/raw`, `data/processed` пусты), поэтому `src.ingest.profile` здесь **не перезапускался** —
 перезапуск на машине с данными обязателен до защиты. Метрики качества — дословно из
-`eval/results/bm25-dev-v1.json` (округление до трёх знаков, как в `research/METHODOLOGY.md`).
+`eval/results/E-003.json` (метод v2, D-077; цифры метода v1 — из `bm25-dev-v1.json` / `E-002.json`, помечены «v1»; округление до трёх знаков, как в `research/METHODOLOGY.md`).
 
 ## Данные организаторов (боль, инсайты)
 
@@ -94,8 +94,8 @@ python по `eval/results/bm25-dev-v1.json`, поле `per_query`):
 | Precision@10 «Новых из открытых источников» (блок B) | нет артефакта (discovery — #16, не влит) | — | — | — |
 | Дистрибьюторы в блоке «Новые» (`kind=distributor`, 9 запросов: демо-лот + 8 реальных кейсов, только кеш, D-071) | в пуле 36 → 61, в выдаче (топ-10) 20 → 25, запросов с дистрибьютором в выдаче 4 → 5 из 9; производителей в выдаче 28 → 25, всего не-дистрибьюторов (с ролью «не определена») 37 → 34 — весь сдвиг на лоте 20.20 (производителей 8 → 5), демо-лот 5 / 5 (чередование `_mix` не менялось); Evidence не прошло 0 из 117. Услуги (3 запроса) и 32.99 оптового канала не имеют; их пул 0 — ещё и потому, что 6 страниц реестра (71.12, 32.99, 85.31 × 2 региона) не в кеше (`pages_not_in_cache`), на число дистрибьюторов это не влияет | `DATA_PROCESSED_DIR=data/processed uv run python scripts/distributor_coverage.py --rule v0 --out eval/results/K3-distributors-v0.json`; то же `--rule v1` | `eval/results/K3-distributors-v0.json`, `K3-distributors-v1.json` (кеш rmsp прогрет 15 живыми запросами) | в файлах (`commit`) |
 | Покрытие обогащения `enrich()` (блок C) | нет артефакта | — | — | — |
-| Метрики на 8 реальных закупках (блок D) | наш метод: recall@10 0.427 [0.167, 0.708], MRR 0.289 [0.087, 0.539], nDCG@10 0.255 [0.112, 0.433]; B-inc recall@10 0.406 [0.125, 0.719]; на 8 кейсах методы в пределах шума | `uv run python -m src.eval.run --exp E-002-real --part real`; `--exp B-inc-real --baseline B-inc --part real` | `eval/results/E-002-real.json`, `B-inc-real.json` | в файлах (`commit`) |
-| Срез «новый для заказчика» (889 из 2 000 dev) | recall@10: наш метод 0.241 [0.216, 0.266], B-inc 0.139 [0.121, 0.157], B-bm25 0.298 [0.271, 0.326] | `make eval EXP=E-002` (`B-inc`, `B-bm25`), срез `winner=new` | `eval/results/E-002.json`, `B-inc.json`, `B-bm25.json` | в файлах (`commit`) |
+| Метрики на 8 реальных закупках (блок D) | наш метод (v2, `E-003-real.json`): recall@10 0.490 [0.240, 0.750], MRR 0.389 [0.154, 0.674], nDCG@10 0.316 [0.157, 0.488]; прежний v1: recall@10 0.427 [0.167, 0.708], MRR 0.289 [0.087, 0.539], nDCG@10 0.255 [0.112, 0.433]; B-inc recall@10 0.406 [0.125, 0.719]; на 8 кейсах методы в пределах шума | `uv run python -m src.eval.run --exp E-003-real --part real`; v1 — `--exp E-002-real` на коммите из файла; `--exp B-inc-real --baseline B-inc --part real` | `eval/results/E-002-real.json`, `B-inc-real.json` | в файлах (`commit`) |
+| Срез «новый для заказчика» (889 из 2 000 dev) | recall@10: наш метод (v2) 0.342 [0.314, 0.371], прежний v1 0.241 [0.216, 0.266], B-inc 0.139 [0.121, 0.157], B-bm25 0.298 [0.271, 0.326] | `make eval EXP=E-003` (`B-inc`, `B-bm25`), срез `winner=new` | `eval/results/E-003.json`, `E-002.json`, `B-inc.json`, `B-bm25.json` | в файлах (`commit`) |
 
 Разбор двух dev-кейсов (не из набора `real`; тексты — `eval/cases/dev.jsonl`, метрики — `per_query`
 в `eval/results/bm25-dev-v1.json`; место релевантного поставщика = 1 / MRR кейса):
