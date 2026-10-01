@@ -1,0 +1,256 @@
+{
+ "exp": "K3-distributors-v0",
+ "rule": "v0",
+ "commit": "32fd9b5",
+ "at": "2026-10-01T19:04:50+00:00",
+ "cache_only": true,
+ "processed_dir": "/home/m1x/Documents/hackathons/rlt-hackathonchik/data/processed",
+ "source_cache": "/home/m1x/Documents/hackathons/rlt-hackathonchik/.claude/worktrees/108-distributors/cache/sources.sqlite",
+ "pages_not_in_cache": [
+  "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=71.12",
+  "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=71.12",
+  "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=32.99",
+  "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=32.99",
+  "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=85.31",
+  "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=85.31"
+ ],
+ "max_requests": 4,
+ "queries": 9,
+ "total": {
+  "pool": 92,
+  "pool_distributors": 36,
+  "shown": 57,
+  "shown_distributors": 20,
+  "shown_manufacturers": 28,
+  "evidence_failed": 0,
+  "queries_with_shown_distributors": 4
+ },
+ "per_query": [
+  {
+   "query_id": "demo-e2e",
+   "text": "Бумага офисная А4",
+   "okpd2": [
+    "17.12.14.110"
+   ],
+   "okved_plan": [
+    "17.12",
+    "46.49.33"
+   ],
+   "history_checked": true,
+   "pool": 19,
+   "pool_distributors": 9,
+   "shown": 10,
+   "shown_distributors": 5,
+   "shown_manufacturers": 5,
+   "pool_by_kind": {
+    "distributor": 9,
+    "manufacturer": 10
+   },
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 17.12, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 5",
+    "ОКВЭД 46.49.33, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 5",
+    "ОКВЭД 17.12, регион 47, UL: кеш, всего в реестре 6, на странице 6, действующих в реестре 5",
+    "ОКВЭД 46.49.33, регион 47, UL: кеш, всего в реестре 9, на странице 9, действующих в реестре 4"
+   ]
+  },
+  {
+   "query_id": "lot-5761234",
+   "text": "Поставка наборов реагентов для нужд СПб ГБУЗ КВД №11 в 2025 году; Treponema pall",
+   "okpd2": [
+    "21.20.23.110"
+   ],
+   "okved_plan": [
+    "21.20",
+    "46.46.1"
+   ],
+   "history_checked": true,
+   "pool": 19,
+   "pool_distributors": 8,
+   "shown": 10,
+   "shown_distributors": 5,
+   "shown_manufacturers": 5,
+   "pool_by_kind": {
+    "distributor": 8,
+    "manufacturer": 11
+   },
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 21.20, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 5",
+    "ОКВЭД 46.46.1, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 4",
+    "ОКВЭД 21.20, регион 47, UL: кеш, всего в реестре 13, на странице 10, действующих в реестре 8",
+    "ОКВЭД 46.46.1, регион 47, UL: кеш, всего в реестре 17, на странице 10, действующих в реестре 6"
+   ]
+  },
+  {
+   "query_id": "lot-5779719",
+   "text": "Поставка дезинфицирующих средств; Средство дезинфицирующее",
+   "okpd2": [
+    "20.20.14.000"
+   ],
+   "okved_plan": [
+    "20.20"
+   ],
+   "history_checked": true,
+   "pool": 8,
+   "pool_distributors": 0,
+   "shown": 8,
+   "shown_distributors": 0,
+   "shown_manufacturers": 8,
+   "pool_by_kind": {
+    "manufacturer": 8
+   },
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 20.20, регион 78, UL: кеш, всего в реестре 12, на странице 10, действующих в реестре 8",
+    "ОКВЭД 20.20, регион 47, UL: кеш, всего в реестре 0, на странице 0, действующих в реестре 0"
+   ]
+  },
+  {
+   "query_id": "lot-5786484",
+   "text": "Выполнение работ по сносу зеленых насаждений утративших жизнеспособность",
+   "okpd2": [
+    "43.12.11.140"
+   ],
+   "okved_plan": [
+    "43.12"
+   ],
+   "history_checked": true,
+   "pool": 9,
+   "pool_distributors": 0,
+   "shown": 9,
+   "shown_distributors": 0,
+   "shown_manufacturers": 0,
+   "pool_by_kind": {
+    "unknown": 9
+   },
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 43.12, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 3",
+    "ОКВЭД 43.12, регион 47, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 8"
+   ]
+  },
+  {
+   "query_id": "lot-5798959",
+   "text": "Выполнение кадастровых работ; Оказание услуг в области кадастровой деятельности ",
+   "okpd2": [
+    "71.12.35.110"
+   ],
+   "okved_plan": [
+    "71.12"
+   ],
+   "history_checked": true,
+   "pool": 0,
+   "pool_distributors": 0,
+   "shown": 0,
+   "shown_distributors": 0,
+   "shown_manufacturers": 0,
+   "pool_by_kind": {},
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 71.12, регион 78, UL: нет в кеше, в сеть не ходили",
+    "ОКВЭД 71.12, регион 47, UL: нет в кеше, в сеть не ходили"
+   ]
+  },
+  {
+   "query_id": "lot-5802116",
+   "text": "Поставка новогодних украшений на Абрамова; Наборы осветительные для рождественск",
+   "okpd2": [
+    "32.99.51.119"
+   ],
+   "okved_plan": [
+    "32.99"
+   ],
+   "history_checked": true,
+   "pool": 0,
+   "pool_distributors": 0,
+   "shown": 0,
+   "shown_distributors": 0,
+   "shown_manufacturers": 0,
+   "pool_by_kind": {},
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 32.99, регион 78, UL: нет в кеше, в сеть не ходили",
+    "ОКВЭД 32.99, регион 47, UL: нет в кеше, в сеть не ходили"
+   ]
+  },
+  {
+   "query_id": "lot-5804197",
+   "text": "Поставка картриджей для электрографических печатающих устройств 2025 году; Картр",
+   "okpd2": [
+    "26.20.40.120"
+   ],
+   "okved_plan": [
+    "26.20",
+    "46.51"
+   ],
+   "history_checked": true,
+   "pool": 17,
+   "pool_distributors": 7,
+   "shown": 10,
+   "shown_distributors": 5,
+   "shown_manufacturers": 5,
+   "pool_by_kind": {
+    "distributor": 7,
+    "manufacturer": 10
+   },
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 26.20, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 6",
+    "ОКВЭД 46.51, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 7",
+    "ОКВЭД 26.20, регион 47, UL: кеш, всего в реестре 9, на странице 9, действующих в реестре 6",
+    "ОКВЭД 46.51, регион 47, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 4"
+   ]
+  },
+  {
+   "query_id": "lot-5809419",
+   "text": "Поставка мягких модулей для сидения; Скамейка для раздевалок",
+   "okpd2": [
+    "31.01.12.160"
+   ],
+   "okved_plan": [
+    "31.01",
+    "46.65"
+   ],
+   "history_checked": true,
+   "pool": 20,
+   "pool_distributors": 12,
+   "shown": 10,
+   "shown_distributors": 5,
+   "shown_manufacturers": 5,
+   "pool_by_kind": {
+    "distributor": 12,
+    "manufacturer": 8
+   },
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 31.01, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 5",
+    "ОКВЭД 46.65, регион 78, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 7",
+    "ОКВЭД 31.01, регион 47, UL: кеш, всего в реестре не сообщается, на странице 10, действующих в реестре 4",
+    "ОКВЭД 46.65, регион 47, UL: кеш, всего в реестре 20, на странице 10, действующих в реестре 5"
+   ]
+  },
+  {
+   "query_id": "lot-5860547",
+   "text": "Оказание услуг по обучению Слушателей - сотрудников Заказчика; Безопасные методы",
+   "okpd2": [
+    "85.31.11.000"
+   ],
+   "okved_plan": [
+    "85.31"
+   ],
+   "history_checked": true,
+   "pool": 0,
+   "pool_distributors": 0,
+   "shown": 0,
+   "shown_distributors": 0,
+   "shown_manufacturers": 0,
+   "pool_by_kind": {},
+   "evidence_failed": 0,
+   "requests": [
+    "ОКВЭД 85.31, регион 78, UL: нет в кеше, в сеть не ходили",
+    "ОКВЭД 85.31, регион 47, UL: нет в кеше, в сеть не ходили"
+   ]
+  }
+ ]
+}
