@@ -237,6 +237,23 @@ export function App() {
   weightsRef.current = weights;
   const [shown, setShown] = useState(PAGE);
 
+  // with local weights the whole candidate set (≤ ALL) is re-ranked here: load it once for the shown query
+  const loadingAll = useRef(false);
+  async function loadAll(q: Query, seq: number) {
+    if (loadingAll.current) return;
+    loadingAll.current = true;
+    try {
+      const all = await search(q, { limit: ALL });
+      if (seq === runSeq.current) setRes(all);
+    } catch (e) {
+      if (seq !== runSeq.current) return;
+      setError(String(e));
+      setState("error");
+    } finally {
+      loadingAll.current = false;
+    }
+  }
+
   async function run(nextFilters: Filters = filters) {
     if (!text.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
@@ -258,6 +275,8 @@ export function App() {
       setShownQuery(q);
       setBase(b ?? r);
       setState("idle");
+      // weights switched on while this page-sized answer was in flight
+      if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
       save({ text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
       if (window.location.pathname === "/search") go("/results");
     } catch (e) {
@@ -292,6 +311,10 @@ export function App() {
   }, [path]);
 
   function resetAll() {
+    // local weights too: a preset left from a rehearsal must not change the order on the demo
+    setWeightSet(STANDARD);
+    saveWeights(STANDARD);
+    weightsRef.current = null;
     try {
       window.sessionStorage.removeItem(STORE);
     } catch {
@@ -336,8 +359,14 @@ export function App() {
     saveWeights(next);
     const nextWeights = activeWeights(next);
     weightsRef.current = nextWeights;
+    if (!res || !shownQuery) return;
     // a page-sized answer cannot be re-ranked as a whole: fetch every candidate once
-    if (res && nextWeights && res.history.length < res.total.history) void run();
+    if (nextWeights && res.history.length < res.total.history) void loadAll(shownQuery, runSeq.current);
+    // back to the standard: the server order, page by page again
+    if (!nextWeights && res.history.length > PAGE) {
+      setRes({ ...res, history: res.history.slice(0, PAGE) });
+      setShown(PAGE);
+    }
   }
 
   function toggle(next: Filters) {
@@ -498,6 +527,7 @@ export function App() {
             >
               Выгрузить в Excel
             </button>
+            {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
           </div>
         </div>
       </form>
@@ -601,7 +631,7 @@ export function App() {
         </div>
       </footer>
     </motion.div>
-    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} />}</AnimatePresence>
+    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} />}</AnimatePresence>
     </LayoutGroup>
     </MotionConfig>
   );
@@ -700,7 +730,7 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   );
 }
 
-function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
+function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () => void; weightsNote?: string }) {
   const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
@@ -751,6 +781,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
       </div>
       <Breakdown m={m} />
       <h3>Почему в списке</h3>
+      {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
       <p className="hint">Оценка по каждому критерию × его вес в подборе.</p>
       <ul className="components">
         {m.components.map((c) => (
@@ -895,30 +926,39 @@ function WeightsSettings({ value, onChange }: { value: WeightSettings; onChange:
   const base: Weights =
     value.preset === "custom" && value.custom ? value.custom : (PRESETS.find((p) => p.id === value.preset)?.weights ?? DEFAULT_WEIGHTS);
   const shares = normalize(base);
+  // the user's own weights stay selectable after trying another preset
+  const options = [
+    ...PRESETS.map((p) => ({ id: p.id, title: p.title, hint: p.hint, weights: p.weights ?? DEFAULT_WEIGHTS })),
+    ...(value.custom ? [{ id: "custom", title: "Свои веса", hint: "Заданы в продвинутом режиме", weights: value.custom }] : []),
+  ];
+  // WAI-ARIA radio group: arrows move and select, one tab stop
+  const onArrows = (e: React.KeyboardEvent) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const i = Math.max(0, options.findIndex((o) => o.id === value.preset));
+    const next = options[(i + step + options.length) % options.length];
+    onChange({ ...value, preset: next.id });
+    (e.currentTarget.querySelector(`[data-preset="${next.id}"]`) as HTMLElement | null)?.focus();
+  };
   return (
     <fieldset className="setting-group weights-group">
       <legend>Как считать оценку</legend>
       <p className="weights-note">
         Меняется только у вас, в этом браузере. У коллег, в методологии и в выгрузке Excel остаются стандартные веса.
       </p>
-      <div className="preset-grid" role="radiogroup" aria-label="Пресет весов">
-        {PRESETS.map((p) => {
-          const on = value.preset === p.id;
+      <div className="preset-grid" role="radiogroup" aria-label="Пресет весов" onKeyDown={onArrows}>
+        {options.map((o) => {
+          const on = value.preset === o.id;
           return (
-            <button key={p.id} type="button" role="radio" aria-checked={on} className={on ? "preset is-on" : "preset"} onClick={() => onChange({ ...value, preset: p.id })}>
-              <span className="preset-title">{p.title}</span>
-              <span className="preset-hint">{p.hint}</span>
-              <WeightBar w={p.weights ?? DEFAULT_WEIGHTS} />
+            <button key={o.id} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} data-preset={o.id}
+              className={on ? "preset is-on" : "preset"} onClick={() => onChange({ ...value, preset: o.id })}>
+              <span className="preset-title">{o.title}</span>
+              <span className="preset-hint">{o.hint}</span>
+              <WeightBar w={o.weights} />
             </button>
           );
         })}
-        {value.preset === "custom" && (
-          <button type="button" role="radio" aria-checked className="preset is-on">
-            <span className="preset-title">Свои веса</span>
-            <span className="preset-hint">Заданы в продвинутом режиме</span>
-            <WeightBar w={base} />
-          </button>
-        )}
       </div>
       <label className="setting switch-row">
         <input type="checkbox" role="switch" checked={value.advanced} onChange={(e) => onChange({ ...value, advanced: e.target.checked })} />

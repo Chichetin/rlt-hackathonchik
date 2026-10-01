@@ -612,3 +612,6 @@ html { scroll-padding-top: 80px; }
 @keyframes glint-turn { to { --glint: 570deg; } }
 @media (prefers-reduced-motion: reduce) { .glass-diamond::after { animation: none; } }
 .hero-mark .glass-m { width: 74%; } /* beats glass.css `.hero-mark svg` */
+.slider-row input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.export-note { flex-basis: 100%; margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.weights-card-note { margin: -4px 0 10px; font-size: 12.5px; color: #c7d4ff; }

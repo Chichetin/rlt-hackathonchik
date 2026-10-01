@@ -52,7 +52,7 @@ export const PRESETS: Preset[] = [
   {
     id: "local",
     title: "Рядом с заказчиком",
-    hint: "Петербург и область — выше остальных",
+    hint: "Петербург и область выше остальных — по КПП; у ИП регион не учитывается",
     weights: { product_fit: 0.6, experience: 0.15, reliability: 0, activity: 0.05, geography: 0.2, price: 0 },
   },
   {

@@ -22,4 +22,10 @@ test("пресет весов пересчитывает выдачу тольк
   await expect(page.getByText("нет данных — в оценку не входит")).toHaveCount(2);
   await page.getByRole("button", { name: "Вернуть стандарт" }).click();
   await expect(page.getByRole("radio", { name: /Стандарт/ })).toHaveAttribute("aria-checked", "true");
+
+  // «Сбросить настройки» also drops a preset left from a rehearsal
+  await page.getByRole("radio", { name: /Опытные исполнители/ }).click();
+  await page.getByRole("button", { name: "Сбросить настройки и сохранённый запрос" }).click();
+  await expect(page.getByRole("radio", { name: /Стандарт/ })).toHaveAttribute("aria-checked", "true");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mitrandir.weights") ?? "{}").preset)).toBe("standard");
 });
