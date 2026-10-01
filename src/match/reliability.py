@@ -48,7 +48,7 @@ TENURE_MONTHS = 12  # tenure saturates at a year in the data (the data starts 20
 HISTORY_PARTS = {"win_rate": 0.35, "retention": 0.25, "breadth": 0.20, "tenure": 0.20}
 REGISTRY_PARTS = {"status": 0.4, "rnp": 0.3, "age": 0.3}
 AGE_YEARS = 5  # registry age saturates at 5 years
-SHADOW_NOTE = " — в балл не входит (включение ждёт подтверждения методологии)"
+SHADOW_NOTE = " — справочно, в балл не входит"
 NO_HISTORY = "Нет данных: истории участия до даты запроса нет"
 
 
@@ -100,6 +100,20 @@ def _months(a: date, b: date) -> int:
     return max(1, (b.year - a.year) * 12 + b.month - a.month + 1)
 
 
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """Russian noun form for n: plural(1, "лот", "лота", "лотов") → "лот"; 3 → "лота"; 11 → "лотов"."""
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def _of(n: int, word_gen_sg: str, word_gen_pl: str) -> str:
+    """"из N <noun>" takes the genitive: из 1 лота, из 3 лотов, из 21 лота."""
+    return f"{n} {plural(n, word_gen_sg, word_gen_pl, word_gen_pl)}"
+
+
 def _pct(x: float) -> str:
     return f"{round(100 * x)}%"
 
@@ -128,9 +142,9 @@ def history_reliability(h: History | None, prior: Prior, ref: date) -> tuple[flo
     first = h.first_seen
     since = (f"в данных с {first.strftime('%m.%Y')}, активен {h.active_months} из {_months(first, ref)} мес."
              if first and first <= ref else "дата первого участия неизвестна")
-    back = (f"повторные победы у {h.repeat_customers} из {h.won_customers} заказчик(ов) с победой"
+    back = (f"повторные победы у {h.repeat_customers} из {_of(h.won_customers, 'заказчика', 'заказчиков')} с победой"
             if h.won_customers else "побед у заказчиков ещё не было")
-    why = (f"Побед {h.wins} из {h.lots} лот(ов) — {_pct(s['win_rate'])} с поправкой на малую выборку "
+    why = (f"Побед {h.wins} из {_of(h.lots, 'лота', 'лотов')} — {_pct(s['win_rate'])} с поправкой на малую выборку "
            f"(у похожих поставщиков {_pct(prior.win_rate)}); {back}; всего заказчиков {h.customers}; {since}")
     return value, why
 
@@ -166,7 +180,7 @@ def registry_reliability(cp: Counterparty, ref: date) -> tuple[float | None, str
     if year is not None:
         age = ref.year - year
         parts["age"] = min(1.0, age / AGE_YEARS)
-        said.append(f"запись в реестре с {year} г. (по ОГРН), {age} лет")
+        said.append(f"запись в реестре с {year} г. (по ОГРН), {age} {plural(age, 'год', 'года', 'лет')}")
     if not parts:
         return None, "Не проверено: статус, РНП и возраст по реестрам ещё не получены"
     total = sum(REGISTRY_PARTS[k] for k in parts)

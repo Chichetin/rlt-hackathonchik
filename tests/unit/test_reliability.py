@@ -23,6 +23,7 @@ from src.match.reliability import (
     history_parts,
     history_reliability,
     ogrn_year,
+    plural,
     pool_prior,
     registry_reliability,
     reliability_mode,
@@ -92,8 +93,10 @@ def test_value_is_the_weighted_sum_and_explained():
     value, why = history_reliability(x, PRIOR, REF)
     s = history_parts(x, PRIOR, REF)
     assert value == pytest.approx(sum(HISTORY_PARTS[k] * s[k] for k in HISTORY_PARTS))
-    assert "Побед 4 из 10" in why and "у похожих поставщиков 40%" in why
-    assert "повторные победы у 1 из 3" in why and "всего заказчиков 5" in why
+    assert "Побед 4 из 10 лотов" in why and "у похожих поставщиков 40%" in why
+    assert "повторные победы у 1 из 3 заказчиков" in why and "всего заказчиков 5" in why
+    _, why = history_reliability(h(lots=21, won=1, rep=0, wins=1), PRIOR, REF)
+    assert "из 21 лота" in why and "у 0 из 1 заказчика" in why and "(ов)" not in why
     assert "в данных с 07.2024, активен 6 из 13 мес." in why
 
 
@@ -250,3 +253,37 @@ def test_rel_on_experiment_is_reproducible_from_the_repository():
     for exp in ("rel-off-s500", "rel-off-f"):
         assert reliability_mode(load_method_config(exp)) == "shadow"
     assert reliability_mode(search_mod.load_config()) == "shadow"  # the product stays in shadow
+
+
+def test_plural_forms():
+    forms = ("лот", "лота", "лотов")
+    assert [plural(n, *forms) for n in (0, 1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 111)] == [
+        "лотов", "лот", "лота", "лота", "лотов", "лотов", "лотов", "лотов", "лот", "лота", "лотов", "лот", "лотов"]
+
+
+def test_shadow_reads_history_only_for_the_shown_top_k(search_data, mode, monkeypatch):
+    """#127 review: in shadow the history SQL covers the k shown suppliers, not all 200 candidates."""
+    from src.match.store import ParquetStore
+
+    calls: list[int] = []
+    real = ParquetStore.supplier_history
+    monkeypatch.setattr(ParquetStore, "supplier_history", lambda self, inns, as_of: calls.append(len(inns))
+                        or real(self, inns, as_of))
+    q = Query(query_id="q", text="бумага офисная", as_of=CUTOFF)
+    mode("shadow")
+    res = search(q, k=2)
+    assert calls == [2] and len(res) == 2 and all(rel(m).value > 0 for m in res)
+    calls.clear()
+    mode("on")
+    assert len(search(q, k=2)) == 2 and calls and calls[0] > 2  # on: every candidate is scored with it
+    calls.clear()
+    mode("off")
+    search(q, k=2)
+    assert calls == []
+
+
+def test_shadow_covers_suppliers_with_an_invalid_inn(search_data, mode):
+    mode("shadow")
+    res = search(Query(query_id="q", text="бумага офисная", as_of=CUTOFF), k=200)
+    bad = [m for m in res if m.counterparty.inn is None]
+    assert bad and all(rel(m).value > 0 and rel(m).explanation.startswith("Побед") for m in bad)

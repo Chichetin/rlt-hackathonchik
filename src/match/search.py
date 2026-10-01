@@ -413,10 +413,13 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     top_bm25 = max(c.bm25 for c in cands)
     ref = as_of or idx.data_end
     last_day = as_of - timedelta(days=1) if as_of else idx.data_end  # history is strictly before as_of
-    history = store.supplier_history([c.inn for c in cands], as_of) if rel_mode != "off" else {}
+    # on: every candidate needs its history (the score depends on it); shadow: only the shown top-k (below) —
+    # the weight is 0, the order does not depend on it, and the query costs one SQL over k INNs, not 200.
+    history = store.supplier_history([c.inn for c in cands], as_of) if rel_mode == "on" else {}
     prior = pool_prior(history.values())
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
+    raw_inn: dict[int, str] = {}
     for c in cands:
         cp = parties.get(c.inn)
         if cp is None:
@@ -431,7 +434,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),
-            _reliability(rel_mode, history.get(c.inn), prior, last_day, w),
+            _reliability("off" if rel_mode == "shadow" else rel_mode, history.get(c.inn), prior, last_day, w),
             ScoreComponent(name="price", value=0.0, weight=0.0, explanation=UNAVAILABLE["price"]),
             _component("activity", act, w, act_why),
             _component("geography", geo, w, geo_why),
@@ -446,9 +449,26 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         out.append(CounterpartyMatch(counterparty=cp, score=round(sum(x.value * x.weight for x in comps), 4),
                                      components=comps, origin="history"))
         bm25_of.append(c.bm25)
+        raw_inn[id(out[-1])] = c.inn  # the data's INN, also when it fails the checksum (counterparty.inn None)
     if opts["tie_break"] == "bm25":
         sims = {id(m): s for m, s in zip(out, bm25_of, strict=True)}
         out.sort(key=lambda m: (-m.score, -sims[id(m)], m.counterparty.inn or "~"))
     else:
         out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
-    return out[:k]
+    out = out[:k]
+    if rel_mode == "shadow" and out:
+        out = _shadow_reliability(store, out, [raw_inn[id(m)] for m in out], as_of, last_day, w)
+    return out
+
+
+def _shadow_reliability(store: Store, shown: list[CounterpartyMatch], inns: list[str], as_of: date | None,
+                        last_day: date | None, w: dict[str, float]) -> list[CounterpartyMatch]:
+    """Fill reliability (weight 0) for the shown matches only; the prior pools the shown candidates."""
+    history = store.supplier_history(inns, as_of)
+    prior = pool_prior(history.values())
+    out = []
+    for m, inn in zip(shown, inns, strict=True):
+        rel = _reliability("shadow", history.get(inn), prior, last_day, w)
+        comps = [rel if c.name == "reliability" else c for c in m.components]
+        out.append(m.model_copy(update={"components": comps}))
+    return out
