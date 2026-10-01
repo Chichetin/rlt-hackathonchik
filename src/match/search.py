@@ -7,12 +7,12 @@ v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
    matched the query themselves (D-045): group XX.XX first, then the code inside it.
 3. Components in [0, 1], one explanation line each:
    product_fit — BM25 similarity (normalized by the best candidate) + depth of the OKPD2 match;
-   experience  — lots and wins among the lots with similar positions before as_of (v2, D-064;
+   experience  — lots and wins among the lots with similar positions before as_of (v2, D-073;
                  `options.experience_by: class` — in the query's OKPD2 group, as in v1);
    activity    — days from the last participation to as_of (or to the end of the data);
    geography   — region of the KPP (78 / 47) against Query.region; shown, weight 0 in v2;
    reliability, price — no data yet: value 0, weight 0, "нет данных" (D-029).
-   score = Σ weight · value with weights and options from configs/search.yaml (v2: D-064, was D-004).
+   score = Σ weight · value with weights and options from configs/search.yaml (v2: D-073, was D-004).
 Candidates found only in open sources (`origin="discovered"`) are #16: the block is empty here.
 """
 
@@ -277,7 +277,7 @@ def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "c
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
 
-# Assortment summary thresholds (D-064, research/DATA_DICTIONARY.md): shown only with enough history.
+# Assortment summary thresholds (D-073, research/DATA_DICTIONARY.md): shown only with enough history.
 PROFILE_MIN_LOTS = 5
 NARROW_TOP_SHARE = 0.8
 WIDE_CLASSES, WIDE_TOP_SHARE = 5, 0.5
