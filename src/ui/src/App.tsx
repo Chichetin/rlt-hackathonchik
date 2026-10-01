@@ -42,7 +42,7 @@ import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
 import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
 import "./filters.css";
-import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
+import { nearHidden, relationToCustomer, tieReason, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
@@ -950,6 +950,7 @@ function Block(props: {
           {props.rows.map((m) => {
             const cp = m.counterparty;
             const top = [...m.components].sort((a, b) => b.value * b.weight - a.value * a.weight)[0];
+            const tie = tieReason(m);
             return (
               <motion.li key={cp.inn ?? cp.name} layout={reduced ? false : "position"}
                 initial={false} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.12 }}>
@@ -975,6 +976,7 @@ function Block(props: {
                   </span>
                   <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
                   {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
+                  {tie && <span className="why tie-why" title={tie}><span className="why-label">Порядок</span>{tie}</span>}
                 </motion.button>
               </motion.li>
             );

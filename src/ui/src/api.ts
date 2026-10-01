@@ -336,6 +336,15 @@ export async function dropTestset(): Promise<void> {
 // offline=1: «Новые» from the cache only — a live run over every lot would be a mass crawl (confirmation №4)
 export const PREDICT_CSV_URL = "/api/testset/predict.csv?top=10&offline=1";
 
+// Why a supplier stands above another with the same score (#278, options.tie_break: wins): the backend appends
+// «; при равной оценке порядок решают …» to the experience explanation. null when the score is unique.
+const TIE_MARK = "при равной оценке";
+export function tieReason(m: CounterpartyMatch): string | null {
+  const text = m.components.find((c) => c.name === "experience")?.explanation ?? "";
+  const at = text.indexOf(TIE_MARK);
+  return at < 0 ? null : text.slice(at).trim();
+}
+
 // Where the supplier is relative to the customer (#242): same region / the neighbour (78 ↔ 47) / another
 const NEIGHBOUR: Record<string, string> = { "Санкт-Петербург": "Ленинградская область", "Ленинградская область": "Санкт-Петербург" };
 export function relationToCustomer(cp: Pick<Counterparty, "region" | "kpp"> & { inn?: string | null }, customerRegion: string | undefined): string | null {
