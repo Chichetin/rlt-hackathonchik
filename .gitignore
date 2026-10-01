@@ -33,3 +33,6 @@ src/ui/playwright-report/
 # IDE
 .idea/
 .vscode/
+
+# make predict output (INN lists, incl. individuals) — not committed
+eval/predict/

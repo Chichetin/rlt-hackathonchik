@@ -115,3 +115,17 @@ def test_crlf_and_lf_build_the_same(tmp_path: Path) -> None:
 def test_unbuilt_as_of_is_a_clear_error(processed: Path) -> None:
     with pytest.raises(FileNotFoundError, match="src.ingest.build"):
         suppliers_path(date(2025, 1, 1), processed)
+
+
+def test_supplier_profile_keys(processed: Path) -> None:
+    cols = (
+        "okpd2_classes, top_class_share, distinct_codes, top_customer_share, repeat_win_share, "
+        "active_months, em_offers, em_wins, aisgz_contracts, entity_type, kpp_count, avg_rivals"
+    )
+    assert _rows(processed / "suppliers.parquet", f"SELECT {cols} FROM '{{p}}' WHERE inn = '{A}'") == [
+        (3, 0.8, 4, 0.6, 0.3333, 5, 5, 3, 0, "ЮЛ", 1, 1.2)
+    ]
+    ip = _rows(processed / "suppliers.parquet", "SELECT entity_type FROM '{p}' WHERE inn = '780100000090'")
+    assert ip == [("ИП",)]
+    st = counterparties([A], processed=processed)[A].stats
+    assert st["top_class_share"] == 0.8 and st["entity_type"] == "ЮЛ"

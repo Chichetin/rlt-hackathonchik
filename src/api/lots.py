@@ -5,10 +5,15 @@ Reads the Postgres store when search uses it (src/match/store.py, schema `data`)
 (and `ТРУ*.csv` for OKPD2) from DATA_RAW_DIR (default data/raw), `;`-separated (research/DATA_DICTIONARY.md).
 Data absent -> LotDataUnavailable (API answers 503, the UI falls back
 to free text); lot absent -> LotNotFound (404). Nothing is invented.
+
+TEST_DATA_DIR (#121): a folder with the organizers' test export (same CSV format, src/ingest/testset.py)
+is looked up first, so a test procedure opens by its number like a training lot; a broken export is
+logged and the training data is still searched.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -18,6 +23,8 @@ from src.contracts import Query
 from src.match.store import StoreUnavailable, get_store
 
 ROOT = Path(__file__).resolve().parents[2]
+log = logging.getLogger(__name__)
+_testsets: dict[tuple[str, float], object] = {}
 
 
 class LotDataUnavailable(RuntimeError):
@@ -59,8 +66,33 @@ def _is_template(subject: str | None) -> bool:
     return not s.strip() or ("закупка" in s and "статьи 93" in s)
 
 
+def _test_lot(ident: str) -> Query | None:
+    """Lot from TEST_DATA_DIR (re-read when the folder changes); None when unset, absent or broken."""
+    from src.ingest.testset import TestDataError, TestSet, load_testset
+
+    folder = os.environ.get("TEST_DATA_DIR")
+    if not folder:
+        return None
+    path = _dir("TEST_DATA_DIR", folder)
+    try:
+        key = (str(path), max((p.stat().st_mtime for p in path.glob("*.csv")), default=0.0))
+        ts = _testsets.get(key)
+        if ts is None:
+            _testsets.clear()
+            ts = _testsets[key] = load_testset(path)
+    except (TestDataError, OSError) as e:
+        log.warning("TEST_DATA_DIR=%s не читается: %s", folder, e)
+        return None
+    assert isinstance(ts, TestSet)
+    lot = ts.find(ident)
+    return lot.query if lot else None
+
+
 def find_lot(ident: str) -> Query:
     ident = ident.strip()
+    test = _test_lot(ident)
+    if test is not None:
+        return test
     try:
         store = get_store()
     except StoreUnavailable as e:  # DATA_STORE=postgres and the schema is not loaded
@@ -116,7 +148,7 @@ def find_lot(ident: str) -> Query:
 
 
 def _query(lot_id, subject, procedure_name, price, customer_inn, channel, *, okpd2: list[str],
-           names: list[str]) -> Query:
+           names: list[str] | None = None) -> Query:
     # subject, else procedure_name, else the lot's position names (both are «ч. 12 ст. 93» templates in ~840 lots)
     if _is_template(subject):
         if not _is_template(procedure_name):
