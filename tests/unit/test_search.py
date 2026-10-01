@@ -7,6 +7,7 @@ Fixture (tests/fixtures/ingest): paper lots 1 (2024-03-01), 3 (2024-11-05), 6 (2
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -87,6 +88,12 @@ def test_experience_counts_lots_and_wins_in_okpd2_group(search_data):
     e = comp(m["7801000012"], "experience")
     assert "4 лот(ов) по ОКПД2 17.12" in e.explanation and "побед: 2" in e.explanation
     assert e.value > comp(m["7801000020"], "experience").value  # 1 paper lot, no paper wins
+
+
+def test_experience_ends_with_assortment_summary_not_scored(search_data):
+    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])))
+    assert comp(m["7801000012"], "experience").explanation.endswith("; узкий ассортимент: 80% лотов — класс 17")
+    assert "ассортимент" not in comp(m["7801000020"], "experience").explanation  # 3 lots: too little history
 
 
 def test_experience_before_cutoff(search_data):
@@ -233,6 +240,61 @@ def test_prebuild_cli_builds_product_and_cutoff_indexes(search_data, tmp_path, c
 def test_prebuild_cli_without_data_exits_2(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "none"))
     assert index_mod.main() == 2
+
+
+# --- scoring options of experiments (#22): v1 is the default, every option is opt-in ---
+
+def _cfg(**options) -> dict:
+    return {**search_mod.load_config(), "options": options}
+
+
+def test_scoring_options_default_is_v1_and_unknown_is_an_error():
+    assert search_mod.scoring_options({}) == {"fit_bm25_share": search_mod.FIT_BM25_SHARE, "experience_by": "class",
+                                              "tie_break": "inn"}
+    for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"}):
+        with pytest.raises(ValueError):
+            search_mod.scoring_options({"options": bad})
+    with pytest.raises(ValueError, match="retriever"):
+        search_mod.check_config({"retriever": "nope"})
+
+
+def test_config_argument_without_options_equals_product(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    assert search(q, config=search_mod.load_config()) == search(q)
+
+
+def test_experience_by_similar_counts_matched_lots(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    by_class = {m.counterparty.inn: m for m in search(q)}
+    similar = search(q, config=_cfg(experience_by="similar"))
+    assert similar and len(similar) == len(by_class)
+    for m in similar:
+        exp = comp(m, "experience")
+        assert "с похожими позициями" in exp.explanation
+        assert "по ОКПД2" in comp(by_class[m.counterparty.inn], "experience").explanation
+        # the value is computed from the matched lots and wins named in the explanation
+        lots, wins = (int(x) for x in re.findall(r"(\d+) лот\(ов\).*побед: (\d+)", exp.explanation)[0])
+        want = 0.5 * search_mod._sat(lots, search_mod.SAT_LOTS) + 0.5 * search_mod._sat(wins, search_mod.SAT_WINS)
+        assert exp.value == pytest.approx(want, abs=1e-4)
+
+
+def test_fit_bm25_share_changes_product_fit(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    only_text = [comp(m, "product_fit").value for m in search(q, config=_cfg(fit_bm25_share=1.0))]
+    default = [comp(m, "product_fit").value for m in search(q)]
+    assert max(only_text) == 1.0 and only_text != default  # share 1.0 = BM25 similarity alone, the best one is 1
+    only_code = [comp(m, "product_fit").value for m in search(q, config=_cfg(fit_bm25_share=0.0))]
+    assert set(only_code) <= set(search_mod.OKPD_DEPTH.values())
+
+
+def test_tie_break_bm25_orders_equal_scores_by_similarity(search_data):
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    zero = {"product_fit": 0.0, "experience": 0.0, "activity": 0.0, "geography": 0.0}  # every score ties at 0
+    inns = [m.counterparty.inn or "~" for m in search(q, weights=zero)]
+    assert inns == sorted(inns)
+    fits = [next(c.value for c in m.components if c.name == "product_fit")
+            for m in search(q, weights=zero, config=_cfg(tie_break="bm25", fit_bm25_share=1.0))]
+    assert fits == sorted(fits, reverse=True)
 
 
 def _sole_trader(kpp):
