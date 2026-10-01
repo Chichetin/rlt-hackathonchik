@@ -151,8 +151,8 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
       </span>
     );
   }
-  // no name in the data: the INN length tells a legal entity (10 digits) from an individual entrepreneur (12)
-  const text = /^ИНН\s/.test(cp.name) ? ((cp.inn ?? "").length === 12 ? "ИП" : "ЮЛ") : initials(cp.name);
+  // no name in the data: the INN length tells a legal entity (10 digits) from an individual or entrepreneur (12)
+  const text = /^ИНН\s/.test(cp.name) ? ((cp.inn ?? "").length === 12 ? "ФЛ" : (cp.inn ?? "").length === 10 ? "ЮЛ" : "?") : initials(cp.name);
   return (
     <span className={`${cls} logo-tone-${tone(cp.inn ?? cp.name)}`} aria-hidden="true">
       {text}
@@ -167,7 +167,7 @@ function OriginBadge({ m }: { m: CounterpartyMatch }) {
   const lots = st.lots_participated;
   if (typeof lots !== "number") return <span className="badge badge-history">Участник закупок АИС ГЗ</span>;
   const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
-  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов${rate}`}</span>;
+  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
 }
 
 function CompanyName({ name }: { name: string }) {
