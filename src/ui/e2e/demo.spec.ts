@@ -2,9 +2,10 @@ import { expect, test } from "@playwright/test";
 
 // Сценарий демо — раздел 10 workflow, docs/ui.md. Существует с первого коммита на заглушке и
 // растёт вместе с продуктом; PR, ломающий его, не вливается (CLAUDE.md).
-// Демо-запрос — лот по номеру. ВНИМАНИЕ: в e2e лот берётся из фикстуры tests/fixtures/raw (DATA_RAW_DIR),
-// синтетической; реальный лот ЭМ СПб подставляется, когда data/raw доступны (docs/ui.md, D-027).
-const DEMO_LOT = "9000001";
+// Демо-запрос — лот по номеру. ВНИМАНИЕ: в e2e лот и поиск идут по синтетической фикстуре
+// tests/fixtures/ingest (DATA_PROCESSED_DIR, playwright.config.ts); реальный лот ЭМ СПб
+// подставляется, когда data/raw доступны (docs/ui.md, D-027).
+const DEMO_LOT = "6";
 
 test("демо: запрос → два блока → карточка → фильтр → выгрузка", async ({ page }) => {
   const started = Date.now();
@@ -15,14 +16,15 @@ test("демо: запрос → два блока → карточка → фи
   await page.getByRole("button", { name: "Загрузить закупку" }).click();
   await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага офисная А4/);
   await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
-  await expect(page.getByLabel("ИНН заказчика")).toHaveValue("7804105239");
+  await expect(page.getByLabel("ИНН заказчика")).toHaveValue("7801000051");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
 
   // 2. Два блока, у каждого поставщика score и объяснение
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   const discovered = page.getByRole("region", { name: "Новые из открытых источников" });
   await expect(history.locator(".item").first()).toBeVisible();
-  await expect(discovered.locator(".item").first()).toBeVisible();
+  // блок «Новые» наполняет #16 (открытые источники); до этого он пуст и честно об этом говорит
+  await expect(discovered.locator(".item, .empty").first()).toBeVisible();
   await expect(history.locator(".score").first()).toHaveText(/\d\.\d\d/);
   await expect(history.locator(".why").first()).not.toBeEmpty();
 
@@ -37,10 +39,27 @@ test("демо: запрос → два блока → карточка → фи
   await expect(card.getByText("В РНП")).toBeVisible();
   await card.getByRole("button", { name: "Закрыть карточку" }).click();
 
-  // 4. Фильтр «только производители»
+  // 4. Фильтры (D-030). «Только производители»: тип в данных организаторов не указан, enrich его
+  // пока не даёт — фильтр не угадывает, а говорит, у скольких признак неизвестен.
+  await expect(discovered.locator(".empty")).toHaveText(/^Поиск в открытых источниках подключается \(#16\)/);
   await page.getByLabel("Только производители").check();
-  await expect(page.locator(".item .meta").first()).toContainText("Производитель");
-  for (const meta of await page.locator(".item .meta").allTextContents()) expect(meta).toContain("Производитель");
+  await expect(page.locator(".filternote")).toHaveText(
+    /^Тип поставщика ещё не определён у \d+ из \d+ — признак появится после обогащения\.$/,
+  );
+  await expect(history.locator(".empty")).toContainText("у кандидатов этот признак ещё не известен");
+  await page.getByLabel("Только производители").uncheck();
+  await expect(history.locator(".item").first()).toBeVisible();
+
+  // «Регион»: по реестру, иначе по КПП (78 — СПб); остаются строки, и у всех КПП 78…
+  const regional = page.waitForResponse(
+    (r) => r.url().endsWith("/api/search") && (r.request().postData() ?? "").includes('"region":"Санкт-Петербург"'),
+  );
+  await page.getByLabel("Регион").selectOption("Санкт-Петербург");
+  const body = await (await regional).json();
+  expect(body.history.length).toBeGreaterThan(0);
+  for (const m of body.history) expect(m.counterparty.kpp).toMatch(/^78/);
+  await expect(history.locator(".item")).toHaveCount(body.history.length);
+  for (const meta of await history.locator(".item .meta").allTextContents()) expect(meta).toContain("Санкт-Петербург");
 
   // 5. Выгрузка в Excel
   const [download] = await Promise.all([
@@ -55,7 +74,7 @@ test("демо: запрос → два блока → карточка → фи
 
 test("номер закупки не найден → понятное сообщение, свободный текст работает", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Номер закупки (необязательно)").fill("1");
+  await page.getByLabel("Номер закупки (необязательно)").fill("999999");
   await page.getByRole("button", { name: "Загрузить закупку" }).click();
   await expect(page.getByRole("alert")).toContainText("не найдена");
   await page.getByLabel("Что нужно закупить").fill("Бумага офисная А4");

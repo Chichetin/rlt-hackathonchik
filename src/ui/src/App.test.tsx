@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { buildQuery, type SearchResponse } from "./api";
+import { buildQuery, filterNotes, regionLabel, type SearchResponse } from "./api";
 
 const match = (name: string, origin: "history" | "discovered", kind = "manufacturer") => ({
   counterparty: {
@@ -118,4 +118,47 @@ test("editing the query text drops the lot context (okpd2, channel)", async () =
   expect(await screen.findByText(/ОКПД2: 17.12/)).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), " другое");
   expect(screen.queryByText(/ОКПД2: 17.12/)).not.toBeInTheDocument();
+});
+
+test("regionLabel: registry region first, then KPP prefix, else unknown", () => {
+  expect(regionLabel({ region: "Москва", kpp: "780101001" })).toBe("Москва");
+  expect(regionLabel({ region: null, kpp: "780101001" })).toBe("Санкт-Петербург (по КПП)");
+  expect(regionLabel({ region: null, kpp: "470101001" })).toBe("Ленинградская область (по КПП)");
+  expect(regionLabel({ region: null, kpp: "770101001" })).toBe("регион не указан");
+  expect(regionLabel({ region: null, kpp: null })).toBe("регион не указан");
+});
+
+test("filterNotes counts candidates hidden for an unknown attribute", () => {
+  const base = structuredClone(response);
+  base.history[0].counterparty.kind = null;
+  base.history[0].counterparty.is_msp = null;
+  const f = { only_msp: true, only_manufacturers: true, region: "" };
+  expect(filterNotes(base, f)).toEqual([
+    "Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения.",
+    "Статус МСП ещё не проверен у 1 из 2 — признак появится после обогащения.",
+  ]);
+  expect(filterNotes(base, { only_msp: false, only_manufacturers: false, region: "" })).toEqual([]);
+  expect(filterNotes(response, f)).toEqual([]);
+});
+
+test("filter that hides unknown-type suppliers says so instead of 'nothing found'", async () => {
+  const base = structuredClone(response);
+  base.stub = false;
+  base.discovered = [];
+  base.history[0].counterparty.kind = null;
+  const filtered = { ...structuredClone(base), history: [] };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    const body = JSON.parse(String((init as RequestInit).body));
+    return new Response(JSON.stringify(body.filters?.only_manufacturers ? filtered : base), { status: 200 });
+  });
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
+  expect(discovered).toHaveTextContent("Поиск в открытых источниках подключается (#16)");
+  await userEvent.click(screen.getByLabelText("Только производители"));
+  expect(await screen.findByText("Тип поставщика ещё не определён у 1 из 1 — признак появится после обогащения.")).toBeInTheDocument();
+  const history = screen.getByRole("region", { name: "С опытом госзакупок" });
+  expect(history).toHaveTextContent("у кандидатов этот признак ещё не известен");
+  expect(history).not.toHaveTextContent("переформулировать");
 });
