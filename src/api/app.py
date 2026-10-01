@@ -25,18 +25,20 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi import Query as Param
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 
+from src.api import guard
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.api.ratings import router as ratings_router
@@ -54,8 +56,8 @@ from src.match.filters import entity_of, kind_of, near_of, parse_filters
 from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
 from src.match.store import get_store
 from src.sources.cache import SourceCache
-from src.sources.pb_nalog import CaptchaRequired
-from src.worker.queue import engine_from_env, enqueue, status_counts
+from src.sources.pb_nalog import CaptchaRequired, card_url
+from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
 if os.environ.get("DEMO_FIXTURE") == "1":
@@ -272,12 +274,27 @@ def api_okpd2(codes: str = "") -> dict[str, str]:
     return {c: okpd2_label(c) for c in items}
 
 
-@app.get("/api/counterparty/{inn}", response_model=Counterparty)
+_LIMITED: dict[int | str, dict[str, Any]] = {
+    401: {"description": "нужен ключ API (X-API-Key), если на сервере задан API_KEY"},
+    429: {"description": "лимит очереди или живых обогащений; повторите через Retry-After секунд"},
+}
+
+
+def _answers_from_cache(inn: str) -> bool:
+    """True when enrich() needs no network: offline mode, or a fresh pb card in the cache (its first branch)."""
+    return os.environ.get("ENRICH_OFFLINE") == "1" or SourceCache().get(card_url(inn)) is not None
+
+
+@app.get("/api/counterparty/{inn}", response_model=Counterparty, dependencies=[Depends(guard.require_api_key)],
+         responses=_LIMITED)
 def api_counterparty(inn: str) -> Counterparty:
+    """The card by INN: from the cache at once, otherwise the registries are asked inside the request, so at most
+    COUNTERPARTY_LIVE_MAX of those at once (F-10)."""
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
-        cp = enrich_mod.enrich(inn)
+        with nullcontext() if _answers_from_cache(inn) else guard.live_slots.take():
+            cp = enrich_mod.enrich(inn)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
     except (CaptchaRequired, TimeoutError, httpx.HTTPError) as e:
@@ -288,11 +305,17 @@ def api_counterparty(inn: str) -> Counterparty:
     return strip_unverified(cp, SourceCache().page_text)
 
 
-@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202)
+@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202,
+          dependencies=[Depends(guard.require_api_key)], responses=_LIMITED)
 def api_enqueue(inn: str) -> EnqueueResult:
+    """Queue the enrichment of an INN for the worker; a new INN over ENRICH_QUEUE_MAX waiting tasks is a 429 (F-10)."""
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
-    return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn))
+    try:
+        return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn, max_pending=guard.queue_max()))
+    except QueueFull as e:
+        log.warning("enrich: очередь полна, %s не поставлен: %s", inn, e)
+        raise guard.busy("очередь обогащения заполнена, повторите позже") from e
 
 
 @app.post("/api/export")
