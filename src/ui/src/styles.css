@@ -541,3 +541,4 @@ html { scroll-padding-top: 80px; }
 .item .name { font-size: 15px; line-height: 1.35; }
 .item .badges { margin-top: 2px; }
 .item .name-inn { font-size: 13.5px; }
+@media (max-width: 480px) { .item { padding: 14px; } }
