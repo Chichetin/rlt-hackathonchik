@@ -70,7 +70,7 @@ def _queue():
 
 
 def _is_stub() -> bool:
-    # STUB: DEMO_FIXTURE=1 (scripts/demo.sh without organizers' data) serves the synthetic fixture.
+    # DEMO_FIXTURE=1 (scripts/demo.sh without organizers' data) serves the synthetic fixture (D-050).
     if os.environ.get("DEMO_FIXTURE") == "1":
         return True
     return bool(getattr(search_mod, "IS_STUB", False) or getattr(enrich_mod, "IS_STUB", False))

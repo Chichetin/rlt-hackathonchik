@@ -15,13 +15,14 @@ elif has_raw; then
   echo "[demo] собираю parquet из ${DATA_RAW_DIR:-data/raw} (src.ingest.build)"
   "${PY[@]}" python -m src.ingest.build
 else
+  # STUB: synthetic fixture instead of organizers' data; marked stub=true in API, banner in UI (D-050)
   echo "[demo] ВНИМАНИЕ: данных организаторов нет (data/raw пуст) — синтетическая фикстура, выдача помечена" >&2
   echo "[demo] как получить данные: docs/demo-clean-clone.md" >&2
   export DEMO_FIXTURE=1 DATA_PROCESSED_DIR=cache/demo-processed INDEX_DIR=cache/demo-indexes
   "${PY[@]}" python -m src.ingest.build --raw-dir tests/fixtures/ingest --out-dir cache/demo-processed
 fi
 
-"${PY[@]}" python -m src.match.index   # предсборка BM25 (продукт + cutoff)
+"${PY[@]}" python -m src.match.index || echo "[demo] ВНИМАНИЕ: индекс BM25 не собран — поиск ответит 503, демо стартует" >&2  # предсборка BM25
 echo "Демо: http://127.0.0.1:${PORT}  (Ctrl+C — остановить)"
 trap 'kill 0' EXIT INT TERM
 "${PY[@]}" python -m src.worker.worker &
