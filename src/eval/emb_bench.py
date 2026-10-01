@@ -39,7 +39,7 @@ from src.eval.split import ROOT, load_cases, split_config
 from src.match.index import get_index
 from src.match.pg_retriever import KNN, norm_map, rrf
 from src.match.store import ParquetStore, processed_dir
-from src.match.text import tokenize
+from src.match.text import tokenize, tokenizer_name, tokenizer_version
 
 log = logging.getLogger(__name__)
 GPU_DIR = Path(os.environ.get("DATA_GPU_DIR") or ROOT / "data" / "gpu")
@@ -229,7 +229,9 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
             "as_of": as_of.isoformat(), "commit": _commit(),
             "created": datetime.now(UTC).isoformat(timespec="seconds"), "top_docs": TOP_DOCS, "knn": KNN,
             "candidates": CANDIDATES, "store": store.name, "index_docs": idx.n_docs}
-    results = {"bm25": {**meta, "retriever": "bm25", "metrics": _summary(base), "slices": slices(base)}}
+    meta["tokenizer"] = tokenizer_version()
+    bm25_key = "bm25" if tokenizer_name() == "prefix5" else f"bm25-{tokenizer_name()}"
+    results = {bm25_key: {**meta, "retriever": "bm25", "metrics": _summary(base), "slices": slices(base)}}
     for model in models:
         import torch
 
@@ -254,7 +256,7 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
         }
         log.info("%s: vec %.3f, hybrid %.3f, bm25 %.3f", model, results[slug(model)]["vector"]["metrics"]
                  ["cand_recall@200"]["mean"], results[slug(model)]["hybrid_rrf"]["metrics"]["cand_recall@200"]["mean"],
-                 results["bm25"]["metrics"]["cand_recall@200"]["mean"])
+                 results[bm25_key]["metrics"]["cand_recall@200"]["mean"])
     out_dir.mkdir(parents=True, exist_ok=True)
     for key, res in results.items():
         name = f"emb-{key}-s1{'-short' if short else ''}.json"
