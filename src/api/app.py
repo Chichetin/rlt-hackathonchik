@@ -113,7 +113,7 @@ def _found(query: Query) -> list[CounterpartyMatch]:
         raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
                                  "или база не отвечает") from e
     if not getattr(search_mod, "IS_STUB", False):
-        found = [*found, *_discovered(query, found)]
+        found = [*_enriched(found), *_discovered(query, found)]
     return apply_filters(found, query)
 
 
@@ -123,6 +123,41 @@ def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
         return matches
     pages = cached_pages(SourceCache().page_text)  # one read and one normalization per page per request
     return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in matches]
+
+
+def _enriched(history: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """Mix the cached enrichment (status, МСП, name, ...) into history candidates BEFORE the hard filters (#38).
+
+    Cache only, never the network inside the user's request: no cache -> the INN goes to the queue
+    (idempotent) and the fields stay None («не проверено»). Organizers' data (inn, kpp, stats) is kept.
+    """
+    cache = SourceCache()
+    out = []
+    for m in history:
+        cp = m.counterparty
+        if m.origin != "history" or not cp.inn:
+            out.append(m)
+            continue
+        try:
+            card = enrich_mod.enrich(cp.inn, cache, offline=True)
+        except Exception:  # noqa: BLE001 — KeyError: not cached; anything else must not break the search
+            try:
+                enqueue(_queue(), "enrich", cp.inn)
+            except Exception:  # noqa: BLE001 — a dead queue does not break the search either
+                log.exception("enrich: не удалось поставить %s в очередь", cp.inn)
+            out.append(m)
+            continue
+        upd: dict[str, object] = {"evidence": [*cp.evidence, *card.evidence]}
+        if cp.name.startswith("ИНН ") and not card.name.startswith("ИНН "):
+            upd["name"] = card.name
+        for f in ("kind", "region", "status", "is_msp", "in_rnp"):
+            if getattr(card, f) is not None:
+                upd[f] = getattr(card, f)
+        if card.okved:
+            upd["okved"] = card.okved
+        upd["contacts"] = {**card.contacts, **cp.contacts}
+        out.append(m.model_copy(update={"counterparty": cp.model_copy(update=upd)}))
+    return out
 
 
 def _discovered(query: Query, history: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
