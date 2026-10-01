@@ -99,7 +99,7 @@
 | `suppliers_2025-07-01.parquet` | — | те же | только лоты с `publish_date` < cutoff (`configs/split.yaml`) — для eval без утечки |
 | `manifest.json` | — | `built_at`, `rows`, `as_of`, `cutoff`, `invalid_supplier_inns` (22) | `fetched_at` для Evidence `data:` |
 
-**Профиль поставщика (D-061, `suppliers.parquet`, 19 ключей `Counterparty.stats`; считаются по лотам до `as_of`, в score не входят).** Распределение на полных данных (44 196 ИНН; квантили 10 / 25 / 50 / 75 / 90 / 99 % и максимум; сборка `--no-cutoff`):
+**Профиль поставщика (D-064, `suppliers.parquet`, 19 ключей `Counterparty.stats`; считаются по лотам до `as_of`, в score не входят).** Распределение на полных данных (44 196 ИНН; квантили 10 / 25 / 50 / 75 / 90 / 99 % и максимум; сборка `--no-cutoff`):
 
 | Ключ | Смысл | 10 | 25 | 50 | 75 | 90 | 99 | max |
 |---|---|---|---|---|---|---|---|---|

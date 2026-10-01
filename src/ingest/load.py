@@ -28,7 +28,7 @@ STATS_KEYS = (
     "last_seen",
     "median_start_price",
     "top_okpd2",
-    # profile (D-061)
+    # profile (D-064)
     "okpd2_classes",
     "top_class",
     "okpd2_groups",

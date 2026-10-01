@@ -140,7 +140,7 @@ def build_suppliers(con: duckdb.DuckDBPyConnection, as_of: date | None, table: s
     Columns are the keys of Counterparty.stats: lots_participated, lots_won, win_rate, customers,
     customers_spb, first_seen, last_seen, median_start_price, top_okpd2 (3 most frequent level-4
     groups, comma-separated), plus kpp (most frequent) and inn_valid, and the profile keys
-    (D-061, research/DATA_DICTIONARY.md): assortment, scale, customers, activity, channels, legal.
+    (D-064, research/DATA_DICTIONARY.md): assortment, scale, customers, activity, channels, legal.
     """
     cond = f"publish_date < DATE '{as_of.isoformat()}'" if as_of else "TRUE"
     # End of the history: lots_last_90d counts lots in [end - 90 days, end).
