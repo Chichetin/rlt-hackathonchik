@@ -7,6 +7,7 @@ import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
 import {
   ALL,
+  PAGE,
   buildQuery,
   COMPONENT_LABEL,
   exportXlsx,
@@ -28,6 +29,7 @@ import {
   type Counterparty,
 } from "./api";
 import { reviewLinks } from "./reviews";
+import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -228,6 +230,12 @@ export function App() {
   }
 
   const runSeq = useRef(0);
+  // local scoring weights (#179): only in this browser; the server and the export keep the standard ones
+  const [weightSet, setWeightSet] = useState<WeightSettings>(loadWeights);
+  const weights = activeWeights(weightSet);
+  const weightsRef = useRef(weights);
+  weightsRef.current = weights;
+  const [shown, setShown] = useState(PAGE);
 
   async function run(nextFilters: Filters = filters) {
     if (!text.trim()) return;
@@ -239,12 +247,14 @@ export function App() {
       const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
       const q = buildQuery(text, nextFilters, extra());
       const [r, b] = await Promise.all([
-        search(q),
+        // with local weights the whole candidate set is re-ranked here, so it comes in one page
+        search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
         active ? search(buildQuery(text, none, extra()), { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
+      setShown(PAGE);
       setShownQuery(q);
       setBase(b ?? r);
       setState("idle");
@@ -316,6 +326,15 @@ export function App() {
     document.title = `${titles[path] ?? "Страница не найдена"} — Митрандир`;
   }, [path]);
 
+  function applyWeights(next: WeightSettings) {
+    setWeightSet(next);
+    saveWeights(next);
+    const nextWeights = activeWeights(next);
+    weightsRef.current = nextWeights;
+    // a page-sized answer cannot be re-ranked as a whole: fetch every candidate once
+    if (res && nextWeights && res.history.length < res.total.history) void run();
+  }
+
   function toggle(next: Filters) {
     setFilters(next);
     if (res) void run(next);
@@ -336,7 +355,7 @@ export function App() {
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
       {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} />
       : path === "/about" ? <AboutPage onStart={() => go("/search")} />
-      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
+      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
       <div className="top">
@@ -522,6 +541,11 @@ export function App() {
           <header className="results-heading">
             <h2 className="results-title">Результаты подбора</h2>
             <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
+            {weights && (
+              <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
+                Оценка: {presetTitle(weightSet)} · только у вас
+              </a>
+            )}
             <span className="result-total" role="status">
               С опытом: <strong><RollingNumber value={res.total.history} /></strong> · Новых: <strong><RollingNumber value={res.total.discovered} /></strong>
             </span>
@@ -531,9 +555,9 @@ export function App() {
             tag="Проверенные"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
-            rows={res.history}
+            rows={weights ? rerank(res.history, weights).slice(0, shown) : res.history}
             total={res.total.history}
-            onMore={() => void showMore()}
+            onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
             loadingMore={more}
             onOpen={setOpen}
             empty={
@@ -547,7 +571,7 @@ export function App() {
             tag="Новые"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
-            rows={res.discovered}
+            rows={rerank(res.discovered, weights)}
             total={res.total.discovered}
             onOpen={setOpen}
             empty={
@@ -853,12 +877,102 @@ function AboutPage({ onStart }: { onStart: () => void }) {
   );
 }
 
-function SettingsPage({ filters, onChange, onReset }: { filters: Filters; onChange: (f: Filters) => void; onReset: () => void }) {
+function WeightBar({ w }: { w: Weights }) {
+  const n = normalize(w);
+  return (
+    <span className="weight-bar" aria-hidden="true">
+      {COMPONENTS.map((c) => (n[c] > 0 ? <i key={c} style={{ width: `${n[c] * 100}%`, background: COMPONENT_COLOR[c] }} /> : null))}
+    </span>
+  );
+}
+
+function WeightsSettings({ value, onChange }: { value: WeightSettings; onChange: (s: WeightSettings) => void }) {
+  const base: Weights =
+    value.preset === "custom" && value.custom ? value.custom : (PRESETS.find((p) => p.id === value.preset)?.weights ?? DEFAULT_WEIGHTS);
+  const shares = normalize(base);
+  return (
+    <fieldset className="setting-group weights-group">
+      <legend>Как считать оценку</legend>
+      <p className="weights-note">
+        Меняется только у вас, в этом браузере. У коллег, в методологии и в выгрузке Excel остаются стандартные веса.
+      </p>
+      <div className="preset-grid" role="radiogroup" aria-label="Пресет весов">
+        {PRESETS.map((p) => {
+          const on = value.preset === p.id;
+          return (
+            <button key={p.id} type="button" role="radio" aria-checked={on} className={on ? "preset is-on" : "preset"} onClick={() => onChange({ ...value, preset: p.id })}>
+              <span className="preset-title">{p.title}</span>
+              <span className="preset-hint">{p.hint}</span>
+              <WeightBar w={p.weights ?? DEFAULT_WEIGHTS} />
+            </button>
+          );
+        })}
+        {value.preset === "custom" && (
+          <button type="button" role="radio" aria-checked className="preset is-on">
+            <span className="preset-title">Свои веса</span>
+            <span className="preset-hint">Заданы в продвинутом режиме</span>
+            <WeightBar w={base} />
+          </button>
+        )}
+      </div>
+      <label className="setting switch-row">
+        <input type="checkbox" role="switch" checked={value.advanced} onChange={(e) => onChange({ ...value, advanced: e.target.checked })} />
+        <span>
+          <strong>Продвинутый режим</strong>
+          <small>Важность каждого критерия вручную. Оценка = Σ значение × доля критерия.</small>
+        </span>
+      </label>
+      {value.advanced && (
+        <div className="sliders">
+          {COMPONENTS.map((c) => UNAVAILABLE.includes(c) ? (
+            <div key={c} className="slider-row is-off">
+              <span className="slider-name">
+                <i style={{ background: COMPONENT_COLOR[c] }} aria-hidden="true" />
+                {COMPONENT_LABEL[c]}
+              </span>
+              <span className="slider-off">нет данных — в оценку не входит</span>
+              <span className="slider-share">0 %</span>
+            </div>
+          ) : (
+            <label key={c} className="slider-row">
+              <span className="slider-name">
+                <i style={{ background: COMPONENT_COLOR[c] }} aria-hidden="true" />
+                {COMPONENT_LABEL[c]}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round((base[c] ?? 0) * 100)}
+                style={{ "--fill": `${Math.round((base[c] ?? 0) * 100)}%`, "--tone": COMPONENT_COLOR[c] } as React.CSSProperties}
+                aria-valuetext={`${Math.round(shares[c] * 100)} % оценки`}
+                onChange={(e) => onChange({ ...value, preset: "custom", custom: { ...base, [c]: Number(e.target.value) / 100 } })}
+              />
+              <span className="slider-share">{Math.round(shares[c] * 100)} %</span>
+            </label>
+          ))}
+          <div className="sliders-foot">
+            <WeightBar w={base} />
+            <button type="button" className="secondary" onClick={() => onChange({ ...STANDARD, advanced: true })}>
+              Вернуть стандарт
+            </button>
+          </div>
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
+function SettingsPage({ filters, onChange, onReset, weightSet, onWeights }: {
+  filters: Filters; onChange: (f: Filters) => void; onReset: () => void;
+  weightSet: WeightSettings; onWeights: (s: WeightSettings) => void;
+}) {
   return (
     <section className="subpage" aria-labelledby="settings-title">
       <header className="top">
         <h1 id="settings-title">Настройки подбора</h1>
-        <p className="sub">Применяются к каждому поиску и к выгрузке в Excel. Их же можно менять в форме подбора.</p>
+        <p className="sub">Фильтры применяются к каждому поиску и к выгрузке в Excel; их же можно менять в форме подбора. Веса оценки — только у вас.</p>
       </header>
       <div className="settings">
         <fieldset className="setting-group">
@@ -898,6 +1012,7 @@ function SettingsPage({ filters, onChange, onReset }: { filters: Filters; onChan
             </select>
           </label>
         </fieldset>
+        <WeightsSettings value={weightSet} onChange={onWeights} />
         <div className="settings-actions">
           <button type="button" className="secondary" onClick={onReset}>Сбросить настройки и сохранённый запрос</button>
         </div>

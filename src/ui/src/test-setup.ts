@@ -5,6 +5,7 @@ import { beforeEach } from "vitest";
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
   window.sessionStorage.clear();
+  window.localStorage.clear(); // local scoring weights (#179)
 });
 
 // jsdom has no media queries; behavior tests use the accessible, instant-motion preference.
