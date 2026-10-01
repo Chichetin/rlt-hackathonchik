@@ -72,7 +72,7 @@ Worktree: <абсолютный путь>; ветка: worktree-<N>-<тема>; 
 Запрещённые: src/contracts.py, pyproject.toml, uv.lock, src/ui/package*.json, чужие каталоги
 Контракты, от которых зависишь: <типы/функции>
 Что уже в main: <модули>; принимается на: реальном модуле | заглушке (почему)
-Проверки: make check [+ make e2e] [+ make eval EXP=<id>]
+Проверки: make check-changed (e2e — сам, по демо-пути) [+ make eval EXP=<id>]
 Документы: DECISIONS / tz-compliance / EXPERIMENTS; PR с Closes #<N>
 Отчёт — по формату builder.md
 ```
@@ -84,7 +84,7 @@ Worktree: <абсолютный путь>; ветка: worktree-<N>-<тема>; 
   (`make eval EXP=<id>`, «было → стало») → merge:
 
   ```bash
-  cd <worktree> && git fetch --prune && git merge origin/main && make check && git push
+  cd <worktree> && git fetch --prune && git merge origin/main && make check-changed && git push
   gh pr merge <PR> --merge --delete-branch     # без squash/rebase
   ```
 
