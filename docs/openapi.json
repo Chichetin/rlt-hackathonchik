@@ -131,6 +131,51 @@
         }
       }
     },
+    "/api/okpd2": {
+      "get": {
+        "summary": "Api Okpd2",
+        "description": "OKPD2 codes, comma-separated → `код «название»` from the dictionary snapshot (#199, D-073); unknown → the code.",
+        "operationId": "api_okpd2_api_okpd2_get",
+        "parameters": [
+          {
+            "name": "codes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Codes"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Okpd2 Api Okpd2 Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/counterparty/{inn}": {
       "get": {
         "summary": "Api Counterparty",

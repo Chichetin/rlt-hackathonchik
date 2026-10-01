@@ -32,6 +32,7 @@ from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.enrich.role import LABEL as ROLE_LABEL
+from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
 from src.match import fallback
 from src.match import search as search_mod
@@ -264,6 +265,18 @@ def api_lot(ident: str) -> Query:
         raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
     except LotDataUnavailable as e:
         raise HTTPException(503, str(e)) from e
+
+
+OKPD2_LABELS_MAX = 50
+
+
+@app.get("/api/okpd2", response_model=dict[str, str])
+def api_okpd2(codes: str = "") -> dict[str, str]:
+    """OKPD2 codes, comma-separated → `код «название»` from the dictionary snapshot (#199, D-073); unknown → the code."""
+    items = list(dict.fromkeys(c.strip() for c in codes.split(",") if c.strip()))
+    if len(items) > OKPD2_LABELS_MAX:
+        raise HTTPException(422, f"не больше {OKPD2_LABELS_MAX} кодов за запрос")
+    return {c: okpd2_label(c) for c in items}
 
 
 @app.get("/api/counterparty/{inn}", response_model=Counterparty)

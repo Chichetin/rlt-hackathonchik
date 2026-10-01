@@ -58,6 +58,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/okpd2": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Okpd2
+         * @description OKPD2 codes, comma-separated → `код «название»` from the dictionary snapshot (#199, D-073); unknown → the code.
+         */
+        get: operations["api_okpd2_api_okpd2_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/counterparty/{inn}": {
         parameters: {
             query?: never;
@@ -371,6 +391,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Query"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_okpd2_api_okpd2_get: {
+        parameters: {
+            query?: {
+                codes?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */
