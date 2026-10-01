@@ -146,6 +146,13 @@ def _doc_codes(store: Store, idx: LotIndex) -> Path:
     raise AssertionError("unreachable")
 
 
+def prebuild_doc_codes(store: Store, idx: LotIndex) -> Path:
+    """Build the position-codes sidecar now (`python -m src.match.index`), not on the first query
+    without a code: in docker-compose the index directory is read-only and the temp one dies with
+    the container (#83)."""
+    return _doc_codes(store, idx)
+
+
 def _position_codes(store: Store, idx: LotIndex) -> tuple[np.ndarray, pa.Array, np.ndarray]:
     """(offsets by doc_id, codes, n) of the sidecar, read once per loaded index."""
     if "doc_codes" not in idx.sidecars:
