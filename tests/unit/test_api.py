@@ -13,7 +13,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, ScoreCompon
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     monkeypatch.setattr(app_mod, "_engine", None)
     # lots: CSV path unless a test sets parquet
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "no-processed"))
@@ -125,6 +125,25 @@ def test_export_xlsx(search_client):
     assert ws.cell(row=2, column=3).value == "7801000012"
 
 
+def test_export_kind_column_in_russian(client, monkeypatch):
+    """«Тип» of the xlsx: the captions of the UI (KIND_LABEL in src/ui/src/api.ts), not the contract's keys (#102)."""
+    from src.match import search as search_mod
+    kinds = ["manufacturer", "distributor", "dealer", "unknown", None, "not-a-kind"]  # last: a code from the future
+    matches = []
+    for i, kind in enumerate(kinds):
+        m = _fabricated("history")
+        matches.append(m.model_copy(update={"counterparty": m.counterparty.model_copy(
+            update={"kind": kind, "name": f"ООО Тип {i}"})}))
+    monkeypatch.setattr(search_mod, "IS_STUB", True)  # no cache / discovery: only the column is under test
+    monkeypatch.setattr(search_mod, "search", lambda q, k=20: matches)
+    r = client.post("/api/export", json={"query_id": "q", "text": "x"})
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]][3] == "Тип"
+    assert [ws.cell(row=row, column=4).value for row in range(2, ws.max_row + 1)] == [
+        "Производитель", "Дистрибьютор", "Дилер", "Тип не определён", "Тип не определён", "Тип не определён"]
+
+
 def test_openapi_has_contracts(client):
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     assert {"Query", "Evidence", "Counterparty", "ScoreComponent", "CounterpartyMatch"} <= set(schemas)
@@ -217,9 +236,9 @@ def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
     con = duckdb.connect()
     con.execute("COPY (SELECT 77::BIGINT lot_id, '0372200260024000124' reqnum, 'Картриджи' procedure_name, "
                 "'Картриджи' subject, 500.0 start_price, '7804105239' customer_inn, 'ЭМ' channel) "
-                f"TO '{tmp_path}/notices.parquet' (FORMAT parquet)")
+                f"TO '{(tmp_path / 'notices.parquet').as_posix()}' (FORMAT parquet)")
     con.execute("COPY (SELECT 77::BIGINT lot_id, 'x' product_name, '26.20.40.190' okpd2_code) "
-                f"TO '{tmp_path}/items.parquet' (FORMAT parquet)")
+                f"TO '{(tmp_path / 'items.parquet').as_posix()}' (FORMAT parquet)")
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path))
     monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path / "nope"))
     q = client.get("/api/lot/0372200260024000124").json()

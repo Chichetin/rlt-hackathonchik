@@ -26,16 +26,20 @@ import {
 
 const REGIONS = ["", "Санкт-Петербург", "Ленинградская область"];
 
-/** «Новые» emptied by «Только производители», judged by the filters of the shown answer (#84): the type
- *  of a new company is never confirmed (D-036), so this filter hides all of them. Other filters keep the
- *  general text: region and МСП of new companies are known, their empty block has other reasons. */
+/** «Новые» emptied by «Только производители», judged by the filters of the shown answer (#84): the role of
+ *  a new company is set by its main OKVED (D-057), so the filter hides all of them only when none of them is a
+ *  manufacturer. If the base answer has one, other filters emptied the block: the general text. Other filters
+ *  alone keep the general text too: region and МСП of new companies are known, their empty block has other reasons. */
 function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Query | null): string | undefined {
   const n = base?.discovered.length ?? 0;
   if (res.discovered.length || !n || base === res || !shown?.filters?.only_manufacturers) return undefined;
-  return (
-    `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ` +
-    "тип поставщика реестр не подтверждает (по ОКВЭД известно только «вероятно»). Снимите фильтр, чтобы их увидеть."
-  );
+  const kinds = base?.discovered.map((m) => m.counterparty.kind) ?? [];
+  if (kinds.includes("manufacturer")) return undefined;
+  const undetermined = kinds.filter((k) => !k).length;
+  const why = undetermined
+    ? `подтверждённых производителей среди них нет — у ${undetermined} из ${n} роль ещё не определена`
+    : "по основному ОКВЭД среди них нет производителей";
+  return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
 }
 
 export function App() {
