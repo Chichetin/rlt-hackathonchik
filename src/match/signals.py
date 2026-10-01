@@ -11,11 +11,8 @@ from __future__ import annotations
 
 import math
 from datetime import date
-from pathlib import Path
 
-import duckdb
-
-from src.match.index import pq_path
+from src.match.store import Store
 
 SAT_CUSTOMER_LOTS = 5  # incumbent saturates at 5 lots with the same customer
 
@@ -33,23 +30,9 @@ def signal_shares(cfg: dict) -> dict[str, float]:
     return out
 
 
-def customer_lots(con: duckdb.DuckDBPyConnection, inns: list[str], customer_inn: str,
-                  processed: Path, as_of: date | None) -> dict[str, int]:
-    """Distinct lots of `customer_inn` each supplier took part in, strictly before as_of."""
-    cond = "publish_date < $as_of" if as_of else "TRUE"
-    params: dict = {"inns": inns, "cust": customer_inn}
-    if as_of:
-        params["as_of"] = as_of
-    rows = con.execute(
-        f"""
-        SELECT supplier_inn, count(DISTINCT lot_id)
-        FROM read_parquet({pq_path(processed / "participants.parquet")})
-        WHERE supplier_inn IN (SELECT unnest($inns)) AND customer_inn = $cust AND {cond}
-        GROUP BY supplier_inn
-        """,
-        params,
-    ).fetchall()
-    return {r[0]: int(r[1]) for r in rows}
+def customer_lots(store: Store, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]:
+    """Distinct lots of `customer_inn` each supplier took part in, strictly before as_of (Postgres or parquet)."""
+    return store.customer_lots(inns, customer_inn, as_of)
 
 
 def incumbent_value(n_lots: int) -> float:

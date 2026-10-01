@@ -19,6 +19,7 @@ import duckdb
 
 from src.contracts import Query
 from src.match.index import check_processed, get_index, pq_path, processed_dir
+from src.match.store import ParquetStore
 from src.match.text import tokenize
 
 METHODS = ("pop", "inc", "bm25")
@@ -165,15 +166,12 @@ def rank_bm25(query: Query, k: int, h: History) -> list[str]:
     """Order of the retriever of search() (best BM25 of the supplier's lots), no component scoring."""
     from src.match import search as search_mod  # read-only use of the retriever (src/match is not ours)
 
-    idx = get_index(h.processed, query.as_of)
+    store = ParquetStore(h.processed)
+    idx = get_index(store, query.as_of)
     hits = idx.retrieve(tokenize(query.text), search_mod.TOP_DOCS)
     if not hits:
         return []
-    con = duckdb.connect()
-    try:
-        cands = search_mod._retrieve(con, idx, hits, h.processed, query.as_of)
-    finally:
-        con.close()
+    cands = search_mod._retrieve(store, idx, idx.lot_hits(hits), query.as_of)
     return [c.inn for c in cands if c.inn in h.valid_inns][:k]
 
 

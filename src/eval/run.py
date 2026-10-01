@@ -185,6 +185,7 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "config_sha256": _safe_sha(),
         "stub": bool(getattr(search_mod, "IS_STUB", False)) and cfg.get("method", "search") == "search",
         "vectors": _vectors(cfg),
+        "store": _store(),
         **body,
     }
 
@@ -196,6 +197,13 @@ def _vectors(cfg: dict) -> dict | None:
     from src.match import pg_retriever
 
     return pg_retriever.coverage()
+
+
+def _store() -> str:
+    """postgres | parquet: where search() read the data (src/match/store.py) — the same metrics expected (#49)."""
+    from src.match.store import get_store
+
+    return get_store().name
 
 
 def _safe_sha() -> str | None:
