@@ -154,3 +154,55 @@ def test_config_hash_ignores_line_endings(repo):
     for p in paths:
         p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
     assert R.config_sha256(repo) == lf
+
+
+def _holdout_case(i: int):
+    from src.eval.split import EvalCase
+
+    return EvalCase.model_validate({"query": {"query_id": f"lot-{i}", "text": "x"}, "relevant_inns": [],
+                                    "date": "2025-11-01"})
+
+
+def test_holdout_sample_is_fixed_by_seed_not_by_order():
+    """The sample is the n lowest sha256(seed:query_id): the same cases whatever the file order, other with
+    another seed; no sample size (null) or a size above the holdout — every case (#145)."""
+    cases = [_holdout_case(i) for i in range(50)]
+    a = F.holdout_sample(cases, 7, seed=1)
+    assert len(a) == 7 and [c.query.query_id for c in a] == sorted(c.query.query_id for c in a)
+    assert [c.query.query_id for c in F.holdout_sample(cases[::-1], 7, seed=1)] == [c.query.query_id for c in a]
+    assert F.holdout_sample(cases, 7, seed=2) != a
+    assert F.holdout_sample(cases, None, seed=1) == cases and F.holdout_sample(cases, 500, seed=1) == cases
+
+
+def test_final_main_evaluates_the_configured_sample(tmp_path, monkeypatch):
+    """The whole holdout (88 848 cases, 0.25–0.30 s each) is a 6–7 h one-shot run — it does not fit the window
+    before code freeze; make eval-final scores the sample fixed in configs/split.yaml and writes a compact
+    result under the 5 MB commit guard (#145, docs/REVIEW.md)."""
+    seen: list[int] = []
+    monkeypatch.setattr(F, "gate", lambda confirm: "a" * 64)
+    monkeypatch.setattr(F, "seen_file", lambda root: tmp_path / "seen")
+    monkeypatch.setattr(F, "FINAL_LOG", tmp_path / "final-log.md")
+    monkeypatch.setattr(F, "split_config", lambda: {**split_config(), "holdout_sample": 4, "holdout_seed": 9})
+    monkeypatch.setattr(F, "load_cases", lambda part, cfg: [_holdout_case(i) for i in range(20)])
+    monkeypatch.setattr(R, "RESULTS", tmp_path)
+    monkeypatch.setattr(F, "ROOT", tmp_path)
+    monkeypatch.setattr(R, "evaluate", lambda cases, cfg: seen.append(len(cases)) or {
+        "n_queries": len(cases), "metrics": {"recall@10": {"value": 0.5, "ci95": [0.4, 0.6]}},
+        "per_query": [{"query_id": c.query.query_id, "recall@10": 0.5} for c in cases]})
+    monkeypatch.setattr(R, "git", lambda *a, **k: "")
+    assert F.main() == 0
+    assert seen == [4]
+    rec = (tmp_path / f"final-{'a' * 8}.json").read_text(encoding="utf-8")
+    assert '"sample": {' in rec and '"of": 20' in rec and '"seed": 9' in rec
+    assert sum(line.startswith('    {"query_id"') for line in rec.splitlines()) == 4  # one line per case
+    assert "| 4 из 20 (seed 9) |" in (tmp_path / "final-log.md").read_text(encoding="utf-8")  # a re-seed shows
+
+
+@pytest.mark.parametrize("n", [-5, 0.5, "3000", True])
+def test_final_refuses_a_broken_sample_before_the_marker(tmp_path, monkeypatch, n):
+    """A typo in holdout_sample stops eval-final BEFORE the «already run» marker: the config is not burned."""
+    monkeypatch.setattr(F, "gate", lambda confirm: "b" * 64)
+    monkeypatch.setattr(F, "seen_file", lambda root: tmp_path / "seen")
+    monkeypatch.setattr(F, "split_config", lambda: {**split_config(), "holdout_sample": n})
+    assert F.main() == 2
+    assert not (tmp_path / "seen").exists()
