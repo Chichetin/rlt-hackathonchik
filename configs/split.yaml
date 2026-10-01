@@ -6,5 +6,8 @@
 cutoff: "2025-07-01"
 holdout_from: "2025-10-01"
 cases:
-  dev: eval/cases/dev.jsonl                         # собирает T-07 (docs/plans/2026-10-01-plan.md)
-  holdout: data/processed/eval/holdout.jsonl        # вне git; собирает DATA, читает только eval-final
+  # собирает `uv run python -m src.eval.build_cases` (T-07, #14); счётчики — eval/cases/build_stats.json
+  dev: eval/cases/dev.jsonl                         # стратифицированная подвыборка dev, в git (D-032)
+  dev_full: data/processed/eval/dev_full.jsonl      # все кейсы dev, вне git
+  real: eval/cases/real.jsonl                       # 5–10 реальных кейсов dev для демо и разбора
+  holdout: data/processed/eval/holdout.jsonl        # вне git; читает только eval-final
