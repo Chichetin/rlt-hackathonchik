@@ -285,3 +285,32 @@ def test_lost_explain_on_fixture(hist, monkeypatch):
     assert first is not None
     tie = explain([(c.query.query_id, first)], {c.query.query_id: c}, CUTOFF, k=1, recorded={c.query.query_id: ["x"]})
     assert tie["largest_weighted_deficit"] == {"tie_by_inn": 1} and tie["rerun_differs"] == 1
+
+
+def test_lost_explain_on_the_h15f_default_keeps_geography_and_names_the_tie_break(hist):
+    """#197: since D-077 geography has weight 0 — still compared (shown in the card), never the deficit;
+    an equal score is ordered by BM25 (tie_break: bm25), so the label is tie_by_bm25, not tie_by_inn."""
+    from src.eval.lost import explain
+
+    h15f = R.load_method_config("H-15f", config_of="H-15f")
+    assert h15f["weights"]["geography"] == 0.0
+    c = case(6, "7801000051", {"7802000020": 2})
+    matches = R.search_mod.search(R.with_cutoff(c.query, CUTOFF), k=200, config=h15f)
+    first, last = matches[0].counterparty.inn, matches[-1].counterparty.inn
+    assert first is not None and last is not None
+    rec = explain([(c.query.query_id, last)], {c.query.query_id: c}, CUTOFF, k=1, config=h15f)
+    assert "geography" in rec["component_delta"] and "geography" not in rec["largest_weighted_deficit"]
+    tie = explain([(c.query.query_id, first)], {c.query.query_id: c}, CUTOFF, k=1, config=h15f)
+    assert tie["largest_weighted_deficit"] == {"tie_by_bm25": 1}
+
+
+def test_lost_reruns_the_recorded_config_not_the_product_default():
+    """A record made before `options:` existed (E-002) runs on the v1 defaults, not on today's H-15f options."""
+    from src.eval.lost import recorded_config
+
+    rec = {"config": {"retriever": "bm25", "k": 20, "signals": {"incumbent": 0.0},
+                      "weights": {"product_fit": 0.35, "experience": 0.2, "reliability": 0.2, "activity": 0.1,
+                                  "geography": 0.1, "price": 0.05}}}
+    cfg = recorded_config(rec)
+    assert cfg["weights"]["geography"] == 0.1 and cfg["options"] == {}
+    assert R.search_mod.scoring_options(cfg) == R.search_mod.scoring_options(R.load_method_config("v1", config_of="v1"))
