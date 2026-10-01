@@ -502,6 +502,25 @@ def test_top_ten_keeps_both_producers_and_distributors(tmp_path):
     assert "всего в реестре не сообщается" in res.requests[0]  # rowCount -1 is not shown as a number
 
 
+def test_second_wholesale_channel_gives_checked_distributors_only(tmp_path):
+    """#108: 17.12 → 46.76.1 (paper wholesale). Its rows become distributors whose every fact passes
+    src/enrich/evidence.py; a row with a checksum-failing INN never becomes a company (no guessed INN)."""
+    paper = ["7707049388", "7806602902"]
+    bad = "7801000013"  # fails the checksum
+    assert all(inn_is_valid(i) for i in paper) and not inn_is_valid(bad)
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("46.76.1", "78"), rmsp.flatten("46.76.1", "78", "UL", _rows(
+        [*paper, bad], "46.76.1", "Торговля оптовая бумагой и картоном")))
+    res = _run(c, _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]), client=_client(_no_network))
+    assert sorted(m.counterparty.inn or "" for m in res.pool) == sorted(paper)
+    for m in res.matches:
+        cp = m.counterparty
+        assert cp.kind == "distributor" and cp.inn and inn_is_valid(cp.inn)
+        assert check_counterparty(cp, c.page_text) == []
+        assert m.components[0].value == D.FIT["wholesale"] and "оптовая торговля" in m.components[0].explanation
+    assert any("ОКВЭД 46.76.1, регион 78" in line for line in res.requests)
+
+
 def test_ip_is_shown_from_the_registry_without_contacts(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCOVERY_NP_TYPES", "IP")
     c = SourceCache(tmp_path / "c.sqlite")
