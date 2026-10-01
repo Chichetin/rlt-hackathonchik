@@ -17,7 +17,7 @@ from src.ingest.build import build
 from src.match import index as index_mod
 from src.match import search as search_mod
 from src.match.search import search
-from src.match.text import tokenize
+from src.match.text import tokenize, tokenizer_version
 
 CUTOFF = date(2025, 7, 1)
 FIXTURE_INGEST = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
@@ -256,3 +256,11 @@ def test_geography_inn_region_signal_h15c():
     from src.contracts import Counterparty
     org = Counterparty(inn="4701000038", kpp="470101001", name="x")
     assert search_mod._geography(org, "Санкт-Петербург", 1.0) == search_mod._geography(org, "Санкт-Петербург")
+
+
+@pytest.mark.parametrize("name", ["prefix5", "snowball", "pymorphy"])
+def test_tokenizers_merge_forms_and_a4_and_switch_version(monkeypatch, name):
+    monkeypatch.setenv("BM25_TOKENIZER", name)
+    assert len({tuple(tokenize(f)) for f in ("бумага", "бумаги", "бумагу")}) == 1
+    assert tokenize("А4") == tokenize("A4") == ["a4"]
+    assert tokenizer_version() == ("prefix5-v1" if name == "prefix5" else f"{name}-v1")
