@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { buildQuery, type Counterparty, filterNotes, regionLabel, type SearchResponse } from "./api";
 
@@ -30,6 +30,7 @@ const response: SearchResponse = {
   stub: true,
 } as SearchResponse;
 
+beforeEach(() => window.history.replaceState(null, "", "/search"));
 afterEach(() => vi.restoreAllMocks());
 
 test("buildQuery keeps only enabled filters", () => {

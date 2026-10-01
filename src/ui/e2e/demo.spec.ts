@@ -10,6 +10,8 @@ const DEMO_LOT = "6";
 test("демо: запрос → два блока → карточка → фильтр → выгрузка", async ({ page }) => {
   const started = Date.now();
   await page.goto("/");
+  await page.getByRole("link", { name: "Начать подбор" }).click();
+  await expect(page).toHaveURL(/\/search$/);
 
   // 1. Ввёл номер закупки → запрос заполнен из извещения (предмет, НМЦК, заказчик)
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
@@ -111,7 +113,7 @@ test("демо: запрос → два блока → карточка → фи
 });
 
 test("номер закупки не найден → понятное сообщение, свободный текст работает", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/search");
   await page.getByLabel("Номер закупки (необязательно)").fill("999999");
   await page.getByRole("button", { name: "Загрузить закупку" }).click();
   await expect(page.getByRole("alert")).toContainText("не найдена");
@@ -127,7 +129,7 @@ test("номер закупки не найден → понятное сооб�
 
 test("мобильная выдача и карточка без горизонтальной прокрутки", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto("/");
+  await page.goto("/search");
   await page.getByRole("button", { name: "Бумага офисная А4, 80 г/м²", exact: true }).click();
   await expect(page.getByLabel("Что нужно закупить")).toBeFocused();
   await page.getByRole("button", { name: "Найти поставщиков" }).click();

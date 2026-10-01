@@ -22,7 +22,9 @@ try {
   page.setDefaultTimeout(120_000); // the first real-data search can load indexes
   await page.goto(base);
   await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator(".title-line > span").last()).toHaveCSS("transform", "none");
   await page.screenshot({ path: `${out}/01-start.png`, animations: "disabled" });
+  await page.getByRole("link", { name: "Начать подбор" }).click();
   await page.getByLabel("Номер закупки (необязательно)").fill(lot);
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/lot/${lot}`);
   await page.getByRole("button", { name: "Загрузить закупку" }).click();
