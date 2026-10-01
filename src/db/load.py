@@ -53,6 +53,8 @@ def _tables(processed: Path, manifest: dict) -> dict[str, Path]:
     tables = {t: processed / f"{t}.parquet" for t in TABLES}
     if cutoff := manifest.get("cutoff"):
         tables[f"suppliers_{cutoff.replace('-', '_')}"] = processed / f"suppliers_{cutoff}.parquet"
+    if (okpd2 := processed / "okpd2.parquet").exists():  # OKPD2 code → name (#154), make okpd2
+        tables["okpd2"] = okpd2
     return tables
 
 

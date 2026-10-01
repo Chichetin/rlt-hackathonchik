@@ -10,6 +10,8 @@ const DEMO_LOT = "6";
 test("демо: запрос → два блока → карточка → фильтр → выгрузка", async ({ page }) => {
   const started = Date.now();
   await page.goto("/");
+  await page.getByRole("link", { name: "Начать подбор" }).click();
+  await expect(page).toHaveURL(/\/search$/);
 
   // 1. Ввёл номер закупки → запрос заполнен из извещения (предмет, НМЦК, заказчик)
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
@@ -35,12 +37,21 @@ test("демо: запрос → два блока → карточка → фи
   await history.locator(".item").first().click();
   const card = page.getByRole("dialog");
   await expect(card.getByText("Почему в списке")).toBeVisible();
+  await expect(card.getByRole("region", { name: "Отзывы" }).getByText(/Не влияет на оценку подбора/)).toBeVisible();
   await expect(card.locator(".components li")).toHaveCount(6);
   await expect(card.locator(".evidence li").first()).toContainText(/\d{2}\.\d{2}\.\d{4}/);
   await expect(card.getByText("Статистика из данных АИС ГЗ")).toBeVisible();
   await expect(card.getByText("МСП", { exact: true })).toBeVisible();
   await expect(card.getByText("В РНП")).toBeVisible();
-  await card.getByRole("button", { name: "Закрыть карточку" }).click();
+  const close = card.getByRole("button", { name: "Закрыть карточку" });
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(card.locator("button, a[href]").last()).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(card).toHaveCount(0);
+  await expect(history.locator(".item").first()).toBeFocused();
 
   // 3а. Карточка «новой» компании: ИНН подтверждён, у каждого факта — ссылка на реестр и дата
   await discovered.locator(".item").first().click();
@@ -103,7 +114,7 @@ test("демо: запрос → два блока → карточка → фи
 });
 
 test("номер закупки не найден → понятное сообщение, свободный текст работает", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/search");
   await page.getByLabel("Номер закупки (необязательно)").fill("999999");
   await page.getByRole("button", { name: "Загрузить закупку" }).click();
   await expect(page.getByRole("alert")).toContainText("не найдена");
@@ -114,4 +125,23 @@ test("номер закупки не найден → понятное сооб�
   await expect(page.getByRole("region", { name: "Новые из открытых источников" }).locator(".empty")).toContainText(
     "Код ОКПД2 не указан — загрузите закупку по номеру",
   );
+});
+
+
+test("мобильная выдача и карточка без горизонтальной прокрутки", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/search");
+  await page.getByRole("button", { name: "Бумага офисная А4, 80 г/м²", exact: true }).click();
+  await expect(page.getByLabel("Что нужно закупить")).toBeFocused();
+  await page.getByRole("button", { name: "Найти поставщиков" }).click();
+  await expect(page.getByRole("heading", { name: "Результаты подбора" })).toBeVisible();
+  const first = page.locator(".item").first();
+  await first.click();
+  const card = page.getByRole("dialog");
+  await expect(card).toBeVisible();
+  expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.screenshot({ path: "/tmp/rlt-ui-mobile-card.png" });
+  await page.keyboard.press("Escape");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "/tmp/rlt-ui-mobile-results.png", fullPage: true });
 });
