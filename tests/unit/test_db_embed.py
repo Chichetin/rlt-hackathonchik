@@ -83,12 +83,29 @@ def test_export_encode_import_roundtrip(conn, tmp_path: Path) -> None:
     texts, vecs = tmp_path / "texts.parquet", tmp_path / "vecs.parquet"
     assert export_missing(conn, texts, vec_schema=VEC) == total - 2
     assert encode_file(texts, vecs, fake_encode, chunk=3) == total - 2
-    assert import_file(conn, vecs, vec_schema=VEC) == total - 2
+    assert import_file(conn, vecs, data_schema=SCHEMA, vec_schema=VEC, batch_size=2) == total - 2  # several batches
     assert embed(conn, fake_encode, data_schema=SCHEMA, vec_schema=VEC, limit=0) == {"total": total, "done": total}
     name = conn.execute(sql.SQL("SELECT norm FROM {} ORDER BY norm DESC LIMIT 1")
                         .format(sql.Identifier(VEC, "names_e5_small"))).fetchone()[0]
     rows = conn.execute(*nearest(VEC, fake_encode([name])[0], 1)).fetchall()
     assert rows[0][0] == name and rows[0][1] == pytest.approx(1.0, abs=1e-3)  # float16 in transit
+
+
+def test_import_into_database_where_embed_never_ran(conn, tmp_path: Path) -> None:
+    """Vectors encoded elsewhere load into a fresh database: no schema `vec`, no table yet (#48)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    norm = norm_sql(sql.Identifier("product_name"))
+    names = [r[0] for r in conn.execute(sql.SQL("SELECT DISTINCT {} FROM {} WHERE {} <> '' ORDER BY 1").format(
+        norm, sql.Identifier(SCHEMA, "items"), norm)).fetchall()]
+    texts, vecs = tmp_path / "texts.parquet", tmp_path / "vecs.parquet"
+    pq.write_table(pa.table({"norm": names}), texts)
+    encode_file(texts, vecs, fake_encode)
+    conn.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(VEC)))
+    assert import_file(conn, vecs, data_schema=SCHEMA, vec_schema=VEC) == len(names)
+    assert embed(conn, fake_encode, data_schema=SCHEMA, vec_schema=VEC, limit=0) == {
+        "total": len(names), "done": len(names)}
 
 
 def test_import_rejects_vectors_of_another_model(conn, tmp_path: Path) -> None:
