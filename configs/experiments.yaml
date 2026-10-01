@@ -25,3 +25,14 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+# Профили весов по типу закупки (#104). Перепрогоны v1 и H-15f со срезом type=goods|services:
+# make eval EXP=H-104-v1 (записи нет — конфигурация продукта, = E-002), --exp H-104-f --config-of H-15f.
+H-104a:          # v1 + профиль: для услуг вес географии 0, для товаров — как в v1 (0.1)
+  weights_by_type: {services: {geography: 0.0}}
+H-104c:          # v1 без географии для всех типов — проверка «на товарах география помогает»
+  weights: {geography: 0.0}
+H-104b:          # H-15f + профиль: для товаров география 0.05 и регион ИП по ИНН, для услуг 0 (как в H-15f)
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
+  signals: {inn_region: 1.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+  weights_by_type: {goods: {geography: 0.05}}

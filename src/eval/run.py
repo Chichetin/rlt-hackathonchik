@@ -24,6 +24,7 @@ from src.eval import baselines
 from src.eval.metrics import METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import search as search_mod
+from src.match.profiles import procurement_type
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -131,10 +132,12 @@ def winner_novelty(cases: list[EvalCase], cutoff: date) -> list[bool | None] | N
 
 
 def slice_names(q: dict) -> list[str]:
-    """Slices a per_query row belongs to: channel, winner novelty and their combination."""
+    """Slices a per_query row belongs to: channel, winner novelty, their combination and procurement
+    type by the case's OKPD2 (#104: goods | services | unknown; rows of older results have no type)."""
     ch = f"channel={q['channel']}" if q.get("channel") else None
     nov = {True: "winner=new", False: "winner=known"}.get(q.get("winner_new"))  # type: ignore[arg-type]
-    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None) if name]
+    kind = f"type={q['type']}" if q.get("type") else None
+    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind) if name]
 
 
 def slices(per_query: list[dict]) -> dict:
@@ -164,7 +167,7 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             ranked = _rank_search(query, cfg) if method == "search" else baselines.rank(query, cfg)
             rel = set(case.relevant_inns)
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
-                         "channel": case.query.channel}
+                         "channel": case.query.channel, "type": procurement_type(case.query.okpd2) or "unknown"}
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:
