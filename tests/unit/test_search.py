@@ -165,9 +165,11 @@ def test_index_is_built_once_and_reused_from_disk(search_data, monkeypatch, tmp_
 
 def test_new_ingest_build_gives_new_index_key(search_data, tmp_path):
     manifest = json.loads((search_data / "manifest.json").read_text(encoding="utf-8"))
-    k1 = index_mod.index_key(search_data, manifest, None)
-    assert k1 != index_mod.index_key(search_data, {**manifest, "built_at": "2099-01-01T00:00:00+00:00"}, None)
-    assert k1 != index_mod.index_key(search_data, manifest, CUTOFF)
+    k1 = index_mod.index_key(manifest, None)
+    assert k1 != index_mod.index_key({**manifest, "built_at": "2099-01-01T00:00:00+00:00"}, None)
+    assert k1 != index_mod.index_key(manifest, CUTOFF)
+    # the same ingest in another place (or loaded into Postgres) shares the index
+    assert k1 == index_mod.index_key(json.loads(json.dumps(manifest)), None)
 
 
 def test_index_has_only_lots_before_as_of(search_data):

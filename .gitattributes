@@ -1,4 +1,4 @@
-# Одинаковые байты на Windows и Linux (#36, D-036): рабочая копия — по core.autocrlf, кроме файлов,
+# Одинаковые байты на Windows и Linux (#36, D-053): рабочая копия — по core.autocrlf, кроме файлов,
 # которым CR ломает запуск или результат теста.
 *.sh text eol=lf
 .githooks/* text eol=lf

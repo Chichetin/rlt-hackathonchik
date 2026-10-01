@@ -14,7 +14,7 @@ Issues (`scripts/issues.sh`), стыковка — через `src/contracts.py`
 Инварианты:
 
 1. `main` зелёный и запускается: PR — по `make check-changed`, свежий `main` — полным `make check`
-   и `make e2e` перед чек-поинтом, freeze и сдачей (CLAUDE.md, D-036); сломал merge — чинится раньше
+   и `make e2e` перед чек-поинтом, freeze и сдачей (CLAUDE.md, D-053); сломал merge — чинится раньше
    всего остального (задача `blocker`).
 2. Нет задачи — нет правки, даже одной строки: `bash scripts/issues.sh create` → `take`.
 3. Интеграция строго по одному.
