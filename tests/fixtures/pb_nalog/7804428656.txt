@@ -1,0 +1,83 @@
+search.periodcode: 12
+search.namec: ООО "БРАСС"
+search.pr_liq: 0
+search.okved2name: Ремонт машин и оборудования
+search.okopf12: 12300
+search.yearcode: 2025
+search.regionname: САНКТ-ПЕТЕРБУРГ Г
+search.okved2: 33.12
+search.dtogrn: 22.12.2009
+search.ogrn: 1099847036750
+search.inn: 7804428656
+search.sulst_name_ex: Действующая организация
+search.okved2maintype: заявительный
+search.sulst_ex: 10
+search.predo: 1
+search.dtreg: 22.12.2009
+search.okved2main: 33.12
+search.invalid: 0
+search.okved2mainname: Ремонт машин и оборудования
+search.namep: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БРАСС"
+vyp.sulst_ex: 10
+vyp.sulst_name_ex: Действующая организация
+vyp.yearcode: 2025
+vyp.periodcode: 12
+vyp.rsmpdate: 01.08.2016 00:00:00
+vyp.rsmpcategory: 1
+vyp.okopf12: 12300
+vyp.foreignorg: 0
+vyp.pr_rafp: 0
+vyp.kpprafp: 780601001
+vyp.Адрес: 195160,САНКТ-ПЕТЕРБУРГ Г,,,,НАБ СВЕРДЛОВСКАЯ,Д. 58,ЛИТЕРА А,КВ. 65
+vyp.pr_zd: 0
+vyp.pr_otch: 0
+vyp.pr_otch_zd_date: 2026-09-01
+vyp.invalid: 0
+vyp.is_protch_przd: 1
+vyp.predo: 1
+vyp.КодОКВЭД: 33.12
+vyp.НаимОКВЭД: Ремонт машин и оборудования
+vyp.ТипОКВЭД: заявительный
+vyp.usn: 1
+vyp.eshn: 0
+vyp.envd: 0
+vyp.spr: 0
+vyp.ausn: 0
+vyp.hastaxmode: 1
+vyp.taxmode_yearcode: 2026
+vyp.taxmode_periodcode: 9
+vyp.arrear_yearcode: 2026
+vyp.arrear_periodcode: 9
+vyp.taxpaysum: 1618399
+vyp.taxpay_yearcode: 2025
+vyp.revenuesum: 17367000
+vyp.expensesum: 12953000
+vyp.form1_yearcode: 2025
+vyp.sschr: 8
+vyp.sschr_yearcode: 2025
+vyp.offense_yearcode: 2024
+vyp.АдресРФ: 195160, Г.САНКТ-ПЕТЕРБУРГ, ВН.ТЕР.Г. МУНИЦИПАЛЬНЫЙ ОКРУГ БОЛЬШАЯ ОХТА, НАБ. СВЕРДЛОВСКАЯ, Д. 58, ЛИТЕРА А, КВ. 65
+vyp.НаимСпОбрЮЛ: Создание юридического лица
+vyp.НаимНО: Межрайонная инспекция Федеральной налоговой службы №21 по Санкт-Петербургу
+vyp.КодРО: 7847
+vyp.НаимЮЛСокр: ООО "БРАСС"
+vyp.СумКап: 10000
+vyp.ДатаПостУч: 2019-10-02
+vyp.МуниципРайон_Наим: ВНУТРИГОРОДСКАЯ ТЕРРИТОРИЯ (ВНУТРИГОРОДСКОЕ МУНИЦИПАЛЬНОЕ ОБРАЗОВАНИЕ) ГОРОДА ФЕДЕРАЛЬНОГО ЗНАЧЕНИЯ МУНИЦИПАЛЬНЫЙ ОКРУГ БОЛЬШАЯ ОХТА
+vyp.НаимВидКап: УСТАВНЫЙ КАПИТАЛ
+vyp.ЭлУлДорСети: НАБ. СВЕРДЛОВСКАЯ
+vyp.НаимРегион2: Г.САНКТ-ПЕТЕРБУРГ
+vyp.ОГРН: 1099847036750
+vyp.Индекс: 195160
+vyp.НаимРО: Межрайонная инспекция Федеральной налоговой службы №15 по Санкт-Петербургу
+vyp.ДатаОГРН: 2009-12-22
+vyp.МуниципРайон_Вид: Внутригородская территория (внутригородское муниципальное образование) города федерального значения
+vyp.НаимЮЛПолн: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БРАСС"
+vyp.КПП: 780601001
+vyp.ИНН: 7804428656
+vyp.ДатаВып: 2026-07-29
+vyp.ПомещЗдания: КВ. 65
+vyp.КодНО: 7806
+vyp.ДатаЗаписи: 2009-12-22
+vyp.masrukinvalid: 0
+vyp.masuchrinvalid: 0
