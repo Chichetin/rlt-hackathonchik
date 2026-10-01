@@ -3,6 +3,10 @@
     DATA_PROCESSED_DIR=<ingest with suppliers_2025-04-01.parquet> \\
     uv run python -m src.match.ranker_train [--n 3000] [--as-of 2025-04-01] [--until 2025-07-01]
 
+`make` / `src.ingest.build` prepare supplier aggregates only for the cutoff; those of --as-of come from
+`uv run python -m src.ingest.build --as-of 2025-04-01 --no-cutoff --out-dir <tmp>` — copy its
+suppliers_2025-04-01.parquet next to the others (the manifest stays, so index keys do not change).
+
 Queries: lots of [as_of, until) — before the dev window (cutoff 2025-07-01, configs/split.yaml) — turned
 into cases by the logic of src/eval/build_cases.py (same exclusions, relevant INNs and grades), a stratified
 sample of n with a fixed seed. Features: search() of the product configuration with `as_of` = the start of
