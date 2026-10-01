@@ -67,7 +67,7 @@ export interface paths {
         };
         /**
          * Api Okpd2
-         * @description OKPD2 codes, comma-separated → `код «название»` from the dictionary snapshot (#199, D-073); unknown → the code.
+         * @description OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code.
          */
         get: operations["api_okpd2_api_okpd2_get"];
         put?: never;

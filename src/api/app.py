@@ -272,7 +272,7 @@ OKPD2_LABELS_MAX = 50
 
 @app.get("/api/okpd2", response_model=dict[str, str])
 def api_okpd2(codes: str = "") -> dict[str, str]:
-    """OKPD2 codes, comma-separated → `код «название»` from the dictionary snapshot (#199, D-073); unknown → the code."""
+    """OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code."""
     items = list(dict.fromkeys(c.strip() for c in codes.split(",") if c.strip()))
     if len(items) > OKPD2_LABELS_MAX:
         raise HTTPException(422, f"не больше {OKPD2_LABELS_MAX} кодов за запрос")
