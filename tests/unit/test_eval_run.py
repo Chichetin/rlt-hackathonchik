@@ -98,6 +98,7 @@ def test_repository_experiments_are_valid_configs():
 @pytest.mark.parametrize(("exp", "result"), [
     ("v1", "E-002"), ("H-15a-03", "H-15a-03"), ("H-15a-06", "H-15a-06"), ("H-15b", "H-15b"), ("H-15c", "H-15c"),
     ("H-15d-tie", "H-15d-tie"), ("H-15e", "H-15e"), ("H-15f", "H-15f"), ("H-15g", "H-15g"), ("H-15f-geo", "H-15f-geo"),
+    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"),
 ])
 def test_experiment_entries_reproduce_recorded_configs(exp, result):
     """The product default moved to H-15f (#174): every entry of configs/experiments.yaml still gives the
@@ -119,3 +120,7 @@ def test_saturation_summary_counts_distinct_scores():
                    "share_first_at_max": 0.667}
     assert summarize([[1.0, 0.5, 0.4]], k=1)["distinct_scores_mean"] == 1.0  # only the top-k is looked at
     assert summarize([])["cases"] == 0
+    # the screen shows two decimals: scores that differ in the API can be equal there
+    near = [[0.9996, 0.9973, 0.9849, 0.9835, 0.9628]]
+    assert summarize(near)["distinct_scores_mean"] == 5.0 and summarize(near)["share_first_at_max"] == 1.0
+    assert summarize(near, decimals=2)["distinct_scores_mean"] == 3.0  # 1.00, 1.00, 0.98, 0.98, 0.96

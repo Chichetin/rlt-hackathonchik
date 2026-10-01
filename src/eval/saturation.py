@@ -23,9 +23,13 @@ from src.match import search as search_mod
 TOP_SCORE = 0.999  # a first place at (almost) the maximum of the scale
 
 
-def summarize(tops: list[list[float]], k: int = 10) -> dict:
-    """`tops`: the scores of the returned top-k per case, best first; empty answers are skipped."""
-    tops = [t[:k] for t in tops if t]
+def summarize(tops: list[list[float]], k: int = 10, decimals: int = 4) -> dict:
+    """`tops`: the scores of the returned top-k per case, best first; empty answers are skipped.
+
+    `decimals`: the precision the scores are compared at — 4 is what the API returns, 2 is what the
+    interface shows (`toFixed(2)`): scores that differ in the API can still look equal on the screen.
+    """
+    tops = [[round(s, decimals) for s in t[:k]] for t in tops if t]
     distinct = [len(set(t)) for t in tops]
     return {
         "cases": len(tops),
@@ -40,7 +44,7 @@ def summarize(tops: list[list[float]], k: int = 10) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config-of", default=None, help="entry of configs/experiments.yaml; default — the product")
-    ap.add_argument("--limit", type=int, default=300, help="first N dev cases (the whole sample takes ~10 min)")
+    ap.add_argument("--limit", type=int, default=2000, help="first N dev cases (the whole sample takes ~10 min)")
     ap.add_argument("-k", type=int, default=10)
     args = ap.parse_args(argv)
     try:
@@ -54,7 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     tops = [[m.score for m in search_mod.search(with_cutoff(c.query, cutoff), k=args.k, weights=cfg.get("weights"),
                                                 config=cfg)] for c in cases]
     print(f"Насыщение баллов в top-{args.k} | конфигурация: {args.config_of or 'продукт'} | dev, первые {len(cases)}")
-    print(json.dumps(summarize(tops, args.k), ensure_ascii=False, indent=2))
+    for decimals, where in ((4, "как в ответе API (4 знака)"), (2, "как на экране (2 знака)")):
+        print(f"— {where}")
+        print(json.dumps(summarize(tops, args.k, decimals), ensure_ascii=False, indent=2))
     return 0
 
 
