@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import logging
 import sys
 import time
@@ -32,11 +33,15 @@ from src.eval.split import ROOT, EvalCase, load_cases
 from src.sources import rmsp
 from src.sources.cache import SourceCache
 
+log = logging.getLogger(__name__)
 LABELS_DIR = ROOT / "eval" / "labels"
 TODO_PATH = LABELS_DIR / "new_suppliers_todo.csv"
+SHOWN_PATH = LABELS_DIR / "new_suppliers_shown.json"  # rows shown per selected query (empty blocks too)
 LABELS_PATH = LABELS_DIR / "new_suppliers.csv"
 TOP_K = 10
 DEFAULT_N = 12
+MIN_OVERLAP = 20  # human/LLM pairs needed before LLM labels count
+MIN_AGREEMENT = 0.8
 RETRIES = 3  # repeats of a query whose registry request timed out (answers already got stay in the cache)
 UNCONFIRMED = "ИНН не подтверждён"
 HUMAN, LLM = "человек", "llm"
@@ -120,6 +125,9 @@ def prepare(n: int, offline: bool, out: Path = TODO_PATH) -> int:
             empty.append(case.query.query_id)
         rows += got
     out.parent.mkdir(parents=True, exist_ok=True)
+    shown = Counter(r["query_id"] for r in rows)
+    SHOWN_PATH.write_text(json.dumps({c.query.query_id: shown[c.query.query_id] for c in cases},
+                                     ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     with out.open("w", encoding="utf-8-sig", newline="") as f:  # BOM + «;»: opens in Russian Excel as is
         w = csv.DictWriter(f, fieldnames=TODO_COLUMNS, delimiter=";")
         w.writeheader()
@@ -143,12 +151,19 @@ def _key(row: dict[str, str]) -> str:
     return inn if inn and inn != UNCONFIRMED else (row.get("name") or "").strip()
 
 
-def _kind(row: dict[str, str]) -> str:
-    return LLM if (row.get("labeled_by") or "").strip().lower().startswith(LLM) else HUMAN
+def _kind(row: dict[str, str]) -> str | None:
+    """llm / человек; an empty `labeled_by` is nobody's label (None) - it is not counted as a human one."""
+    by = (row.get("labeled_by") or "").strip().lower()
+    if not by:
+        return None
+    return LLM if by.startswith(LLM) else HUMAN
 
 
-def resolve(rows: Sequence[dict[str, str]]) -> dict[tuple[str, str], tuple[int, str]]:
-    """(query_id, company) -> (label, kind). A human label wins over an LLM one; empty labels are skipped."""
+def resolve(rows: Sequence[dict[str, str]], use_llm: bool = True) -> dict[tuple[str, str], tuple[int, str]]:
+    """(query_id, company) -> (label, kind). A human label wins over an LLM one; empty labels are skipped.
+
+    Rows without `labeled_by` are skipped with a warning; two human labels that differ are logged (first wins).
+    """
     out: dict[tuple[str, str], tuple[int, str]] = {}
     for row in rows:
         label = (row.get("label") or "").strip()
@@ -156,8 +171,15 @@ def resolve(rows: Sequence[dict[str, str]]) -> dict[tuple[str, str], tuple[int, 
             continue
         k = ((row.get("query_id") or "").strip(), _key(row))
         kind = _kind(row)
+        if kind is None:
+            log.warning("строка без labeled_by пропущена: %s %s", *k)
+            continue
+        if kind == LLM and not use_llm:
+            continue
         if k not in out or (kind == HUMAN and out[k][1] == LLM):
             out[k] = (int(label), kind)
+        elif kind == HUMAN and out[k][1] == HUMAN and out[k][0] != int(label):
+            log.warning("две разные метки человека на %s %s: берём первую (%d)", *k, out[k][0])
     return out
 
 
@@ -166,19 +188,34 @@ def agreement(rows: Sequence[dict[str, str]]) -> tuple[int, float | None]:
     by: dict[tuple[str, str], dict[str, int]] = {}
     for row in rows:
         label = (row.get("label") or "").strip()
-        if label in ("0", "1") and _key(row):
-            by.setdefault(((row.get("query_id") or "").strip(), _key(row)), {})[_kind(row)] = int(label)
+        if label in ("0", "1") and _key(row) and _kind(row):
+            by.setdefault(((row.get("query_id") or "").strip(), _key(row)), {})[str(_kind(row))] = int(label)
     both = [v for v in by.values() if HUMAN in v and LLM in v]
     return len(both), (sum(v[HUMAN] == v[LLM] for v in both) / len(both) if both else None)
 
 
-def precision_body(rows: Sequence[dict[str, str]]) -> dict:
-    """precision@10 per query = labeled 1 / labeled (the table has <= 10 rows per query), mean over queries."""
-    resolved = resolve(rows)
+def llm_trusted(rows: Sequence[dict[str, str]]) -> bool:
+    """EVAL.md B: LLM labels count only after >= MIN_OVERLAP common pairs agree with the human at >= MIN_AGREEMENT."""
+    n, share = agreement(rows)
+    return n >= MIN_OVERLAP and share is not None and share >= MIN_AGREEMENT
+
+
+def precision_body(rows: Sequence[dict[str, str]], shown: dict[str, int] | None = None) -> dict:
+    """precision@10 per query = labeled 1 / labeled (the table has <= 10 rows per query), mean over queries.
+
+    `shown` = rows per selected query from `prepare` (empty blocks included): n_selected, empty_blocks, shown.
+    """
+    has_llm = any(_kind(r) == LLM and (r.get("label") or "").strip() in ("0", "1") for r in rows)
+    use_llm = llm_trusted(rows)
+    if has_llm and not use_llm:
+        log.warning("метки LLM исключены из метрики: согласие с человеком не подтверждено (нужно >= %d пар, >= %.0f%%)",
+                    MIN_OVERLAP, MIN_AGREEMENT * 100)
+    resolved = resolve(rows, use_llm)
     per: dict[str, list[int]] = {}
     for (qid, _), (label, _) in resolved.items():
         per.setdefault(qid, []).append(label)
-    per_query = [{"query_id": q, "precision@10": sum(v) / len(v), "labeled": len(v), "relevant": sum(v)}
+    per_query = [{"query_id": q, "precision@10": sum(v) / len(v), "labeled": len(v), "relevant": sum(v),
+                  "shown": (shown or {}).get(q)}
                  for q, v in sorted(per.items())]
     values = [p["precision@10"] for p in per_query]
     lo, hi = bootstrap_ci(values)
@@ -188,7 +225,9 @@ def precision_body(rows: Sequence[dict[str, str]]) -> dict:
         "metrics": {"precision@10": {"value": sum(values) / len(values) if values else 0.0, "ci95": [lo, hi]}},
         "labeled": len(resolved),
         "labeled_by": dict(Counter(kind for _, kind in resolved.values())),
-        "agreement_human_llm": {"overlap": n_both, "share": agree},
+        "agreement_human_llm": {"overlap": n_both, "share": agree, "llm_used": use_llm and has_llm},
+        "n_selected": len(shown) if shown else None,
+        "empty_blocks": sorted(q for q, n in (shown or {}).items() if n == 0),
         "per_query": per_query,
     }
 
@@ -197,7 +236,8 @@ def score(exp: str, labels: Path) -> int:
     if not labels.exists():
         print(f"нет файла разметки {labels}: сначала заполните label в {TODO_PATH.name} и сохраните как {labels.name}")
         return 1
-    body = precision_body(read_labels(labels))
+    shown = json.loads(SHOWN_PATH.read_text(encoding="utf-8")) if SHOWN_PATH.exists() else None
+    body = precision_body(read_labels(labels), shown)
     if not body["n_queries"]:
         print("в файле нет ни одной метки 0/1 — считать нечего")
         return 1

@@ -55,10 +55,10 @@ def test_precision_and_priority():
             lab("b", "5", "1", "llm:m")]  # human 0 wins over llm 1
     body = L.precision_body(rows)
     per = {p["query_id"]: p["precision@10"] for p in body["per_query"]}
-    assert per == {"a": pytest.approx(2 / 3), "b": pytest.approx(1 / 3)}
-    assert body["metrics"]["precision@10"]["value"] == pytest.approx(0.5)
-    assert body["labeled_by"] == {"человек": 4, "llm": 2}
-    assert body["agreement_human_llm"] == {"overlap": 1, "share": 0.0}
+    assert per == {"a": pytest.approx(2 / 3), "b": 0.0}  # LLM labels excluded: overlap < 20
+    assert body["metrics"]["precision@10"]["value"] == pytest.approx(1 / 3)
+    assert body["labeled_by"] == {"человек": 4}
+    assert body["agreement_human_llm"] == {"overlap": 1, "share": 0.0, "llm_used": False}
 
 
 def test_read_labels_semicolon_and_unconfirmed(tmp_path):
@@ -66,3 +66,27 @@ def test_read_labels_semicolon_and_unconfirmed(tmp_path):
     p.write_text("query_id;inn;name;label;labeled_by\nq;ИНН не подтверждён;ООО «Х»;1;человек:a\n", encoding="utf-8-sig")
     body = L.precision_body(L.read_labels(p))
     assert body["metrics"]["precision@10"]["value"] == 1.0 and body["labeled"] == 1
+
+
+def test_llm_without_agreement_does_not_change_value():
+    human = [lab("a", "1", "1"), lab("a", "2", "0")]
+    llm = [lab("a", "3", "0", "llm:m"), lab("a", "4", "0", "llm:m")]
+    base = L.precision_body(human)["metrics"]["precision@10"]["value"]
+    body = L.precision_body(human + llm)
+    assert body["metrics"]["precision@10"]["value"] == base == 0.5  # overlap < 20: LLM labels are not used
+    assert body["agreement_human_llm"]["llm_used"] is False and body["labeled"] == 2
+
+
+def test_llm_used_after_agreement():
+    rows = []
+    for i in range(20):  # 20 common pairs, all equal
+        rows += [lab("a", f"h{i}", "1"), lab("a", f"h{i}", "1", "llm:m")]
+    rows.append(lab("a", "only", "0", "llm:m"))
+    body = L.precision_body(rows, {"a": 21, "b": 0})
+    assert body["agreement_human_llm"]["llm_used"] is True and body["labeled"] == 21
+    assert body["empty_blocks"] == ["b"] and body["n_selected"] == 2
+
+
+def test_empty_labeled_by_is_nobody():
+    body = L.precision_body([lab("a", "1", "1", ""), lab("a", "2", "0")])
+    assert body["labeled"] == 1 and body["labeled_by"] == {"человек": 1}
