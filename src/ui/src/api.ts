@@ -179,3 +179,18 @@ export function filterNotes(base: SearchResponse | null, f: Filters): string[] {
   }
   return notes;
 }
+
+export type Backtest = components["schemas"]["Backtest"];
+
+// Места реальных участников закупки в нашей выдаче (backtest, #192). Ошибка — текст причины от сервера.
+export async function fetchBacktest(ident: string): Promise<Backtest> {
+  const r = await fetch(`/api/lot/${encodeURIComponent(ident.trim())}/backtest`);
+  if (r.ok) return r.json();
+  let detail = "";
+  try {
+    detail = (await r.json()).detail ?? "";
+  } catch {
+    /* тело не JSON */
+  }
+  throw new Error(detail || `HTTP ${r.status}`);
+}

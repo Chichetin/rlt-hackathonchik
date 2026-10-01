@@ -31,6 +31,7 @@ import {
   type Counterparty,
 } from "./api";
 import { reviewLinks } from "./reviews";
+import { BacktestPanel } from "./Backtest";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
@@ -475,6 +476,7 @@ export function App() {
               {lotMsg.text}
             </p>
           )}
+          {lot && lotMsg?.kind === "ok" && <BacktestPanel key={lotQueryId} ident={lotId} />}
         </div>
         <div className="query-divider"><span>или введите описание</span></div>
         <label htmlFor="q">Что нужно закупить</label>

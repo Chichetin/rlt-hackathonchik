@@ -58,6 +58,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lot/{ident}/backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Lot Backtest
+         * @description Places of the lot's real participants and winner in our ranking, history before the cutoff (#192, D-084).
+         */
+        get: operations["api_lot_backtest_api_lot__ident__backtest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/okpd2": {
         parameters: {
             query?: never;
@@ -133,6 +153,33 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Backtest */
+        Backtest: {
+            /** Lot Id */
+            lot_id: number;
+            /**
+             * Lot Date
+             * Format: date
+             */
+            lot_date: string;
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+            /** Channel */
+            channel: string | null;
+            /** Ranked */
+            ranked: number;
+            /** Participants */
+            participants: components["schemas"]["ParticipantRank"][];
+            /** Winner Rank */
+            winner_rank: number | null;
+            /** In Top */
+            in_top: number;
+            /** Top */
+            top: number;
+        };
         /** Counterparty */
         Counterparty: {
             /** Inn */
@@ -228,6 +275,15 @@ export interface components {
             };
             /** Store */
             store: string;
+        };
+        /** ParticipantRank */
+        ParticipantRank: {
+            /** Inn */
+            inn: string;
+            /** Is Winner */
+            is_winner: boolean;
+            /** Rank */
+            rank: number | null;
         };
         /**
          * Query
@@ -391,6 +447,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Query"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_lot_backtest_api_lot__ident__backtest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ident: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Backtest"];
                 };
             };
             /** @description Validation Error */
