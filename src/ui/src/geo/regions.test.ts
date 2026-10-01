@@ -34,7 +34,7 @@ describe("innIsValid", () => {
     expect(innIsValid("630012345662")).toBe(false);
     expect(innIsValid("630012345608")).toBe(false); // the 12th digit fits, the 11th does not
     expect(innIsValid("77001234５9")).toBe(false); // full-width digit
-    expect(innIsValid("102382656")).toBe(false);
+    expect(innIsValid("123456783")).toBe(false); // 9 digits: a Belarus UNP shape, not an INN
   });
 });
 

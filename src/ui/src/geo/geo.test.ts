@@ -184,7 +184,8 @@ describe("supplier-regions.json", () => {
   type Agg = {
     total_suppliers: number;
     by_region: Record<string, { suppliers: number; winners: number }>;
-    foreign: { count: number; note: string };
+    foreign: { count: number; inn_9909: number; nine_char: number; note: string };
+    data_built_at: string | null;
     unknown: number;
   };
   const agg = JSON.parse(readFileSync(join(ASSETS, "supplier-regions.json"), "utf8")) as Agg;
@@ -197,7 +198,9 @@ describe("supplier-regions.json", () => {
       sum += row.suppliers;
     }
     expect(sum + agg.foreign.count + agg.unknown).toBe(agg.total_suppliers);
-    expect(agg.foreign.note).toMatch(/гипотеза/);
+    expect(agg.foreign.inn_9909 + agg.foreign.nine_char).toBe(agg.foreign.count);
+    expect(agg.foreign.note).toMatch(/не проверено/);
+    expect(agg).not.toHaveProperty("generated_at"); // reproducible: no wall-clock time
   });
 
   it("has a polygon for every region with suppliers, except code 99", () => {

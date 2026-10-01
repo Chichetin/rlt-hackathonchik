@@ -48,7 +48,12 @@ QUANTIZATION="${QUANTIZATION:-1e5}"
 MIN_ISLAND="${MIN_ISLAND:-40km2}"  # острова меньше — отбрасываются (у РФ и у подложки)
 BUDGET=512000                      # оба файла вместе, байт (критерий #178: ≤ 0,5 МБ)
 
-WORK="${GEO_WORK:-$(mktemp -d)}"
+if [ -n "${GEO_WORK:-}" ]; then
+  WORK="$GEO_WORK"                         # архивы остаются для повторного запуска
+else
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "$WORK"' EXIT               # временный каталог удаляется и при ошибке
+fi
 mkdir -p "$WORK"
 case "$WORK" in "$ROOT"|"$ROOT"/*) echo "GEO_WORK внутри репозитория: архивы NE — вне git" >&2; exit 2 ;; esac
 echo "build_geo: каталог $WORK, RF_SUBJECTS=$RF_SUBJECTS"
@@ -69,8 +74,10 @@ for name in "$A1" "$A0"; do
 done
 
 # regions.ts → subjects.json (код → iso, название): единственный источник названий для геометрии.
+# import() — по file:// URL: абсолютный путь Windows (C:\…) import() не принимает.
 node --input-type=module -e "
-  const { REGIONS } = await import(process.argv[1]);
+  import { pathToFileURL } from 'node:url';
+  const { REGIONS } = await import(pathToFileURL(process.argv[1]).href);
   process.stdout.write(JSON.stringify(REGIONS));
 " "$REGIONS_TS" > "$WORK/subjects.json"
 
@@ -203,9 +210,10 @@ mkdir -p "$WORK/out"
 node --input-type=module -e "
   import { readFileSync, writeFileSync } from 'node:fs';
   import { createRequire } from 'node:module';
+  import { join } from 'node:path';
   const [work, out, mode, budget] = process.argv.slice(1);
-  const rules = createRequire(import.meta.url)(work + '/geo_rules.cjs');
-  const subjects = JSON.parse(readFileSync(work + '/subjects.json', 'utf8'));
+  const rules = createRequire(import.meta.url)(join(work, 'geo_rules.cjs'));
+  const subjects = JSON.parse(readFileSync(join(work, 'subjects.json'), 'utf8'));
   const meta = (what) => ({
     source: 'Natural Earth $NE_VERSION, 1:10m, ' + what + ' (https://www.naturalearthdata.com)',
     license: 'public domain (https://www.naturalearthdata.com/about/terms-of-use/)',
@@ -214,7 +222,7 @@ node --input-type=module -e "
   });
   const COUNTRY_NAMES = rules.countryNames();
 
-  const reg = JSON.parse(readFileSync(work + '/out/regions.json', 'utf8'));
+  const reg = JSON.parse(readFileSync(join(work, 'out', 'regions.json'), 'utf8'));
   const geoms = reg.objects.regions.geometries;
   for (const g of geoms) {
     const s = subjects[g.properties.code];
@@ -226,7 +234,7 @@ node --input-type=module -e "
   if (JSON.stringify(got) !== JSON.stringify(want.sort())) throw new Error('субъекты: ' + got.length + ' вместо ' + want.length);
   reg.meta = meta('admin-1 states/provinces');
 
-  const cty = JSON.parse(readFileSync(work + '/out/countries.json', 'utf8'));
+  const cty = JSON.parse(readFileSync(join(work, 'out', 'countries.json'), 'utf8'));
   for (const g of cty.objects.countries.geometries) {
     const name = COUNTRY_NAMES[g.properties.iso2];
     if (!name) throw new Error('страна без названия: ' + g.properties.iso2);
@@ -237,8 +245,8 @@ node --input-type=module -e "
   cty.meta = meta('admin-0 countries, point of view: Russia (_rus)');
 
   const a = JSON.stringify(reg) + '\n', b = JSON.stringify(cty) + '\n';
-  writeFileSync(out + '/ru-regions.topo.json', a);
-  writeFileSync(out + '/neighbors.topo.json', b);
+  writeFileSync(join(out, 'ru-regions.topo.json'), a);
+  writeFileSync(join(out, 'neighbors.topo.json'), b);
   const size = (s) => Buffer.byteLength(s, 'utf8');
   const total = size(a) + size(b);
   console.log('ru-regions.topo.json: ' + geoms.length + ' субъектов, ' + size(a) + ' байт');

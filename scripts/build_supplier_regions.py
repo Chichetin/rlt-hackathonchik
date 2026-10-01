@@ -13,7 +13,12 @@ src/ui/src/geo/region-code-cases.json are checked against both):
     in 2005–2008 map to the current subject (CODE_ALIASES).
 One supplier, one region: the most frequent region over its participations (rows); a tie goes to the
 INN's region, then to the smallest code. INN 9909… (foreign organisation) and 9-character identifiers
-(not a Russian INN) are «foreign»; the country is not known.
+(not a Russian INN) are «foreign»; the country is not in the data — the 9-character ones are checked
+against the format and check digit of a Belarus UNP (counts only, no identifiers in the output).
+
+Display only: the aggregate is not a search feature and is not read by eval. It covers the whole period
+of the organizers' data, the holdout (configs/split.yaml) included. The output is reproducible: no
+wall-clock time, the build time of the data comes from data/processed/manifest.json (built_at).
 
   uv run python scripts/build_supplier_regions.py
   uv run python scripts/build_supplier_regions.py --participants <path> --out <path>
@@ -26,7 +31,6 @@ import json
 import re
 import sys
 from collections import Counter
-from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -49,11 +53,44 @@ CODE_ALIASES: dict[str, str] = {
 FOREIGN_INN = "9909"
 _KPP = re.compile(r"\d{4}[\dA-Z]{2}\d{3}", re.ASCII)
 
-FOREIGN_NOTE = (
-    "Иностранные участники: ИНН 9909… (иностранная организация на учёте в РФ) и идентификаторы из 9 знаков "
-    "вместо ИНН. Страна в данных не указана. 9 знаков похожи на УНП Беларуси (у физлиц — 2 буквы + 7 цифр) "
-    "или ИНН Узбекистана/Таджикистана — это гипотеза, не проверено."
-)
+# Belarus UNP (payer account number), the algorithm of python-stdnum stdnum.by.unp (1.20): 9 characters;
+# organisations — 9 digits, individual entrepreneurs — 2 letters + 7 digits; the first character is a
+# region (1–7 or a letter), the 9th is a check digit with weights 29, 23, 19, 17, 13, 7, 5, 3 mod 11.
+_UNP_WEIGHTS = (29, 23, 19, 17, 13, 7, 5, 3)
+_UNP_LETTERS = "ABCEHKMOPT"
+_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def unp_check_ok(s: str) -> bool:
+    """The 9th character is the UNP check digit of the first eight (format of the rest not checked)."""
+    if len(s) != 9 or not s[2:].isdigit() or not s.isascii():
+        return False
+    if not s[:2].isdigit():
+        if s[1] not in _UNP_LETTERS or s[0] not in _ALPHABET:
+            return False
+        s = s[0] + str(_UNP_LETTERS.index(s[1])) + s[2:]
+    c = sum(w * _ALPHABET.index(ch) for w, ch in zip(_UNP_WEIGHTS, s, strict=False)) % 11
+    return c <= 9 and str(c) == s[8]
+
+
+def unp_is_valid(s: str) -> bool:
+    """A Belarus UNP: format, region and check digit (as stdnum.by.unp.is_valid)."""
+    if len(s) != 9 or not s.isascii() or not s[2:].isdigit():
+        return False
+    if not s[:2].isdigit() and not all(ch in _UNP_LETTERS for ch in s[:2]):
+        return False
+    return s[0] in "1234567ABCEHKM" and unp_check_ok(s)
+
+
+def foreign_note(inn_9909: int, nine_char: int, nine_digit: int, unp_check_ok: int, unp_valid: int) -> str:
+    return (
+        f"Иностранные участники. ИНН 9909… (иностранная организация на учёте в РФ): {inn_9909}. Идентификаторы "
+        f"из 9 знаков вместо ИНН: {nine_char}, из них цифровых {nine_digit}; контрольная цифра УНП Беларуси "
+        f"(веса 29, 23, 19, 17, 13, 7, 5, 3, mod 11) сходится у {unp_check_ok} из {nine_digit} цифровых; формат, "
+        f"код области и контрольную цифру УНП целиком проходят {unp_valid} из {nine_char} (алгоритм "
+        "python-stdnum by.unp). Страна в данных не указана: Беларусь — вывод по контрольной цифре "
+        "(у случайных 9 цифр она сходится примерно в 1 случае из 11), реестром не проверено."
+    )
 
 
 def _canonical(two: str) -> str | None:
@@ -76,7 +113,11 @@ def region_code_of(inn: str | None, kpp: str | None) -> str | None:
 
 def is_foreign(inn: str) -> bool:
     i = inn.strip()
-    return (inn_is_valid(i) and i.startswith(FOREIGN_INN)) or len(i) == 9
+    return is_foreign_inn(i) or len(i) == 9
+
+
+def is_foreign_inn(inn: str) -> bool:
+    return inn_is_valid(inn) and inn.startswith(FOREIGN_INN)
 
 
 def _pick(inn: str, regions: Counter[str]) -> str:
@@ -106,11 +147,12 @@ def aggregate(participants: Path) -> dict:
             regions[inn][code] += n
 
     by_region: dict[str, dict[str, int]] = {}
-    foreign = unknown = multi = 0
+    foreign: list[str] = []
+    unknown = multi = 0
     for inn, counts in regions.items():
         if not counts:
             if is_foreign(inn):
-                foreign += 1
+                foreign.append(inn.strip())
             else:
                 unknown += 1
             continue
@@ -119,21 +161,34 @@ def aggregate(participants: Path) -> dict:
         row["suppliers"] += 1
         row["winners"] += won[inn]
 
+    nine = [i for i in foreign if len(i) == 9]
+    digits = [i for i in nine if i.isdigit()]
+    stats = {
+        "inn_9909": sum(is_foreign_inn(i) for i in foreign),
+        "nine_char": len(nine),
+        "nine_digit": len(digits),
+        "unp_check_ok": sum(unp_check_ok(i) for i in digits),
+        "unp_valid": sum(unp_is_valid(i) for i in nine),
+    }
+    manifest = participants.parent / "manifest.json"
+    built_at = json.loads(manifest.read_text(encoding="utf-8")).get("built_at") if manifest.exists() else None
+
     return {
         "source": "participants.parquet (данные организаторов «Поставщики»: лот → ИНН/КПП участника, is_winner)",
-        "generated_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
+        "data_built_at": built_at,
         "period": {"from": str(period[0]), "to": str(period[1]), "rows": period[2]},
         "method": (
             "Поставщик — уникальный ИНН. Регион — код субъекта ФНС из КПП организации (место постановки на учёт, "
             "у филиала — его город), если КПП валиден, не из нулей и не 99… (крупнейшие налогоплательщики), "
             "иначе из ИНН; у ИП (12 цифр) — только ИНН. Серии 97/98 — Москва/Санкт-Петербург, коды упразднённых "
             "АО — их нынешний субъект. Несколько регионов у ИНН — самый частый по участиям. ИНН с неверной "
-            "контрольной суммой — unknown. Правила — regionCodeOf в src/ui/src/geo/regions.ts."
+            "контрольной суммой — unknown. Правила — regionCodeOf в src/ui/src/geo/regions.ts. Только для "
+            "отображения: в признаки поиска и eval не подаётся; период включает holdout (configs/split.yaml)."
         ),
         "total_suppliers": len(regions),
         "by_region": dict(sorted(by_region.items())),
         "multi_region_suppliers": multi,
-        "foreign": {"count": foreign, "note": FOREIGN_NOTE},
+        "foreign": {"count": len(foreign), **stats, "note": foreign_note(**stats)},
         "unknown": unknown,
     }
 

@@ -66,26 +66,34 @@ ROWS: list[tuple[str, str | None, bool]] = [
     ("630012345661", "780601001", False), ("630012345661", "781101001", True), ("630012345661", None, False),
     # new Moscow series, Crimea
     ("9701123455", None, True), ("9100123450", "910201001", False),
-    # foreign organisation, a 9-character identifier → foreign; bad checksum, 15 digits, zeros → unknown
-    ("9909123454", "773851001", False), ("102382656", None, True), ("AB4502800", None, False),
-    ("7700123450", "784201001", False), ("322169000196810", None, False), ("0000123450", None, False),
+    # foreign: INN 9909…, 9-character identifiers (synthetic, not in the data): a valid UNP of an
+    # organisation and of an IP, a check digit that fits with a non-region first digit, a wrong check
+    # digit, letters outside the UNP set
+    ("9909123454", "773851001", False), ("123456783", None, True), ("AB1234563", None, False),
+    ("812345679", None, False), ("123456789", None, False), ("XY1234567", None, False),
+    # unknown: bad checksum, 15 digits, zeros
+    ("7700123450", "784201001", False), ("300000000000000", None, False), ("0000123450", None, False),
 ]
 
 
 def test_aggregate(agg: ModuleType, tmp_path: Path) -> None:
     out = agg.aggregate(_participants(tmp_path, ROWS))
-    assert out["total_suppliers"] == 11
+    assert out["total_suppliers"] == 14
     assert out["by_region"] == {
         "63": {"suppliers": 1, "winners": 1},
         "77": {"suppliers": 1, "winners": 1},
         "78": {"suppliers": 2, "winners": 1},
         "91": {"suppliers": 1, "winners": 0},
     }
-    assert out["foreign"]["count"] == 3
-    assert "9909" in out["foreign"]["note"] and "гипотеза" in out["foreign"]["note"]
+    foreign = out["foreign"]
+    note = foreign.pop("note")
+    assert foreign == {"count": 6, "inn_9909": 1, "nine_char": 5, "nine_digit": 3, "unp_check_ok": 2, "unp_valid": 2}
+    assert "ИНН 9909… (иностранная организация на учёте в РФ): 1." in note
+    assert "сходится у 2 из 3 цифровых" in note and "проходят 2 из 5" in note and "не проверено" in note
     assert out["unknown"] == 3
     assert out["multi_region_suppliers"] == 1
-    assert out["period"] == {"from": "2024-03-01", "to": "2024-03-15", "rows": len(ROWS)}
+    assert out["period"] == {"from": "2024-03-01", "to": "2024-03-18", "rows": len(ROWS)}
+    assert "только для отображения" in out["method"].lower() and "holdout" in out["method"]
     regions = sum(v["suppliers"] for v in out["by_region"].values())
     assert regions + out["foreign"]["count"] + out["unknown"] == out["total_suppliers"]
     assert list(out["by_region"]) == sorted(out["by_region"])
@@ -97,8 +105,36 @@ def test_tie_prefers_the_inn_region(agg: ModuleType, tmp_path: Path) -> None:
     assert agg.aggregate(_participants(tmp_path, rows))["by_region"] == {"78": {"suppliers": 1, "winners": 0}}
 
 
-def test_main_writes_json(agg: ModuleType, tmp_path: Path) -> None:
+# Synthetic values; the verdicts are cross-checked with python-stdnum 1.20 (stdnum.by.unp).
+UNP_CASES = [
+    ("123456783", True, True),  # organisation
+    ("AB1234563", True, True),  # individual entrepreneur: 2 letters + 7 digits
+    ("ME1234561", True, True),  # E is 3 in the UNP letter set (14 in the plain alphabet)
+    ("812345679", True, False),  # check digit fits, 8 is not a region
+    ("123456789", False, False),  # wrong check digit
+    ("XY1234567", False, False),  # letters outside the UNP set
+    ("12345678", False, False),  # 8 characters
+    ("1234567\uff183", False, False),  # full-width digit
+]
+
+
+@pytest.mark.parametrize(("value", "check_ok", "valid"), UNP_CASES)
+def test_unp(agg: ModuleType, value: str, check_ok: bool, valid: bool) -> None:
+    assert agg.unp_check_ok(value) is check_ok
+    assert agg.unp_is_valid(value) is valid
+
+
+def test_main_writes_reproducible_json(agg: ModuleType, tmp_path: Path) -> None:
+    participants = _participants(tmp_path, ROWS)
     out = tmp_path / "supplier-regions.json"
-    agg.main(["--participants", str(_participants(tmp_path, ROWS)), "--out", str(out)])
-    data = json.loads(out.read_text(encoding="utf-8"))
-    assert data["total_suppliers"] == 11 and data["source"].startswith("participants.parquet")
+    agg.main(["--participants", str(participants), "--out", str(out)])
+    first = out.read_bytes()
+    data = json.loads(first)
+    assert data["total_suppliers"] == 14 and data["source"].startswith("participants.parquet")
+    assert data["data_built_at"] is None  # no manifest next to the parquet
+    agg.main(["--participants", str(participants), "--out", str(out)])
+    assert out.read_bytes() == first  # no wall-clock time in the output
+
+    (tmp_path / "manifest.json").write_text('{"built_at": "2026-10-01T18:23:26+00:00"}', encoding="utf-8")
+    agg.main(["--participants", str(participants), "--out", str(out)])
+    assert json.loads(out.read_text(encoding="utf-8"))["data_built_at"] == "2026-10-01T18:23:26+00:00"
