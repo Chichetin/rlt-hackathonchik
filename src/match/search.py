@@ -41,6 +41,7 @@ from src.ingest.okpd2 import label
 from src.match import fallback
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
+from src.match.profiles import profile_overrides, profile_weights
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
@@ -111,6 +112,7 @@ def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     scoring_options(cfg)
+    profile_overrides(cfg)  # weights by procurement type (#104), off by default
     return cfg
 
 
@@ -439,6 +441,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         codes, predicted = ([guess], True) if guess else ([], False)
     if codes:
         _class_history(store, cands, codes, as_of)
+    w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}
     if shares["incumbent"] > 0 and query.customer_inn:
         incumbent = customer_lots(store, [c.inn for c in cands], query.customer_inn, as_of)
@@ -462,6 +465,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
+        if profile_note:
+            geo_why = f"{geo_why}; {profile_note}"
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),

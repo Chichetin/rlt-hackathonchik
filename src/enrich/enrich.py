@@ -8,7 +8,7 @@ cached card text (src/enrich/evidence.py checks it; the API shows only what pass
 Organizers' data stats (`Counterparty.stats`) come from search(), not from here.
 
 After the ФНС card, `_merge_rnp` adds РНП ЕИС (`Counterparty.in_rnp`, src/sources/eis_rnp.py),
-D-099 (#111): a failure or a captcha never turns into a guessed fact, only a logged warning.
+D-101 (#111): a failure or a captcha never turns into a guessed fact, only a logged warning.
 The Электронный магазин СПб registry is NOT a source of enrich() or discover() (D-061: an expert's
 feedback after checkpoint 1 — АИС ГЗ is the primary source, "обогащение вашими данными" reads as
 circular to the jury); the estore.py client was removed (D-067).
@@ -225,7 +225,7 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
 
 
 def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) -> Counterparty:
-    """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-099, #111). `offline` is passed through
+    """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-101, #111). `offline` is passed through
     explicitly (never the `ENRICH_OFFLINE` environment variable) so the caller — not a process-wide
     flag — decides whether a live request (paced, under lock, Crawl-delay 60 s) may happen at all:
     the API always passes `offline=True` via `rnp_offline` below, the worker does not, and only the
@@ -251,7 +251,7 @@ def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) ->
 def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
            rnp_offline: bool | None = None) -> Counterparty:
     """pb card from cache → pb live (unless blocked) → rmsp by INN → bo, then РНП ЕИС is merged in
-    (D-099, #111). The error of pb is raised only if no fallback source answered; otherwise the
+    (D-101, #111). The error of pb is raised only if no fallback source answered; otherwise the
     source of every fact is in its Evidence. Электронный магазин СПб (its client was removed, D-067) is
     NOT a source here (D-061).
     `offline=True` — cache only (KeyError when nothing is cached); None — by `ENRICH_OFFLINE`.
