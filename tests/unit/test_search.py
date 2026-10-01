@@ -33,7 +33,8 @@ def comp(m, name):
     return next(c for c in m.components if c.name == name)
 
 
-def test_tokenize_normalizes_case_forms_and_a4():
+def test_tokenize_normalizes_case_forms_and_a4(monkeypatch):
+    monkeypatch.delenv("BM25_TOKENIZER", raising=False)
     assert tokenize("Бумаги офисные А4") == tokenize("бумага офисная a4") == ["бумаг", "офисн", "a4"]
     assert tokenize("Ёлка и для") == ["елка"]
 
