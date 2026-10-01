@@ -78,7 +78,8 @@ def test_default_scoring_is_h15f_normalized(search_data):
     assert sum(cfg["weights"].values()) == pytest.approx(1.0) and cfg["weights"]["geography"] == 0.0
     assert search_mod.scoring_options(cfg) == {"fit_bm25_share": 0.8, "experience_by": "similar", "tie_break": "bm25",
                                                "sat_lots": 20, "sat_wins": 10,  # caps: the default, #196 is opt-in
-                                               "price": "none", "activity_by": "all"}  # #105 options are opt-in
+                                               "price": "none", "activity_by": "all",
+                                               "experience_wins": "count"}  # #105 options are opt-in
     m = search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]))[0]
     assert "с похожими позициями" in comp(m, "experience").explanation
     assert comp(m, "geography").weight == 0.0 and comp(m, "geography").explanation  # shown, not scored
@@ -278,7 +279,8 @@ def _cfg(**options) -> dict:
 def test_scoring_options_default_is_v1_and_unknown_is_an_error():
     assert search_mod.scoring_options({}) == {"fit_bm25_share": search_mod.FIT_BM25_SHARE, "experience_by": "class",
                                               "tie_break": "inn", "sat_lots": search_mod.SAT_LOTS,
-                                              "sat_wins": search_mod.SAT_WINS, "price": "none", "activity_by": "all"}
+                                              "sat_wins": search_mod.SAT_WINS, "price": "none", "activity_by": "all",
+                                              "experience_wins": "count"}
     for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"},
                 {"sat_lots": 0}, {"sat_wins": 2.5}, {"sat_lots": True}):
         with pytest.raises(ValueError):

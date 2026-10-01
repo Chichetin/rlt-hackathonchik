@@ -90,6 +90,9 @@ OPTIONS: dict[str, tuple] = {
     "price": ("none", ("none", "scale")),
     # activity (#105): all — the last participation of any kind; similar — the last lot with similar positions
     "activity_by": ("all", ("all", "similar")),
+    # experience (#105): count — 0.5·sat(lots) + 0.5·sat(wins); rate — the wins half is the smoothed win rate
+    # (wins + 1) / (lots + 2), so 1 win of 20 lots is not «experienced winner»
+    "experience_wins": ("count", ("count", "rate")),
 }
 PRICE_DECADES = 2.0  # price = 1 − |log10(budget / median)| / 2: 0 at a 100× difference
 
@@ -283,14 +286,20 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
 
 
 def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class",
-                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS) -> tuple[float, str]:
+                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS, wins: str = "count") -> tuple[float, str]:
     if codes and by == "class":
         groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
-        lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
+        lots, wins_n, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
-        lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
-    value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(wins, sat_wins)
-    return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
+        lots, wins_n, what = c.n_lots, c.n_wins, "с похожими позициями"
+    n_wins = wins_n
+    if wins == "rate":
+        rate = (n_wins + 1) / (lots + 2)
+        value = 0.5 * _sat(lots, sat_lots) + 0.5 * rate
+        return value, (f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {n_wins} "
+                       f"(доля побед со сглаживанием {rate:.0%})")
+    value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(n_wins, sat_wins)
+    return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {n_wins}"
 
 
 # Assortment summary thresholds (D-064, research/DATA_DICTIONARY.md): shown only with enough history.
@@ -491,7 +500,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         if cp is None:
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
-        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"])
+        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"],
+                                   opts["experience_wins"])
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)

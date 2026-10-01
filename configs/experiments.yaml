@@ -65,3 +65,6 @@ H-105-fresh:
 H-105-fresh10:   # то же, вес activity 0.10 вместо 0.048
   weights: {activity: 0.10}
   options: {activity_by: similar}
+# #105: доля побед (сглаженная) вместо числа побед во второй половине experience
+H-105-winrate:
+  options: {experience_wins: rate}

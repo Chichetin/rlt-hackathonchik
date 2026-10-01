@@ -14,7 +14,7 @@ CUTOFF = date(2025, 7, 1)
 
 
 def _cp(median: float | None) -> Counterparty:
-    stats = {} if median is None else {"median_start_price": median}
+    stats: dict[str, float | int | str] = {} if median is None else {"median_start_price": median}
     return Counterparty(inn="7801000012", name="x", stats=stats)
 
 
@@ -69,3 +69,17 @@ def test_activity_by_similar_lots(search_data):
         assert _comp(m, "activity").value <= _comp(same, "activity").value + 1e-9
     with pytest.raises(ValueError):
         scoring_options({"options": {"activity_by": "bogus"}})
+
+
+def test_experience_wins_rate():
+    from src.match.search import Candidate, _experience
+
+    c = Candidate("7801000012", 1.0, 20, 1, 1, "x", CUTOFF)
+    count, _ = _experience(c, [], CUTOFF, "similar", wins="count")
+    rate, why = _experience(c, [], CUTOFF, "similar", wins="rate")
+    assert rate < count and "доля побед" in why  # 1 win of 20: low rate
+    few = Candidate("7801000012", 1.0, 3, 3, 1, "x", CUTOFF)
+    # 3 of 3 won: the wins half is higher than for 1 of 20, though the lots half is lower
+    assert _experience(few, [], CUTOFF, "similar", wins="rate")[1].endswith("(доля побед со сглаживанием 80%)")
+    with pytest.raises(ValueError):
+        scoring_options({"options": {"experience_wins": "bogus"}})
