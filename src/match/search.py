@@ -112,7 +112,7 @@ def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     scoring_options(cfg)
-    ranker.spec(cfg)  # learned ranker (#198): on by default since D-101
+    ranker.spec(cfg)  # learned ranker (#198): on by default since D-102
     profile_overrides(cfg)  # weights by procurement type (#104), off by default
     return cfg
 

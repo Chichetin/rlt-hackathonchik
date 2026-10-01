@@ -1,6 +1,6 @@
 import type { CounterpartyMatch, ScoreComponent } from "./api";
 
-// The learned ranker (#198, D-101) appends its reason to the product_fit explanation after this marker
+// The learned ranker (#198, D-102) appends its reason to the product_fit explanation after this marker
 // (src/match/ranker.py MARKER): the order and the score are the model's, the components are its inputs.
 const MARKER = "почему на этом месте — ";
 
