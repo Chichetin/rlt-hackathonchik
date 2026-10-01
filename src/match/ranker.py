@@ -247,18 +247,20 @@ def value_text(name: str, x: float) -> str:
     return f"{label}: {v}"
 
 
+MARKER = "почему на этом месте — "  # the UI shows the text after it as the reason of the position (src/ui/src/ranker.ts)
+
+
 def explain(model: Model, contrib: np.ndarray, row: np.ndarray, pro: int = 3, con: int = 1) -> str:
     """Why the model put the supplier here: the `pro` features that lifted it most and the `con` that pulled
     it down most, each with its value. The contributions are exact (tree SHAP / w·z), not a guess."""
     order = np.argsort(-contrib, kind="stable")
     up = [i for i in order[:pro] if contrib[i] > 0]
     down = [i for i in order[::-1][:con] if contrib[i] < 0]
-    parts = [f"порядок задаёт ранжировщик ({KIND_TEXT[model.kind]}), компоненты — его входы"]
-    parts.append("за — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in up) if up
-                 else "ни один признак не поднял выше среднего")
+    why = ("за — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in up) if up
+           else "ни один признак не поднял выше среднего")
     if down:
-        parts.append("против — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in down))
-    return ". ".join(parts)
+        why += "; против — " + "; ".join(value_text(NAMES[i], float(row[i])) for i in down)
+    return f"{MARKER}модель {KIND_TEXT[model.kind]}, обученная на истории закупок (критерии — её входы): {why}"
 
 
 def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
