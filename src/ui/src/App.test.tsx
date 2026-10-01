@@ -53,6 +53,8 @@ test("search shows two blocks, explanation and card with sources", async () => {
   expect(card).toHaveTextContent("Статус: действующее");
   expect(card).toHaveTextContent("ЕГРЮЛ");
   expect(card).toHaveTextContent("не подтверждён");
+  // no site in the sources — no logo and no placeholder in its place (#138)
+  expect(document.querySelector(".logo")).toBeNull();
 });
 
 test("API error is shown, not swallowed", async () => {
