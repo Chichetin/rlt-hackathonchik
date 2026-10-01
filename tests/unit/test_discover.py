@@ -1,10 +1,12 @@
 """Discovery v0 (#16): rmsp.nalog.ru answer → block «Новые», only with Evidence, no network in tests.
 
 `tests/fixtures/rmsp/UL_17.23_78.json` is a real answer of the extended search recorded 01.10
-(session tokens and row ids removed). ИП and ФНС-card texts used here are synthetic.
+(session tokens and row ids removed, phones and emails replaced with test values of the same shape).
+ИП and ФНС-card texts used here are synthetic.
 """
 
 import json
+import time
 from pathlib import Path
 
 import duckdb
@@ -191,26 +193,28 @@ def test_discover_shows_only_active_new_companies_with_evidence(cache, tmp_path)
     assert first.counterparty.name == 'ООО "МАРКЛИП"' and first.score == 0.45  # 0.35·1.0 + 0.1·1.0
     fit = first.components[0]
     assert fit.value == 1.0 and "ОКВЭД 17.23" in fit.explanation and "классом ОКПД2 запроса 17.23" in fit.explanation
-    assert "вероятно производитель" in fit.explanation and "не указан" not in fit.explanation
+    assert "вероятно производитель" in fit.explanation and "автоматически" not in fit.explanation
+    assert fit.explanation.endswith("; совпадение по классу ОКВЭД (4 знака), не по товару")
+    assert first.components[1].explanation == "В данных организаторов за 2024–2025 не встречается ни в одной закупке"
     assert "ещё не проверен" in first.components[2].explanation and first.components[2].weight == 0.0
 
 
 def test_registry_contacts_of_a_legal_entity_pass_the_evidence_check(cache, tmp_path):
     res = _run(cache, _processed(tmp_path, []))
     cp = next(m.counterparty for m in res.matches if m.counterparty.inn == "7805772436")
-    assert cp.contacts == {"phone": "+7(812)4487815", "email": "evrikapk@mail.ru"}
+    assert cp.contacts == {"phone": "+7(812)5550101", "email": "company1@example.org"}
     assert check_counterparty(cp, cache.page_text) == []
     assert len(res.matches) == 5 and res.known == 0
 
 
 def test_odd_phone_is_not_a_contact_and_legal_form_suffix_is_shortened(tmp_path):
-    # real shapes seen live on 01.10: phone "+7(96507)53515", name with the legal form at the end
-    row = {**ANSWER["data"][2], "phone": "+7(96507)53515",
+    # shapes seen live on 01.10 (digits replaced): a 5-digit area code, the legal form at the end of the name
+    row = {**ANSWER["data"][2], "phone": "+7(96507)00000",
            "name_ex": '" ЭЛАСТИС " ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ'}
     c = SourceCache(tmp_path / "c.sqlite")
     c.put(rmsp.search_url("17.23", "78"), rmsp.flatten("17.23", "78", "UL", {"data": [row]}))
     cp = _run(c, _processed(tmp_path, [])).matches[0].counterparty
-    assert cp.contacts == {"email": "evrikapk@mail.ru"} and "phone" not in {e.field for e in cp.evidence}
+    assert cp.contacts == {"email": "company1@example.org"} and "phone" not in {e.field for e in cp.evidence}
     assert cp.name == 'ООО " ЭЛАСТИС "' and check_counterparty(cp, c.page_text) == []
     assert D.display_name({"nptype": "UL", "name_ex": 'АКЦИОНЕРНОЕ ОБЩЕСТВО "НПО "ИЗОЛЯТОР"'}) == 'АО "НПО "ИЗОЛЯТОР"'
     assert D.display_name({"nptype": "UL", "name_ex": "ФОНД РАЗВИТИЯ"}) == "ФОНД РАЗВИТИЯ"
@@ -230,9 +234,54 @@ def test_offline_without_cache_is_empty_and_says_why(tmp_path):
     assert res.matches == [] and res.requests and all("нет в кеше" in r for r in res.requests)
 
 
-def test_query_without_okpd2_and_history_does_not_search(cache, tmp_path):
+def test_query_without_okpd2_and_history_does_not_search(cache, tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")
     res = _run(cache, _processed(tmp_path, []), query=_query(okpd2=[]), client=_client(_no_network))
     assert res.matches == [] and res.requests == [] and "не определён" in res.notes[0]
+
+
+@pytest.mark.parametrize("flag", [None, "0", "true"])  # only "1" switches the predicted class on
+def test_predicted_class_is_off_by_default_no_block_no_network(search_data, tmp_path, monkeypatch, flag):
+    from src.match.search import search
+    if flag is None:
+        monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS", raising=False)
+    else:
+        monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", flag)
+    q = Query(query_id="q", text="бумага А4")  # no OKPD2: search() would predict 17.12
+    history = search(q)
+    assert D.stated_class(history) == "17.12"
+    c = SourceCache(tmp_path / "c.sqlite")
+    rmsp.seed(FIX / "e2e", c)  # even a warm cache is not used for a predicted class
+    res = D.discover(q, history, cache=c, weights=WEIGHTS, processed=search_data, offline=False,
+                     client=_client(_no_network))
+    assert res.matches == [] and res.requests == [] and res.okpd_classes == [] and not res.predicted
+    assert "DISCOVERY_PREDICTED_CLASS" in res.notes[0]
+    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")
+    on = D.discover(q, history, cache=c, weights=WEIGHTS, processed=search_data, offline=True)
+    assert on.predicted and on.okpd_classes == ["17.12"] and len(on.matches) == 10
+    # an explicit OKPD2 never needs the flag
+    monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS")
+    explicit = D.discover(q.model_copy(update={"okpd2": ["17.12.14.110"]}), history, cache=c, weights=WEIGHTS,
+                          processed=search_data, offline=True)
+    assert len(explicit.matches) == 10 and not explicit.predicted
+
+
+def test_known_inns_are_cached_per_file_version(tmp_path):
+    processed = _processed(tmp_path, ["7805772436"])
+    assert D.known_inns(["7805772436", "4703173460"], None, processed) == {"7805772436"}
+    assert D.known_inns([], None, processed) == set()
+    path = processed / "suppliers.parquet"
+    before = dict(D._SUPPLIERS)
+    assert D.known_inns(["4703173460"], None, processed) == set() and D._SUPPLIERS == before  # no re-read
+    con = duckdb.connect()  # the data is rebuilt: the new file is read, the old entry is dropped
+    con.execute(f"COPY (SELECT '4703173460' AS inn) TO '{path}' (FORMAT parquet)")
+    con.close()
+    import os
+    os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1_000_000))
+    assert D.known_inns(["7805772436", "4703173460"], None, processed) == {"4703173460"}
+    assert sum(k[0] == str(path) for k in D._SUPPLIERS) == 1
+    path.unlink()
+    assert D.known_inns(["4703173460"], None, processed) is None
 
 
 def test_live_requests_respect_plan_budget_and_block(tmp_path):
@@ -266,12 +315,102 @@ def test_live_requests_respect_plan_budget_and_block(tmp_path):
     assert any("защиту не обходим" in n for n in blocked.notes)
 
 
-def test_source_timeout_gives_empty_block_not_an_error(tmp_path):
+def test_source_timeout_gives_empty_block_and_the_rest_of_the_query_is_cache_only(tmp_path):
+    calls = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
         raise httpx.ConnectTimeout("timeout", request=request)
 
-    res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), offline=False, client=_client(handler))
-    assert res.matches == [] and all("не ответил" in r for r in res.requests)
+    processed = _processed(tmp_path, [])
+    res = _run(SourceCache(tmp_path / "c.sqlite"), processed, offline=False, client=_client(handler))
+    assert res.matches == [] and len(calls) == 1  # one attempt, not one per (OKVED, region)
+    assert "не ответил" in res.requests[0] and all("в сеть не ходили" in r for r in res.requests[1:])
+    assert rmsp.blocked()  # the hanging source is left alone for a while: the next search does not wait either
+    again = _run(SourceCache(tmp_path / "c2.sqlite"), processed, offline=False, client=_client(_no_network))
+    assert again.matches == [] and all("в сеть не ходили" in r for r in again.requests)
+
+
+def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
+    calls = []
+    processed = _processed(tmp_path, [])
+    res = _run(SourceCache(tmp_path / "c.sqlite"), processed, offline=False,
+               client=_client(lambda r: (calls.append(1), httpx.Response(500))[1]))
+    assert len(calls) == 1 and "не ответил" in res.requests[0] and not rmsp.blocked()
+    # a failed refresh that fell back to an outdated answer also ends the live part of the query
+    c = SourceCache(tmp_path / "stale.sqlite", ttl_s=10)
+    c.put(rmsp.search_url("17.23", "78"), rmsp.flatten("17.23", "78", "UL", ANSWER), fetched_at=1.0)
+    calls.clear()
+    res = _run(c, processed, offline=False,
+               client=_client(lambda r: (calls.append(1), httpx.Response(500))[1]))
+    assert len(calls) == 1 and len(res.matches) == 5 and "кеш" in res.requests[0]
+
+
+def _hang(calls: list, ok_first: float | None = None):
+    """A source that keeps silent exactly as long as the client agreed to wait (connect + read)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.extensions["timeout"])
+        if ok_first is not None and len(calls) == 1:
+            time.sleep(ok_first)
+            return httpx.Response(200, json={"rowCount": 0, "data": []})
+        t = request.extensions["timeout"]
+        time.sleep(t["connect"] + t["read"])
+        raise httpx.ReadTimeout("silence", request=request)
+    return handler
+
+
+@pytest.mark.parametrize(("ok_first", "pacing", "expected_calls"), [
+    (None, 0.0, 1),  # the very first request hangs
+    (0.2, 0.0, 2),  # the first answers slowly, the second hangs: it only gets what is left
+    (0.0, 0.3, 2),  # the pause between requests is part of the budget too
+    (0.5, 0.0, 1),  # almost nothing left after the first answer → the second request is not started
+])
+def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, monkeypatch, ok_first, pacing,
+                                                                     expected_calls):
+    budget = 0.6
+    monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
+    monkeypatch.setattr(rmsp, "_last_request", 0.0)
+    calls: list = []
+    started = time.monotonic()
+    res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),
+               offline=False, budget_s=budget, client=_client(_hang(calls, ok_first)))
+    elapsed = time.monotonic() - started
+    assert elapsed < budget + 0.25, f"{elapsed:.2f} s for a {budget} s budget"
+    assert len(calls) == expected_calls and len(res.requests) == 4 and res.matches == []
+    assert all(t["connect"] + t["read"] <= budget + 1e-6 for t in calls)
+
+
+def test_request_timeout_is_capped_by_the_default_when_time_is_plenty(tmp_path, monkeypatch):
+    monkeypatch.setattr(rmsp, "TIMEOUT_S", 3.0)
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, json=ANSWER)
+
+    c = SourceCache(tmp_path / "c.sqlite")
+    rmsp.fetch_search("17.23", "78", cache=c, client=_client(handler))  # no deadline: connect + read = 3 s
+    rmsp.fetch_search("17.23", "47", cache=c, client=_client(handler), deadline=time.monotonic() + 60)
+    assert [(t["connect"], t["read"]) for t in seen] == [(1.5, 1.5), (1.5, 1.5)]
+    with pytest.raises(rmsp.Paused):  # too little time: no request at all, and it is not a refusal
+        rmsp.fetch_search("17.12", "78", cache=c, client=_client(_no_network), deadline=time.monotonic() + 0.05)
+    assert not rmsp.blocked()
+
+
+def test_okved_code_without_a_name_still_has_evidence(tmp_path):
+    no_name = {k: v for k, v in ANSWER["data"][0].items() if k != "okved1name"}
+    no_code = {k: v for k, v in ANSWER["data"][2].items() if k not in ("okved1", "okved1name")}
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("17.23", "78"), rmsp.flatten("17.23", "78", "UL", {"data": [no_name, no_code]}))
+    res = _run(c, _processed(tmp_path, []))
+    assert [m.counterparty.inn for m in res.matches] == ["4703173460"] and res.inactive == 0  # no OKVED → not shown
+    cp = res.matches[0].counterparty
+    ev = next(e for e in cp.evidence if e.field == "okved")
+    assert ev.value == "4703173460.okved1: 17.23" and ev.fact == "Основной ОКВЭД 17.23" and cp.okved == ["17.23"]
+    assert check_counterparty(cp, c.page_text) == []
+    assert res.matches[0].components[0].explanation.startswith("Основной ОКВЭД 17.23 совпадает с классом ОКПД2 запроса")
+    fake = ev.model_copy(update={"value": "4703173460.okved1: 46.49"})  # a code the row does not hold
+    assert check_counterparty(cp.model_copy(update={"evidence": [fake, *cp.evidence]}), c.page_text)
 
 
 def _card(inn: str, status: str) -> str:  # synthetic ФНС card text in the pb_nalog.flatten format
@@ -308,7 +447,7 @@ def test_wholesale_neighbour_region_and_ip(tmp_path):
     maker, trader = res.matches
     assert maker.counterparty.inn == "7811777270" and maker.score == 0.45
     assert trader.score == 0.29  # 0.35·0.6 + 0.1·0.8
-    assert "вероятно дистрибьютор" in trader.components[0].explanation
+    assert trader.components[0].explanation.endswith("вероятно дистрибьютор")  # no «по классу» note for trade
     assert "соседний регион — Ленинградская область" in trader.components[4].explanation
     assert trader.counterparty.region == "Ленинградская область"
 
@@ -402,6 +541,7 @@ def test_stated_class_takes_the_majority_and_ignores_short_codes():
 
 @pytest.fixture
 def api(tmp_path, monkeypatch, search_data):
+    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")  # these tests search by text, without OKPD2
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
     monkeypatch.setattr(app_mod, "_engine", None)
     c = SourceCache()  # SOURCE_CACHE of this test (conftest)
@@ -420,12 +560,40 @@ def test_api_search_fills_the_discovered_block(api):
     m = body["discovered"][0]
     assert m["origin"] == "discovered" and m["counterparty"]["name"] == 'ООО "МАРКЛИП"'
     assert all(e["url"].startswith("https://rmsp.nalog.ru/") and e["fetched_at"] for e in m["counterparty"]["evidence"])
-    assert "класс определён по похожим закупкам" in m["components"][0]["explanation"]
+    why = m["components"][0]["explanation"]  # a predicted class is never called «ОКПД2 запроса» (#63)
+    assert "класса ОКПД2 17.12 (в запросе ОКПД2 не указан — класс определён автоматически" in why
+    assert "ОКПД2 запроса" not in why
     assert "7801000012" in [x["counterparty"]["inn"] for x in body["history"]]
     assert api.get("/api/health").json()["queue"] == {"pending": 1}  # the ФНС card is ordered, not fetched inline
     only_lo = api.post("/api/search", json={"query_id": "q", "text": "бумага А4",
                                             "filters": {"region": "Ленинградская область"}}).json()
     assert only_lo["discovered"] == []
+
+
+def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):
+    monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS")
+    monkeypatch.delenv("DISCOVERY_OFFLINE")  # the network is allowed — and still must not be touched
+    attempts = []
+    monkeypatch.setattr(rmsp, "_post", lambda *a, **k: attempts.append(a) or 1 / 0)
+    body = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"}).json()
+    assert body["history"] and body["discovered"] == [] and attempts == []
+    assert api.get("/api/health").json()["queue"] == {}
+    # the same request with the code from the notice fills the block without the flag
+    monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
+    with_code = api.post("/api/search", json={"query_id": "q", "text": "бумага А4", "okpd2": ["17.12.14.110"]}).json()
+    assert [m["counterparty"]["inn"] for m in with_code["discovered"]] == ["4703173460"]
+    assert "ОКПД2 запроса 17.12" in with_code["discovered"][0]["components"][0]["explanation"]
+
+
+def test_evidence_pages_are_prepared_once_per_request(cache, tmp_path):
+    from src.enrich.evidence import cached_pages, strip_unverified
+    res = _run(cache, _processed(tmp_path, []))
+    reads: list[str] = []
+    pages = cached_pages(lambda url: reads.append(url) or cache.page_text(url))
+    shown = [strip_unverified(m.counterparty, pages) for m in res.matches]
+    assert reads == [rmsp.search_url("17.23", "78")]  # 5 companies, ~30 facts, one page read
+    assert shown == [strip_unverified(m.counterparty, cache.page_text) for m in res.matches]
+    assert cached_pages(pages) is pages and pages("https://nope") is None
 
 
 def test_api_does_not_call_unchecked_companies_new(api, monkeypatch):

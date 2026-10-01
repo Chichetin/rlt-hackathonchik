@@ -1,4 +1,4 @@
-"""enrich(inn) while pb.nalog.ru asks for a captcha: rmsp by INN, then bo (#58, D-040).
+"""enrich(inn) while pb.nalog.ru asks for a captcha: rmsp by INN, then bo (#58, D-052).
 
 Answers are real, recorded 01.10 (tests/fixtures/enrich_fallback/README.md); the network is mocked."""
 

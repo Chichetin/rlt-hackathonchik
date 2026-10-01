@@ -9,7 +9,9 @@ Block «Новые из открытых источников» (`origin="discov
    design) and, for goods, a wholesale code from a hand-made table (WHOLESALE). There is no official
    OKPD2 → OKVED2 key (research/SOURCES.md): the mapping is our rule and is shown to the user.
 3. One cached rmsp.nalog.ru request per (OKVED, region): companies of СПб / ЛО with this main OKVED.
-   At most MAX_REQUESTS per query, live ones only within the time budget; the rest — cache only.
+   At most MAX_REQUESTS per query. Live requests end before the deadline (LIVE_BUDGET_S from the
+   start: pacing, connect and read included); after the first network failure the rest of the query
+   reads only the cache, and a timeout pauses the source for every search (rmsp.DOWN_COOLDOWN_S).
 4. Dropped: excluded from the registry, already present in organizers' data (suppliers*.parquet),
    liquidated by the ФНС card. Organizers' data absent → `history_checked=False`: the caller must
    not call these companies «новые».
@@ -18,7 +20,12 @@ Block «Новые из открытых источников» (`origin="discov
    enrichment queue (`enqueue`), so the request itself makes no pb.nalog.ru calls.
 
 `DISCOVERY_OFFLINE=1` or `ENRICH_OFFLINE=1` — cache only, no network.
-CLI (live check, cache warm-up): `python -m src.enrich.discover "бумага офисная" --okpd2 17.12.14 --enrich`.
+`DISCOVERY_PREDICTED_CLASS=1` — also build the block for a query WITHOUT OKPD2, by the class search()
+predicts. Off by default: until #63 the prediction is wrong on real data («бумага офисная» → paints),
+and a wrong class would show irrelevant companies with product_fit 1.0. Without the flag such a query
+gets an empty block and no network request.
+CLI (live check, cache warm-up): `python -m src.enrich.discover "бумага офисная" --okpd2 17.12.14`;
+without `--okpd2` the class is the one search() predicts on organizers' data (as in /api/search).
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, Scor
 from src.enrich.enrich import MSP_CATEGORY, enrich, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.ingest.load import suppliers_path
+from src.match import search as search_mod
 from src.match.filters import REGION_CODE, apply_filters
 from src.match.index import processed_dir
 from src.sources import pb_nalog, rmsp
@@ -54,7 +62,7 @@ SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 MAX_SHOWN = 10  # companies in the block and INNs sent to enrichment per query
 MAX_REQUESTS = 4  # rmsp requests per query (cached or live)
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
-LIVE_BUDGET_S = 4.0  # wall time for live rmsp requests inside one /api/search
+LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
 FIT = {"class": 1.0, "wholesale": 0.6}  # product_fit of a discovered company (D-036)
 NEIGHBOUR = {"78": "47", "47": "78"}
@@ -115,6 +123,10 @@ class Discovery:
     notes: list[str] = field(default_factory=list)
 
 
+def predicted_class_allowed() -> bool:
+    return os.environ.get("DISCOVERY_PREDICTED_CLASS") == "1"
+
+
 def offline_mode() -> bool:
     return os.environ.get("DISCOVERY_OFFLINE") == "1" or os.environ.get("ENRICH_OFFLINE") == "1"
 
@@ -148,7 +160,15 @@ def okved_plan(codes: Sequence[str]) -> list[Channel]:
 
 
 def stated_class(history: Sequence[CounterpartyMatch]) -> str | None:
-    """The OKPD2 class search() predicted for the query, read from its product_fit explanations."""
+    """The OKPD2 class search() predicted for the query, read from its product_fit explanations.
+
+    TODO(#63, area:match): search() returns its predicted code only inside a Russian sentence of the
+    explanation; parsing it is fragile (a reworded sentence silently switches us to the lot vote —
+    tests/unit/test_discover.py::test_class_is_predicted_from_history_lots pins the wording). When
+    search() exposes the predicted code as data, read it from there. The prediction itself is weak
+    on real data (#63: «бумага офисная» → 20.30), so the class is always shown as «определён
+    автоматически», never as the class of the query.
+    """
     votes: dict[str, int] = {}
     for m in history[:VOTE_MATCHES]:
         for comp in m.components:
@@ -198,24 +218,35 @@ def _lots_class(history: Sequence[CounterpartyMatch], processed: Path) -> str | 
     return min(votes, key=lambda c: (-votes[c], c)) if votes else None
 
 
+_SUPPLIERS: dict[tuple[str, int], frozenset[str]] = {}  # (file, mtime) → all INNs of organizers' data
+
+
+def _all_inns(path: Path) -> frozenset[str] | None:
+    """Every INN of a suppliers parquet, read once per file version (a rebuilt file is read again)."""
+    key = (str(path), path.stat().st_mtime_ns)
+    if key not in _SUPPLIERS:
+        con = duckdb.connect()
+        try:
+            rows = con.execute("SELECT DISTINCT inn FROM read_parquet(?) WHERE inn IS NOT NULL", [str(path)]).fetchall()
+        except duckdb.Error as e:
+            log.warning("discovery: %s не прочитан: %s", path.name, e)
+            return None
+        finally:
+            con.close()
+        for old in [k for k in _SUPPLIERS if k[0] == key[0]]:
+            del _SUPPLIERS[old]
+        _SUPPLIERS[key] = frozenset(r[0] for r in rows)
+    return _SUPPLIERS[key]
+
+
 def known_inns(inns: Sequence[str], as_of: date | None, processed: Path) -> set[str] | None:
     """INNs present in organizers' data (before as_of); None — the data is absent, nothing checked."""
     try:
         path = suppliers_path(as_of, processed)
-    except FileNotFoundError:
+        everyone = _all_inns(path)
+    except OSError:  # FileNotFoundError from suppliers_path or a file removed meanwhile
         return None
-    if not inns:
-        return set()
-    con = duckdb.connect()
-    try:
-        rows = con.execute("SELECT inn FROM read_parquet(?) WHERE inn IN (SELECT unnest(?))",
-                           [str(path), list(inns)]).fetchall()
-    except duckdb.Error as e:
-        log.warning("discovery: %s не прочитан: %s", path.name, e)
-        return None
-    finally:
-        con.close()
-    return {r[0] for r in rows}
+    return None if everyone is None else set(inns) & everyone
 
 
 def display_name(row: dict[str, str]) -> str | None:
@@ -251,7 +282,10 @@ def from_row(row: dict[str, str], page: CachedPage) -> Counterparty:
     full = row.get("name_ex")
     add("name", full, f"Наименование: {full}" if is_ul else f"Индивидуальный предприниматель {full}")
     okved, okved_name = row.get("okved1"), row.get("okved1name")
-    add("okved", okved_name, f"Основной ОКВЭД {okved} — {okved_name}")
+    if okved and okved_name:
+        add("okved", okved_name, f"Основной ОКВЭД {okved} — {okved_name}")
+    elif okved:  # no name in the row: the code itself is the fact, tied to its own registry line
+        add("okved", f"{inn}.okved1: {okved}", f"Основной ОКВЭД {okved}")
 
     category = row.get("category", "")
     is_msp: bool | None = None
@@ -308,17 +342,18 @@ def _is_goods_producer(okved: str) -> bool:
 
 def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: bool, has_card: bool,
                 region: str, weights: dict[str, float]) -> list[ScoreComponent]:
-    okved, okved_name = row.get("okved1", ""), row.get("okved1name", "")
-    head = f"Основной ОКВЭД {okved} «{okved_name}»"
+    okved, okved_name = row["okved1"], row.get("okved1name", "")
+    head = f"Основной ОКВЭД {okved}" + (f" «{okved_name}»" if okved_name else "")
+    # A predicted class is never presented as the class of the query (#63: the prediction can be wrong).
+    cls = (f"ОКПД2 {ch.okpd_class} (в запросе ОКПД2 не указан — класс определён автоматически по похожим "
+           "закупкам в данных АИС ГЗ)") if predicted else f"ОКПД2 запроса {ch.okpd_class}"
     if ch.relation == "class":
         role = ("вероятно производитель (по ОКВЭД)" if _is_goods_producer(okved)
                 else "основной вид деятельности соответствует предмету закупки")
-        fit_why = f"{head} совпадает с классом ОКПД2 запроса {ch.okpd_class} — {role}"
+        fit_why = f"{head} совпадает с классом {cls} — {role}; совпадение по классу ОКВЭД (4 знака), не по товару"
     else:
-        fit_why = (f"{head} — оптовая торговля товарами класса ОКПД2 {ch.okpd_class} "
-                   "(таблица соответствия ОКПД2 → ОКВЭД) — вероятно дистрибьютор")
-    if predicted:
-        fit_why += "; ОКПД2 в запросе не указан, класс определён по похожим закупкам в данных АИС ГЗ"
+        fit_why = (f"{head} — оптовая торговля товарами класса {cls}, "
+                   "по таблице соответствия ОКПД2 → ОКВЭД — вероятно дистрибьютор")
 
     if has_card and cp.status:
         rel_why = f"Статус по реестру ФНС: {cp.status} — в score не входит"
@@ -337,9 +372,9 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
     parts: dict[str, tuple[float, float, str]] = {
         "product_fit": (FIT[ch.relation], weights.get("product_fit", 0.0), fit_why),
         "experience": (0.0, weights.get("experience", 0.0),
-                       "В данных АИС ГЗ не участвовал ни в одной закупке — опыта госзакупок у заказчиков СПб нет"),
+                       "В данных организаторов за 2024–2025 не встречается ни в одной закупке"),
         "reliability": (0.0, 0.0, rel_why),
-        "activity": (0.0, weights.get("activity", 0.0), "Участий в закупках в данных АИС ГЗ нет"),
+        "activity": (0.0, weights.get("activity", 0.0), "Участий в закупках в данных организаторов нет"),
         "geography": (geo, weights.get("geography", 0.0), geo_why),
         "price": (0.0, 0.0, "Нет данных: в открытых источниках нет цен — в score не входит"),
     }
@@ -394,6 +429,10 @@ def discover(
     classes = okpd_classes(query.okpd2)
     codes: list[str] = [c.strip() for c in query.okpd2]
     if not classes:
+        if not predicted_class_allowed():  # D-036: off until search() predicts the class reliably (#63)
+            res.notes.append("ОКПД2 в запросе не указан — блок «Новые» не строится "
+                             "(DISCOVERY_PREDICTED_CLASS выключен)")
+            return res
         guess = predict_class(history, processed)
         if guess is None:
             res.notes.append("ОКПД2 запроса не указан и не определён по истории — поиск по ОКВЭД невозможен")
@@ -403,26 +442,34 @@ def discover(
 
     jobs = [(ch, region, np) for region in _regions(query) for ch in okved_plan(codes)
             for np in _np_types()][:MAX_REQUESTS]
-    started = time.monotonic()
+    deadline = time.monotonic() + budget_s  # every live request of this query ends before it
+    net_ok = True  # False after the first network failure: the rest of the query is cache only
     found: dict[str, tuple[dict[str, str], Channel, CachedPage]] = {}
     for ch, region, np_type in jobs:
         label = f"ОКВЭД {ch.okved}, регион {region}, {np_type}"
-        fresh = cache.get(rmsp.search_url(ch.okved, region, np_type)) is not None
-        live = not offline and not fresh and not rmsp.blocked() and time.monotonic() - started < budget_s
+        url = rmsp.search_url(ch.okved, region, np_type)
+        # no time left before the deadline → the client raises Paused without a request
+        live = not offline and net_ok and cache.get(url) is None and not rmsp.blocked()
         try:
-            page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live)
+            page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live, deadline=deadline)
+        except rmsp.Paused:  # no request was made: pause of the source or no time left
+            net_ok, page = False, None
         except rmsp.Blocked as e:
+            net_ok = False
             log.error("discovery: %s", e)
             res.requests.append(f"{label}: источник отказал — остановлено")
             res.notes.append(str(e))
             continue
         except (httpx.HTTPError, ValueError) as e:
+            net_ok = False
             log.warning("discovery: %s: %s", label, e)
             res.requests.append(f"{label}: источник не ответил ({type(e).__name__})")
             continue
         if page is None:
             res.requests.append(f"{label}: нет в кеше, в сеть не ходили")
             continue
+        if live and cache.get(url) is None:  # the request failed and an outdated answer was used
+            net_ok, live = False, False
         answer = rmsp.parse(page.body)
         active = [r for r in answer.rows if r.get("is_active") == "1"]
         res.inactive += len(answer.rows) - len(active)
@@ -431,7 +478,8 @@ def discover(
         res.requests.append(f"{label}: {'сеть' if live else 'кеш'}, всего в реестре {total}, "
                             f"на странице {len(answer.rows)}, действующих в реестре {len(active)}")
         for row in active:
-            found.setdefault(row["inn"], (row, ch, page))  # first channel wins: class before wholesale
+            if row.get("okved1"):  # no OKVED in the row → nothing to explain the match with
+                found.setdefault(row["inn"], (row, ch, page))  # first channel wins: class before wholesale
 
     known = known_inns(list(found), query.as_of, processed)
     res.history_checked = known is not None
@@ -464,7 +512,8 @@ def discover(
 
 def _report(query: Query, res: Discovery, cache: SourceCache) -> None:
     print(f"\nЗапрос: «{query.text}», ОКПД2 {', '.join(query.okpd2) or '—'} "
-          f"→ классы {', '.join(res.okpd_classes) or '—'}")
+          f"→ классы {', '.join(res.okpd_classes) or '—'}"
+          f"{' (определён автоматически search() по похожим закупкам)' if res.predicted else ''}")
     for line in res.requests:
         print(f"  rmsp: {line}")
     for note in res.notes:
@@ -497,7 +546,13 @@ def main(argv: list[str] | None = None) -> int:
     cache = SourceCache()
     query = Query(query_id="discover-cli", text=args.text, okpd2=args.okpd2, region=args.region)
     offline = args.offline or offline_mode()
-    res = discover(query, cache=cache, offline=offline, budget_s=60.0)
+    history: list[CounterpartyMatch] = []
+    if not args.okpd2:  # the text path of the UI: the class is what search() predicts
+        try:
+            history = search_mod.search(query)
+        except FileNotFoundError:
+            print("  ! данные организаторов не загружены — класс ОКПД2 по тексту не определить, укажите --okpd2")
+    res = discover(query, history, cache=cache, offline=offline, budget_s=60.0)
     if args.enrich and not offline:
         for m in res.matches:
             inn = m.counterparty.inn
@@ -512,7 +567,7 @@ def main(argv: list[str] | None = None) -> int:
                 code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else ""
                 print(f"  ! карточка {inn} не получена ({type(e).__name__} {code}) — обогащение остановлено")
                 break
-        res = discover(query, cache=cache, offline=True)
+        res = discover(query, history, cache=cache, offline=True)
     _report(query, res, cache)
     return 0
 

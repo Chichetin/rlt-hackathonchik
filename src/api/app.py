@@ -23,7 +23,7 @@ from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
-from src.enrich.evidence import strip_unverified
+from src.enrich.evidence import cached_pages, strip_unverified
 from src.llm.provider import get_provider
 from src.match import search as search_mod
 from src.match.filters import apply_filters
@@ -32,6 +32,8 @@ from src.sources.pb_nalog import CaptchaRequired
 from src.worker.queue import engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
+if os.environ.get("DEMO_FIXTURE") == "1":
+    log.warning("DEMO_FIXTURE=1: synthetic fixture, not the organizers' data")
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
 
@@ -69,6 +71,9 @@ def _queue():
 
 
 def _is_stub() -> bool:
+    # DEMO_FIXTURE=1 (scripts/demo.sh without organizers' data) serves the synthetic fixture (D-050).
+    if os.environ.get("DEMO_FIXTURE") == "1":
+        return True
     return bool(getattr(search_mod, "IS_STUB", False) or getattr(enrich_mod, "IS_STUB", False))
 
 
@@ -112,8 +117,8 @@ def api_search(query: Query) -> SearchResponse:
     matches = apply_filters(found, query)
     if not getattr(search_mod, "IS_STUB", False):
         # What the card and the xlsx show: only facts and contacts that pass the Evidence check.
-        cache = SourceCache()
-        matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
+        pages = cached_pages(SourceCache().page_text)  # one read and one normalization per page per request
+        matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)})
                    for m in matches]
     return SearchResponse(
         query=query,

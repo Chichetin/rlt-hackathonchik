@@ -1,7 +1,7 @@
 """enrich(inn) -> Counterparty with Evidence for every fact. Owner: SOURCES.
 
 Main source: ФНС «Прозрачный бизнес» (src/sources/pb_nalog.py) through the disk cache, so the demo
-works on cache without internet. While pb asks for a captcha (#58, D-040) the fallback is the registry
+works on cache without internet. While pb asks for a captcha (#58, D-052) the fallback is the registry
 of МСП by INN (src/sources/rmsp.py), then ГИР БО (src/sources/bo_nalog.py): fewer facts, each with its
 own source and url. Every fact is an Evidence whose `value` literally occurs in the
 cached card text (src/enrich/evidence.py checks it; the API shows only what passes).
