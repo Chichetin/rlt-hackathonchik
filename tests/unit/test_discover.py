@@ -476,6 +476,14 @@ def test_wholesale_neighbour_region_and_ip(tmp_path):
     assert "соседний регион — Ленинградская область" in trader.components[4].explanation
     assert trader.counterparty.region == "Ленинградская область"
 
+    # #218: a customer from the Leningrad region — the wholesaler from 47 is local now, the maker from 78 a neighbour
+    (tmp_path / "cust").mkdir()
+    cust = _run(c, _processed(tmp_path / "cust", []), query=_query(okpd2=["17.12.14.110"], customer_inn="4700000003"))
+    geo = {m.counterparty.inn: m.components[4] for m in cust.matches}
+    assert geo[trader.counterparty.inn].value == 1.0
+    assert geo["7811777270"].value == 0.8
+    assert "ИНН заказчика выдан в Ленинградской области" in geo["7811777270"].explanation
+
 
 def _rows(inns: list[str], okved: str, name: str) -> dict:
     return {"rowCount": -1, "data": [{**ANSWER["data"][0], "inn": i, "okved1": okved, "okved1name": name}
