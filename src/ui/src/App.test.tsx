@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { buildQuery, filterNotes, regionLabel, type SearchResponse } from "./api";
+import { buildQuery, type Counterparty, filterNotes, regionLabel, type SearchResponse } from "./api";
 
 const match = (name: string, origin: "history" | "discovered", kind = "manufacturer") => ({
   counterparty: {
@@ -204,7 +204,7 @@ test("history is paged on the server: total from the header, «Показать 
 });
 
 // #84: «Новые» emptied by a filter. Mock: requests with the given filter get no new companies.
-async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["17.12.14.110"], kinds: (string | null)[] = [null]) {
+async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["17.12.14.110"], kinds: Counterparty["kind"][] = [null]) {
   const base = structuredClone(response);
   base.stub = false;
   base.query.okpd2 = okpd2;
