@@ -146,12 +146,10 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
 
 /** What puts the company in its block: its procurement record, or that it is new to АИС ГЗ. */
 function OriginBadge({ m }: { m: CounterpartyMatch }) {
-  const st = m.counterparty.stats ?? {};
-  if (m.origin !== "history") return <span className="badge badge-new">Новый · нет в АИС ГЗ</span>;
-  const lots = st.lots_participated;
-  if (typeof lots !== "number") return <span className="badge badge-history">Участник закупок АИС ГЗ</span>;
-  const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
-  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
+  // the numbers are in the stat grid; the badge only names the origin
+  return m.origin === "history"
+    ? <span className="badge badge-history">Участник закупок АИС ГЗ</span>
+    : <span className="badge badge-new">Новый · нет в АИС ГЗ</span>;
 }
 
 function CompanyName({ name }: { name: string }) {
@@ -622,6 +620,7 @@ function Block(props: {
                 initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, amount: 0.05 }} transition={{ duration: reduced ? 0 : 0.45, delay: reduced ? 0 : Math.min(i, 4) * 0.04, ease: easeOut }}>
                 <motion.button className="item" whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
+                  <span className="item-head">
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
                   <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
@@ -630,14 +629,17 @@ function Block(props: {
                       <motion.span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%`, originX: 0 }} initial={reduced ? false : { scaleX: 0 }} whileInView={{ scaleX: 1 }} viewport={{ once: true }} transition={{ duration: reduced ? 0 : 0.7, ease: easeOut }} />
                     </span>
                   </span>
+                  </span>
                   <span className="meta">
                     {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
-                  <span className="badges">
-                    <OriginBadge m={m} />
-                  </span>
+                  <StatGrid m={m} />
                   {top && <span className="why">{top.explanation}</span>}
+                  <span className="item-foot">
+                    <OriginBadge m={m} />
+                    <span className="item-go" aria-hidden="true">→</span>
+                  </span>
                 </motion.button>
               </motion.li>
             );
@@ -657,6 +659,43 @@ function Block(props: {
         </div>
       )}
     </section>
+  );
+}
+
+function day(v: string | number | undefined): string {
+  if (v == null) return "—";
+  const d = new Date(String(v));
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString("ru-RU");
+}
+
+/** Four facts at a glance, all from the response: procurement record for history, registry fields for new. */
+function StatGrid({ m }: { m: CounterpartyMatch }) {
+  const cp = m.counterparty;
+  const st = cp.stats ?? {};
+  const stat = (key: string) => (st[key] == null ? "—" : formatStat(key, st[key]));
+  const cells: [string, string][] =
+    m.origin === "history"
+      ? [
+          ["Лотов в АИС ГЗ", stat("lots_participated")],
+          ["Доля побед", stat("win_rate")],
+          ["Заказчиков", stat("customers")],
+          ["Последнее участие", day(st.last_seen)],
+        ]
+      : [
+          ["Основной ОКВЭД", cp.okved?.[0] ?? "—"],
+          ["МСП", yesNo(cp.is_msp)],
+          ["Статус", cp.status ?? "не проверено"],
+          ["В РНП", yesNo(cp.in_rnp)],
+        ];
+  return (
+    <span className="stat-grid">
+      {cells.map(([label, value]) => (
+        <span className="stat" key={label}>
+          <b>{value}</b>
+          <small>{label}</small>
+        </span>
+      ))}
+    </span>
   );
 }
 
