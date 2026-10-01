@@ -13,6 +13,8 @@ from src.api import app as app_mod
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
     monkeypatch.setattr(app_mod, "_engine", None)
+    # lots: CSV path unless a test sets parquet
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "no-processed"))
     return TestClient(app_mod.app)
 
 
@@ -83,3 +85,70 @@ def test_search_strips_unverified_facts_once_real(client, monkeypatch, tmp_path)
     # stub web evidence (example.org) is not in the empty cache -> dropped, contacts dropped
     assert discovered and all(m["counterparty"]["contacts"] == {} for m in discovered)
     assert all(e["url"].startswith("data:") for m in body["history"] for e in m["counterparty"]["evidence"])
+
+
+FIXTURE_RAW = "tests/fixtures/raw"
+
+
+def test_lot_by_lot_id_and_reqnum(client, monkeypatch):
+    monkeypatch.setenv("DATA_RAW_DIR", FIXTURE_RAW)
+    q = client.get("/api/lot/9000001").json()
+    assert q["query_id"] == "lot-9000001" and q["text"].startswith("Бумага офисная А4")
+    assert q["budget"] == 45000.0 and q["customer_inn"] == "7804105239" and q["channel"] == "ЭМ"
+    assert q["okpd2"] == ["17.12.14.110", "17.12.14.119"]
+    by_req = client.get("/api/lot/0372200260025000001").json()
+    assert by_req["query_id"] == "lot-9000002" and by_req["channel"] == "АИС ГЗ"
+
+
+def test_lot_not_found_404(client, monkeypatch):
+    monkeypatch.setenv("DATA_RAW_DIR", FIXTURE_RAW)
+    assert client.get("/api/lot/1").status_code == 404
+
+
+def test_lot_without_data_503(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path / "nope"))
+    r = client.get("/api/lot/9000001")
+    assert r.status_code == 503 and "данные" in r.json()["detail"]
+
+
+def test_lot_rejects_non_digits(client):
+    assert client.get("/api/lot/abc").status_code == 422
+
+
+def test_lot_broken_csv_503_not_crash(client, monkeypatch, tmp_path):
+    (tmp_path / "Извещения_bad.csv").write_text("a;b\n1;2\n", encoding="utf-8")
+    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
+    assert client.get("/api/lot/1").status_code == 503
+
+
+def test_lot_unparsable_price_gives_no_budget(client, monkeypatch, tmp_path):
+    (tmp_path / "Извещения_x.csv").write_text(
+        "lot_id;reqnum;subject;start_price;customer_inn;is_eshop_or_aisgz\n5;;Товар;n/a;;ЭМ\n", encoding="utf-8")
+    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
+    q = client.get("/api/lot/5").json()
+    assert q["budget"] is None and q["customer_inn"] is None and q["okpd2"] == []
+
+
+def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path):
+    (tmp_path / "Извещения_t.csv").write_text(
+        "lot_id;reqnum;procedure_name;subject;start_price;customer_inn;is_eshop_or_aisgz\n"
+        "7;;Поставка картриджей;Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
+    assert client.get("/api/lot/7").json()["text"] == "Поставка картриджей"
+
+
+def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
+    import duckdb
+    con = duckdb.connect()
+    con.execute("COPY (SELECT 77::BIGINT lot_id, '0372200260024000124' reqnum, 'Картриджи' procedure_name, "
+                "'Картриджи' subject, 500.0 start_price, '7804105239' customer_inn, 'ЭМ' channel) "
+                f"TO '{tmp_path}/notices.parquet' (FORMAT parquet)")
+    con.execute("COPY (SELECT 77::BIGINT lot_id, 'x' product_name, '26.20.40.190' okpd2_code) "
+                f"TO '{tmp_path}/items.parquet' (FORMAT parquet)")
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path))
+    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path / "nope"))
+    q = client.get("/api/lot/0372200260024000124").json()
+    assert q["query_id"] == "lot-77" and q["okpd2"] == ["26.20.40.190"]
+    assert q["channel"] == "ЭМ" and q["budget"] == 500.0
