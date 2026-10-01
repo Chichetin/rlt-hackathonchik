@@ -23,13 +23,16 @@ export default defineConfig({
   ],
   webServer: {
     command:
+      // a test export uploaded by an earlier run (cache/e2e-testsets/active) must not answer /api/lot (#207)
+      "uv run --frozen python -c \"import shutil; shutil.rmtree('cache/e2e-testsets', ignore_errors=True)\" && " +
       "uv run --frozen python -m src.ingest.build --raw-dir tests/fixtures/ingest --out-dir cache/e2e-processed && " +
       "uv run --frozen python -m src.sources.rmsp seed tests/fixtures/rmsp/e2e && " +
       `uv run --frozen uvicorn src.api.app:app --host 127.0.0.1 --port ${port}`,
     cwd: "../..",
     env: { PYTHONPATH: ".", DATABASE_URL: "sqlite:///cache/e2e-queue.sqlite", DATA_RAW_DIR: "tests/fixtures/raw",
            DATA_PROCESSED_DIR: "cache/e2e-processed", INDEX_DIR: "cache/e2e-indexes",
-           SOURCE_CACHE: "cache/e2e-sources.sqlite", DISCOVERY_OFFLINE: "1" },
+           SOURCE_CACHE: "cache/e2e-sources.sqlite", DISCOVERY_OFFLINE: "1",
+           TESTSETS_DIR: "cache/e2e-testsets" },
     url: `http://127.0.0.1:${port}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
