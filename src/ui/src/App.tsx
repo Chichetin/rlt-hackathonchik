@@ -2,11 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
 import "./micro.css";
-import { GlassSidebar, GlassTopbar } from "./GlassShell";
+import { GlassHeader } from "./GlassShell";
+import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
+import { okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
+  PAGE,
   buildQuery,
   COMPONENT_LABEL,
   exportXlsx,
@@ -28,6 +31,9 @@ import {
   type Counterparty,
 } from "./api";
 import { reviewLinks } from "./reviews";
+import { TestsetPanel } from "./TestsetPanel";
+import "./testset.css";
+import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -156,18 +162,43 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
 }
 
 /** What puts the company in its block: its procurement record, or that it is new to АИС ГЗ. */
+function OriginIcon({ origin }: { origin: "history" | "new" }) {
+  return <svg className="origin-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {origin === "history"
+      ? <><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /><path d="M12 7v5l3 2" /></>
+      : <><circle cx="12" cy="12" r="8" /><path d="M12 8v8M8 12h8" /></>}
+  </svg>;
+}
+
 function OriginBadge({ m }: { m: CounterpartyMatch }) {
   const st = m.counterparty.stats ?? {};
-  if (m.origin !== "history") return <span className="badge badge-new">Новый · нет в АИС ГЗ</span>;
+  if (m.origin !== "history") return <span className="badge badge-new"><OriginIcon origin="new" />Новый · нет в АИС ГЗ</span>;
   const lots = st.lots_participated;
-  if (typeof lots !== "number") return <span className="badge badge-history">Участник закупок АИС ГЗ</span>;
+  if (typeof lots !== "number") return <span className="badge badge-history"><OriginIcon origin="history" />Участник закупок АИС ГЗ</span>;
   const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
-  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
+  return <span className="badge badge-history"><OriginIcon origin="history" />{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
+}
+
+// the usual short legal forms: the list stays readable in a narrow column; the full name is in the tooltip and the card
+const LEGAL_FORMS: [RegExp, string][] = [
+  [/^ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ\s+/i, "ООО "],
+  [/^ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ПАО "],
+  [/^НЕПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "НАО "],
+  [/^ЗАКРЫТОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ЗАО "],
+  [/^ОТКРЫТОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "ОАО "],
+  [/^АКЦИОНЕРНОЕ ОБЩЕСТВО\s+/i, "АО "],
+  [/^ИНДИВИДУАЛЬНЫЙ ПРЕДПРИНИМАТЕЛЬ\s+/i, "ИП "],
+];
+
+export function shortName(name: string): string {
+  for (const [re, short] of LEGAL_FORMS) if (re.test(name)) return name.replace(re, short);
+  return name;
 }
 
 function CompanyName({ name }: { name: string }) {
   // the organizers' data has no supplier names (contracts.py): such a row is named by its INN
-  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"}>{name}</span>;
+  const short = shortName(name);
+  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={short !== name ? name : undefined}>{short}</span>;
 }
 
 export function App() {
@@ -186,6 +217,7 @@ export function App() {
   const [open, setOpen] = useState<CounterpartyMatch | null>(null);
   const [lotId, setLotId] = useState(saved.lotId ?? "");
   const [lot, setLot] = useState<Extra["lot"]>(saved.lot ?? null);
+  const lotLabels = useOkpd2Labels(lot?.okpd2 ?? []);
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
@@ -197,18 +229,30 @@ export function App() {
   };
   const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId });
 
-  async function loadLot() {
-    if (!lotId.trim()) return;
+  // the query of a loaded lot, for a search that must not wait for the form state to update
+  type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
+
+  async function loadLot(id: string = lotId): Promise<Ready | null> {
+    if (!id.trim()) return null;
     setLotBusy(true);
     setLotMsg(null);
     try {
-      const q = await fetchLot(lotId);
+      const q = await fetchLot(id);
       setText(q.text);
       setBudget(q.budget ? String(q.budget) : "");
       setCustomerInn(q.customer_inn ?? "");
       setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
       setLotQueryId(q.query_id);
-      setLotMsg({ kind: "ok", text: `Закупка ${lotId.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+      const budgetText = q.budget ? String(q.budget) : "";
+      const lotCtx = { okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget };
+      return {
+        text: q.text,
+        lotId: id,
+        budget: budgetText,
+        customerInn: q.customer_inn ?? "",
+        extra: { budget: budgetText, customer_inn: q.customer_inn ?? "", lot: lotCtx, query_id: q.query_id },
+      };
     } catch (e) {
       setLot(null);
       setLotQueryId(undefined);
@@ -222,33 +266,79 @@ export function App() {
               ? "Номер закупки — только цифры (lot_id или реестровый номер)."
               : `Не удалось загрузить закупку: ${String(e)}.`;
       setLotMsg({ kind: "err", text: `${why} Опишите предмет закупки текстом ниже.` });
+      return null;
     } finally {
       setLotBusy(false);
     }
   }
 
-  const runSeq = useRef(0);
+  // a procedure of the uploaded test export (#207): load it by number and search at once
+  const [pickedLot, setPickedLot] = useState<string | null>(null);
+  async function pickTestLot(id: string) {
+    setPickedLot(id);
+    setLotId(id);
+    try {
+      const ready = await loadLot(id);
+      if (ready) await run(filters, ready);
+    } finally {
+      setPickedLot(null);
+    }
+  }
 
-  async function run(nextFilters: Filters = filters) {
-    if (!text.trim()) return;
+  const runSeq = useRef(0);
+  // local scoring weights (#179): only in this browser; the server and the export keep the standard ones
+  const [weightSet, setWeightSet] = useState<WeightSettings>(loadWeights);
+  const weights = activeWeights(weightSet);
+  const weightsRef = useRef(weights);
+  weightsRef.current = weights;
+  const [shown, setShown] = useState(PAGE);
+
+  // with local weights the whole candidate set (≤ ALL) is re-ranked here: load it once for the shown query
+  const loadingAll = useRef(false);
+  async function loadAll(q: Query, seq: number) {
+    if (loadingAll.current) return;
+    loadingAll.current = true;
+    try {
+      const all = await search(q, { limit: ALL });
+      if (seq === runSeq.current) setRes(all);
+    } catch (e) {
+      if (seq !== runSeq.current) return;
+      setError(String(e));
+      setState("error");
+    } finally {
+      loadingAll.current = false;
+    }
+  }
+
+  async function run(nextFilters: Filters = filters, ready?: Ready) {
+    // the query of this run: a picked test lot (#207) or the form
+    const qText = ready?.text ?? text;
+    const qExtra = ready ? () => ready.extra : extra;
+    if (!qText.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
     setState("loading");
     setOpen(null);
     try {
       const active = nextFilters.only_msp || nextFilters.only_manufacturers || !!nextFilters.region;
       const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
-      const q = buildQuery(text, nextFilters, extra());
+      const q = buildQuery(qText, nextFilters, qExtra());
       const [r, b] = await Promise.all([
-        search(q),
+        // with local weights the whole candidate set is re-ranked here, so it comes in one page
+        search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
-        active ? search(buildQuery(text, none, extra()), { limit: ALL }) : Promise.resolve(null),
+        active ? search(buildQuery(qText, none, qExtra()), { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
+      setShown(PAGE);
       setShownQuery(q);
       setBase(b ?? r);
       setState("idle");
-      save({ text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
+      // weights switched on while this page-sized answer was in flight
+      if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
+      save(ready
+        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id }
+        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
       if (window.location.pathname === "/search") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
@@ -282,6 +372,10 @@ export function App() {
   }, [path]);
 
   function resetAll() {
+    // local weights too: a preset left from a rehearsal must not change the order on the demo
+    setWeightSet(STANDARD);
+    saveWeights(STANDARD);
+    weightsRef.current = null;
     try {
       window.sessionStorage.removeItem(STORE);
     } catch {
@@ -321,6 +415,21 @@ export function App() {
     document.title = `${titles[path] ?? "Страница не найдена"} — Митрандир`;
   }, [path]);
 
+  function applyWeights(next: WeightSettings) {
+    setWeightSet(next);
+    saveWeights(next);
+    const nextWeights = activeWeights(next);
+    weightsRef.current = nextWeights;
+    if (!res || !shownQuery) return;
+    // a page-sized answer cannot be re-ranked as a whole: fetch every candidate once
+    if (nextWeights && res.history.length < res.total.history) void loadAll(shownQuery, runSeq.current);
+    // back to the standard: the server order, page by page again
+    if (!nextWeights && res.history.length > PAGE) {
+      setRes({ ...res, history: res.history.slice(0, PAGE) });
+      setShown(PAGE);
+    }
+  }
+
   function toggle(next: Filters) {
     setFilters(next);
     if (res) void run(next);
@@ -330,18 +439,18 @@ export function App() {
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
     <div inert={!!open}><ScrollTools /></div>
-    <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
+    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
-      <GlassSidebar path={path} link={link} mark={<BrandMark />} />
+      <GlassHeader path={path} link={link} mark={<BrandMark />} />
+      {path !== "/" && <div className="search-background"><WaveField pattern="slats" /></div>}
       <div className="content">
-      <GlassTopbar path={path} link={link} />
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
       {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
       : path === "/about" ? <AboutPage onStart={() => go("/search")} />
-      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
+      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
       <div className="top">
@@ -355,7 +464,7 @@ export function App() {
         </div>
       )}
 
-      <div className="search-workbench">
+      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""}`}>
       <form
         id="supplier-search"
         className="query"
@@ -364,12 +473,14 @@ export function App() {
           void run();
         }}
       >
+        <div className="query-main">
         <div className="section-heading">
           <div>
             <h2>Параметры закупки</h2>
             <p>Загрузите извещение или опишите, что вам нужно.</p>
           </div>
         </div>
+        <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
         <div className="lot-section">
           <label htmlFor="lot">Номер закупки (необязательно)</label>
           <div className="lotrow">
@@ -415,6 +526,12 @@ export function App() {
           setText(example);
           resetLot();
         }} />
+        </div>
+        <div className="query-options">
+        {path === "/search" && <div className="section-heading"><div>
+          <h2>Уточнить подбор</h2>
+          <p>Необязательно. Поможет сузить круг компаний.</p>
+        </div></div>}
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -428,7 +545,7 @@ export function App() {
         {(lot?.channel || lot?.okpd2?.length) && (
           <div className="chips">
             {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
-            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
+            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {okpd2Text(lot.okpd2, lotLabels)}</span> : null}
           </div>
         )}
         <div className="row">
@@ -466,7 +583,7 @@ export function App() {
               <SearchIcon />
               {state === "loading" ? "Ищем…" : "Найти поставщиков"}
             </button>
-            <button
+            {path === "/results" && <button
               type="button"
               className="secondary"
               disabled={!res}
@@ -478,8 +595,10 @@ export function App() {
               }
             >
               Выгрузить в Excel
-            </button>
+            </button>}
+            {path === "/results" && weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
           </div>
+        </div>
         </div>
       </form>
       <div className="output">
@@ -527,18 +646,23 @@ export function App() {
           <header className="results-heading">
             <h2 className="results-title">Результаты подбора</h2>
             <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
+            {weights && (
+              <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
+                Оценка: {presetTitle(weightSet)} · только у вас
+              </a>
+            )}
             <span className="result-total" role="status">
               С опытом: <strong><RollingNumber value={res.total.history} /></strong> · Новых: <strong><RollingNumber value={res.total.discovered} /></strong>
             </span>
           </header>
           <Block
             variant="history"
-            tag="Проверенные"
+            tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
-            rows={res.history}
+            rows={weights ? rerank(res.history, weights).slice(0, shown) : res.history}
             total={res.total.history}
-            onMore={() => void showMore()}
+            onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
             loadingMore={more}
             onOpen={setOpen}
             empty={
@@ -549,10 +673,10 @@ export function App() {
           />
           <Block
             variant="new"
-            tag="Новые"
+            tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
-            rows={res.discovered}
+            rows={rerank(res.discovered, weights)}
             total={res.total.discovered}
             onOpen={setOpen}
             empty={
@@ -570,14 +694,8 @@ export function App() {
       </motion.div>
       </AnimatePresence>
       </div>
-      <footer className="appfoot">
-        <div className="appfoot-in">
-          <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
-          <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
-        </div>
-      </footer>
     </motion.div>
-    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} />}</AnimatePresence>
+    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} />}</AnimatePresence>
     </LayoutGroup>
     </MotionConfig>
   );
@@ -598,7 +716,7 @@ function Block(props: {
   const reduced = useReducedMotion();
   return (
     <section className={`block block-${props.variant}`} aria-label={props.title}>
-      <span className="block-tag">{props.tag}</span>
+      <span className="block-tag"><OriginIcon origin={props.variant} />{props.tag}</span>
       <h2>
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
@@ -676,10 +794,12 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   );
 }
 
-function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
+function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () => void; weightsNote?: string }) {
   const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
+  const topOkpd2 = String(cp.stats?.top_okpd2 ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+  const okpd2Labels = useOkpd2Labels(topOkpd2);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overflow = document.body.style.overflow;
@@ -721,12 +841,13 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
         <Logo cp={cp} large />
         <h2>{cp.name}</h2>
       </div>
-      <div className="card-summary">
+      <div className={`card-summary card-summary-${m.origin === "history" ? "history" : "new"}`}>
         <span>{m.origin === "history" ? "С опытом госзакупок" : "Из открытых источников"}</span>
         <span>Оценка <strong>{m.score.toFixed(2)}</strong></span>
       </div>
       <Breakdown m={m} />
       <h3>Почему в списке</h3>
+      {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
       <p className="hint">Оценка по каждому критерию × его вес в подборе.</p>
       <ul className="components">
         {m.components.map((c) => (
@@ -766,7 +887,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
           <dl className="facts stats">
             {Object.entries(cp.stats ?? {}).map(([k, v]) => [
               <dt key={`k-${k}`}>{STAT_LABEL[k] ?? k}</dt>,
-              <dd key={`v-${k}`}>{formatStat(k, v)}</dd>,
+              <dd key={`v-${k}`}>{k === "top_okpd2" ? okpd2Text(topOkpd2, okpd2Labels) : formatStat(k, v)}</dd>,
             ])}
           </dl>
         </>
@@ -858,12 +979,111 @@ function AboutPage({ onStart }: { onStart: () => void }) {
   );
 }
 
-function SettingsPage({ filters, onChange, onReset }: { filters: Filters; onChange: (f: Filters) => void; onReset: () => void }) {
+function WeightBar({ w }: { w: Weights }) {
+  const n = normalize(w);
+  return (
+    <span className="weight-bar" aria-hidden="true">
+      {COMPONENTS.map((c) => (n[c] > 0 ? <i key={c} style={{ width: `${n[c] * 100}%`, background: COMPONENT_COLOR[c] }} /> : null))}
+    </span>
+  );
+}
+
+function WeightsSettings({ value, onChange }: { value: WeightSettings; onChange: (s: WeightSettings) => void }) {
+  const base: Weights =
+    value.preset === "custom" && value.custom ? value.custom : (PRESETS.find((p) => p.id === value.preset)?.weights ?? DEFAULT_WEIGHTS);
+  const shares = normalize(base);
+  // the user's own weights stay selectable after trying another preset
+  const options = [
+    ...PRESETS.map((p) => ({ id: p.id, title: p.title, hint: p.hint, weights: p.weights ?? DEFAULT_WEIGHTS })),
+    ...(value.custom ? [{ id: "custom", title: "Свои веса", hint: "Заданы в продвинутом режиме", weights: value.custom }] : []),
+  ];
+  // WAI-ARIA radio group: arrows move and select, one tab stop
+  const onArrows = (e: React.KeyboardEvent) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const i = Math.max(0, options.findIndex((o) => o.id === value.preset));
+    const next = options[(i + step + options.length) % options.length];
+    onChange({ ...value, preset: next.id });
+    (e.currentTarget.querySelector(`[data-preset="${next.id}"]`) as HTMLElement | null)?.focus();
+  };
+  return (
+    <fieldset className="setting-group weights-group">
+      <legend>Как считать оценку</legend>
+      <p className="weights-note">
+        Меняется только у вас, в этом браузере. У коллег, в методологии и в выгрузке Excel остаются стандартные веса.
+      </p>
+      <div className="preset-grid" role="radiogroup" aria-label="Пресет весов" onKeyDown={onArrows}>
+        {options.map((o) => {
+          const on = value.preset === o.id;
+          return (
+            <button key={o.id} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} data-preset={o.id}
+              className={on ? "preset is-on" : "preset"} onClick={() => onChange({ ...value, preset: o.id })}>
+              <span className="preset-title">{o.title}</span>
+              <span className="preset-hint">{o.hint}</span>
+              <WeightBar w={o.weights} />
+            </button>
+          );
+        })}
+      </div>
+      <label className="setting switch-row">
+        <input type="checkbox" role="switch" checked={value.advanced} onChange={(e) => onChange({ ...value, advanced: e.target.checked })} />
+        <span>
+          <strong>Продвинутый режим</strong>
+          <small>Важность каждого критерия вручную. Оценка = Σ значение × доля критерия.</small>
+        </span>
+      </label>
+      {value.advanced && (
+        <div className="sliders">
+          {COMPONENTS.map((c) => UNAVAILABLE.includes(c) ? (
+            <div key={c} className="slider-row is-off">
+              <span className="slider-name">
+                <i style={{ background: COMPONENT_COLOR[c] }} aria-hidden="true" />
+                {COMPONENT_LABEL[c]}
+              </span>
+              <span className="slider-off">нет данных — в оценку не входит</span>
+              <span className="slider-share">0 %</span>
+            </div>
+          ) : (
+            <label key={c} className="slider-row">
+              <span className="slider-name">
+                <i style={{ background: COMPONENT_COLOR[c] }} aria-hidden="true" />
+                {COMPONENT_LABEL[c]}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round((base[c] ?? 0) * 100)}
+                style={{ "--fill": `${Math.round((base[c] ?? 0) * 100)}%`, "--tone": COMPONENT_COLOR[c] } as React.CSSProperties}
+                aria-valuetext={`${Math.round(shares[c] * 100)} % оценки`}
+                onChange={(e) => onChange({ ...value, preset: "custom", custom: { ...base, [c]: Number(e.target.value) / 100 } })}
+              />
+              <span className="slider-share">{Math.round(shares[c] * 100)} %</span>
+            </label>
+          ))}
+          <div className="sliders-foot">
+            <WeightBar w={base} />
+            <button type="button" className="secondary" onClick={() => onChange({ ...STANDARD, advanced: true })}>
+              Вернуть стандарт
+            </button>
+          </div>
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
+function SettingsPage({ filters, onChange, onReset, weightSet, onWeights }: {
+  filters: Filters; onChange: (f: Filters) => void; onReset: () => void;
+  weightSet: WeightSettings; onWeights: (s: WeightSettings) => void;
+}) {
   return (
     <section className="subpage" aria-labelledby="settings-title">
       <header className="top">
         <h1 id="settings-title">Настройки подбора</h1>
-        <p className="sub">Применяются к каждому поиску и к выгрузке в Excel. Их же можно менять в форме подбора.</p>
+        <p className="sub">Фильтры применяются к каждому поиску и к выгрузке в Excel; их же можно менять в форме подбора. Веса оценки — только у вас.</p>
       </header>
       <div className="settings">
         <fieldset className="setting-group">
@@ -903,6 +1123,7 @@ function SettingsPage({ filters, onChange, onReset }: { filters: Filters; onChan
             </select>
           </label>
         </fieldset>
+        <WeightsSettings value={weightSet} onChange={onWeights} />
         <div className="settings-actions">
           <button type="button" className="secondary" onClick={onReset}>Сбросить настройки и сохранённый запрос</button>
         </div>

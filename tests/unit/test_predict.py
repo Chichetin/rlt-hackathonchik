@@ -159,3 +159,40 @@ def test_duplicate_lot_rows_and_empty_okpd2_cells(tmp_path):
     ts = load_testset(d)
     assert len(ts.lots) == 1 and ts.lots[0].query.text == "Бумага"  # first row of a lot, as in ingest
     assert ts.lots[0].query.okpd2 == ["17.12.14.110"]
+
+
+@pytest.mark.parametrize(
+    ("value", "cell"),
+    [
+        ("- Аренда анализатора", "'- Аренда анализатора"),
+        ('=HYPERLINK("http://x")', '\'=HYPERLINK("http://x")'),
+        ("+7 812 000-00-00", "'+7 812 000-00-00"),
+        ("@SUM(1)", "'@SUM(1)"),
+        ("\tx", "'\tx"),
+        ("\rx", "'\rx"),
+        ("Бумага -1", "Бумага -1"),
+        ("-0.5", "-0.5"),  # a number is not a formula: stays a number in Excel
+        ("", ""),
+        (3, 3),
+    ],
+)
+def test_csv_cell_never_starts_a_formula(value, cell):
+    assert P.csv_cell(value) == cell
+
+
+def test_formula_like_texts_are_escaped_in_the_file(search_data, tmp_path):
+    """docs/REVIEW.md F-08: 5 subjects of the organizers' data start with «-»; in Excel such a cell is a formula."""
+    d = _copy(tmp_path)
+    (d / "Извещения_24-25.csv").write_text(
+        'lot_id;subject\n1;- Аренда анализатора\n2;=HYPERLINK("http://x")\n3;+7 бумага\n4;@SUM(1)\n'
+        "5;Бумага -1\n=6;Бумага А4\n", encoding="utf-8")
+    out = tmp_path / "o.csv"
+    P.run(d, out, top=2, offline=True)
+    rows = _rows(out)
+    texts = {r["lot_id"]: r["query_text"] for r in rows}
+    assert texts == {"1": "'- Аренда анализатора", "2": "'=HYPERLINK(\"http://x\")", "3": "'+7 бумага",
+                     "4": "'@SUM(1)", "5": "Бумага -1", "'=6": "Бумага А4"}
+    assert all(r["score"] == "" or not r["score"].startswith("'") for r in rows)
+    stats = P.run(d, out, top=2, offline=True)
+    assert stats["skipped"] == 6  # resume recognizes an escaped lot_id: no duplicate rows
+    assert len(_rows(out)) == len(rows)

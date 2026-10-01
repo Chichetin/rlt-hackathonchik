@@ -27,11 +27,14 @@ from openpyxl import Workbook
 from pydantic import BaseModel
 
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
+from src.api.testset import UploadLimit
+from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.enrich.role import LABEL as ROLE_LABEL
+from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
 from src.match import fallback
 from src.match import search as search_mod
@@ -74,6 +77,8 @@ app = FastAPI(
     version="0.1.0",
     description="Подбор поставщиков, производителей и дистрибьюторов с объяснением и источниками фактов.",
 )
+app.add_middleware(UploadLimit)  # 413 on an oversized test export before the body is read (#207)
+app.include_router(testset_router)  # /api/testset: the test export uploaded in the UI (#207), before the SPA route
 _engine = None
 
 
@@ -264,6 +269,18 @@ def api_lot(ident: str) -> Query:
         raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
     except LotDataUnavailable as e:
         raise HTTPException(503, str(e)) from e
+
+
+OKPD2_LABELS_MAX = 50
+
+
+@app.get("/api/okpd2", response_model=dict[str, str])
+def api_okpd2(codes: str = "") -> dict[str, str]:
+    """OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code."""
+    items = list(dict.fromkeys(c.strip() for c in codes.split(",") if c.strip()))
+    if len(items) > OKPD2_LABELS_MAX:
+        raise HTTPException(422, f"не больше {OKPD2_LABELS_MAX} кодов за запрос")
+    return {c: okpd2_label(c) for c in items}
 
 
 @app.get("/api/counterparty/{inn}", response_model=Counterparty)

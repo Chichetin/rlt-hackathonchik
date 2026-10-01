@@ -351,7 +351,7 @@ def with_card(cp: Counterparty, cache: SourceCache) -> tuple[Counterparty, bool]
 
 
 def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: bool, has_card: bool,
-                region: str, weights: dict[str, float]) -> list[ScoreComponent]:
+                region: str, weights: dict[str, float], region_note: str | None = None) -> list[ScoreComponent]:
     okved, okved_name = row["okved1"], row.get("okved1name", "")
     head = f"Основной ОКВЭД {okved}" + (f" «{okved_name}»" if okved_name else "")
     # A predicted class is never presented as the class of the query (#63: the prediction can be wrong).
@@ -378,6 +378,8 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
         geo, geo_why = NEIGHBOUR_VALUE, f"Реестр МСП: соседний регион — {where}"
     else:
         geo, geo_why = 0.0, f"Реестр МСП: {where}; регион запроса — {region}"
+    if region_note:  # the comparison is with the customer's region, say so
+        geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {region_note}"
 
     parts: dict[str, tuple[float, float, str]] = {
         "product_fit": (FIT[ch.relation], weights.get("product_fit", 0.0), fit_why),
@@ -500,6 +502,7 @@ def discover(
     matches: list[CounterpartyMatch] = []
     relation: dict[str, Relation] = {}
     no_card: set[str] = set()
+    target, target_note = search_mod.customer_region(query)  # «География» against the customer's region (#218)
     for inn, (row, ch, page) in found.items():
         if known and inn in known:
             continue
@@ -507,7 +510,7 @@ def discover(
         if not has_card:
             no_card.add(inn)
         relation[inn] = ch.relation
-        comps = _components(cp, row, ch, res.predicted, has_card, query.region, weights)
+        comps = _components(cp, row, ch, res.predicted, has_card, target, weights, target_note)
         matches.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                          score=round(sum(c.value * c.weight for c in comps), 4)))
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here

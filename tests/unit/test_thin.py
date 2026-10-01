@@ -1,4 +1,4 @@
-"""Thin OKPD2 groups (#122, D-078): metric on a hand-built mini dataset, the threshold edges."""
+"""Thin OKPD2 groups (#122, D-087): metric on a hand-built mini dataset, the threshold edges."""
 
 from __future__ import annotations
 
