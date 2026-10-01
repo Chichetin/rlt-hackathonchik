@@ -1,0 +1,27 @@
+# Эксперименты скоринга (#22, research/EXPERIMENTS.md): id эксперимента → правки поверх configs/search.yaml.
+# `make eval EXP=<id>` берёт запись по id; id без записи — конфигурация продукта как есть.
+# Это НЕ конфигурация продукта: дефолт меняется только в configs/search.yaml и только с подтверждением
+# человека №3 (формула и веса — слайд). Блоки weights / signals / options накладываются по ключам.
+H-15a-03:        # инкумбент-сигнал в experience, доля 0.3
+  signals: {incumbent: 0.3}
+H-15a-06:
+  signals: {incumbent: 0.6}
+H-15b:           # веса H-15b (сумма доступных компонент 1.0)
+  weights: {product_fit: 0.5, experience: 0.25, reliability: 0.0, activity: 0.15, geography: 0.1, price: 0.0}
+H-15c:           # регион ИП без КПП или с КПП из нулей — по ИНН (signals.inn_region, #95)
+  signals: {inn_region: 1.0}
+H-15d-tie:       # равные баллы — по BM25, а не по ИНН
+  options: {tie_break: bm25}
+H-15e:           # experience по лотам с похожими позициями вместо группы ОКПД2
+  options: {experience_by: similar}
+H-15f:           # v2-кандидат: текст важнее, опыт — по похожим позициям, география не штрафует
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+H-15g:           # H-15f + инкумбент-сигнал 0.3
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
+  signals: {incumbent: 0.3}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+H-15f-geo:       # проверка: H-15f с ненулевым весом географии и регионом ИП по ИНН
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
+  signals: {inn_region: 1.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
