@@ -52,6 +52,30 @@ def test_search_rejects_empty_text(client):
     assert client.post("/api/search", json={"query_id": "q", "text": ""}).status_code == 422
 
 
+def test_search_rejects_client_as_of_without_building_an_index(search_client, search_data):
+    """as_of is the backtest knob (eval calls search() directly). Through the API a client date built a new BM25
+    index for that date under the global index lock: on the full data 46 s and 110 MB per date, every other
+    search waiting (40 s instead of 0.5 s), then 503 (#145, docs/REVIEW.md F-01)."""
+    import os
+    from pathlib import Path
+
+    for path in ("/api/search", "/api/export"):
+        r = search_client.post(path, json={"query_id": "q", "text": "бумага", "as_of": "2025-03-01"})
+        assert r.status_code == 422 and "as_of" in r.json()["detail"]
+    built = Path(os.environ["INDEX_DIR"])
+    assert not built.exists() or not any(built.iterdir())  # nothing was built for the client's date
+
+
+def test_search_rejects_oversized_text(search_client):
+    """Unbounded text held a worker: 1 MB — 18 s on the full data; the longest eval query is 4.5k chars (#145, F-02)."""
+    big = "бумага офисная " * 1400  # 21 000 chars
+    for path in ("/api/search", "/api/export"):
+        r = search_client.post(path, json={"query_id": "q", "text": big})
+        assert r.status_code == 422 and "символов" in r.json()["detail"]
+    fits = search_client.post("/api/search", json={"query_id": "q", "text": "бумага офисная " * 1300})  # 19 500
+    assert fits.status_code == 200 and fits.json()["history"]
+
+
 def test_search_pages_on_server_with_totals(search_client):
     q = {"query_id": "q", "text": "бумага"}
     full = search_client.post("/api/search", json=q)
@@ -221,14 +245,20 @@ def test_lot_unparsable_price_gives_no_budget(client, monkeypatch, tmp_path):
     assert q["budget"] is None and q["customer_inn"] is None and q["okpd2"] == []
 
 
-def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path):
+@pytest.mark.parametrize(("procedure", "text"), [
+    ("Поставка картриджей", "Поставка картриджей"),
+    ("Закупка, осуществляемая в соответствии с частью 12 статьи 93", "Картридж; Тонер"),  # #113: both templates
+])
+def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path, procedure, text):
     (tmp_path / "Извещения_t.csv").write_text(
         "lot_id;reqnum;procedure_name;subject;start_price;customer_inn;is_eshop_or_aisgz\n"
-        "7;;Поставка картриджей;Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
+        f"7;;{procedure};Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
         encoding="utf-8",
     )
+    (tmp_path / "ТРУ_t.csv").write_text("lot_id;product_name;okpd2_code\n7;Тонер;20.59\n7;Картридж;26.20\n",
+                                        encoding="utf-8")
     monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
-    assert client.get("/api/lot/7").json()["text"] == "Поставка картриджей"
+    assert client.get("/api/lot/7").json()["text"] == text
 
 
 def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
@@ -252,3 +282,13 @@ def test_health_stub_flag_follows_demo_fixture_env(client, monkeypatch):
     assert client.get("/api/health").json()["stub"] is False
     monkeypatch.setenv("DEMO_FIXTURE", "1")
     assert client.get("/api/health").json()["stub"] is True
+
+
+def test_okpd2_labels_for_ui(client):
+    r = client.get("/api/okpd2", params={"codes": "17.12.14.110, 80.10.12.000,99.99.99.999,,"})
+    assert r.status_code == 200
+    assert r.json() == {"17.12.14.110": "17.12.14.110 «Бумага для печати»",
+                        "80.10.12.000": "80.10.12.000 (по 80.10.12 «Услуги охраны»)",
+                        "99.99.99.999": "99.99.99.999"}
+    assert client.get("/api/okpd2").json() == {}
+    assert client.get("/api/okpd2", params={"codes": ",".join(f"17.12.{i}" for i in range(51))}).status_code == 422

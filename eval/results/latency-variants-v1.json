@@ -1,0 +1,217 @@
+{
+  "exp_id": "latency-variants-v1",
+  "kind": "latency-variants",
+  "created_at": "2026-10-01T18:20:48+00:00",
+  "machine": {
+    "platform": "Linux-7.2.7-arch1-1-x86_64-with-glibc2.44",
+    "python": "3.14.7",
+    "cpus": 16
+  },
+  "what": "Варианты `make latency` (src.eval.latency.measure без изменений, n=100 после 5 прогревочных запросов; commit у каждого прогона свой). asis — как make latency; nodisc — src.api.app._discovered возвращает [] (вклад discovery, ревью #65 п. 2); noenrich — src.api.app._enriched возвращает историю как есть (появился в 4162c2c); text — у dev-запросов убран ОКПД2 (клиент, набравший только название; UI-сценарий). Порядок на parquet (4ff96c6): asis, nodisc, text, asis, nodisc; Postgres (4ff96c6) — только text; parquet (4162c2c): asis, noenrich, asis, noenrich.",
+  "conditions": {
+    "load_average_start_end": {
+      "parquet@4ff96c6 (asis, nodisc, text, asis, nodisc)": [
+        [
+          2.15,
+          2.13,
+          3.29
+        ],
+        [
+          1.63,
+          2.39,
+          3.18
+        ]
+      ],
+      "postgres@4ff96c6 (text)": [
+        [
+          1.5,
+          2.35,
+          3.16
+        ],
+        [
+          1.26,
+          1.8,
+          2.73
+        ]
+      ],
+      "parquet@4162c2c (asis, noenrich, asis, noenrich)": [
+        [
+          1.12,
+          1.57,
+          2.15
+        ],
+        [
+          2.91,
+          2.36,
+          2.36
+        ]
+      ]
+    },
+    "foreign_check_processes": "нет на старте каждой серии",
+    "added_by_hand_after_the_run": "блок conditions дописан исполнителем после прогона (инструмент его не пишет); цифры замера не менялись",
+    "env": {
+      "DISCOVERY_OFFLINE": "1",
+      "ENRICH_OFFLINE": "1",
+      "SOURCE_CACHE": "пустой (cache/sources.sqlite в worktree, ни одной страницы)",
+      "INDEX_DIR": "worktree/indexes (собраны `python -m src.match.index` из parquet; коды позиций построены заранее)",
+      "DATA_PROCESSED_DIR": "data/processed основной копии (полные данные организаторов, manifest.built_at 2026-10-01T10:15:17+00:00)",
+      "network": "ни одного запроса во внешние источники: офлайн-режим discovery, кеш пуст — блок «Новые» пуст, карточки из кеша не подмешиваются (их нет)"
+    },
+    "queries": "первые 5 dev-запросов — прогрев, далее 200; dev-запросы несут ОКПД2 лота (51 598 из 51 599 dev-кейсов), as_of=None, limit=20",
+    "cache_caveat": "кеш источников пуст, поэтому `_enriched` (карточки из кеша для 200 кандидатов, src/api/app.py) и `_verified` читают пустой SQLite; с прогретым кешем цена этих шагов выше — не измерено (прогрев кеша — массовые запросы наружу, подтверждение человека №4)"
+  },
+  "runs": [
+    {
+      "commit": "4ff96c6",
+      "variant": "asis",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 487.28,
+        "p95": 550.08,
+        "mean": 453.15,
+        "max": 588.97
+      }
+    },
+    {
+      "commit": "4ff96c6",
+      "variant": "nodisc",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 486.25,
+        "p95": 548.24,
+        "mean": 452.5,
+        "max": 575.04
+      }
+    },
+    {
+      "commit": "4ff96c6",
+      "variant": "text",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 480.42,
+        "p95": 533.54,
+        "mean": 447.43,
+        "max": 575.53
+      }
+    },
+    {
+      "commit": "4ff96c6",
+      "variant": "asis",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 517.03,
+        "p95": 572.15,
+        "mean": 478.25,
+        "max": 607.47
+      }
+    },
+    {
+      "commit": "4ff96c6",
+      "variant": "nodisc",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 482.48,
+        "p95": 533.68,
+        "mean": 446.9,
+        "max": 579.72
+      }
+    },
+    {
+      "commit": "4ff96c6",
+      "variant": "text",
+      "store": "postgres",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 2465.87,
+        "p95": 4365.5,
+        "mean": 2427.28,
+        "max": 4802.78
+      }
+    },
+    {
+      "commit": "4162c2c",
+      "variant": "asis",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 543.85,
+        "p95": 597.14,
+        "mean": 505.7,
+        "max": 636.72
+      }
+    },
+    {
+      "commit": "4162c2c",
+      "variant": "noenrich",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 485.87,
+        "p95": 540.42,
+        "mean": 451.92,
+        "max": 562.91
+      }
+    },
+    {
+      "commit": "4162c2c",
+      "variant": "asis",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 539.66,
+        "p95": 586.36,
+        "mean": 500.23,
+        "max": 670.62
+      }
+    },
+    {
+      "commit": "4162c2c",
+      "variant": "noenrich",
+      "store": "parquet",
+      "retriever": "bm25",
+      "n_queries": 100,
+      "warmup": 5,
+      "limit": 20,
+      "latency_ms": {
+        "p50": 486.57,
+        "p95": 536.31,
+        "mean": 447.38,
+        "max": 573.51
+      }
+    }
+  ],
+  "probe": "скрипт замера лежит вне репозитория (путь вне разрешённых брифом); исходник ниже",
+  "probe_source": "\"\"\"Variants of `make latency` (src.eval.latency.measure, #81): which part of /api/search p50/p95 is discovery,\nand what a text-only query (no OKPD2 — what a customer types into the UI) costs.\n\nusage: latency_variants.py <variant: asis|nodisc|text> <n>     (DATA_STORE from the environment, DISCOVERY_OFFLINE=1)\n  asis   — measure() unchanged (dev queries with OKPD2; discovery runs, offline, empty source cache)\n  nodisc — the same, src.api.app._discovered returns [] (history block only)\n  noenrich — (commit 4162c2c and later) src.api.app._enriched returns the history unchanged\n  text   — dev queries with okpd2=[] (a customer who typed only the item name); discovery runs (no OKPD2 -> empty block)\n\"\"\"\nimport json, sys\nfrom src.eval import latency\nvariant, n = sys.argv[1], int(sys.argv[2])\nif variant == \"nodisc\":\n    from src.api import app as app_mod\n    app_mod._discovered = lambda query, history: []\nelif variant == \"noenrich\":\n    from src.api import app as app_mod\n    app_mod._enriched = lambda history, uncached: history\nelif variant == \"text\":\n    orig = latency.load_cases\n    def stripped(part, cfg=None):\n        cases = orig(part, cfg)\n        for c in cases:\n            c.query = c.query.model_copy(update={\"okpd2\": []})\n        return cases\n    latency.load_cases = stripped\nbody = latency.measure(n)\nbody.pop(\"per_query\")\nprint(json.dumps({\"variant\": variant, **body}, ensure_ascii=False))\n"
+}

@@ -4,6 +4,8 @@ Also serves the built UI (src/ui/dist) at "/", so `make demo` is one process + w
 Search is paginated, filtered and sorted on the server (D-024): `POST /api/search?limit=&offset=`
 pages each block, the block sizes after filters are in the X-Total-History / X-Total-Discovered
 headers (the frozen SearchResponse has no total). The xlsx export takes every filtered row.
+Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
+X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Response
@@ -24,12 +27,16 @@ from openpyxl import Workbook
 from pydantic import BaseModel
 
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
+from src.api.testset import UploadLimit
+from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.enrich.role import LABEL as ROLE_LABEL
+from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
+from src.match import fallback
 from src.match import search as search_mod
 from src.match.filters import apply_filters
 from src.match.store import get_store
@@ -44,6 +51,8 @@ ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
 # «Тип» of the xlsx: the captions of KIND_LABEL in src/ui/src/api.ts, from the role captions of D-057
 KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Тип не определён"}
+# The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
+MAX_TEXT_CHARS = 20_000
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -68,6 +77,8 @@ app = FastAPI(
     version="0.1.0",
     description="Подбор поставщиков, производителей и дистрибьюторов с объяснением и источниками фактов.",
 )
+app.add_middleware(UploadLimit)  # 413 on an oversized test export before the body is read (#207)
+app.include_router(testset_router)  # /api/testset: the test export uploaded in the UI (#207), before the SPA route
 _engine = None
 
 
@@ -107,8 +118,22 @@ def health() -> Health:
     return Health(status="ok", stub=_is_stub(), llm=get_provider().name, queue=status_counts(_queue()), store=store)
 
 
-def _found(query: Query, uncached: set[str] | None = None) -> list[CounterpartyMatch]:
-    """Every candidate of the query after the user filters, best first.
+def _accepted(query: Query) -> None:
+    """422 before the search for what the product does not take: an empty text (#113); `as_of` — the eval
+    knob (search() is called directly there): through the API a client date built a new BM25 index per date
+    under the global index lock — 46 s and 110 MB on the full data, every other search waiting, then 503
+    (#145, F-01); a text over MAX_TEXT_CHARS (F-02)."""
+    if not query.text.strip():
+        raise HTTPException(422, "Пустой запрос")
+    if query.as_of is not None:
+        raise HTTPException(422, "as_of задаётся только в backtest (make eval): API ищет по всем данным")
+    if len(query.text) > MAX_TEXT_CHARS:
+        raise HTTPException(422, f"Текст запроса длиннее {MAX_TEXT_CHARS:_} символов".replace("_", " ")
+                                 + " — оставьте наименование позиции или фрагмент ТЗ")
+
+
+def _found(query: Query, uncached: set[str] | None = None) -> tuple[list[CounterpartyMatch], str | None]:
+    """Every candidate of the query after the user filters, best first; and why history is empty (#113).
 
     «Новые» INNs are the first in the enrichment queue because discover() queues them here, while
     `_enriched` only collects history INNs without a cache into `uncached` and the caller queues them
@@ -117,16 +142,23 @@ def _found(query: Query, uncached: set[str] | None = None) -> list[CounterpartyM
     производители» keeps only a role whose basis passed the check; strip_unverified does not check
     status / is_msp / name / region, so those filters rely on the cached card as is.
     """
+    _accepted(query)
     try:
         found = search_mod.search(query, k=search_mod.CANDIDATES)
     except FileNotFoundError as e:  # organizers' data not ingested / not loaded (src/match/store.py)
         log.warning("search: %s", e)  # the path goes to the log, not to the client
         raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
                                  "или база не отвечает") from e
+    note = fallback.search_note()
     if not getattr(search_mod, "IS_STUB", False):
         discovered = _discovered(query, found)
         found = [*_enriched(found, uncached if uncached is not None else set()), *discovered]
-    return apply_filters(found, query)
+    shown = apply_filters(found, query)
+    hidden = sum(m.origin == "history" for m in found) - sum(m.origin == "history" for m in shown)
+    if hidden and not any(m.origin == "history" for m in shown):
+        note = f"фильтры скрыли {hidden}"
+        log.info("search %s: %s", query.query_id, note)
+    return shown, note
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -209,7 +241,9 @@ def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
     uncached: set[str] = set()
-    matches = _found(query, uncached)
+    matches, note = _found(query, uncached)
+    if note:
+        response.headers["X-Search-Note"] = quote(note)
     history = [m for m in matches if m.origin == "history"]
     discovered = [m for m in matches if m.origin == "discovered"]
     response.headers["X-Total-History"] = str(len(history))
@@ -237,6 +271,18 @@ def api_lot(ident: str) -> Query:
         raise HTTPException(503, str(e)) from e
 
 
+OKPD2_LABELS_MAX = 50
+
+
+@app.get("/api/okpd2", response_model=dict[str, str])
+def api_okpd2(codes: str = "") -> dict[str, str]:
+    """OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code."""
+    items = list(dict.fromkeys(c.strip() for c in codes.split(",") if c.strip()))
+    if len(items) > OKPD2_LABELS_MAX:
+        raise HTTPException(422, f"не больше {OKPD2_LABELS_MAX} кодов за запрос")
+    return {c: okpd2_label(c) for c in items}
+
+
 @app.get("/api/counterparty/{inn}", response_model=Counterparty)
 def api_counterparty(inn: str) -> Counterparty:
     if not inn_is_valid(inn):
@@ -262,7 +308,7 @@ def api_enqueue(inn: str) -> EnqueueResult:
 
 @app.post("/api/export")
 def api_export(query: Query) -> StreamingResponse:
-    matches = _verified(_found(query))
+    matches = _verified(_found(query)[0])
     res = SearchResponse(query=query, history=[m for m in matches if m.origin == "history"],
                          discovered=[m for m in matches if m.origin == "discovered"], stub=_is_stub())
     wb = Workbook()

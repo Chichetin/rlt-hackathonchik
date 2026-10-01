@@ -87,7 +87,7 @@ stale_s=$((STALE_MIN * 60))
 Q='query($owner:String!,$name:String!){viewer{login}
 repository(owner:$owner,name:$name){
  issues(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title createdAt updatedAt
-  assignees(first:10){nodes{login}} labels(first:20){nodes{name}}
+  assignees(first:10){nodes{login}} labels(first:20){nodes{name}} comments(last:1){nodes{author{login}}}
   timelineItems(last:1,itemTypes:[ASSIGNED_EVENT]){nodes{...on AssignedEvent{createdAt}}}}}
  pullRequests(states:OPEN,first:100){nodes{number headRefName updatedAt}}
  refs(refPrefix:"refs/heads/",query:"worktree-",first:100){nodes{name target{...on Commit{committedDate}}}}}}'
@@ -98,7 +98,8 @@ fetch() {
   printf '%s' "$raw" | jq -c '{me: .data.viewer.login,
     issues: [.data.repository.issues.nodes[] | {number, title, createdAt, updatedAt,
       assignees: [.assignees.nodes[].login], labels: [.labels.nodes[].name],
-      assignedAt: (.timelineItems.nodes[0].createdAt // null)}],
+      assignedAt: (.timelineItems.nodes[0].createdAt // null),
+      lastBy: (.comments.nodes[0].author.login // null)}],
     prs: [.data.repository.pullRequests.nodes[] | {number, head: .headRefName, updatedAt}],
     refs: [.data.repository.refs.nodes[] | {name, at: (.target.committedDate // null)}]}'
 }
@@ -241,6 +242,9 @@ LABELS
     J "$data" '[.issues[] | select(any(.assignees[]; . == $d.me))]
       | if length > 0 then "[issues] мои открытые (\($d.me)):", (.[] | "  " + row)
         else "[issues] за \($d.me) открытых задач нет. Взять: bash scripts/issues.sh free → take <N>" end'
+    J "$data" '[.issues[] | select(any(.assignees[]; . == $d.me) and .lastBy != null and .lastBy != $d.me)]
+      | if length > 0 then "[входящее] в моих задачах последний комментарий не мой — прочитай (gh issue view <N> --comments | tail -30) и ответь по правилу «Связь агентов»:",
+          (.[] | "  #\(.number) \(.title) — новый комментарий от \(.lastBy)") else empty end'
     J "$data" '[.issues[] | select((others($d.me) | length) > 0 and (any(.assignees[]; . == $d.me) | not) and fresh($d))
         | {a: ([.labels[] | select(startswith("area:"))] | join(",") | if . == "" then "без area" else . end),
            w: "#\(.number) \(.assignees | join(",")) с \(.assignedAt // .updatedAt | ep | utc)"}]

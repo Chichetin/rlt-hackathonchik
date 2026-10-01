@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from src.api import app as app_mod
 from src.contracts import Query, inn_is_valid
 from src.enrich import discover as D
+from src.enrich import role
 from src.enrich.evidence import check_counterparty
 from src.sources import pb_nalog, rmsp
 from src.sources.cache import SourceCache
@@ -158,7 +159,8 @@ def test_server_error_is_not_a_block_and_stale_cache_survives(tmp_path):
 def test_okved_plan_class_then_wholesale():
     plan = D.okved_plan(["17.12.14.110", "17.12.14.119"])
     assert [(c.okved, c.okpd_class, c.relation) for c in plan] == [("17.12", "17.12", "class"),
-                                                                    ("46.49.33", "17.12", "wholesale")]
+                                                                    ("46.49.33", "17.12", "wholesale"),
+                                                                    ("46.76.1", "17.12", "wholesale")]
     assert [c.okved for c in D.okved_plan(["22.19.60.119"])] == ["22.19", "46.46.2"]  # longest prefix wins
     assert [c.okved for c in D.okved_plan(["22.19.20.110"])] == ["22.19"]  # no wholesale row → class only
     assert [c.okved for c in D.okved_plan(["28.23.25.000"])] == ["28.23", "46.66"]
@@ -166,11 +168,28 @@ def test_okved_plan_class_then_wholesale():
     assert [c.okved for c in D.okved_plan(["81.21.10.000"])] == ["81.21"]  # a service: the class itself
 
 
+def test_okved_plan_more_wholesale_channels_for_distributors():
+    """#108: a class may have several wholesale codes; classes without a row before got one."""
+    assert [c.okved for c in D.okved_plan(["17.12.14.110"])] == ["17.12", "46.49.33", "46.76.1"]
+    assert [c.okved for c in D.okved_plan(["17.23.13.191"])] == ["17.23", "46.49.33"]  # 46.76.1 only for 17.12
+    assert [c.okved for c in D.okved_plan(["26.20.40.120"])] == ["26.20", "46.51", "46.66"]
+    assert [c.okved for c in D.okved_plan(["20.20.14.000"])] == ["20.20", "46.75"]
+    assert [c.okved for c in D.okved_plan(["20.30.22.110"])] == ["20.30", "46.73.4"]  # paints (not 46.73.6)
+    assert [c.okved for c in D.okved_plan(["26.40.20.120"])] == ["26.40", "46.43"]
+    assert [c.okved for c in D.okved_plan(["27.51.11.110"])] == ["27.51", "46.43.1"]
+    assert [c.okved for c in D.okved_plan(["26.60.12.120"])] == ["26.60", "46.46.2"]
+    assert [c.okved for c in D.okved_plan(["25.73.30.110"])] == ["25.73", "46.74"]
+    assert [c.relation for c in D.okved_plan(["26.20.40.120"])] == ["class", "wholesale", "wholesale"]
+    assert all((role.classify(code) or ("",))[0] == "distributor" for codes in D.WHOLESALE.values() for code in codes)
+    assert D.wholesale_okved("43.12.11") is None and D.wholesale_okveds("43.12.11") == ()
+
+
 def test_okved_plan_skips_broad_codes_and_limits_classes():
     assert D.okved_plan(["17", "", " "]) == [] and D.okpd_classes(["17", "17.1"]) == []
     plan = D.okved_plan(["17.12.14", "26.20.40", "31.01.11"])
-    assert [c.okpd_class for c in plan] == ["17.12", "17.12", "26.20", "26.20"]  # MAX_CLASSES = 2
-    assert [c.okved for c in D.okved_plan(["17.12.14", "17.23.13"])] == ["17.12", "46.49.33", "17.23"]  # no repeat
+    assert [c.okpd_class for c in plan] == ["17.12", "17.12", "17.12", "26.20", "26.20", "26.20"]  # MAX_CLASSES = 2
+    assert [c.okved for c in D.okved_plan(["17.12.14", "17.23.13"])] == [
+        "17.12", "46.49.33", "46.76.1", "17.23"]  # no repeat
 
 
 # --- discover() ----------------------------------------------------------------------------------
@@ -296,12 +315,12 @@ def test_live_requests_respect_plan_budget_and_block(tmp_path):
     q = _query(okpd2=["17.12.14.110"])
     _run(SourceCache(tmp_path / "a.sqlite"), processed, query=q, offline=False, client=_client(handler))
     assert [p.split("region=")[1] for p in posted] == [  # own region first, then the neighbour; ≤ MAX_REQUESTS
-        "78&npType=UL&okved1=17.12", "78&npType=UL&okved1=46.49.33",
-        "47&npType=UL&okved1=17.12", "47&npType=UL&okved1=46.49.33"]
+        "78&npType=UL&okved1=17.12", "78&npType=UL&okved1=46.49.33", "78&npType=UL&okved1=46.76.1",
+        "47&npType=UL&okved1=17.12", "47&npType=UL&okved1=46.49.33", "47&npType=UL&okved1=46.76.1"]
     posted.clear()
-    two = _query(okpd2=["17.12.14.110", "26.20.40.110"])  # 2 classes × (class + wholesale) × 2 regions = 8
+    two = _query(okpd2=["17.12.14.110", "26.20.40.110"])  # 2 classes × (class + 2 wholesale) × 2 regions = 12
     _run(SourceCache(tmp_path / "two.sqlite"), processed, query=two, offline=False, client=_client(handler))
-    assert len(posted) == D.MAX_REQUESTS == 4 and all("region=78" in p for p in posted)
+    assert len(posted) == D.MAX_REQUESTS == 6 and all("region=78" in p for p in posted)
     posted.clear()
     lo = _query(okpd2=["17.12.14.110"], filters={"region": "Ленинградская область"})
     _run(SourceCache(tmp_path / "b.sqlite"), processed, query=lo, offline=False, client=_client(handler))
@@ -380,7 +399,7 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
     # request because the deadline starts after the query setup)
     elapsed = time.monotonic() - calls[0]["at"]
     assert elapsed < rmsp.TIMEOUT_S, f"{elapsed:.2f} s of network for a {budget} s budget"
-    assert len(calls) == expected_calls and len(res.requests) == 4 and res.matches == []
+    assert len(calls) == expected_calls and len(res.requests) == D.MAX_REQUESTS and res.matches == []
     # every request may wait only for what is left before the deadline (0.1 s: monotonic clock step on Windows)
     assert calls[0]["connect"] + calls[0]["read"] <= budget + 1e-6
     assert all(t["at"] - calls[0]["at"] + t["connect"] + t["read"] <= budget + 0.1 for t in calls)
@@ -457,6 +476,14 @@ def test_wholesale_neighbour_region_and_ip(tmp_path):
     assert "соседний регион — Ленинградская область" in trader.components[4].explanation
     assert trader.counterparty.region == "Ленинградская область"
 
+    # #218: a customer from the Leningrad region — the wholesaler from 47 is local now, the maker from 78 a neighbour
+    (tmp_path / "cust").mkdir()
+    cust = _run(c, _processed(tmp_path / "cust", []), query=_query(okpd2=["17.12.14.110"], customer_inn="4700000003"))
+    geo = {m.counterparty.inn: m.components[4] for m in cust.matches}
+    assert geo[trader.counterparty.inn].value == 1.0
+    assert geo["7811777270"].value == 0.8
+    assert "ИНН заказчика выдан в Ленинградской области" in geo["7811777270"].explanation
+
 
 def _rows(inns: list[str], okved: str, name: str) -> dict:
     return {"rowCount": -1, "data": [{**ANSWER["data"][0], "inn": i, "okved1": okved, "okved1name": name}
@@ -477,7 +504,29 @@ def test_top_ten_keeps_both_producers_and_distributors(tmp_path):
     shown = [m.counterparty.inn for m in res.matches]
     assert len(shown) == D.MAX_SHOWN == 10 and set(traders) <= set(shown)  # 7 producers + all 3 distributors
     assert shown[:7] == sorted(makers)[:7] and shown[7:] == sorted(traders)  # score order, INN inside a score
+    pool = [m.counterparty for m in res.pool]  # #108: every candidate before the top-10 cut
+    assert len(pool) == len(makers) + len(traders)
+    assert sorted(cp.inn or "" for cp in pool if cp.kind == "distributor") == sorted(traders)
     assert "всего в реестре не сообщается" in res.requests[0]  # rowCount -1 is not shown as a number
+
+
+def test_second_wholesale_channel_gives_checked_distributors_only(tmp_path):
+    """#108: 17.12 → 46.76.1 (paper wholesale). Its rows become distributors whose every fact passes
+    src/enrich/evidence.py; a row with a checksum-failing INN never becomes a company (no guessed INN)."""
+    paper = ["7707049388", "7806602902"]
+    bad = "7801000013"  # fails the checksum
+    assert all(inn_is_valid(i) for i in paper) and not inn_is_valid(bad)
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("46.76.1", "78"), rmsp.flatten("46.76.1", "78", "UL", _rows(
+        [*paper, bad], "46.76.1", "Торговля оптовая бумагой и картоном")))
+    res = _run(c, _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]), client=_client(_no_network))
+    assert sorted(m.counterparty.inn or "" for m in res.pool) == sorted(paper)
+    for m in res.matches:
+        cp = m.counterparty
+        assert cp.kind == "distributor" and cp.inn and inn_is_valid(cp.inn)
+        assert check_counterparty(cp, c.page_text) == []
+        assert m.components[0].value == D.FIT["wholesale"] and "оптовая торговля" in m.components[0].explanation
+    assert any("ОКВЭД 46.76.1, регион 78" in line for line in res.requests)
 
 
 def test_ip_is_shown_from_the_registry_without_contacts(tmp_path, monkeypatch):

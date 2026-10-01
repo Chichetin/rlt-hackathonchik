@@ -1,0 +1,556 @@
+{
+  "exp_id": "rss-api-v1",
+  "kind": "rss",
+  "created_at": "2026-10-01T17:39:58+00:00",
+  "commit": "5232e4cc9a2f78133715b9398faabafb82a3a85f",
+  "dirty": false,
+  "machine": {
+    "platform": "Linux-7.2.7-arch1-1-x86_64-with-glibc2.44",
+    "python": "3.14.7",
+    "cpus": 16
+  },
+  "what": "RSS (VmRSS, peak VmHWM, МБ, /proc/<pid>/status) процесса uvicorn src.api.app:app — отдельный процесс на каждый прогон, DISCOVERY_OFFLINE=1. Запросы БЕЗ ОКПД2 (текст «бумага офисная А4», затем «перчатки нитриловые смотровые»): первый запрос индекса строит doc_codes.parquet, если его нет (D-045, #83). as_of=None — индекс продукта, 2025-07-01 — индекс eval.",
+  "note_ms": "ms в этом файле сняты при параллельной нагрузке (два eval и чужие проверки) — для слайдов не использовать; здесь — память",
+  "cold_doc_codes": "codes=cold: doc_codes.parquet удалён перед запуском (первый запрос без ОКПД2 строит его через fetchall пар)",
+  "prebuilt_doc_codes": "codes=prebuilt: после `python -m src.match.index` (путь по умолчанию в compose, #83)",
+  "runs": [
+    {
+      "store": "parquet",
+      "codes": "cold",
+      "seq": "none",
+      "after_start": {
+        "rss_mb": 200.7,
+        "peak_mb": 200.7
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 4910,
+          "total_history": 200,
+          "rss_mb": 1544.4,
+          "peak_mb": 2877.9
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 487,
+          "total_history": 200,
+          "rss_mb": 1547.5,
+          "peak_mb": 2877.9
+        }
+      ]
+    },
+    {
+      "store": "parquet",
+      "codes": "cold",
+      "seq": "cutoff",
+      "after_start": {
+        "rss_mb": 200.6,
+        "peak_mb": 200.6
+      },
+      "steps": [
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 3534,
+          "total_history": 200,
+          "rss_mb": 1452.7,
+          "peak_mb": 2147.3
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 368,
+          "total_history": 200,
+          "rss_mb": 1460.2,
+          "peak_mb": 2147.3
+        }
+      ]
+    },
+    {
+      "store": "parquet",
+      "codes": "cold",
+      "seq": "both",
+      "after_start": {
+        "rss_mb": 200.7,
+        "peak_mb": 200.7
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 4531,
+          "total_history": 200,
+          "rss_mb": 1742.3,
+          "peak_mb": 2880.7
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 421,
+          "total_history": 200,
+          "rss_mb": 1755.9,
+          "peak_mb": 2880.7
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 3465,
+          "total_history": 200,
+          "rss_mb": 1804.6,
+          "peak_mb": 2880.7
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 362,
+          "total_history": 200,
+          "rss_mb": 1534.0,
+          "peak_mb": 2880.7
+        }
+      ]
+    },
+    {
+      "store": "parquet",
+      "codes": "prebuilt",
+      "seq": "none",
+      "after_start": {
+        "rss_mb": 200.7,
+        "peak_mb": 200.7
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 1166,
+          "total_history": 200,
+          "rss_mb": 1157.6,
+          "peak_mb": 1384.8
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 464,
+          "total_history": 200,
+          "rss_mb": 1155.5,
+          "peak_mb": 1384.8
+        }
+      ]
+    },
+    {
+      "store": "parquet",
+      "codes": "prebuilt",
+      "seq": "cutoff",
+      "after_start": {
+        "rss_mb": 200.6,
+        "peak_mb": 200.6
+      },
+      "steps": [
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 955,
+          "total_history": 200,
+          "rss_mb": 993.2,
+          "peak_mb": 1235.4
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 333,
+          "total_history": 200,
+          "rss_mb": 998.9,
+          "peak_mb": 1235.4
+        }
+      ]
+    },
+    {
+      "store": "parquet",
+      "codes": "prebuilt",
+      "seq": "both",
+      "after_start": {
+        "rss_mb": 200.6,
+        "peak_mb": 200.6
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 1118,
+          "total_history": 200,
+          "rss_mb": 1157.1,
+          "peak_mb": 1432.1
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 433,
+          "total_history": 200,
+          "rss_mb": 1161.0,
+          "peak_mb": 1432.1
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 842,
+          "total_history": 200,
+          "rss_mb": 1455.4,
+          "peak_mb": 1664.1
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 364,
+          "total_history": 200,
+          "rss_mb": 1464.9,
+          "peak_mb": 1664.1
+        }
+      ]
+    },
+    {
+      "store": "postgres",
+      "codes": "cold",
+      "seq": "none",
+      "after_start": {
+        "rss_mb": 200.6,
+        "peak_mb": 200.6
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 13957,
+          "total_history": 200,
+          "rss_mb": 2610.6,
+          "peak_mb": 3051.0
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 2553,
+          "total_history": 200,
+          "rss_mb": 2606.7,
+          "peak_mb": 3051.0
+        }
+      ]
+    },
+    {
+      "store": "postgres",
+      "codes": "cold",
+      "seq": "cutoff",
+      "after_start": {
+        "rss_mb": 216.3,
+        "peak_mb": 216.3
+      },
+      "steps": [
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 10197,
+          "total_history": 200,
+          "rss_mb": 1613.8,
+          "peak_mb": 2294.9
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 1957,
+          "total_history": 200,
+          "rss_mb": 1613.8,
+          "peak_mb": 2294.9
+        }
+      ]
+    },
+    {
+      "store": "postgres",
+      "codes": "cold",
+      "seq": "both",
+      "after_start": {
+        "rss_mb": 220.1,
+        "peak_mb": 220.1
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 14286,
+          "total_history": 200,
+          "rss_mb": 2671.7,
+          "peak_mb": 3098.4
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 2521,
+          "total_history": 200,
+          "rss_mb": 2675.8,
+          "peak_mb": 3098.4
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 10082,
+          "total_history": 200,
+          "rss_mb": 1875.4,
+          "peak_mb": 3098.4
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 1908,
+          "total_history": 200,
+          "rss_mb": 1875.4,
+          "peak_mb": 3098.4
+        }
+      ]
+    },
+    {
+      "store": "postgres",
+      "codes": "prebuilt",
+      "seq": "none",
+      "after_start": {
+        "rss_mb": 238.4,
+        "peak_mb": 238.4
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 3668,
+          "total_history": 200,
+          "rss_mb": 1157.6,
+          "peak_mb": 1163.4
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 2813,
+          "total_history": 200,
+          "rss_mb": 1157.8,
+          "peak_mb": 1163.4
+        }
+      ]
+    },
+    {
+      "store": "postgres",
+      "codes": "prebuilt",
+      "seq": "cutoff",
+      "after_start": {
+        "rss_mb": 246.6,
+        "peak_mb": 246.6
+      },
+      "steps": [
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 2861,
+          "total_history": 200,
+          "rss_mb": 1002.6,
+          "peak_mb": 1002.6
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 1927,
+          "total_history": 200,
+          "rss_mb": 1002.8,
+          "peak_mb": 1002.8
+        }
+      ]
+    },
+    {
+      "store": "postgres",
+      "codes": "prebuilt",
+      "seq": "both",
+      "after_start": {
+        "rss_mb": 255.9,
+        "peak_mb": 255.9
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 3724,
+          "total_history": 200,
+          "rss_mb": 1220.9,
+          "peak_mb": 1220.9
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 2618,
+          "total_history": 200,
+          "rss_mb": 1221.2,
+          "peak_mb": 1221.2
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 2683,
+          "total_history": 200,
+          "rss_mb": 1486.1,
+          "peak_mb": 1486.1
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 1934,
+          "total_history": 200,
+          "rss_mb": 1486.2,
+          "peak_mb": 1486.2
+        }
+      ]
+    }
+  ],
+  "runs_with_load": [
+    {
+      "store": "parquet",
+      "codes": "prebuilt",
+      "seq": "both",
+      "after_start": {
+        "rss_mb": 236.7,
+        "peak_mb": 236.7
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 1574,
+          "total_history": 200,
+          "rss_mb": 1158.9,
+          "peak_mb": 1286.9
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 460,
+          "total_history": 200,
+          "rss_mb": 760.7,
+          "peak_mb": 1286.9
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 1164,
+          "total_history": 200,
+          "rss_mb": 1269.7,
+          "peak_mb": 1484.2
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 346,
+          "total_history": 200,
+          "rss_mb": 1269.9,
+          "peak_mb": 1484.2
+        }
+      ],
+      "after_205_dev_queries": {
+        "rss_mb": 1086.8,
+        "peak_mb": 1484.2
+      }
+    },
+    {
+      "store": "postgres",
+      "codes": "prebuilt",
+      "seq": "both",
+      "after_start": {
+        "rss_mb": 255.9,
+        "peak_mb": 255.9
+      },
+      "steps": [
+        {
+          "as_of": null,
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 3571,
+          "total_history": 200,
+          "rss_mb": 1188.8,
+          "peak_mb": 1188.8
+        },
+        {
+          "as_of": null,
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 2411,
+          "total_history": 200,
+          "rss_mb": 1189.1,
+          "peak_mb": 1189.1
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "бумага офисная А4",
+          "first_for_as_of": true,
+          "ms": 2470,
+          "total_history": 200,
+          "rss_mb": 1508.1,
+          "peak_mb": 1508.1
+        },
+        {
+          "as_of": "2025-07-01",
+          "text": "перчатки нитриловые смотровые",
+          "first_for_as_of": false,
+          "ms": 1724,
+          "total_history": 200,
+          "rss_mb": 1508.2,
+          "peak_mb": 1508.2
+        }
+      ],
+      "after_205_dev_queries": {
+        "rss_mb": 1522.3,
+        "peak_mb": 1523.8
+      }
+    }
+  ],
+  "runs_with_load_what": "после последовательности (as_of None, затем 2025-07-01) — 205 первых dev-запросов (с ОКПД2, as_of=None, limit=20), как их шлёт make latency, по HTTP; after_205_dev_queries — RSS после них",
+  "probe": "scripts of the probe are not in the repository (path is outside of the task); source below",
+  "probe_source": "\"\"\"RSS of a real uvicorn process serving src.api.app on the first queries WITHOUT OKPD2 (#81, review #65).\n\nusage: rss_probe.py <store parquet|postgres> <cold|prebuilt> <seq: none|cutoff|both> [<out.json>]\ncold: doc_codes.parquet of the indexes is removed first (built by the first query without OKPD2).\n\"\"\"\nimport json, os, shutil, subprocess, sys, tempfile, time, urllib.request\n\nWT = os.environ[\"WT\"]\nstore, codes, seq = sys.argv[1:4]\nsrc_idx = os.environ[\"INDEX_DIR\"]\nwork = tempfile.mkdtemp(prefix=\"rssprobe-\", dir=os.environ.get(\"PROBE_TMP\"))\nidx = os.path.join(work, \"indexes\")\nshutil.copytree(src_idx, idx)\ntmp = os.path.join(work, \"tmp\"); os.makedirs(tmp)\nif codes == \"cold\":\n    for d in os.listdir(idx):\n        p = os.path.join(idx, d, \"doc_codes.parquet\")\n        if os.path.exists(p):\n            os.remove(p)\nport = 8790 + abs(hash((store, codes, seq))) % 100\nenv = dict(os.environ, DATA_STORE=store, INDEX_DIR=idx, TMPDIR=tmp)\nproc = subprocess.Popen([f\"{WT}/.venv/bin/python\", \"-m\", \"uvicorn\", \"src.api.app:app\", \"--port\", str(port),\n                         \"--log-level\", \"warning\"], cwd=WT, env=env)\n\ndef mem(pid):\n    out = {}\n    for line in open(f\"/proc/{pid}/status\"):\n        if line.startswith((\"VmRSS\", \"VmHWM\")):\n            k, v = line.split(\":\"); out[k] = round(int(v.split()[0]) / 1024, 1)\n    return {\"rss_mb\": out[\"VmRSS\"], \"peak_mb\": out[\"VmHWM\"]}\n\ndef call(path, body=None):\n    req = urllib.request.Request(f\"http://127.0.0.1:{port}{path}\", data=json.dumps(body).encode() if body else None,\n                                 headers={\"content-type\": \"application/json\"})\n    t0 = time.perf_counter()\n    with urllib.request.urlopen(req, timeout=600) as r:\n        data = r.read(); h = {k.lower(): v for k, v in r.headers.items()}\n    return (time.perf_counter() - t0) * 1000, data, h\n\ntry:\n    for _ in range(120):\n        try:\n            call(\"/api/health\"); break\n        except Exception:\n            time.sleep(0.5)\n    rec = {\"store\": store, \"codes\": codes, \"seq\": seq, \"after_start\": mem(proc.pid), \"steps\": []}\n    plan = {\"none\": [None], \"cutoff\": [\"2025-07-01\"], \"both\": [None, \"2025-07-01\"]}[seq]\n    texts = [\"бумага офисная А4\", \"перчатки нитриловые смотровые\"]\n    for as_of in plan:\n        for i, text in enumerate(texts):\n            q = {\"query_id\": f\"probe-{as_of}-{i}\", \"text\": text, \"as_of\": as_of}\n            ms, data, h = call(\"/api/search?limit=20\", q)\n            rec[\"steps\"].append({\"as_of\": as_of, \"text\": text, \"first_for_as_of\": i == 0, \"ms\": round(ms),\n                                 \"total_history\": int(h.get(\"x-total-history\", -1)), **mem(proc.pid)})\n    if len(sys.argv) > 4 and sys.argv[4] == \"load\":  # 205 dev queries over HTTP, as `make latency` sends them\n        cases = [json.loads(l)[\"query\"] for l in open(f\"{WT}/eval/cases/dev.jsonl\", encoding=\"utf-8\")][:205]\n        for q in cases:\n            call(\"/api/search?limit=20\", {**q, \"as_of\": None})\n        rec[\"after_205_dev_queries\"] = mem(proc.pid)\n    print(json.dumps(rec, ensure_ascii=False))\nfinally:\n    proc.terminate(); proc.wait(timeout=30)\n    shutil.rmtree(work, ignore_errors=True)\n",
+  "make_latency_process": {
+    "what": "пик (VmHWM) и RSS после прогона процесса `make latency` (TestClient и приложение в одном процессе, 200+5 dev-запросов, as_of=None; обёртка вызывает src.eval.latency.main и читает /proc/self/status). Снято при фоновой нагрузке (параллельный eval), на commit 5232e4c; память от нагрузки не зависит.",
+    "parquet": {
+      "VmHWM_mb": 1421,
+      "VmRSS_after_mb": 751
+    },
+    "postgres": {
+      "VmHWM_mb": 1181,
+      "VmRSS_after_mb": 720
+    }
+  }
+}

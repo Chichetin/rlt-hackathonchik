@@ -82,7 +82,18 @@ async function post(path: string, body: unknown): Promise<Response> {
 export const PAGE = 20;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
-export type SearchPage = SearchResponse & { total: Totals };
+// note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
+export type SearchPage = SearchResponse & { total: Totals; note?: string };
+
+function searchNote(r: Response): string | undefined {
+  const raw = r.headers.get("X-Search-Note");
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return undefined; // malformed encoding: fall back to the general empty text
+  }
+}
 
 export async function search(q: Query, page: { limit?: number; offset?: number } = {}): Promise<SearchPage> {
   const qs = new URLSearchParams({ limit: String(page.limit ?? PAGE), offset: String(page.offset ?? 0) });
@@ -95,6 +106,7 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
   return {
     ...body,
     total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
+    note: searchNote(r),
   };
 }
 
@@ -167,3 +179,52 @@ export function filterNotes(base: SearchResponse | null, f: Filters): string[] {
   }
   return notes;
 }
+
+// Organizers' test export uploaded from the UI (#207): CSV of the training format, sent as text in JSON
+// (no multipart). The server keeps it in cache/testsets and makes it the active set: /api/lot finds its lots.
+export type TestsetLot = { lot_id: string; reqnum: string | null; text: string; okpd2: string[]; notes: string[] };
+export type Testset = { id: string; files: string[]; lots: number; warnings: string[]; items: TestsetLot[] };
+
+async function detail(r: Response): Promise<string> {
+  const body = await r.text();
+  try {
+    const d = (JSON.parse(body) as { detail?: unknown }).detail;
+    if (typeof d === "string") return d;
+    // FastAPI validation errors: a list of {msg}
+    if (Array.isArray(d)) return d.map((x) => (x as { msg?: string }).msg ?? JSON.stringify(x)).join("; ");
+  } catch {
+    /* not JSON */
+  }
+  return body || `${r.status}`;
+}
+
+export async function uploadTestset(files: File[]): Promise<Testset> {
+  const payload = { files: await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() }))) };
+  const r = await fetch("/api/testset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (!r.ok) throw new Error(await detail(r));
+  const body: unknown = await r.json();
+  if (!isTestset(body)) throw new Error("сервер не принял выгрузку: неожиданный ответ");
+  return body;
+}
+
+function isTestset(x: unknown): x is Testset {
+  const t = x as Partial<Testset> | null;
+  return !!t && typeof t.id === "string" && Array.isArray(t.items) && Array.isArray(t.files) && Array.isArray(t.warnings);
+}
+
+export async function getTestset(): Promise<Testset | null> {
+  // read a copy: a shared mocked Response in tests (and any other reader) keeps its body
+  const r = (await fetch("/api/testset")).clone();
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(await detail(r));
+  const body: unknown = await r.json();
+  return isTestset(body) ? body : null; // an older API without /api/testset answers with something else
+}
+
+export async function dropTestset(): Promise<void> {
+  const r = await fetch("/api/testset", { method: "DELETE" });
+  if (!r.ok && r.status !== 404) throw new Error(await detail(r));
+}
+
+// offline=1: «Новые» from the cache only — a live run over every lot would be a mass crawl (confirmation №4)
+export const PREDICT_CSV_URL = "/api/testset/predict.csv?top=10&offline=1";
