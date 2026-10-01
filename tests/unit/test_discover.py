@@ -574,7 +574,9 @@ def test_api_search_fills_the_discovered_block(api):
     assert "класса ОКПД2 17.12 (в запросе ОКПД2 не указан — класс определён автоматически" in why
     assert "ОКПД2 запроса" not in why
     assert "7801000012" in [x["counterparty"]["inn"] for x in body["history"]]
-    assert api.get("/api/health").json()["queue"] == {"pending": 1}  # the ФНС card is ordered, not fetched inline
+    # the ФНС cards are ordered, not fetched inline: the «новый» one + every history INN without a cache (#38)
+    hist = {m["counterparty"]["inn"] for m in body["history"] if m["counterparty"]["inn"]}
+    assert api.get("/api/health").json()["queue"] == {"pending": 1 + len(hist)}
     only_lo = api.post("/api/search", json={"query_id": "q", "text": "бумага А4",
                                             "filters": {"region": "Ленинградская область"}}).json()
     assert only_lo["discovered"] == []
@@ -587,7 +589,8 @@ def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, mo
     monkeypatch.setattr(rmsp, "_post", lambda *a, **k: attempts.append(a) or 1 / 0)
     body = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"}).json()
     assert body["history"] and body["discovered"] == [] and attempts == []
-    assert api.get("/api/health").json()["queue"] == {}
+    hist = {m["counterparty"]["inn"] for m in body["history"] if m["counterparty"]["inn"]}
+    assert api.get("/api/health").json()["queue"] == {"pending": len(hist)}  # history INNs only (#38), no «новые»
     # the same request with the code from the notice fills the block without the flag
     monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
     with_code = api.post("/api/search", json={"query_id": "q", "text": "бумага А4", "okpd2": ["17.12.14.110"]}).json()

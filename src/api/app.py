@@ -107,8 +107,16 @@ def health() -> Health:
     return Health(status="ok", stub=_is_stub(), llm=get_provider().name, queue=status_counts(_queue()), store=store)
 
 
-def _found(query: Query) -> list[CounterpartyMatch]:
-    """Every candidate of the query after the user filters, best first."""
+def _found(query: Query, uncached: set[str] | None = None) -> list[CounterpartyMatch]:
+    """Every candidate of the query after the user filters, best first.
+
+    «Новые» INNs are the first in the enrichment queue because discover() queues them here, while
+    `_enriched` only collects history INNs without a cache into `uncached` and the caller queues them
+    (the visible page only) after this function returns. The hard filters run on the enriched rows
+    (status, МСП, kind). The cached card passes strip_unverified BEFORE the filters, so «только
+    производители» keeps only a role whose basis passed the check; strip_unverified does not check
+    status / is_msp / name / region, so those filters rely on the cached card as is.
+    """
     try:
         found = search_mod.search(query, k=search_mod.CANDIDATES)
     except FileNotFoundError as e:  # organizers' data not ingested / not loaded (src/match/store.py)
@@ -116,7 +124,8 @@ def _found(query: Query) -> list[CounterpartyMatch]:
         raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
                                  "или база не отвечает") from e
     if not getattr(search_mod, "IS_STUB", False):
-        found = [*found, *_discovered(query, found)]
+        discovered = _discovered(query, found)
+        found = [*_enriched(found, uncached if uncached is not None else set()), *discovered]
     return apply_filters(found, query)
 
 
@@ -128,10 +137,65 @@ def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in matches]
 
 
+def _enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[CounterpartyMatch]:
+    """Mix the cached enrichment (status, МСП, name, kind, ...) into history candidates BEFORE the hard filters (#38).
+
+    Cache only, never the network inside the user's request: no cache -> the INN is added to `uncached`
+    (queued later, visible page only) and the fields stay None («не проверено»). Organizers' data
+    (inn, kpp, stats) is kept.
+    """
+    cache = SourceCache()
+    pages = cached_pages(cache.page_text)  # one read and normalization per page for the whole list
+    out = []
+    for m in history:
+        cp = m.counterparty
+        if m.origin != "history" or not cp.inn or not inn_is_valid(cp.inn):
+            out.append(m)
+            continue
+        try:
+            # filters see only facts that pass the Evidence check, as the card does (strip before filters)
+            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True), pages)
+        except KeyError:  # nothing cached for this INN
+            uncached.add(cp.inn)
+            out.append(m)
+            continue
+        except Exception:  # noqa: BLE001 — a broken cached page must not break the search
+            log.exception("enrich из кеша: %s", cp.inn)
+            out.append(m)
+            continue
+        upd: dict[str, object] = {"evidence": [*cp.evidence, *card.evidence]}
+        if cp.name.startswith("ИНН ") and not card.name.startswith("ИНН "):
+            upd["name"] = card.name
+        for f in ("kind", "region", "status", "is_msp", "in_rnp"):
+            if getattr(card, f) is not None:
+                upd[f] = getattr(card, f)
+        if card.okved:
+            upd["okved"] = card.okved
+        upd["contacts"] = {**card.contacts, **cp.contacts}
+        out.append(m.model_copy(update={"counterparty": cp.model_copy(update=upd)}))
+    return out
+
+
+def _queue_uncached(page: list[CounterpartyMatch], uncached: set[str]) -> None:
+    """Queue enrichment for the uncached INNs of the shown page only (#38): not the whole candidate
+    list, and a failed task stays failed (retry_failed=False) — no repeated hits on the registries."""
+    for m in page:
+        inn = m.counterparty.inn
+        if inn and inn in uncached:
+            try:
+                enqueue(_queue(), "enrich", inn, retry_failed=False)
+            except Exception:  # noqa: BLE001 — a dead queue does not break the search
+                log.exception("enrich: не удалось поставить %s в очередь", inn)
+
+
+def _enqueue_background(inn: str) -> None:
+    enqueue(_queue(), "enrich", inn, retry_failed=False)
+
+
 def _discovered(query: Query, history: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     """Block «Новые» (#16, D-037): open sources via the cache; a failing source never breaks the search."""
     try:
-        res = discover_mod.discover(query, history, enqueue=lambda inn: enqueue(_queue(), "enrich", inn))
+        res = discover_mod.discover(query, history, enqueue=_enqueue_background)
     except Exception:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
         log.exception("discovery: блок «Новые» пуст из-за ошибки")
         return []
@@ -144,14 +208,17 @@ def _discovered(query: Query, history: list[CounterpartyMatch]) -> list[Counterp
 def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
-    matches = _found(query)
+    uncached: set[str] = set()
+    matches = _found(query, uncached)
     history = [m for m in matches if m.origin == "history"]
     discovered = [m for m in matches if m.origin == "discovered"]
     response.headers["X-Total-History"] = str(len(history))
     response.headers["X-Total-Discovered"] = str(len(discovered))
+    page = history[offset:offset + limit]
+    _queue_uncached(page, uncached)
     return SearchResponse(
         query=query,
-        history=_verified(history[offset:offset + limit]),
+        history=_verified(page),
         discovered=_verified(discovered[offset:offset + limit]),
         stub=_is_stub(),
     )
