@@ -129,9 +129,7 @@ def build(zip_path: Path, out: Path, workers: int | None = None) -> dict[str, in
              len(todo))
     rows, started = 0, time.monotonic()
     if workers == 1:
-        results = (_build_one(str(zip_path), m, str(out)) for m in todo)
-        for i, n in enumerate(results, 1):
-            rows += n
+        rows = sum(_build_one(str(zip_path), m, str(out)) for m in todo)
     else:
         with ProcessPoolExecutor(workers or os.cpu_count()) as ex:
             futures = [ex.submit(_build_one, str(zip_path), m, str(out)) for m in todo]
