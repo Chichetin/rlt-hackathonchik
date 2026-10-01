@@ -35,6 +35,8 @@ import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
+from src.ingest.okpd2 import label
+from src.match import fallback
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
@@ -63,6 +65,7 @@ SAT_LOTS, SAT_WINS = 20, 10  # experience saturates at 20 lots / 10 wins in the 
 HALF_LIFE_DAYS = 90  # activity halves every 90 days without participation
 REGION_NAME = {v: k for k, v in REGION_CODE.items()}
 REGION_IN = {"78": "в Санкт-Петербурге", "47": "в Ленинградской области"}
+REGION_PREP = {"78": "Санкт-Петербурге", "47": "Ленинградской области"}
 NEIGHBOUR = {"78": "47", "47": "78"}
 NEIGHBOUR_VALUE = 0.8
 # Components without data (D-029): shown with value 0 and weight 0, not invented.
@@ -78,6 +81,9 @@ OPTIONS: dict[str, tuple] = {
     "fit_bm25_share": (FIT_BM25_SHARE, None),  # share of BM25 in product_fit, [0, 1]
     "experience_by": ("class", ("class", "similar")),  # lots in the OKPD2 group | lots with similar positions
     "tie_break": ("inn", ("inn", "bm25")),  # order of equal scores
+    # lots / wins at which experience reaches 1.0 (#196): low caps make active suppliers indistinguishable
+    "sat_lots": (SAT_LOTS, None),
+    "sat_wins": (SAT_WINS, None),
 }
 
 
@@ -93,6 +99,9 @@ def scoring_options(cfg: dict) -> dict:
     out["fit_bm25_share"] = float(out["fit_bm25_share"])
     if not 0.0 <= out["fit_bm25_share"] <= 1.0:
         raise ValueError(f"options.fit_bm25_share = {out['fit_bm25_share']}: доля должна быть в [0, 1]")
+    for name in ("sat_lots", "sat_wins"):
+        if isinstance(out[name], bool) or not isinstance(out[name], int) or out[name] < 1:
+            raise ValueError(f"options.{name} = {out[name]!r}: ожидается целое число ≥ 1")
     return out
 
 
@@ -128,6 +137,7 @@ class Candidate:
     okpd_code: str | None = None  # supplier's code at the deepest match
     class_lots: int = 0
     class_wins: int = 0
+    found_by: str = ""  # fallback ladder (src/match/fallback.py): the first phrase of product_fit
 
 
 def _retrieve(store: Store, idx: LotIndex, lots: LotHits, as_of: date | None) -> list[Candidate]:
@@ -253,7 +263,7 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
                  how: str = "", share: float = FIT_BM25_SHARE) -> tuple[float, str]:
     sim = c.bm25 / top_bm25 if top_bm25 > 0 else 0.0
     best = c.best_text if len(c.best_text) <= 60 else c.best_text[:57] + "…"
-    head = f"Похожие{how} позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
+    head = c.found_by or f"Похожие{how} позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
     if not codes:
         return sim, f"{head}; ОКПД2 запроса не определён"
     src = "ОКПД2 определён по похожим позициям" if predicted else "ОКПД2 запроса"
@@ -261,16 +271,17 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
     if c.okpd_level == 0 or c.okpd_code is None:
         return value, f"{head}; {src} {', '.join(codes)} в его истории не встречается"
     return value, (f"{head}; {src}: {OKPD_LEVEL_TEXT[c.okpd_level]} "
-                   f"{_prefix(c.okpd_code, c.okpd_level)}")
+                   f"{label(_prefix(c.okpd_code, c.okpd_level))}")
 
 
-def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class") -> tuple[float, str]:
+def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class",
+                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS) -> tuple[float, str]:
     if codes and by == "class":
-        groups = ", ".join(sorted({x[2] or x[0] for x in map(levels, codes)}))
+        groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
         lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
-    value = 0.5 * _sat(lots, SAT_LOTS) + 0.5 * _sat(wins, SAT_WINS)
+    value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(wins, sat_wins)
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
 
@@ -317,6 +328,22 @@ def _inn_geography(inn: str | None, want: str | None, share: float, why: str) ->
     return 0.0, note
 
 
+def customer_region(query: Query) -> tuple[str, str | None]:
+    """The region «География» is measured against (#218): the customer's, else the query region.
+
+    The first two INN digits are the region where the INN was issued, not necessarily where the customer is
+    (the customer's KPP would be better, but Query has none). АИС ГЗ customers work in St Petersburg or the
+    Leningrad region, so only INN 78 / 47 is taken; another prefix (a federal body registered in Moscow, a
+    branch) says nothing about where the goods go — then the query region stays. The second value is the
+    note for the explanation, or None.
+    """
+    inn = (query.customer_inn or "").strip()
+    code = inn[:2] if len(inn) in (10, 12) and inn.isdigit() else ""
+    if code in REGION_NAME:
+        return REGION_NAME[code], f"ИНН заказчика выдан в {REGION_PREP[code]} — сравниваем с этим регионом"
+    return query.region, None
+
+
 def _geography(cp: Counterparty, region: str, inn_share: float = 0.0) -> tuple[float, str]:
     want = REGION_CODE.get(region)
     if not cp.kpp or len(cp.kpp) < 2 or not cp.kpp.strip("0"):  # 000000000 — a stub, not region 00
@@ -343,7 +370,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
 
     `config`: the whole configuration of an experiment (eval); by default configs/search.yaml.
+    Why the answer is empty (or found by the fallback ladder): fallback.search_note() after the call.
     """
+    fallback.reset_note()
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
@@ -351,7 +380,11 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     store = get_store()
     as_of = query.as_of
     idx = get_index(store, as_of)
-    hits = idx.retrieve(tokenize(query.text), TOP_DOCS)
+    if idx.n_docs == 0:
+        fallback.set_note(fallback.no_history(as_of))
+        return []
+    tokens = fallback.cap_tokens(idx, tokenize(query.text))
+    hits = idx.retrieve(tokens, TOP_DOCS)
     how = ""
     if cfg["retriever"] == "pg_hybrid":
         from src.match import pg_retriever
@@ -363,13 +396,17 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             if STRICT_RETRIEVER:
                 raise
             log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
-    if not hits:
-        return []
+    codes, bad_codes = fallback.okpd2_codes(query.okpd2)
     lots = idx.lot_hits(hits)
-    cands = _retrieve(store, idx, lots, as_of)
-    if not cands:
-        return []
-    codes = list(dict.fromkeys(c.strip() for c in query.okpd2 if c.strip()))
+    cands = _retrieve(store, idx, lots, as_of) if hits else []
+    if not cands:  # nobody by text: the fallback ladder (src/match/fallback.py)
+        hits, cands, note = fallback.ladder(store, idx, query, tokens, codes, cfg, bad_codes)
+        fallback.set_note(note)
+        if not cands:
+            return []
+        lots = idx.lot_hits(hits)
+    elif bad_codes:
+        fallback.set_note(f"ОКПД2 не распознан и не учтён: {', '.join(bad_codes)}")
     predicted = False
     if not codes:
         guess = _predict_okpd2(store, idx, hits, lots)
@@ -385,17 +422,20 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
+    target, target_note = customer_region(query)  # «География» against the customer's region (#218)
     for c in cands:
         cp = parties.get(c.inn)
         if cp is None:
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
-        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"])
+        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"])
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)
         act, act_why = _activity(cp, ref, as_of)
-        geo, geo_why = _geography(cp, query.region, shares["inn_region"])
+        geo, geo_why = _geography(cp, target, shares["inn_region"])
+        if target_note:  # the comparison is with the customer's region, say so
+            geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),

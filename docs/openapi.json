@@ -6,6 +6,122 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/testset": {
+      "get": {
+        "summary": "Get Testset",
+        "operationId": "get_testset_api_testset_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedTestset"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "набор не загружен"
+          }
+        }
+      },
+      "post": {
+        "summary": "Upload Testset",
+        "description": "Test export files (CSV text) -> the active set; 422 with a message on a broken format, 413 over the limit.",
+        "operationId": "upload_testset_api_testset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadTestsetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedTestset"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Testset",
+        "operationId": "delete_testset_api_testset_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/api/testset/predict.csv": {
+      "get": {
+        "summary": "Predict Testset",
+        "description": "`make predict --offline` over the active set: per lot «История» and «Новые» with score and components.",
+        "operationId": "predict_testset_api_testset_predict_csv_get",
+        "parameters": [
+          {
+            "name": "top",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "кандидатов в каждом блоке",
+              "default": 10,
+              "title": "Top"
+            },
+            "description": "кандидатов в каждом блоке"
+          },
+          {
+            "name": "offline",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "только 1: «Новые» из кеша, без сети",
+              "default": true,
+              "title": "Offline"
+            },
+            "description": "только 1: «Новые» из кеша, без сети"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "выдача по каждой процедуре (CSV «;»)",
+            "content": {
+              "text/csv": {}
+            }
+          },
+          "404": {
+            "description": "набор не загружен"
+          },
+          "422": {
+            "description": "offline=0: живой прогон по всем лотам — только make predict"
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "summary": "Health",
@@ -114,6 +230,91 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Query"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lot/{ident}/backtest": {
+      "get": {
+        "summary": "Api Lot Backtest",
+        "description": "Places of the lot's real participants and winner in our ranking, history before the cutoff (#192, D-084).",
+        "operationId": "api_lot_backtest_api_lot__ident__backtest_get",
+        "parameters": [
+          {
+            "name": "ident",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ident"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Backtest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/okpd2": {
+      "get": {
+        "summary": "Api Okpd2",
+        "description": "OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code.",
+        "operationId": "api_okpd2_api_okpd2_get",
+        "parameters": [
+          {
+            "name": "codes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Codes"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Okpd2 Api Okpd2 Get"
                 }
               }
             }
@@ -248,6 +449,78 @@
   },
   "components": {
     "schemas": {
+      "Backtest": {
+        "properties": {
+          "lot_id": {
+            "type": "integer",
+            "title": "Lot Id"
+          },
+          "lot_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Lot Date"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "ranked": {
+            "type": "integer",
+            "title": "Ranked"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/ParticipantRank"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "winner_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winner Rank"
+          },
+          "in_top": {
+            "type": "integer",
+            "title": "In Top"
+          },
+          "top": {
+            "type": "integer",
+            "title": "Top"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lot_id",
+          "lot_date",
+          "as_of",
+          "channel",
+          "ranked",
+          "participants",
+          "winner_rank",
+          "in_top",
+          "top"
+        ],
+        "title": "Backtest"
+      },
       "Counterparty": {
         "properties": {
           "inn": {
@@ -535,6 +808,36 @@
         ],
         "title": "Health"
       },
+      "ParticipantRank": {
+        "properties": {
+          "inn": {
+            "type": "string",
+            "title": "Inn"
+          },
+          "is_winner": {
+            "type": "boolean",
+            "title": "Is Winner"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inn",
+          "is_winner",
+          "rank"
+        ],
+        "title": "ParticipantRank"
+      },
       "Query": {
         "properties": {
           "query_id": {
@@ -720,6 +1023,135 @@
         ],
         "title": "SearchResponse",
         "description": "API envelope: two blocks of the result (the incumbent trap, methodology step 5)."
+      },
+      "UploadTestsetRequest": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/UploadedCsv"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "UploadTestsetRequest"
+      },
+      "UploadedCsv": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name",
+            "description": "имя файла, как у пользователя (Извещения*.csv, ТРУ*.csv)"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "содержимое файла, UTF-8 текстом"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "text"
+        ],
+        "title": "UploadedCsv"
+      },
+      "UploadedLot": {
+        "properties": {
+          "lot_id": {
+            "type": "string",
+            "title": "Lot Id"
+          },
+          "reqnum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reqnum"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "текст запроса подбора (Query.text) — тем же правилом, что /api/lot"
+          },
+          "okpd2": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Okpd2"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes",
+            "description": "что не так с лотом: пустой ОКПД2, предмет, НМЦК"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lot_id",
+          "reqnum",
+          "text",
+          "okpd2",
+          "notes"
+        ],
+        "title": "UploadedLot"
+      },
+      "UploadedTestset": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "sha256 содержимого Извещения + ТРУ, первые 12 знаков"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "использованные файлы (Поставщики*.csv не используется)"
+          },
+          "lots": {
+            "type": "integer",
+            "title": "Lots"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UploadedLot"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "files",
+          "lots",
+          "warnings",
+          "items"
+        ],
+        "title": "UploadedTestset"
       },
       "ValidationError": {
         "properties": {
