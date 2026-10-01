@@ -124,7 +124,6 @@ function logoHost(cp: CounterpartyMatch["counterparty"]): string | null {
   return domain && !FREE_MAIL.test(domain) ? domain : null;
 }
 
-
 export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterparty"]; large?: boolean }) {
   const host = logoHost(cp);
   const [failed, setFailed] = useState(false);
