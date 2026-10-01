@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App, noteText } from "./App";
@@ -335,7 +335,7 @@ function okpd2Route(body: unknown) {
       : new Response(JSON.stringify(body), { status: 200 });
 }
 
-test("lot chip names the OKPD2 class; without names it shows the bare code", async () => {
+test("lot chip names the OKPD2 class", async () => {
   const lotQuery = { query_id: "lot-9", text: "Бумага из извещения", okpd2: ["17.12"], budget: 1000, customer_inn: null, channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
   vi.spyOn(globalThis, "fetch").mockImplementation(okpd2Route(lotQuery));
   render(<App />);
@@ -365,5 +365,7 @@ test("card falls back to bare OKPD2 codes when names fail", async () => {
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/okpd2")));
+  await new Promise((r) => setTimeout(r, 0)); // the 500 is handled before the check
   expect(within(screen.getByRole("dialog")).getByText("17.12, 26.20")).toBeInTheDocument();
 });

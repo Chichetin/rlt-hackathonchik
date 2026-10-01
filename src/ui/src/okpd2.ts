@@ -3,18 +3,22 @@
 import { useEffect, useState } from "react";
 
 const known = new Map<string, string>(); // на всю сессию: справочник не меняется
+const PER_REQUEST = 50; // OKPD2_LABELS_MAX в src/api/app.py
 
-async function fetchLabels(codes: string[]): Promise<void> {
-  const missing = codes.filter((c) => !known.has(c));
-  if (!missing.length) return;
-  const r = await fetch(`/api/okpd2?codes=${encodeURIComponent(missing.join(","))}`);
+async function fetchChunk(codes: string[]): Promise<void> {
+  const r = await fetch(`/api/okpd2?codes=${encodeURIComponent(codes.join(","))}`);
   if (!r.ok) return;
   const body: unknown = await r.json();
   if (!body || typeof body !== "object") return;
-  for (const c of missing) {
+  for (const c of codes) {
     const v = (body as Record<string, unknown>)[c];
     if (typeof v === "string") known.set(c, v);
   }
+}
+
+async function fetchLabels(codes: string[]): Promise<void> {
+  const missing = [...new Set(codes)].filter((c) => !known.has(c));
+  for (let i = 0; i < missing.length; i += PER_REQUEST) await fetchChunk(missing.slice(i, i + PER_REQUEST));
 }
 
 export function okpd2Text(codes: string[], labels: Map<string, string>): string {
