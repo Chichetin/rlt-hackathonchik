@@ -395,7 +395,7 @@ test("card falls back to bare OKPD2 codes when names fail", async () => {
   expect(within(screen.getByRole("dialog")).getByText("17.12, 26.20")).toBeInTheDocument();
 });
 
-test("long legal forms are shortened in the list only", async () => {
+test("company names retain exact supplied legal form in list and full card", async () => {
   const long = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БЕТА"';
   const res = JSON.parse(JSON.stringify(response));
   res.history[0].counterparty.name = long;
@@ -403,7 +403,7 @@ test("long legal forms are shortened in the list only", async () => {
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
-  const row = within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText('ООО "БЕТА"');
+  const row = within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText(long);
   expect(row).toHaveAttribute("title", long);
   await userEvent.click(row);
   await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
