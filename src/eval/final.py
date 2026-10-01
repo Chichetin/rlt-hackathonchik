@@ -38,6 +38,8 @@ def seen_file(root: Path) -> Path:
 
 def gate(confirm: str | None, root: Path = ROOT, log: Path = FINAL_LOG) -> str:
     """Returns the config sha256 if the holdout may be read, else raises PermissionError."""
+    if "BM25_TOKENIZER" in os.environ:
+        raise PermissionError("BM25_TOKENIZER задан: eval-final оценивает только токенизатор из configs/search.yaml")
     try:
         sha = R.config_sha256(root)
         dirty = R.git("status", "--porcelain", "--", *FROZEN_PATHS, root=root, strict=True)

@@ -2,7 +2,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { buildQuery, filterNotes, regionLabel, type SearchResponse } from "./api";
+import { reviewLinks } from "./reviews";
+import { buildQuery, type Counterparty, filterNotes, regionLabel, type SearchResponse } from "./api";
 
 const match = (name: string, origin: "history" | "discovered", kind = "manufacturer") => ({
   counterparty: {
@@ -47,11 +48,13 @@ test("search shows two blocks, explanation and card with sources", async () => {
   expect(screen.getByRole("region", { name: "Новые из открытых источников" })).toBeInTheDocument();
   expect(screen.getByText(/Демонстрационные данные/)).toBeInTheDocument();
   expect(screen.getAllByText("5 контрактов по ОКПД2 17.12").length).toBeGreaterThan(0);
-  await userEvent.click(screen.getByText("ООО Альфа"));
+  await userEvent.click(within(screen.getByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   const card = screen.getByRole("dialog", { name: "Карточка: ООО Альфа" });
   expect(card).toHaveTextContent("Статус: действующее");
   expect(card).toHaveTextContent("ЕГРЮЛ");
   expect(card).toHaveTextContent("не подтверждён");
+  // no site in the sources — no logo and no placeholder in its place (#138)
+  expect(document.querySelector(".logo")).toBeNull();
 });
 
 test("API error is shown, not swallowed", async () => {
@@ -100,7 +103,7 @@ test("card shows stats and the unconfirmed INN note", async () => {
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
-  await userEvent.click(await screen.findByText("ООО Альфа"));
+  await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   const card = screen.getByRole("dialog");
   expect(card).toHaveTextContent("Побед");
   expect(card).toHaveTextContent("Доля побед");
@@ -139,6 +142,22 @@ test("filterNotes counts candidates hidden for an unknown attribute", () => {
   ]);
   expect(filterNotes(base, { only_msp: false, only_manufacturers: false, region: "" })).toEqual([]);
   expect(filterNotes(response, f)).toEqual([]);
+});
+
+test("filterNotes: «unknown» is a role the rule has set (with a basis), «null» is not yet determined", () => {
+  const f = { only_msp: false, only_manufacturers: true, region: "" };
+  const base = structuredClone(response);
+  base.history[0].counterparty.kind = "unknown";
+  expect(filterNotes(base, f)).toEqual([
+    "У 1 из 2 основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).",
+  ]);
+  base.discovered[0].counterparty.kind = null;
+  expect(filterNotes(base, f)).toEqual([
+    "Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения.",
+    "У 1 из 2 основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).",
+  ]);
+  base.history[0].counterparty.kind = "distributor";
+  expect(filterNotes(base, f)).toEqual(["Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения."]);
 });
 
 test("filter that hides unknown-type suppliers says so instead of 'nothing found'", async () => {
@@ -188,11 +207,16 @@ test("history is paged on the server: total from the header, «Показать 
 });
 
 // #84: «Новые» emptied by a filter. Mock: requests with the given filter get no new companies.
-async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["17.12.14.110"]) {
+async function newBlockWith(filter: "only_manufacturers" | "region", okpd2 = ["17.12.14.110"], kinds: Counterparty["kind"][] = [null]) {
   const base = structuredClone(response);
   base.stub = false;
   base.query.okpd2 = okpd2;
-  base.discovered[0].counterparty.kind = null;
+  base.discovered = kinds.map((kind, i) => {
+    const m = structuredClone(response.discovered[0]);
+    m.counterparty.name = i ? `ООО Бета ${i}` : "ООО Бета";
+    m.counterparty.kind = kind;
+    return m;
+  });
   const filtered = { ...structuredClone(base), discovered: [] };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
     const body = JSON.parse(String((init as RequestInit).body));
@@ -222,4 +246,66 @@ test("«Новые» emptied by the region keep the general text: the region of 
   await userEvent.selectOptions(screen.getByLabelText("Регион"), "Ленинградская область");
   expect(await within(discovered).findByText(/новых компаний по этому запросу не найдено/)).toBeInTheDocument();
   expect(discovered).not.toHaveTextContent("Под фильтр");
+});
+
+test("«Новые» emptied by «Только производители»: all distributors — no manufacturers among them, not «type unconfirmed» (#102)", async () => {
+  const discovered = await newBlockWith("only_manufacturers", undefined, ["distributor"]);
+  await userEvent.click(screen.getByLabelText("Только производители"));
+  expect(
+    await within(discovered).findByText(
+      "Под фильтр «Только производители» не попал никто из 1 новых компаний из реестра МСП: " +
+        "по основному ОКВЭД среди них нет производителей. Снимите фильтр, чтобы их увидеть.",
+    ),
+  ).toBeInTheDocument();
+  expect(discovered).not.toHaveTextContent("реестр не подтверждает");
+  expect(discovered).not.toHaveTextContent("вероятно");
+});
+
+test("«Новые» emptied by «Только производители»: role of all not determined — «confirmed manufacturers», у 1 из 1 (#102)", async () => {
+  const discovered = await newBlockWith("only_manufacturers");
+  await userEvent.click(screen.getByLabelText("Только производители"));
+  expect(
+    await within(discovered).findByText(
+      "Под фильтр «Только производители» не попал никто из 1 новых компаний из реестра МСП: " +
+        "подтверждённых производителей среди них нет — у 1 из 1 роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
+    ),
+  ).toBeInTheDocument();
+});
+
+test("«Новые» emptied by «Только производители»: one distributor, one without a role — у 1 из 2 (#102)", async () => {
+  const discovered = await newBlockWith("only_manufacturers", undefined, ["distributor", null]);
+  await userEvent.click(screen.getByLabelText("Только производители"));
+  expect(
+    await within(discovered).findByText(
+      "Под фильтр «Только производители» не попал никто из 2 новых компаний из реестра МСП: " +
+        "подтверждённых производителей среди них нет — у 1 из 2 роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
+    ),
+  ).toBeInTheDocument();
+});
+
+test("«Новые» with a manufacturer emptied by other filters: «Только производители» is not blamed (#102)", async () => {
+  const discovered = await newBlockWith("only_manufacturers", undefined, ["distributor", "manufacturer"]);
+  await userEvent.click(screen.getByLabelText("Только производители"));
+  expect(await within(discovered).findByText(/новых компаний по этому запросу не найдено/)).toBeInTheDocument();
+  expect(discovered).not.toHaveTextContent("Под фильтр");
+});
+
+test("card has a «Отзывы» block: not-in-score note, links by name and INN, no rating (#106)", async () => {
+  const withInn = structuredClone(response);
+  withInn.history[0]!.counterparty.inn = "7804428656";
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withInn), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
+  const block = within(screen.getByRole("region", { name: "Отзывы" }));
+  expect(block.getByText(/Не влияет на оценку подбора/)).toBeInTheDocument();
+  expect(block.getByText(/Рейтинг из отзывов не показываем/)).toBeInTheDocument();
+  expect(block.getByRole("link", { name: "2ГИС" })).toHaveAttribute("href", expect.stringContaining(encodeURIComponent("ООО Альфа 7804428656")));
+});
+
+test("reviewLinks: a placeholder name «ИНН …» is not used as a query; nothing to search — no links", () => {
+  expect(reviewLinks("ИНН 7804428656", "7804428656")[0].url).toContain("text=7804428656");
+  expect(reviewLinks("ИНН 7804428656", "7804428656")[0].url).not.toContain("%D0%98%D0%9D%D0%9D");
+  expect(reviewLinks("ИНН ", null)).toEqual([]);
 });
