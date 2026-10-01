@@ -35,6 +35,7 @@ import pyarrow.parquet as pq
 
 from src.db.norm import normalize
 from src.eval.metrics import bootstrap_ci
+from src.eval.run import winner_novelty
 from src.eval.split import ROOT, load_cases, split_config
 from src.match.index import get_index
 from src.match.pg_retriever import KNN, norm_map, rrf
@@ -62,6 +63,8 @@ PREFIX = {
 }
 # T5 encoders overflow in fp16 (inf/NaN activations): bf16 keeps the range at the same speed
 BF16 = {"ai-forever/FRIDA"}
+METRICS = ("cand_recall@200", "winner_hit@200", "recall@10", "mrr")
+DELTA_METRICS = ("cand_recall@200", "recall@10", "mrr")  # paired Δ to BM25 and per_query (#267)
 # vectors already encoded for production (#48): model -> files
 EXISTING = {"intfloat/multilingual-e5-small": ("vecs-e5-small.parquet", "vecs-rest.parquet")}
 
@@ -138,17 +141,20 @@ class Corpus:
 
         m = norm_map(idx)
         norms: list[str] = []
-        chunks: list[np.ndarray] = []
+        chunks: list = []
+        # batch by batch straight to the GPU: the whole table in RAM took ~9 GB for a 768-d model (#267)
         for f in vec_files(model, gpu_dir):
-            t = pq.read_table(f)
-            dim = t.schema.field("emb").type.list_size
-            emb = t.column("emb").combine_chunks().flatten().to_numpy(zero_copy_only=False).reshape(-1, dim)
-            names = t.column("norm").to_pylist()
-            keep = np.fromiter((n in m for n in names), bool, len(names))
-            norms.extend(n for n, k in zip(names, keep, strict=True) if k)
-            chunks.append(emb[keep])
+            pf = pq.ParquetFile(f)
+            dim = pf.schema_arrow.field("emb").type.list_size
+            for b in pf.iter_batches(batch_size=100_000):
+                names = b.column("norm").to_pylist()
+                keep = np.fromiter((n in m for n in names), bool, len(names))
+                emb = b.column("emb").flatten().to_numpy(zero_copy_only=False).reshape(-1, dim)[keep]
+                norms.extend(n for n, k in zip(names, keep, strict=True) if k)
+                chunks.append(torch.from_numpy(np.ascontiguousarray(emb, dtype=np.float16)).cuda())
         self.docs = [m[n] for n in norms]
-        self.emb = torch.from_numpy(np.concatenate(chunks).astype(np.float16)).cuda()
+        self.emb = torch.cat(chunks)
+        del chunks
         log.info("%s: %d имён в индексе cutoff из корпуса", slug(model), len(norms))
 
     def search(self, q: np.ndarray, k: int = KNN) -> list[list[int]]:
@@ -177,13 +183,14 @@ def _row(ranked: list[str], case) -> dict[str, float]:
     rel = set(case.relevant_inns)
     winners = {i for i, g in case.grades.items() if g >= 2} or rel
     got = set(ranked)
+    first = next((i for i, inn in enumerate(ranked) if inn in rel), None)
     return {"cand_recall@200": len(got & rel) / len(rel), "winner_hit@200": float(bool(got & winners)),
-            "recall@10": len(set(ranked[:10]) & rel) / len(rel)}
+            "recall@10": len(set(ranked[:10]) & rel) / len(rel), "mrr": 0.0 if first is None else 1 / (first + 1)}
 
 
 def _summary(rows: list[dict[str, float]]) -> dict:
     out = {"n": len(rows)}
-    for k in ("cand_recall@200", "winner_hit@200", "recall@10"):
+    for k in METRICS:
         vals = [r[k] for r in rows]
         lo, hi = bootstrap_ci(vals)
         out[k] = {"mean": round(float(np.mean(vals)) if vals else 0.0, 4), "ci95": [round(lo, 4), round(hi, 4)]}
@@ -194,6 +201,11 @@ def _paired(a: list[dict], b: list[dict], key: str = "cand_recall@200") -> dict:
     d = [x[key] - y[key] for x, y in zip(a, b, strict=True)]
     lo, hi = bootstrap_ci(d)
     return {"mean": round(float(np.mean(d)), 4), "ci95": [round(lo, 4), round(hi, 4)]}
+
+
+def _deltas(a: list[dict], b: list[dict]) -> dict:
+    """Paired bootstrap Δ (a − b) per metric; before #267 only cand_recall@200 was compared."""
+    return {k: _paired(a, b, k) for k in DELTA_METRICS}
 
 
 def cpu_latency(model: str, texts: list[str], n: int = 50) -> dict:
@@ -216,7 +228,8 @@ def short_text(text: str) -> str:
     return parts[1] if len(parts) > 1 else parts[0]
 
 
-def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = False) -> dict[str, dict]:
+def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = False,
+          latency: bool = True) -> dict[str, dict]:
     cfg = split_config()
     as_of = date.fromisoformat(str(cfg["cutoff"]))
     store = ParquetStore(processed_dir())
@@ -229,24 +242,36 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
     bm25_hits = [idx.retrieve(tokenize(t), TOP_DOCS) for t in raw]
     base = [_row(_cands(store, idx, h, as_of), c) for h, c in zip(bm25_hits, cases, strict=True)]
     log.info("BM25: %.0f с", time.time() - t0)
-    empty = [i for i, h in enumerate(bm25_hits) if not h]
+    # slices (#267): channel, winner new for the customer (as src.eval.run), a "new name" — the normalized
+    # short query (first position) is not a name of the cutoff index, so BM25 can only match it by tokens
+    names = norm_map(idx)
+    novelty = winner_novelty(cases, as_of) or [None] * len(cases)
+    groups = {ch: [i for i, c in enumerate(cases) if c.query.channel == ch] for ch in ("ЭМ", "АИС ГЗ")}
+    groups["winner=new"] = [i for i, v in enumerate(novelty) if v is True]
+    groups["winner=known"] = [i for i, v in enumerate(novelty) if v is False]
+    groups["new_name"] = [i for i, c in enumerate(cases) if normalize(short_text(c.query.text)) not in names]
+    groups["bm25_empty"] = [i for i, h in enumerate(bm25_hits) if not h]
 
-    def slices(rows: list[dict]) -> dict:
-        s = {ch: _summary([r for r, c in zip(rows, cases, strict=True) if c.query.channel == ch])
-             for ch in ("ЭМ", "АИС ГЗ")}
-        s["bm25_empty"] = _summary([rows[i] for i in empty])
-        return s
+    def slices(rows: list[dict], vs: list[dict] | None = None) -> dict:
+        out = {}
+        for name, ix in groups.items():
+            out[name] = _summary([rows[i] for i in ix])
+            if vs is not None and ix:
+                out[name]["delta_vs_bm25"] = _deltas([rows[i] for i in ix], [vs[i] for i in ix])
+        return out
 
     meta = {"part": "dev", "query": "short" if short else "lot", "n": len(cases), "seed": seed,
             "as_of": as_of.isoformat(), "commit": _commit(),
             "created": datetime.now(UTC).isoformat(timespec="seconds"), "top_docs": TOP_DOCS, "knn": KNN,
-            "candidates": CANDIDATES, "store": store.name, "index_docs": idx.n_docs}
+            "candidates": CANDIDATES, "store": store.name, "index_docs": idx.n_docs,
+            "slice_def": {"new_name": "normalized first position not a name of the cutoff index",
+                          "winner=new": "src.eval.run.winner_novelty"}}
     meta["tokenizer"] = tokenizer_version()
     bm25_key = "bm25" if tokenizer_name() == "prefix5" else f"bm25-{tokenizer_name()}"
     ids = [c.query.query_id for c in cases]
 
-    def per_query(rows: list[dict]) -> dict[str, float]:  # paired comparison across runs (same seed)
-        return {i: r["cand_recall@200"] for i, r in zip(ids, rows, strict=True)}
+    def per_query(rows: list[dict]) -> dict[str, dict]:  # paired comparison across runs (same seed)
+        return {i: {k: r[k] for k in DELTA_METRICS} for i, r in zip(ids, rows, strict=True)}
 
     results = {bm25_key: {**meta, "retriever": "bm25", "metrics": _summary(base), "slices": slices(base),
                           "per_query": per_query(base)}}
@@ -275,15 +300,15 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
         torch.cuda.empty_cache()
         results[slug(model)] = {
             **meta, "model": model, "prefix": PREFIX[model], "corpus_files": [p.name for p in vec_files(model)],
-            "vector": {"metrics": _summary(vec), "slices": slices(vec), "delta_vs_bm25": _paired(vec, base),
+            "vector": {"metrics": _summary(vec), "slices": slices(vec, base), "delta_vs_bm25": _deltas(vec, base),
                     "per_query": per_query(vec)},
-            "hybrid_rrf": {"metrics": _summary(hyb), "slices": slices(hyb), "delta_vs_bm25": _paired(hyb, base),
+            "hybrid_rrf": {"metrics": _summary(hyb), "slices": slices(hyb, base), "delta_vs_bm25": _deltas(hyb, base),
                     "per_query": per_query(hyb)},
-            "gpu_seconds": round(elapsed, 1), "cpu_query_latency": cpu_latency(model, texts),
+            "gpu_seconds": round(elapsed, 1), "cpu_query_latency": cpu_latency(model, texts) if latency else None,
         }
-        log.info("%s: vec %.3f, hybrid %.3f, bm25 %.3f", model, results[slug(model)]["vector"]["metrics"]
-                 ["cand_recall@200"]["mean"], results[slug(model)]["hybrid_rrf"]["metrics"]["cand_recall@200"]["mean"],
-                 results[bm25_key]["metrics"]["cand_recall@200"]["mean"])
+        r = results[slug(model)]
+        log.info("%s: recall@10 vec %.3f, hybrid %.3f, bm25 %.3f", model, r["vector"]["metrics"]["recall@10"]["mean"],
+                 r["hybrid_rrf"]["metrics"]["recall@10"]["mean"], results[bm25_key]["metrics"]["recall@10"]["mean"])
         save(slug(model))
     return results
 
@@ -299,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--seed", type=int, default=20261001)
     b.add_argument("--out-dir", type=Path, default=ROOT / "eval" / "results")
     b.add_argument("--short", action="store_true", help="query = the first position name (user-like)")
+    b.add_argument("--no-latency", action="store_true",
+                   help="skip CPU query latency (parallel runs make it noisy; measure on an idle machine)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -306,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         for model in args.model:
             print({"model": model, "out": str(encode_corpus(model))}, flush=True)
         return 0
-    res = bench(args.model, args.n, args.seed, args.out_dir, args.short)
+    res = bench(args.model, args.n, args.seed, args.out_dir, args.short, latency=not args.no_latency)
     print(json.dumps({k: (v.get("metrics") or {kk: v[kk]["metrics"] for kk in ("vector", "hybrid_rrf")})
                       for k, v in res.items()}, ensure_ascii=False, indent=1))
     return 0
