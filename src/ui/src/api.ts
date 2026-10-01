@@ -82,7 +82,18 @@ async function post(path: string, body: unknown): Promise<Response> {
 export const PAGE = 20;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
-export type SearchPage = SearchResponse & { total: Totals };
+// note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
+export type SearchPage = SearchResponse & { total: Totals; note?: string };
+
+function searchNote(r: Response): string | undefined {
+  const raw = r.headers.get("X-Search-Note");
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return undefined; // malformed encoding: fall back to the general empty text
+  }
+}
 
 export async function search(q: Query, page: { limit?: number; offset?: number } = {}): Promise<SearchPage> {
   const qs = new URLSearchParams({ limit: String(page.limit ?? PAGE), offset: String(page.offset ?? 0) });
@@ -95,6 +106,7 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
   return {
     ...body,
     total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
+    note: searchNote(r),
   };
 }
 

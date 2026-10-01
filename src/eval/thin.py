@@ -1,4 +1,4 @@
-"""«Thin» OKPD2 categories: where the organizers' data shows few suppliers for the demand (#122, D-073).
+"""«Thin» OKPD2 categories: where the organizers' data shows few suppliers for the demand (#122, D-074).
 
     uv run python -m src.eval.thin T-thin-v1            # -> eval/results/T-thin-v1.json
 
@@ -10,7 +10,7 @@ counts in each of them (the same convention as the class vote in discover.py).
 
 Per group: lots, share of lots with exactly one offer (distinct valid supplier INNs), median offers,
 distinct suppliers, suppliers per 100 lots. A group is thin when ALL hold (thresholds in `Thresholds`,
-the choice is justified by `sensitivity` in the result file and by D-073):
+the choice is justified by `sensitivity` in the result file and by D-074):
 - lots >= min_lots  (below that the share of single-offer lots is noise: its standard error at 50
   lots is up to 0.07);
 - single_share >= min_single  (at least half of the lots have no competition at all);

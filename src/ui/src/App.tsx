@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
-import { ExampleWheel, RollingNumber, WarmHints } from "./Micro";
+import { ExampleWheel, RollingNumber } from "./Micro";
 import "./micro.css";
+import { GlassSidebar, GlassTopbar } from "./GlassShell";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
 import {
@@ -76,6 +77,14 @@ function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Quer
     ? `подтверждённых производителей среди них нет — у ${undetermined} из ${n} роль ещё не определена`
     : "по основному ОКВЭД среди них нет производителей";
   return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+}
+
+/** Server's reason for an empty answer (X-Search-Note, #166) as a sentence; none — the general empty text. */
+export function noteText(note: string | undefined): string | undefined {
+  const t = note?.trim();
+  if (!t) return undefined;
+  const sentence = t[0].toUpperCase() + t.slice(1);
+  return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
 type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
@@ -318,23 +327,9 @@ export function App() {
     <div inert={!!open}><ScrollTools /></div>
     <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
-      <header className="appbar">
-      <div className="workspace-bar">
-        <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
-          <span className="brand-mark"><BrandMark /></span>
-          митрандир
-        </a>
-        <WarmHints route={path}><nav className="workspace-nav" aria-label="Разделы страницы">
-          {[["/", "Главная", "Возможности Митрандира"], ["/search", "Подбор", "Опишите закупку или загрузите извещение"], ["/results", "Результаты", "Найденные компании и основания подбора"], ["/settings", "Настройки", "Регион и требования к поставщикам"], ["/about", "О сервисе", "Источники данных и критерии оценки"]].map(([to, label, hint]) => (
-            <a key={to} data-hint={hint} {...link(to)}>
-              {path === to && <motion.span className="nav-indicator" layoutId="nav-current" transition={glide} aria-hidden="true" />}
-              <span className="nav-label">{label}</span>
-            </a>
-          ))}
-        </nav></WarmHints>
-      </div>
-      </header>
+      <GlassSidebar path={path} link={link} mark={<BrandMark />} />
       <div className="content">
+      <GlassTopbar path={path} link={link} />
       <AnimatePresence mode="wait" initial={false}>
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -544,7 +539,7 @@ export function App() {
             empty={
               filterNotes(base, filters).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
-                : undefined
+                : noteText(res.note)
             }
           />
           <Block
