@@ -1,0 +1,375 @@
+{
+ "source": "participants.parquet (данные организаторов «Поставщики»: лот → ИНН/КПП участника, is_winner)",
+ "generated_at": "2026-10-01T20:34:16+00:00",
+ "period": {
+  "from": "2024-01-08",
+  "to": "2025-12-31",
+  "rows": 1010107
+ },
+ "method": "Поставщик — уникальный ИНН. Регион — код субъекта ФНС из КПП организации (место постановки на учёт, у филиала — его город), если КПП валиден, не из нулей и не 99… (крупнейшие налогоплательщики), иначе из ИНН; у ИП (12 цифр) — только ИНН. Серии 97/98 — Москва/Санкт-Петербург, коды упразднённых АО — их нынешний субъект. Несколько регионов у ИНН — самый частый по участиям. ИНН с неверной контрольной суммой — unknown. Правила — regionCodeOf в src/ui/src/geo/regions.ts.",
+ "total_suppliers": 44196,
+ "by_region": {
+  "01": {
+   "suppliers": 24,
+   "winners": 22
+  },
+  "02": {
+   "suppliers": 393,
+   "winners": 350
+  },
+  "03": {
+   "suppliers": 72,
+   "winners": 67
+  },
+  "04": {
+   "suppliers": 11,
+   "winners": 9
+  },
+  "05": {
+   "suppliers": 100,
+   "winners": 91
+  },
+  "06": {
+   "suppliers": 17,
+   "winners": 16
+  },
+  "07": {
+   "suppliers": 66,
+   "winners": 61
+  },
+  "08": {
+   "suppliers": 65,
+   "winners": 62
+  },
+  "09": {
+   "suppliers": 28,
+   "winners": 26
+  },
+  "10": {
+   "suppliers": 198,
+   "winners": 176
+  },
+  "11": {
+   "suppliers": 188,
+   "winners": 169
+  },
+  "12": {
+   "suppliers": 61,
+   "winners": 55
+  },
+  "13": {
+   "suppliers": 76,
+   "winners": 67
+  },
+  "14": {
+   "suppliers": 74,
+   "winners": 68
+  },
+  "15": {
+   "suppliers": 46,
+   "winners": 42
+  },
+  "16": {
+   "suppliers": 431,
+   "winners": 379
+  },
+  "17": {
+   "suppliers": 9,
+   "winners": 9
+  },
+  "18": {
+   "suppliers": 251,
+   "winners": 219
+  },
+  "19": {
+   "suppliers": 37,
+   "winners": 35
+  },
+  "20": {
+   "suppliers": 19,
+   "winners": 17
+  },
+  "21": {
+   "suppliers": 160,
+   "winners": 136
+  },
+  "22": {
+   "suppliers": 208,
+   "winners": 187
+  },
+  "23": {
+   "suppliers": 467,
+   "winners": 410
+  },
+  "24": {
+   "suppliers": 297,
+   "winners": 264
+  },
+  "25": {
+   "suppliers": 147,
+   "winners": 134
+  },
+  "26": {
+   "suppliers": 251,
+   "winners": 230
+  },
+  "27": {
+   "suppliers": 154,
+   "winners": 146
+  },
+  "28": {
+   "suppliers": 60,
+   "winners": 53
+  },
+  "29": {
+   "suppliers": 275,
+   "winners": 259
+  },
+  "30": {
+   "suppliers": 101,
+   "winners": 91
+  },
+  "31": {
+   "suppliers": 115,
+   "winners": 100
+  },
+  "32": {
+   "suppliers": 125,
+   "winners": 110
+  },
+  "33": {
+   "suppliers": 138,
+   "winners": 120
+  },
+  "34": {
+   "suppliers": 245,
+   "winners": 221
+  },
+  "35": {
+   "suppliers": 254,
+   "winners": 221
+  },
+  "36": {
+   "suppliers": 265,
+   "winners": 230
+  },
+  "37": {
+   "suppliers": 216,
+   "winners": 197
+  },
+  "38": {
+   "suppliers": 186,
+   "winners": 169
+  },
+  "39": {
+   "suppliers": 148,
+   "winners": 138
+  },
+  "40": {
+   "suppliers": 103,
+   "winners": 91
+  },
+  "41": {
+   "suppliers": 55,
+   "winners": 48
+  },
+  "42": {
+   "suppliers": 218,
+   "winners": 192
+  },
+  "43": {
+   "suppliers": 213,
+   "winners": 189
+  },
+  "44": {
+   "suppliers": 70,
+   "winners": 64
+  },
+  "45": {
+   "suppliers": 82,
+   "winners": 74
+  },
+  "46": {
+   "suppliers": 95,
+   "winners": 89
+  },
+  "47": {
+   "suppliers": 2409,
+   "winners": 2268
+  },
+  "48": {
+   "suppliers": 109,
+   "winners": 94
+  },
+  "49": {
+   "suppliers": 19,
+   "winners": 17
+  },
+  "50": {
+   "suppliers": 988,
+   "winners": 868
+  },
+  "51": {
+   "suppliers": 362,
+   "winners": 341
+  },
+  "52": {
+   "suppliers": 441,
+   "winners": 391
+  },
+  "53": {
+   "suppliers": 318,
+   "winners": 288
+  },
+  "54": {
+   "suppliers": 351,
+   "winners": 305
+  },
+  "55": {
+   "suppliers": 221,
+   "winners": 198
+  },
+  "56": {
+   "suppliers": 236,
+   "winners": 209
+  },
+  "57": {
+   "suppliers": 61,
+   "winners": 52
+  },
+  "58": {
+   "suppliers": 117,
+   "winners": 108
+  },
+  "59": {
+   "suppliers": 323,
+   "winners": 265
+  },
+  "60": {
+   "suppliers": 310,
+   "winners": 288
+  },
+  "61": {
+   "suppliers": 419,
+   "winners": 367
+  },
+  "62": {
+   "suppliers": 89,
+   "winners": 78
+  },
+  "63": {
+   "suppliers": 391,
+   "winners": 338
+  },
+  "64": {
+   "suppliers": 213,
+   "winners": 195
+  },
+  "65": {
+   "suppliers": 38,
+   "winners": 37
+  },
+  "66": {
+   "suppliers": 732,
+   "winners": 639
+  },
+  "67": {
+   "suppliers": 142,
+   "winners": 119
+  },
+  "68": {
+   "suppliers": 53,
+   "winners": 44
+  },
+  "69": {
+   "suppliers": 230,
+   "winners": 208
+  },
+  "70": {
+   "suppliers": 127,
+   "winners": 106
+  },
+  "71": {
+   "suppliers": 127,
+   "winners": 102
+  },
+  "72": {
+   "suppliers": 128,
+   "winners": 101
+  },
+  "73": {
+   "suppliers": 151,
+   "winners": 135
+  },
+  "74": {
+   "suppliers": 474,
+   "winners": 415
+  },
+  "75": {
+   "suppliers": 65,
+   "winners": 59
+  },
+  "76": {
+   "suppliers": 236,
+   "winners": 217
+  },
+  "77": {
+   "suppliers": 3660,
+   "winners": 3299
+  },
+  "78": {
+   "suppliers": 23417,
+   "winners": 22531
+  },
+  "79": {
+   "suppliers": 8,
+   "winners": 8
+  },
+  "83": {
+   "suppliers": 2,
+   "winners": 2
+  },
+  "86": {
+   "suppliers": 182,
+   "winners": 154
+  },
+  "87": {
+   "suppliers": 5,
+   "winners": 4
+  },
+  "89": {
+   "suppliers": 81,
+   "winners": 65
+  },
+  "90": {
+   "suppliers": 1,
+   "winners": 1
+  },
+  "91": {
+   "suppliers": 77,
+   "winners": 68
+  },
+  "92": {
+   "suppliers": 27,
+   "winners": 23
+  },
+  "93": {
+   "suppliers": 8,
+   "winners": 8
+  },
+  "94": {
+   "suppliers": 2,
+   "winners": 2
+  },
+  "99": {
+   "suppliers": 9,
+   "winners": 9
+  }
+ },
+ "multi_region_suppliers": 215,
+ "foreign": {
+  "count": 5,
+  "note": "Иностранные участники: ИНН 9909… (иностранная организация на учёте в РФ) и идентификаторы из 9 знаков вместо ИНН. Страна в данных не указана. 9 знаков похожи на УНП Беларуси (у физлиц — 2 буквы + 7 цифр) или ИНН Узбекистана/Таджикистана — это гипотеза, не проверено."
+ },
+ "unknown": 18
+}
