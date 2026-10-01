@@ -1,8 +1,8 @@
 {
   "exp_id": "E-001",
   "part": "dev",
-  "created_at": "2026-10-01T10:08:39+00:00",
-  "commit": "43822152ad8864bc89f20a6591a5697bea5f8978",
+  "created_at": "2026-10-01T10:19:40+00:00",
+  "commit": "6b5ee1c1841869ab5adea9985d002c0a4826ff1c",
   "dirty": false,
   "config": {
     "retriever": "bm25",
@@ -16,7 +16,7 @@
       "price": 0.05
     }
   },
-  "config_sha256": "fc26e1a0065616185858a107019ff2910c1c28ee8f204b374fe3d9e4d73d3f30",
+  "config_sha256": "53fff9bd7b8a6440150c710ab3680d578529bf356ac3438578b123fd3582b1da",
   "stub": false,
   "n_queries": 3,
   "metrics": {
