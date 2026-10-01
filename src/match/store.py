@@ -54,6 +54,10 @@ class LotHits:
         order = np.lexsort((self.lot_id, -self.score))[:n]
         return [(int(self.lot_id[i]), float(self.score[i])) for i in order]
 
+    def without(self, lot_id: int) -> LotHits:
+        keep = self.lot_id != lot_id
+        return LotHits(self.lot_id[keep], self.score[keep], self.doc_id[keep])
+
 
 class Store(Protocol):
     name: str

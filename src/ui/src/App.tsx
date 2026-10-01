@@ -745,6 +745,13 @@ export function App() {
         </p>
       ))}
 
+      {path === "/results" && res?.excludedLot && state !== "loading" && (
+        <p className="filternote" role="note">
+          Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
+          выдачу только по другим своим закупкам. Места участников без учёта этой закупки — «Проверить на истории».
+        </p>
+      )}
+
       {path === "/results" && res && (
         <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
           {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
