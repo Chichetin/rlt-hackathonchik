@@ -88,12 +88,12 @@ def _vectors_file(tmp_path, names: dict[str, list[float]]):
 
 @pytest.fixture
 def sem_vectors(search_data, tmp_path, monkeypatch):
-    """A 4-d table over every fixture name; the query is e0, the future name is e0 too (cosine 1)."""
+    """A 4-d table over the fixture names; the query is e0, the future name is e0 too (cosine 1).
+    «Бумага офисная» (a lot subject) is not in the table: encoded on the fly with the passage prefix."""
     names = {
         FUTURE: [1, 0, 0, 0],
         'бумага для офисной техники "снегурочка"': [0.8, 0.6, 0, 0],
         "бумага а4": [0.6, 0, 0.8, 0],
-        "бумага офисная": [0.6, 0, 0.8, 0],  # subject of lot 3 (2024-11): a document of the index as well
         "бумага": [1, 0, 0, 0],  # lot 7, 2025-10-15: after as_of as well
         **{n: [0, 0, 0, 1] for n in ("вода питьевая", "вода", "картридж лазерный", "тонер", "картридж",
                                      "услуги по ремонту холодильного оборудования", "ремонт оборудования",
@@ -102,31 +102,39 @@ def sem_vectors(search_data, tmp_path, monkeypatch):
     monkeypatch.setenv(semantic.ENV, str(_vectors_file(tmp_path, names)))
     monkeypatch.setattr(semantic, "_vectors", {})
     monkeypatch.setattr(semantic, "_queries", {})
-    monkeypatch.setattr(semantic, "_encoder", lambda model: lambda texts: np.asarray([[1.0, 0, 0, 0]] * len(texts)))
+    encoded: list[str] = []
+
+    def encode(texts):  # the model without a prefix: the caller adds query: / passage:
+        encoded.extend(texts)
+        return np.asarray([[1.0, 0, 0, 0] if t.startswith("query: ") else [0.6, 0, 0.8, 0] for t in texts])
+
+    monkeypatch.setattr(semantic, "_encoder", lambda model: encode)
     seen: list[str] = []
     real = semantic.Vectors.similarity
 
-    def spy(self, qv, texts):
+    def spy(self, qv, texts, encode=None):
         seen.extend(texts)
-        return real(self, qv, texts)
+        return real(self, qv, texts, encode)
 
     monkeypatch.setattr(semantic.Vectors, "similarity", spy)
-    return seen
+    return seen, encoded
 
 
 def test_sem_reads_only_best_positions_before_as_of(sem_vectors):
+    seen, encoded = sem_vectors
     cfg = search_mod.load_config()
     got: list = []
     search(SEM_Q, config=cfg, features_out=got)
     sem = {inn: r[ranker.NAMES.index("sem")] for inn, r in got}
-    assert sem and sem_vectors, "sem is computed for training when the vectors are at hand"
+    assert sem and seen, "sem is computed for training when the vectors are at hand"
     # only names of the index as_of reach the table: never the positions of lots 6 and 7 (after as_of)
-    assert FUTURE not in {semantic.normalize(t) for t in sem_vectors}
-    assert "бумага" not in {semantic.normalize(t) for t in sem_vectors}
+    assert FUTURE not in {semantic.normalize(t) for t in seen}
+    assert "бумага" not in {semantic.normalize(t) for t in seen}
+    assert encoded == ["query: бумага офисная", "passage: бумага офисная"]  # the subject of lot 3 had no vector
     assert all(v < 0.99 for v in sem.values() if not math.isnan(v))
     # 780100000090 took part in lot 1 (2024) and won lot 6 (2025-08): its best position is the one of lot 1
     assert sem["780100000090"] == pytest.approx(0.8, abs=1e-3)
-    assert sem["4701000038"] == pytest.approx(0.6, abs=1e-3)  # lot 3 «Бумага офисная» (and lot 4, not paper)
+    assert sem["4701000038"] == pytest.approx(0.6, abs=1e-3)  # lot 3 «Бумага офисная», encoded on the fly
 
 
 def test_sem_is_nan_without_vectors_and_old_models_load(search_data, tmp_path, monkeypatch):

@@ -6,9 +6,13 @@ from a parquet file (`norm`: string, `emb`: fixed_size_list<float16>, L2-normali
 — src/eval/emb_bench.py, src/db/embed.py), named by the env `SEM_VECTORS`; the query is encoded by the model
 of the file's metadata with its query prefix (src/db/embed.py SPECS).
 
+The index has two kinds of documents: position names (in the table) and lot subjects (not in it, ~30% of the
+candidates' best documents) — a text without a vector is encoded here by the same model with the passage prefix
+of the file and kept in memory.
+
 No leak: the table only answers for the names the caller passes; search() passes `best_text` of candidates,
 which come from the index of `as_of` (history strictly before it). A name of the table that is not a candidate's
-best position never enters the feature. A name without a vector gives NaN (the ranker handles missing values).
+best position never enters the feature.
 """
 
 from __future__ import annotations
@@ -26,6 +30,8 @@ from src.db.norm import normalize
 log = logging.getLogger(__name__)
 ENV = "SEM_VECTORS"
 QUERY_CACHE = 4096  # encoded queries kept in memory (an eval or a training run repeats none, the product a few)
+Encoder = Callable[[list[str]], np.ndarray]
+TEXT_CACHE = 300_000  # encoded texts without a vector in the table (float16, 768 dims: ~460 MB at most)
 
 
 class Vectors:
@@ -35,6 +41,8 @@ class Vectors:
         if emb.ndim != 2 or len(norms) != emb.shape[0]:
             raise ValueError(f"векторы: {len(norms)} имён и матрица {emb.shape}")
         self.row = {t: i for i, t in enumerate(norms)}
+        self.extra: dict[str, np.ndarray] = {}  # texts encoded here (not in the table), normalized
+        self._extra_lock = threading.Lock()
         self.emb = emb
         self.model = model
         self.prefix = prefix
@@ -59,16 +67,30 @@ class Vectors:
         log.info("векторы %s: %d имён, модель %s", path, len(norms), meta["model"])
         return cls(norms, values, meta["model"], meta.get("prefix", ""), str(path))
 
-    def similarity(self, query_vec: np.ndarray, texts: list[str]) -> list[float]:
-        """Cosine of the query vector and each text's vector; NaN where the text has no vector."""
-        rows = [self.row.get(normalize(t), -1) for t in texts]
-        found = [r for r in rows if r >= 0]
-        sims = (self.emb[found].astype(np.float32) @ np.asarray(query_vec, dtype=np.float32)) if found else []
-        it = iter(float(s) for s in sims)
-        return [next(it) if r >= 0 else float("nan") for r in rows]
+    def similarity(self, query_vec: np.ndarray, texts: list[str], encode: Encoder | None = None) -> list[float]:
+        """Cosine of the query vector and each text's vector; a text without one is encoded by `encode`
+        (prefix included by the caller), NaN without `encode`."""
+        q = np.asarray(query_vec, dtype=np.float32)
+        norms = [normalize(t) for t in texts]
+        rows = [self.row.get(n, -1) for n in norms]
+        sims = [float("nan")] * len(texts)
+        found = [i for i, r in enumerate(rows) if r >= 0]
+        if found:
+            for i, v in zip(found, self.emb[[rows[i] for i in found]].astype(np.float32) @ q, strict=True):
+                sims[i] = float(v)
+        if encode is not None:
+            missing = [i for i, r in enumerate(rows) if r < 0 and norms[i]]
+            with self._extra_lock:
+                new = sorted({norms[i] for i in missing} - set(self.extra))
+                if new:
+                    if len(self.extra) + len(new) > TEXT_CACHE:
+                        self.extra.clear()
+                    for n, v in zip(new, np.asarray(encode(new), dtype=np.float16), strict=True):
+                        self.extra[n] = v
+                for i in missing:
+                    sims[i] = float(self.extra[norms[i]].astype(np.float32) @ q)
+        return sims
 
-
-Encoder = Callable[[list[str]], np.ndarray]
 
 _lock = threading.Lock()
 _vectors: dict[str, Vectors] = {}
@@ -98,12 +120,27 @@ def vectors() -> Vectors:
 
 
 def _encoder(model: str) -> Encoder:
-    from src.db.embed import model_encoder, spec
+    """The model without a prefix: callers add `query: ` / `passage: ` themselves (one model in memory)."""
+    from src.db.embed import model_encoder
 
     with _lock:
         if model not in _encoders:
-            _encoders[model] = model_encoder(prefix=spec(model).query, name=model)
+            _encoders[model] = model_encoder(prefix="", name=model)
         return _encoders[model]
+
+
+def _passages(vecs: Vectors) -> Encoder:
+    enc = _encoder(vecs.model)
+    return lambda texts: enc([vecs.prefix + t for t in texts])
+
+
+def _query_prefix(vecs: Vectors) -> str:
+    from src.db.embed import spec
+
+    try:
+        return spec(vecs.model).query
+    except ValueError:  # a model outside SPECS: e5-style prefixes go together
+        return "query: " if vecs.prefix == "passage: " else ""
 
 
 def query_vector(text: str, vecs: Vectors) -> np.ndarray:
@@ -112,7 +149,7 @@ def query_vector(text: str, vecs: Vectors) -> np.ndarray:
         hit = _queries.get(key)
     if hit is not None:
         return hit
-    v = np.asarray(_encoder(vecs.model)([key[1]])[0], dtype=np.float32)
+    v = np.asarray(_encoder(vecs.model)([_query_prefix(vecs) + key[1]])[0], dtype=np.float32)
     with _lock:
         if len(_queries) >= QUERY_CACHE:
             _queries.clear()
@@ -123,7 +160,7 @@ def query_vector(text: str, vecs: Vectors) -> np.ndarray:
 def similarity(query_text: str, texts: list[str]) -> list[float]:
     """`sem` of each candidate: cosine of the query and its best position (texts from the index as_of)."""
     vecs = vectors()
-    return vecs.similarity(query_vector(query_text, vecs), texts)
+    return vecs.similarity(query_vector(query_text, vecs), texts, _passages(vecs))
 
 
 def coverage() -> dict | None:
@@ -132,4 +169,4 @@ def coverage() -> dict | None:
         if not _vectors:
             return None
         v = next(iter(_vectors.values()))
-        return {"feature": "sem", "model": v.model, "file": v.path, "rows": len(v.row)}
+        return {"feature": "sem", "model": v.model, "file": v.path, "rows": len(v.row), "encoded_here": len(v.extra)}
