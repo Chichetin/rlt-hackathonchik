@@ -33,7 +33,9 @@ from typing import Literal
 
 from src.contracts import Counterparty, CounterpartyMatch, Query
 
-_DEAD = ("ликвид", "банкрот", "прекращ")
+# Stems of a stopped entity in an ЕГРЮЛ/ЕГРИП or ГИР БО status: «прекращена» and «прекратило деятельность»
+# differ in the stem; «недействующее ЮЛ» and «исключено из ЕГРЮЛ» are the tax office striking it off.
+_DEAD = ("ликвид", "банкрот", "прекращ", "прекрат", "недейств", "исключ")
 REGION_CODE = {"Санкт-Петербург": "78", "Ленинградская область": "47"}
 KINDS = ("manufacturer", "distributor", "dealer", "unknown")
 Entity = Literal["ul", "ip"]
