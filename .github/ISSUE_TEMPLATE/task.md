@@ -22,7 +22,7 @@ labels: []
 ## Критерий приёмки
 
 - [ ] <команда и ожидаемый результат: pytest …, make eval EXP=…, make e2e>
-- [ ] `make check` зелёный; e2e демо (`make e2e`) не сломан
+- [ ] `make check-changed` зелёный (включает e2e демо, если задет демо-путь)
 - [ ] Факты — с Evidence; нет `# STUB` в новой логике демо-пути (или задача на его замену)
 - [ ] Решения — строки D-… в `research/DECISIONS.md`; строка `docs/tz-compliance.md` обновлена
 
