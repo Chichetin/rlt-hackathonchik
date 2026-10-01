@@ -25,8 +25,9 @@ from pydantic import BaseModel
 
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
+from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
-from src.enrich.evidence import strip_unverified
+from src.enrich.evidence import cached_pages, strip_unverified
 from src.llm.provider import get_provider
 from src.match import search as search_mod
 from src.match.filters import apply_filters
@@ -111,6 +112,8 @@ def _found(query: Query) -> list[CounterpartyMatch]:
         log.warning("search: %s", e)  # the path goes to the log, not to the client
         raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
                                  "или база не отвечает") from e
+    if not getattr(search_mod, "IS_STUB", False):
+        found = [*found, *_discovered(query, found)]
     return apply_filters(found, query)
 
 
@@ -118,8 +121,20 @@ def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     """What the card and the xlsx show: only facts and contacts that pass the Evidence check."""
     if getattr(search_mod, "IS_STUB", False):
         return matches
-    cache = SourceCache()
-    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)}) for m in matches]
+    pages = cached_pages(SourceCache().page_text)  # one read and one normalization per page per request
+    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in matches]
+
+
+def _discovered(query: Query, history: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """Block «Новые» (#16, D-037): open sources via the cache; a failing source never breaks the search."""
+    try:
+        res = discover_mod.discover(query, history, enqueue=lambda inn: enqueue(_queue(), "enrich", inn))
+    except Exception:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
+        log.exception("discovery: блок «Новые» пуст из-за ошибки")
+        return []
+    log.info("discovery %s: %d компаний; %s", query.query_id, len(res.matches), "; ".join(res.requests + res.notes))
+    # «новые» only when the companies were checked against organizers' data
+    return res.matches if res.history_checked else []
 
 
 @app.post("/api/search", response_model=SearchResponse)
