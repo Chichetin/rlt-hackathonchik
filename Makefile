@@ -80,6 +80,7 @@ ui-dev:            ## Vite dev-сервер с прокси на API
 demo:              ## всё одной командой с чистого клона, на кеше: http://127.0.0.1:$(PORT)
 	@[ -d .venv ] && [ -d $(UI)/node_modules ] || $(MAKE) setup
 	$(MAKE) ui-build
+	-$(PY) python -m src.match.index   # предсборка BM25 (продукт + cutoff); без данных — предупреждение, демо стартует
 	@echo "Демо: http://127.0.0.1:$(PORT)  (Ctrl+C — остановить)"
 	@trap 'kill 0' EXIT INT TERM; \
 	$(PY) python -m src.worker.worker & \
