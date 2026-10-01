@@ -4,7 +4,8 @@ Selection rule (deterministic): valid INN, ordered by lots_won DESC, lots_partic
 last_seen DESC, inn ASC (wins first: a winner is the likelier invitee; recency and INN break ties).
 The INNs go into the task queue (idempotent by (kind, key), D-008), the loop drains them with pauses
 between live source calls. A restart does not repeat finished INNs: `done` tasks stay done and the
-cache serves the rest. A captcha stops the run, the task returns to the queue (never bypassed).
+cache serves the rest. A pb captcha is never bypassed: enrich() falls back to rmsp/bo (D-052); the run
+stops, returning the task to the queue, only when no source answered (D-056).
 """
 
 from __future__ import annotations

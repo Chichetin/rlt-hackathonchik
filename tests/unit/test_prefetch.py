@@ -47,7 +47,7 @@ def test_idempotent_and_resume(eng):
 
     r1 = prefetch.run(GOOD[:4], eng, pause_s=0, enrich_fn=crashy)
     assert r1["errors_this_run"] == 1
-    # restart: only the task that failed once is redone, finished ones are not
+    # the failed task was retried inside r1 already; the restart repeats no finished task
     r2 = prefetch.run(GOOD[:4], eng, pause_s=0, enrich_fn=crashy)
     assert calls.count(GOOD[2]) == 2 and all(calls.count(i) == 1 for i in GOOD[:4] if i != GOOD[2])
     assert r2["done_total"] == 4 and status_counts(eng) == {"done": 4}
