@@ -282,8 +282,9 @@ def score(cp: Counterparty, *, okved: str, relation: str, base: float, codes: Se
             hits.append(f"«{s}» в ОКВЭД" + (" (профиль ОКПД2)" if from_profile else ""))
             used.add("okved")
     text = min(1.0, raw / float(cfg["text_saturation"]))
-    src = "слова запроса" + (f" и профиля ОКПД2 {profile.code} ({'≥ ' if profile.capped else ''}{profile.positions} наименований позиций "
-                             "в данных АИС ГЗ)" if profile else "; профиля ОКПД2 нет")
+    floor = "≥ " if profile and profile.capped else ""
+    src = "слова запроса" + (f" и профиля ОКПД2 {profile.code} ({floor}{profile.positions} наименований "
+                             "позиций в данных АИС ГЗ)" if profile else "; профиля ОКПД2 нет")
     text_why = (f"Текст: {text:.2f} — совпали {', '.join(hits)}" if hits
                 else f"Текст: 0 — {src} не встречаются в названии и ОКВЭД по реестру МСП")
     text_ev = tuple([*(names if "name" in used else ()), *(okved_names if "okved" in used else ())])
