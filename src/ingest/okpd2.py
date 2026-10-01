@@ -60,6 +60,8 @@ def import_export(path: Path, dest: Path = SNAPSHOT, meta: Path = META) -> int:
         code = FIXES.get(r["Kod"].strip(), r["Kod"].strip())
         if code and not CODE.fullmatch(code):
             raise ValueError(f"{name}: код неправильной формы {code!r} — сверить со вторым источником, в FIXES")
+        if code in rows:
+            raise ValueError(f"{name}: код {code!r} встречается дважды (опечатка из FIXES и верный код?)")
         if code:
             rows[code] = (r["Name"].strip(), r["Razdel"].strip())
     with dest.open("w", encoding="utf-8", newline="") as f:
