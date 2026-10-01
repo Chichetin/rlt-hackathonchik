@@ -314,3 +314,28 @@ def test_lost_reruns_the_recorded_config_not_the_product_default():
     cfg = recorded_config(rec)
     assert cfg["weights"]["geography"] == 0.1 and cfg["options"] == {}
     assert R.search_mod.scoring_options(cfg) == R.search_mod.scoring_options(R.load_method_config("v1", config_of="v1"))
+
+
+def test_lost_main_uses_the_recorded_config_and_rejects_an_unknown_config_of(tmp_path, monkeypatch, capsys):
+    from src.eval import lost as L
+
+    seen: list[dict | None] = []
+    monkeypatch.setattr(L, "split_config", lambda: {"cutoff": "2025-01-01"})
+    monkeypatch.setattr(L, "load_cases", lambda part, split: [])
+    monkeypatch.setattr(L, "explain", lambda *a, config=None, **k: seen.append(config) or {"lost": 0})
+    per_query = [{"query_id": "q1", "recall@10": 1.0, "ranked": ["x"]}]
+    v1_weights = {"product_fit": 0.35, "experience": 0.2, "reliability": 0.2, "activity": 0.1, "geography": 0.1,
+                  "price": 0.05}
+    for exp in ("A", "B"):
+        rec = {"exp_id": exp, "part": "dev", "per_query": per_query,
+               "config": {"retriever": "bm25", "k": 20, "weights": v1_weights}}
+        (tmp_path / f"{exp}.json").write_text(json.dumps(rec), encoding="utf-8")
+
+    assert L.main(["A", "B"], results=tmp_path) == 0
+    assert seen[-1] is not None and seen[-1]["weights"] == v1_weights and seen[-1]["options"] == {}
+    assert "config из A.json" in capsys.readouterr().out
+    assert L.main(["A", "B", "--config-of", "H-15f"], results=tmp_path) == 0
+    h15f = seen[-1]
+    assert h15f is not None and h15f["weights"]["geography"] == 0.0 and h15f["options"]["tie_break"] == "bm25"
+    assert L.main(["A", "B", "--config-of", "no-such-id"], results=tmp_path) == 2
+    assert "no-such-id" in capsys.readouterr().err

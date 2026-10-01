@@ -27,6 +27,7 @@ from pathlib import Path
 from src.eval.run import RESULTS, load_method_config, with_cutoff
 from src.eval.split import EvalCase, load_cases, split_config
 from src.match import search as search_mod
+from src.match.text import tokenizer_name
 
 HOME_INN = ("78", "47")  # INN prefixes of Saint Petersburg and the Leningrad region
 
@@ -51,6 +52,10 @@ def recorded_config(rec: dict) -> dict:
     cfg = {**search_mod.load_config(), **rec["config"]}
     for block in ("options", "signals"):
         cfg[block] = rec["config"].get(block) or {}
+    used = rec["config"].get("tokenizer")
+    if used and used != tokenizer_name():  # search() takes the tokenizer from configs/search.yaml or BM25_TOKENIZER
+        print(f"! прогон был на токенизаторе {used}, перезапуск — на {tokenizer_name()}: задайте BM25_TOKENIZER={used}",
+              file=sys.stderr)
     return cfg
 
 
@@ -136,7 +141,12 @@ def main(argv: list[str] | None = None, results: Path = RESULTS) -> int:
     cases = {c.query.query_id: c for c in load_cases(a["part"], split)}
     lost = lost_relevant(a, b, {qid: set(c.relevant_inns) for qid, c in cases.items()}, args.k)
     if args.config_of:
-        cfg, origin = load_method_config(args.config_of, config_of=args.config_of), f"--config-of {args.config_of}"
+        try:
+            cfg = load_method_config(args.config_of, config_of=args.config_of)
+        except ValueError as e:  # an id missing in experiments.yaml, a baseline id: a message, not a traceback
+            print(e, file=sys.stderr)
+            return 2
+        origin = f"--config-of {args.config_of}"
     else:
         cfg, origin = recorded_config(a), f"config из {args.a}.json"
     rec = explain(lost, cases, date.fromisoformat(str(split["cutoff"])), args.k,
