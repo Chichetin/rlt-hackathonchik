@@ -63,9 +63,9 @@ def embed(conn: psycopg.Connection, encode: Encoder, data_schema: str = "data", 
     conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(vec_schema)))
     conn.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} (norm text PRIMARY KEY, emb vector({}))").format(t, DIM))
-    conn.execute(sql.SQL("INSERT INTO {} (norm) SELECT DISTINCT {} FROM {} WHERE product_name IS NOT NULL "
-                         "ON CONFLICT DO NOTHING").format(t, norm_sql(sql.Identifier("product_name")),
-                                                          sql.Identifier(data_schema, "items")))
+    norm = norm_sql(sql.Identifier("product_name"))
+    conn.execute(sql.SQL("INSERT INTO {} (norm) SELECT DISTINCT {} FROM {} WHERE {} <> '' "  # '' never passes keyset
+                         "ON CONFLICT DO NOTHING").format(t, norm, sql.Identifier(data_schema, "items"), norm))
     total, missing = conn.execute(sql.SQL("SELECT count(*), count(*) FILTER (WHERE emb IS NULL) FROM {}")
                                   .format(t)).fetchone()  # type: ignore[misc]
     todo = missing if limit is None else min(limit, missing)
@@ -113,7 +113,8 @@ def export_missing(conn: psycopg.Connection, path: Path, vec_schema: str = "vec"
 def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000) -> int:
     """texts.parquet → vecs.parquet (norm, emb float16[DIM]); no database needed."""
     texts = pq.read_table(src, columns=["norm"]).column("norm").to_pylist()
-    schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), DIM))])
+    schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), DIM))],
+                       metadata={"model": MODEL, "prefix": PASSAGE})
     started = time.monotonic()
     with pq.ParquetWriter(dst, schema) as w:
         for i in range(0, len(texts), chunk):
@@ -129,6 +130,10 @@ def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000) -> i
 
 def import_file(conn: psycopg.Connection, path: Path, vec_schema: str = "vec") -> int:
     """Fill rows still without a vector from vecs.parquet; returns the number of rows updated."""
+    meta = pq.read_schema(path).metadata or {}
+    got = {k.decode(): v.decode() for k, v in meta.items() if k in (b"model", b"prefix")}
+    if got != {"model": MODEL, "prefix": PASSAGE}:
+        raise ValueError(f"{path}: векторы другой модели или префикса {got}, нужно {MODEL!r} и {PASSAGE!r}")
     conn.execute(sql.SQL("CREATE TEMP TABLE IF NOT EXISTS import_vecs (norm text, emb vector({}))").format(DIM))
     conn.execute("TRUNCATE import_vecs")
     with conn.cursor() as cur:

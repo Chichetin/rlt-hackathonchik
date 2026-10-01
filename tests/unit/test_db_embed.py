@@ -45,15 +45,17 @@ def conn(tmp_path_factory: pytest.TempPathFactory):
         c.execute(f"DROP SCHEMA IF EXISTS {SCHEMA}, {VEC} CASCADE")
 
 
-@pytest.mark.parametrize("raw", ["  Бумага   ОФИСНАЯ\tА4 ", "Ёлка ёлочная", "Картридж HP", "x\n y", "a\u2009b\u3000c"])
+@pytest.mark.parametrize("raw", ["  Бумага   ОФИСНАЯ\tА4 ", "Ёлка ёлочная", "Картридж HP", "x\n y",
+                                 "a\u2009b\u3000c", "\u3000Ручка", "Ёж\x85"])
 def test_python_and_postgres_normalization_agree(conn, raw: str) -> None:
     got = conn.execute(sql.SQL("SELECT {}").format(norm_sql(sql.SQL("%s::text"))), [raw]).fetchone()[0]
     assert got == normalize(raw)
 
 
 def test_embed_is_resumable_and_covers_distinct_names(conn) -> None:
-    distinct = conn.execute(sql.SQL("SELECT count(DISTINCT {}) FROM {} WHERE product_name IS NOT NULL").format(
-        norm_sql(sql.Identifier("product_name")), sql.Identifier(SCHEMA, "items"))).fetchone()[0]
+    norm = norm_sql(sql.Identifier("product_name"))
+    distinct = conn.execute(sql.SQL("SELECT count(DISTINCT {}) FROM {} WHERE {} <> ''").format(
+        norm, sql.Identifier(SCHEMA, "items"), norm)).fetchone()[0]
     first = embed(conn, fake_encode, data_schema=SCHEMA, vec_schema=VEC, batch=4, limit=5)
     assert first == {"total": distinct, "done": 5}
     second = embed(conn, fake_encode, data_schema=SCHEMA, vec_schema=VEC, batch=4)
@@ -87,3 +89,14 @@ def test_export_encode_import_roundtrip(conn, tmp_path: Path) -> None:
                         .format(sql.Identifier(VEC, "names_e5_small"))).fetchone()[0]
     rows = conn.execute(*nearest(VEC, fake_encode([name])[0], 1)).fetchall()
     assert rows[0][0] == name and rows[0][1] == pytest.approx(1.0, abs=1e-3)  # float16 in transit
+
+
+def test_import_rejects_vectors_of_another_model(conn, tmp_path: Path) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    bad = tmp_path / "other.parquet"
+    pq.write_table(pa.table({"norm": ["x"], "emb": pa.FixedSizeListArray.from_arrays(
+        np.zeros(DIM, dtype=np.float16), DIM)}).replace_schema_metadata({"model": "other", "prefix": "passage: "}), bad)
+    with pytest.raises(ValueError, match="другой модели"):
+        import_file(conn, bad, vec_schema=VEC)

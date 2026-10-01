@@ -16,7 +16,7 @@ _WS = re.compile(r"[ \t\n\r\f\v\xa0]+")
 
 
 def normalize(text: str) -> str:
-    return _WS.sub(" ", text.lower().replace("ё", "е")).strip()
+    return _WS.sub(" ", text.lower().replace("ё", "е")).strip(" ")  # as btrim(): only the space
 
 
 def norm_sql(col: sql.Composable) -> sql.Composed:

@@ -5,6 +5,7 @@ services:
   db:
     image: pgvector/pgvector:pg16   # Postgres 16 + pgvector (D-023): данные лотов и векторный поиск
     ports: ["127.0.0.1:${PG_PORT:-5432}:5432"]   # загрузчик parquet → Postgres запускается с хоста (make db-load)
+    shm_size: 2gb   # параллельная сборка HNSW держит maintenance_work_mem в /dev/shm (по умолчанию 64M — падает)
     environment:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app   # secret-scan: allow — локальная БД демо, наружу не открыта
