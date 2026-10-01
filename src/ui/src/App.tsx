@@ -35,8 +35,9 @@ function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Quer
   if (res.discovered.length || !n || base === res || !shown?.filters?.only_manufacturers) return undefined;
   const kinds = base?.discovered.map((m) => m.counterparty.kind) ?? [];
   if (kinds.includes("manufacturer")) return undefined;
-  const why = kinds.some((k) => !k)
-    ? "производителей среди них нет, у части роль ещё не определена"
+  const undetermined = kinds.filter((k) => !k).length;
+  const why = undetermined
+    ? `подтверждённых производителей среди них нет — у ${undetermined} из ${n} роль ещё не определена`
     : "по основному ОКВЭД среди них нет производителей";
   return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
 }

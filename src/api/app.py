@@ -207,7 +207,8 @@ def api_export(query: Query) -> StreamingResponse:
         for m in rows:
             cp = m.counterparty
             ws.append([
-                block, cp.name, cp.inn or "ИНН не подтверждён", KIND_LABEL[cp.kind or "unknown"], cp.region or "",
+                block, cp.name, cp.inn or "ИНН не подтверждён",
+                KIND_LABEL.get(cp.kind or "unknown", KIND_LABEL["unknown"]), cp.region or "",
                 {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], round(m.score, 3),
                 "; ".join(c.explanation for c in m.components),
                 "; ".join(f"{e.source}: {e.url}" for e in cp.evidence),

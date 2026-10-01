@@ -146,12 +146,12 @@ test("filterNotes: «unknown» is a role the rule has set (with a basis), «null
   const base = structuredClone(response);
   base.history[0].counterparty.kind = "unknown";
   expect(filterNotes(base, f)).toEqual([
-    "У 1 из 2 основной ОКВЭД — не производство и не торговля, поэтому производителями они не считаются (основание — в карточке).",
+    "У 1 из 2 основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).",
   ]);
   base.discovered[0].counterparty.kind = null;
   expect(filterNotes(base, f)).toEqual([
     "Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения.",
-    "У 1 из 2 основной ОКВЭД — не производство и не торговля, поэтому производителями они не считаются (основание — в карточке).",
+    "У 1 из 2 основной ОКВЭД — не производство и не торговля: такая компания производителем не считается (основание — в карточке).",
   ]);
   base.history[0].counterparty.kind = "distributor";
   expect(filterNotes(base, f)).toEqual(["Тип поставщика ещё не определён у 1 из 2 — признак появится после обогащения."]);
@@ -258,24 +258,24 @@ test("«Новые» emptied by «Только производители»: all
   expect(discovered).not.toHaveTextContent("вероятно");
 });
 
-test("«Новые» emptied by «Только производители»: role of some not determined — the text does not claim «no manufacturers» (#102)", async () => {
+test("«Новые» emptied by «Только производители»: role of all not determined — «confirmed manufacturers», у 1 из 1 (#102)", async () => {
   const discovered = await newBlockWith("only_manufacturers");
   await userEvent.click(screen.getByLabelText("Только производители"));
   expect(
     await within(discovered).findByText(
       "Под фильтр «Только производители» не попал никто из 1 новых компаний из реестра МСП: " +
-        "производителей среди них нет, у части роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
+        "подтверждённых производителей среди них нет — у 1 из 1 роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
     ),
   ).toBeInTheDocument();
 });
 
-test("«Новые» emptied by «Только производители»: one distributor, one without a role — «у части» (#102)", async () => {
+test("«Новые» emptied by «Только производители»: one distributor, one without a role — у 1 из 2 (#102)", async () => {
   const discovered = await newBlockWith("only_manufacturers", undefined, ["distributor", null]);
   await userEvent.click(screen.getByLabelText("Только производители"));
   expect(
     await within(discovered).findByText(
       "Под фильтр «Только производители» не попал никто из 2 новых компаний из реестра МСП: " +
-        "производителей среди них нет, у части роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
+        "подтверждённых производителей среди них нет — у 1 из 2 роль ещё не определена. Снимите фильтр, чтобы их увидеть.",
     ),
   ).toBeInTheDocument();
 });

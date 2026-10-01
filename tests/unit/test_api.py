@@ -128,7 +128,7 @@ def test_export_xlsx(search_client):
 def test_export_kind_column_in_russian(client, monkeypatch):
     """«Тип» of the xlsx: the captions of the UI (KIND_LABEL in src/ui/src/api.ts), not the contract's keys (#102)."""
     from src.match import search as search_mod
-    kinds = ["manufacturer", "distributor", "dealer", "unknown", None]
+    kinds = ["manufacturer", "distributor", "dealer", "unknown", None, "not-a-kind"]  # last: a code from the future
     matches = []
     for i, kind in enumerate(kinds):
         m = _fabricated("history")
@@ -141,7 +141,7 @@ def test_export_kind_column_in_russian(client, monkeypatch):
     assert ws is not None
     assert [c.value for c in ws[1]][3] == "Тип"
     assert [ws.cell(row=row, column=4).value for row in range(2, ws.max_row + 1)] == [
-        "Производитель", "Дистрибьютор", "Дилер", "Тип не определён", "Тип не определён"]
+        "Производитель", "Дистрибьютор", "Дилер", "Тип не определён", "Тип не определён", "Тип не определён"]
 
 
 def test_openapi_has_contracts(client):
