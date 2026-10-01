@@ -761,7 +761,7 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
   );
 }
 
-const SEG_COLORS = ["#c0acf6", "#8fd3c1", "#f0c27b", "#88b4f2", "#e99bb4", "#b9c97a"];
+const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa6b2"];
 
 /** Score as a stacked bar: each segment is value × weight of one component, so their sum is the total. */
 function Breakdown({ m }: { m: CounterpartyMatch }) {
