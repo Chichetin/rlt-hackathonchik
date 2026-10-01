@@ -143,3 +143,14 @@ def test_config_hash_ignores_ui_code(repo):
     subprocess.run([*git, "add", "."], check=True)
     subprocess.run([*git, "commit", "-qm", "ui"], check=True)
     assert R.config_sha256(repo) == before
+
+
+def test_config_hash_ignores_line_endings(repo):
+    """Same config checked out with CRLF (Windows, core.autocrlf) and LF (Linux) → same sha256."""
+    paths = [repo / rel for rel in R.CONFIG_FILES]
+    for p in paths:
+        p.write_bytes(p.read_bytes().replace(b"\r\n", b"\n"))
+    lf = R.config_sha256(repo)
+    for p in paths:
+        p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
+    assert R.config_sha256(repo) == lf
