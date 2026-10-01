@@ -31,15 +31,16 @@ test("мобильный dock остаётся в окне при прокрут
 });
 
 
-test("рисунок фона переключается между волнами и рёбрами при паузе", async ({ page }) => {
+test("рисунок фона переключается между волнами и рёбрами на неподвижном кадре", async ({ page }) => {
+  // reduced motion freezes the field (the pause button was removed in #171), so frames compare exactly
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
-  await page.getByRole("button", { name: "Пауза фона" }).click();
   const pixels = () => page.locator(".wave-field").evaluate((el: HTMLCanvasElement) => el.toDataURL());
+  await expect.poll(pixels).not.toBe("data:,");
   const waves = await pixels();
   await page.getByRole("button", { name: "Рёбра", exact: true }).click();
   await expect(page.getByRole("button", { name: "Рёбра", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(pixels).not.toBe(waves);
-  await expect(page.getByRole("button", { name: "Продолжить фон" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Волны", exact: true }).click();
   await expect.poll(pixels).toBe(waves);
 });
