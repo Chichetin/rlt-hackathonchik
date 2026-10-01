@@ -172,7 +172,7 @@ Excel; строится командой `uv run python -m src.eval.label_new pr
   3. эта конфигурация на holdout ещё не запускалась;
   4. `search()` — не `# STUB`.
   Каждый запуск — строка в `eval/final-log.md`. Запускает только `evaluator` и только по заморозке.
-  **Оценивается выборка holdout** (`holdout_sample: 3000`, `holdout_seed` в `configs/split.yaml`, D-075): весь holdout — 88 848 кейсов по 0.25–0.30 с (E-002, H-15f на dev) → 6–7.5 ч одним
+  **Оценивается выборка holdout** (`holdout_sample: 3000`, `holdout_seed` в `configs/split.yaml`, D-076): весь holdout — 88 848 кейсов по 0.25–0.30 с (E-002, H-15f на dev) → 6–7.5 ч одним
   запуском, а маркер «уже запускалась» пишется до чтения holdout — прерванный прогон сжигает конфигурацию без
   результата. Выборка — n кейсов с наименьшим sha256(seed:query_id), задана в хешируемом конфиге до запуска;
   3 000 кейсов ≈ 15–25 мин, 95% CI recall@10 ≈ ±0.016. **`holdout_seed` и `holdout_sample` не меняются:** другая
