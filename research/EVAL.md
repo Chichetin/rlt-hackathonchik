@@ -181,3 +181,8 @@ Excel; строится командой `uv run python -m src.eval.label_new pr
 - Тест замка — `tests/unit/test_eval_seal.py`.
 - `make eval` оценивает ту же выдачу, что видит пользователь: после замены заглушки `evaluate()`
   прогоняет `strip_unverified()`, как `/api/search` (D-015).
+- С #220 (D-097) `/api/search`, `make eval` / `eval-final` и `make predict` идут одним конвейером
+  `src/match/pipeline.py`. В backtest (`backtest=True`, `as_of` задан) основной список **не зависит от кеша**:
+  нет обогащения из кеша, блока «Новые», фильтров статуса / РНП; кейс с фильтром по МСП или роли — ошибка.
+  Что убрали бы сегодняшние фильтры ФНС / РНП в top-10 — `today_filters` в файле результата, вне `metrics`
+  и bootstrap, на слайд не идёт.

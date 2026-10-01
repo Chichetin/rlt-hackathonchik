@@ -38,15 +38,14 @@ from src.api.ratings import router as ratings_router
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
-from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
-from src.enrich.evidence import cached_pages, strip_unverified
+from src.enrich.evidence import strip_unverified
 from src.enrich.role import LABEL as ROLE_LABEL
 from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
-from src.match import fallback
+from src.match import pipeline
 from src.match import search as search_mod
-from src.match.filters import apply_legal, apply_user_filters, entity_of, facets, kind_of, parse_filters
+from src.match.filters import entity_of, kind_of, parse_filters
 from src.match.store import get_store
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired
@@ -148,85 +147,25 @@ def _accepted(query: Query) -> None:
 
 def _found(query: Query, uncached: set[str] | None = None
            ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]]]:
-    """Every candidate of the query after the user filters, best first; why history is empty (#113); X-Facets.
+    """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets.
 
-    «Новые» INNs are the first in the enrichment queue because discover() queues them here, while
-    `_enriched` only collects history INNs without a cache into `uncached` and the caller queues them
-    (the visible page only) after this function returns. The hard filters run on the enriched rows
-    (status, МСП, kind). The cached card passes strip_unverified BEFORE the filters, so «только
-    производители» keeps only a role whose basis passed the check; strip_unverified does not check
-    status / is_msp / name / region, so those filters rely on the cached card as is.
+    The selection itself is src/match/pipeline.py — the same for make eval and make predict (#220).
     """
     _accepted(query)
     try:
-        found = search_mod.search(query, k=search_mod.CANDIDATES)
+        res = pipeline.pick(query, enqueue=_enqueue_background)
     except FileNotFoundError as e:  # organizers' data not ingested / not loaded (src/match/store.py)
         log.warning("search: %s", e)  # the path goes to the log, not to the client
         raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
                                  "или база не отвечает") from e
-    note = fallback.search_note()
-    candidates: list[CounterpartyMatch] | None = None  # «Новые» before the user filters, None — no discovery
-    if not getattr(search_mod, "IS_STUB", False):
-        discovered, candidates = _discovered(query, found)
-        found = [*_enriched(found, uncached if uncached is not None else set()), *discovered]
-    legal = apply_legal(found)
-    shown = apply_user_filters(legal, query)
-    hidden = sum(m.origin == "history" for m in found) - sum(m.origin == "history" for m in shown)
-    if hidden and not any(m.origin == "history" for m in shown):
-        note = f"фильтры скрыли {hidden}"
-        log.info("search %s: %s", query.query_id, note)
-    new = facets(m for m in legal if m.origin == "discovered")
-    if candidates is not None:  # discovery: the block is cut to MAX_SHOWN after the user filters
-        new = {g: {v: min(n, discover_mod.MAX_SHOWN) for v, n in counts.items()}
-               for g, counts in facets(apply_legal(candidates)).items()}
-    return shown, note, {"history": facets(m for m in legal if m.origin == "history"), "discovered": new}
+    if uncached is not None:
+        uncached.update(res.uncached)
+    return res.matches, res.note, res.facets
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     """What the card and the xlsx show: only facts and contacts that pass the Evidence check."""
-    if getattr(search_mod, "IS_STUB", False):
-        return matches
-    pages = cached_pages(SourceCache().page_text)  # one read and one normalization per page per request
-    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in matches]
-
-
-def _enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[CounterpartyMatch]:
-    """Mix the cached enrichment (status, МСП, name, kind, ...) into history candidates BEFORE the hard filters (#38).
-
-    Cache only, never the network inside the user's request: no cache -> the INN is added to `uncached`
-    (queued later, visible page only) and the fields stay None («не проверено»). Organizers' data
-    (inn, kpp, stats) is kept.
-    """
-    cache = SourceCache()
-    pages = cached_pages(cache.page_text)  # one read and normalization per page for the whole list
-    out = []
-    for m in history:
-        cp = m.counterparty
-        if m.origin != "history" or not cp.inn or not inn_is_valid(cp.inn):
-            out.append(m)
-            continue
-        try:
-            # filters see only facts that pass the Evidence check, as the card does (strip before filters)
-            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True), pages)
-        except KeyError:  # nothing cached for this INN
-            uncached.add(cp.inn)
-            out.append(m)
-            continue
-        except Exception:  # noqa: BLE001 — a broken cached page must not break the search
-            log.exception("enrich из кеша: %s", cp.inn)
-            out.append(m)
-            continue
-        upd: dict[str, object] = {"evidence": [*cp.evidence, *card.evidence]}
-        if cp.name.startswith("ИНН ") and not card.name.startswith("ИНН "):
-            upd["name"] = card.name
-        for f in ("kind", "region", "status", "is_msp", "in_rnp"):
-            if getattr(card, f) is not None:
-                upd[f] = getattr(card, f)
-        if card.okved:
-            upd["okved"] = card.okved
-        upd["contacts"] = {**card.contacts, **cp.contacts}
-        out.append(m.model_copy(update={"counterparty": cp.model_copy(update=upd)}))
-    return out
+    return pipeline.verified(matches)
 
 
 def _queue_uncached(page: list[CounterpartyMatch], uncached: set[str]) -> None:
@@ -243,25 +182,6 @@ def _queue_uncached(page: list[CounterpartyMatch], uncached: set[str]) -> None:
 
 def _enqueue_background(inn: str) -> None:
     enqueue(_queue(), "enrich", inn, retry_failed=False)
-
-
-def _discovered(query: Query, history: list[CounterpartyMatch]
-                ) -> tuple[list[CounterpartyMatch], list[CounterpartyMatch]]:
-    """Block «Новые» (#16, D-037): open sources via the cache; a failing source never breaks the search.
-
-    Returns the block (after the user filters, top MAX_SHOWN) and every candidate before the user filters (X-Facets).
-    """
-    try:
-        res = discover_mod.discover(query, history, enqueue=_enqueue_background)
-    except Exception:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
-        log.exception("discovery: блок «Новые» пуст из-за ошибки")
-        return [], []
-    log.info("discovery %s: %d компаний; %s", query.query_id, len(res.matches), "; ".join(res.requests + res.notes))
-    # «новые» only when the companies were checked against organizers' data
-    if not res.history_checked:
-        return [], []
-    # matches ⊆ candidates: a Discovery built without candidates (a test double) still counts its own block
-    return res.matches, res.candidates or res.matches
 
 
 @app.post("/api/search", response_model=SearchResponse)
@@ -336,7 +256,7 @@ def api_counterparty(inn: str) -> Counterparty:
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
         # rnp_offline=True: a direct card lookup must not wait on the 60 s РНП Crawl-delay pause
-        # (research/SOURCES.md, D-095) — only the worker does a live РНП request.
+        # (research/SOURCES.md, D-098) — only the worker does a live РНП request.
         cp = enrich_mod.enrich(inn, rnp_offline=True)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
