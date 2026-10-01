@@ -80,6 +80,9 @@ OPTIONS: dict[str, tuple] = {
     "fit_bm25_share": (FIT_BM25_SHARE, None),  # share of BM25 in product_fit, [0, 1]
     "experience_by": ("class", ("class", "similar")),  # lots in the OKPD2 group | lots with similar positions
     "tie_break": ("inn", ("inn", "bm25")),  # order of equal scores
+    # lots / wins at which experience reaches 1.0 (#196): low caps make active suppliers indistinguishable
+    "sat_lots": (SAT_LOTS, None),
+    "sat_wins": (SAT_WINS, None),
 }
 
 
@@ -95,6 +98,9 @@ def scoring_options(cfg: dict) -> dict:
     out["fit_bm25_share"] = float(out["fit_bm25_share"])
     if not 0.0 <= out["fit_bm25_share"] <= 1.0:
         raise ValueError(f"options.fit_bm25_share = {out['fit_bm25_share']}: доля должна быть в [0, 1]")
+    for name in ("sat_lots", "sat_wins"):
+        if isinstance(out[name], bool) or not isinstance(out[name], int) or out[name] < 1:
+            raise ValueError(f"options.{name} = {out[name]!r}: ожидается целое число ≥ 1")
     return out
 
 
@@ -267,13 +273,14 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
                    f"{label(_prefix(c.okpd_code, c.okpd_level))}")
 
 
-def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class") -> tuple[float, str]:
+def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class",
+                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS) -> tuple[float, str]:
     if codes and by == "class":
         groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
         lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
-    value = 0.5 * _sat(lots, SAT_LOTS) + 0.5 * _sat(wins, SAT_WINS)
+    value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(wins, sat_wins)
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
 
@@ -403,7 +410,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         if cp is None:
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
-        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"])
+        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"])
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)
