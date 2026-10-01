@@ -14,7 +14,7 @@ Every value is copied as is from one record. Cached page of a record (src/source
 in the rmsp.nalog.ru format (same registry), so the role basis `row.<inn>.okved1` of src/enrich/role.py
 applies as is. `page()` of a parquet row equals `page_from_xml()` of the raw record (`record()`, the audit
 path: dump file + member + `ИдДок`), and `counterparty()` gives every fact an Evidence whose value is on
-that page (src/enrich/evidence.py, D-084). ИП: no locality on the page (152-ФЗ, as in rmsp.py).
+that page (src/enrich/evidence.py, D-090). ИП: no locality on the page (152-ФЗ, as in rmsp.py).
 Licence: FNS open data, commercial use allowed (research/SOURCES.md).
 """
 

@@ -1,4 +1,4 @@
-"""Pool of new companies: the full FNS MSP registry dump → parquet → Postgres schema `pool` (#185, D-084).
+"""Pool of new companies: the full FNS MSP registry dump → parquet → Postgres schema `pool` (#185, D-090).
 
     uv run python -m src.db.pool build    # data/external/rsmp/parts → data/external/rsmp/pool/*.parquet
     DATABASE_URL=postgresql://app:app@127.0.0.1:5432/app uv run python -m src.db.pool load   # → schema pool
@@ -15,7 +15,7 @@ Tables (the same in parquet and in Postgres):
 
 Facts: every shown value of a company is an Evidence built from its row by `msp_dump.counterparty()` and
 checked against the page `msp_dump.page()` that `counterparties()` puts into src/sources/cache.py. The
-Evidence rows are derived, not stored: one per value, ~80 M rows would be a copy of `companies` (D-084).
+Evidence rows are derived, not stored: one per value, ~80 M rows would be a copy of `companies` (D-090).
 
 Postgres: loaded into `<schema>_new`, counted against the manifest, indexed, then swapped in one
 transaction like src/db/load.py. Schema `pool` is outside `data` and `vec`: `make db-load` does not drop
