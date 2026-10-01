@@ -386,6 +386,8 @@ def test_geography_follows_the_customer():
     lo, _ = search_mod.customer_region(Query(query_id="t218", text="x", customer_inn="4700000003"))
     assert search_mod._geography(org47, lo)[0] == 1.0
     assert search_mod._geography(org78, lo)[0] == pytest.approx(search_mod.NEIGHBOUR_VALUE)
+
+
 def test_saturation_caps_spread_experience_of_active_suppliers(search_data):
     """#196: with the default caps (20 lots / 10 wins) busy suppliers all get experience 1.0; higher caps
     keep them apart, and the value follows the caps exactly."""
