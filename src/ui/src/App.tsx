@@ -133,6 +133,13 @@ function initials(name: string): string {
   return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? "")).toUpperCase() || "?";
 }
 
+const TONES = 6;
+function tone(key: string): number {
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % TONES;
+}
+
 export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterparty"]; large?: boolean }) {
   const host = logoHost(cp);
   const [failed, setFailed] = useState(false);
@@ -144,9 +151,23 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
       </span>
     );
   }
-  // no name in the data — nothing to draw; keep the column so rows stay aligned
-  if (/^ИНН\s/.test(cp.name)) return <span className={`${cls} logo-none`} aria-hidden="true" />;
-  return <span className={cls} aria-hidden="true">{initials(cp.name)}</span>;
+  // no name in the data: the INN length tells a legal entity (10 digits) from an individual or entrepreneur (12)
+  const text = /^ИНН\s/.test(cp.name) ? ((cp.inn ?? "").length === 12 ? "ФЛ" : (cp.inn ?? "").length === 10 ? "ЮЛ" : "?") : initials(cp.name);
+  return (
+    <span className={`${cls} logo-tone-${tone(cp.inn ?? cp.name)}`} aria-hidden="true">
+      {text}
+    </span>
+  );
+}
+
+/** What puts the company in its block: its procurement record, or that it is new to АИС ГЗ. */
+function OriginBadge({ m }: { m: CounterpartyMatch }) {
+  const st = m.counterparty.stats ?? {};
+  if (m.origin !== "history") return <span className="badge badge-new">Новый · нет в АИС ГЗ</span>;
+  const lots = st.lots_participated;
+  if (typeof lots !== "number") return <span className="badge badge-history">Участник закупок АИС ГЗ</span>;
+  const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
+  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
 }
 
 function CompanyName({ name }: { name: string }) {
@@ -404,9 +425,13 @@ export function App() {
             ИНН заказчика
             <input value={customerInn} inputMode="numeric" placeholder="необязательно" onChange={(e) => setCustomerInn(e.target.value)} />
           </label>
-          {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
-          {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
         </div>
+        {(lot?.channel || lot?.okpd2?.length) && (
+          <div className="chips">
+            {lot?.channel && <span className="chip">Канал: {lot.channel}</span>}
+            {lot?.okpd2?.length ? <span className="chip">ОКПД2: {lot.okpd2.join(", ")}</span> : null}
+          </div>
+        )}
         <div className="row">
           <fieldset className="filters">
             <legend>Фильтры</legend>
@@ -508,8 +533,10 @@ export function App() {
             </span>
           </header>
           <Block
+            variant="history"
+            tag="Проверенные"
             title="С опытом госзакупок"
-            hint="Есть в данных АИС ГЗ"
+            hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             rows={res.history}
             total={res.total.history}
             onMore={() => void showMore()}
@@ -522,8 +549,10 @@ export function App() {
             }
           />
           <Block
+            variant="new"
+            tag="Расширение круга"
             title="Новые из открытых источников"
-            hint="Нет в данных АИС ГЗ, найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
+            hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             rows={res.discovered}
             total={res.total.discovered}
             onOpen={setOpen}
@@ -554,9 +583,12 @@ function Block(props: {
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
+  variant: "history" | "new";
+  tag: string;
 }) {
   return (
-    <section className="block" aria-label={props.title}>
+    <section className={`block block-${props.variant}`} aria-label={props.title}>
+      <span className="block-tag">{props.tag}</span>
       <h2>
         {props.title} <span className="count">{props.total}</span>
       </h2>
@@ -582,6 +614,9 @@ function Block(props: {
                   <span className="meta">
                     {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
+                  </span>
+                  <span className="badges">
+                    <OriginBadge m={m} />
                   </span>
                   {top && <span className="why">{top.explanation}</span>}
                 </button>
