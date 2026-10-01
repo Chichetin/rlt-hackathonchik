@@ -187,7 +187,8 @@ def test_discover_shows_only_active_new_companies_with_evidence(cache, tmp_path)
         assert {e.field for e in cp.evidence} >= {"inn", "ogrn", "name", "okved", "msp", "region"}
         assert all(e.url == rmsp.search_url("17.23", "78") and e.fetched_at.year == 2026 for e in cp.evidence)
         assert cp.region == "Санкт-Петербург" and cp.is_msp is True and cp.okved == ["17.23"]
-        assert cp.status is None and cp.kind is None  # not known from the registry row → not guessed
+        assert cp.status is None  # not known from the registry row → not guessed
+        assert cp.kind == "manufacturer"  # main OKVED 17.23 — section C (D-057), basis is an Evidence
         assert [c.name for c in m.components] == list(D.COMPONENT_ORDER)
     first = res.matches[0]
     assert first.counterparty.name == 'ООО "МАРКЛИП"' and first.score == 0.45  # 0.35·1.0 + 0.1·1.0
@@ -560,11 +561,17 @@ def test_api_search_fills_the_discovered_block(api):
     m = body["discovered"][0]
     assert m["origin"] == "discovered" and m["counterparty"]["name"] == 'ООО "МАРКЛИП"'
     assert all(e["url"].startswith("https://rmsp.nalog.ru/") and e["fetched_at"] for e in m["counterparty"]["evidence"])
+    # the role survives the Evidence check of the API, its basis is a fact of the card (D-057)
+    assert m["counterparty"]["kind"] == "distributor"
+    assert any(e["fact"].startswith("Роль — дистрибьютор: заявленный основной ОКВЭД 46.49.33")
+               for e in m["counterparty"]["evidence"])
     why = m["components"][0]["explanation"]  # a predicted class is never called «ОКПД2 запроса» (#63)
     assert "класса ОКПД2 17.12 (в запросе ОКПД2 не указан — класс определён автоматически" in why
     assert "ОКПД2 запроса" not in why
     assert "7801000012" in [x["counterparty"]["inn"] for x in body["history"]]
-    assert api.get("/api/health").json()["queue"] == {"pending": 1}  # the ФНС card is ordered, not fetched inline
+    # the ФНС cards are ordered, not fetched inline: the «новый» one + every history INN without a cache (#38)
+    hist = {m["counterparty"]["inn"] for m in body["history"] if m["counterparty"]["inn"]}
+    assert api.get("/api/health").json()["queue"] == {"pending": 1 + len(hist)}
     only_lo = api.post("/api/search", json={"query_id": "q", "text": "бумага А4",
                                             "filters": {"region": "Ленинградская область"}}).json()
     assert only_lo["discovered"] == []
@@ -577,7 +584,8 @@ def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, mo
     monkeypatch.setattr(rmsp, "_post", lambda *a, **k: attempts.append(a) or 1 / 0)
     body = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"}).json()
     assert body["history"] and body["discovered"] == [] and attempts == []
-    assert api.get("/api/health").json()["queue"] == {}
+    hist = {m["counterparty"]["inn"] for m in body["history"] if m["counterparty"]["inn"]}
+    assert api.get("/api/health").json()["queue"] == {"pending": len(hist)}  # history INNs only (#38), no «новые»
     # the same request with the code from the notice fills the block without the flag
     monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
     with_code = api.post("/api/search", json={"query_id": "q", "text": "бумага А4", "okpd2": ["17.12.14.110"]}).json()

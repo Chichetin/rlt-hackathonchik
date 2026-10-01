@@ -18,7 +18,8 @@ from datetime import UTC, datetime
 
 import httpx
 
-from src.contracts import Counterparty, Evidence, inn_is_valid
+from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
+from src.enrich import role
 from src.sources import bo_nalog, pb_nalog, rmsp
 from src.sources.cache import CachedPage, SourceCache
 
@@ -70,6 +71,8 @@ def from_card(inn: str, page: CachedPage) -> Counterparty:
     okved_code = f.get("vyp.КодОКВЭД") or f.get("search.okved2main")
     okved_name = f.get("vyp.НаимОКВЭД") or f.get("search.okved2mainname")
     add("okved", okved_name, f"Основной ОКВЭД {okved_code} — {okved_name}")
+    key = "vyp.КодОКВЭД" if f.get("vyp.КодОКВЭД") else "search.okved2main"
+    kind = role.assign(okved_code, okved_name, f"{key}: {okved_code}", add)
 
     # МСП only from the card's own value: the line `vyp.rsmpcategory: <c>` is the Evidence value.
     # No key (empty card, ИП without it) → None («не проверено»), never a guessed «нет».
@@ -88,6 +91,7 @@ def from_card(inn: str, page: CachedPage) -> Counterparty:
         inn=inn,
         kpp=kpp,
         name=name or f"ИНН {inn}",
+        kind=kind,
         region=_region(kpp) if kpp else None,  # KPP is evidenced; INN prefix is not a fact
         status=status,
         is_msp=is_msp,
@@ -143,10 +147,30 @@ def from_rmsp(inn: str, page: CachedPage) -> Counterparty:
     is_msp = _msp(row, add)
     okved = row.get("okved1")
     add("okved", row.get("okved1name"), f"Основной ОКВЭД {okved} — {row.get('okved1name')}")
+    kind = role.assign(okved, row.get("okved1name"), f"row.{inn}.okved1: {okved}", add)
     code = row.get("regioncode")
     add("region", f"regioncode: {code}" if code else None, f"Регион реестра МСП: {_region_by_code(code)}")
-    return Counterparty(inn=inn, name=name or f"ИНН {inn}", region=_region_by_code(code), is_msp=is_msp,
+    return Counterparty(inn=inn, name=name or f"ИНН {inn}", kind=kind, region=_region_by_code(code), is_msp=is_msp,
                         okved=[okved] if okved else [], evidence=ev)
+
+
+# ГИР БО statusCode is an English code; the hard filter (src/match/filters.py, _DEAD) looks for Russian
+# stems. Codes of a stopped company are mapped by stem; the list of real codes is not confirmed
+# [ПРОВЕРИТЬ] — an unknown code is kept as is (shown, not filtered), never guessed.
+_BO_DEAD = (("BANKRUPT", "банкротство"), ("LIQUIDAT", "ликвидация"), ("TERMINAT", "деятельность прекращена"),
+            ("DISSOLV", "деятельность прекращена"), ("CLOSED", "деятельность прекращена"))
+
+
+def bo_status(code: str | None) -> str | None:
+    """ГИР БО statusCode -> status text: ACTIVE -> «действующая», a stop code -> a Russian stem + the code."""
+    if not code:
+        return None
+    if code.upper() == "ACTIVE":
+        return "действующая"
+    for stem, text in _BO_DEAD:
+        if stem in code.upper():
+            return f"{text} (ГИР БО: {code})"
+    return code
 
 
 def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> Counterparty:
@@ -154,6 +178,7 @@ def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> C
     f = bo_nalog.parse(page.body)
     ev: list[Evidence] = []
     add = _evidence(bo_nalog.SOURCE, page, ev)
+    kind: Kind | None = None
     if f:
         add("inn", inn, f"ИНН {inn} найден в ГИР БО")
         add("ogrn", f.get("ogrn"), f"ОГРН {f.get('ogrn')}")
@@ -161,13 +186,14 @@ def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> C
         code = f.get("statusCode")
         add("status", f"statusCode: {code}" if code else None, f"Статус в ГИР БО: {code}")
         add("okved", f.get("okved2"), f"Основной ОКВЭД {f.get('okved2')} (код, ГИР БО)")
+        kind = role.assign(f.get("okved2"), None, f"row.{inn}.okved2: {f.get('okved2')}", add)
     is_msp = None
     if msp_page is not None and not any(r.get("inn") == inn for r in rmsp.parse(msp_page.body).rows):
         add_msp = _evidence(rmsp.SOURCE, msp_page, ev)
         add_msp("msp", "inn_rows: 0", "В реестре МСП не найден (запрос по ИНН)")
         is_msp = False
-    status = {"ACTIVE": "действующая"}.get(f.get("statusCode", ""), f.get("statusCode"))
-    return Counterparty(inn=inn, name=f.get("shortName") or f"ИНН {inn}", region=None, status=status,
+    status = bo_status(f.get("statusCode"))
+    return Counterparty(inn=inn, name=f.get("shortName") or f"ИНН {inn}", kind=kind, region=None, status=status,
                         is_msp=is_msp, okved=[f["okved2"]] if f.get("okved2") else [], evidence=ev)
 
 
@@ -192,13 +218,15 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
     return None
 
 
-def enrich(inn: str, cache: SourceCache | None = None) -> Counterparty:
+def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None) -> Counterparty:
     """pb card from cache → pb live (unless blocked) → rmsp by INN → bo. The error of pb is raised
-    only if no fallback source answered; otherwise the source of every fact is in its Evidence."""
+    only if no fallback source answered; otherwise the source of every fact is in its Evidence.
+    `offline=True` — cache only (KeyError when nothing is cached); None — by `ENRICH_OFFLINE`."""
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
     cache = cache or SourceCache()
-    offline = os.environ.get("ENRICH_OFFLINE") == "1"
+    if offline is None:
+        offline = os.environ.get("ENRICH_OFFLINE") == "1"
     err: Exception
     if offline:
         page = cache.get(pb_nalog.card_url(inn), allow_stale=True)

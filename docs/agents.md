@@ -13,7 +13,7 @@
 | Роль | Модель | Когда | Видит и может | Возвращает |
 |---|---|---|---|---|
 | сессия участника | модель человека | всё окно | основная копия на `main` — только чтение; берёт задачи, заводит worktree, пишет брифы, запускает роли | итог окна: что влито, что в работе, что ждёт человека |
-| `builder` | sonnet; сложность «высокая» → `model: opus` | одна issue | свой worktree: тест → код → `make check` → PR → `reviewer` → merge по вердикту | PR, команды и числа, решения D-… |
+| `builder` | sonnet; сложность «высокая» → `model: opus` | одна issue | свой worktree: тест → код → `make check-changed` → PR → `reviewer` → merge по вердикту | PR, команды и числа, решения D-… |
 | `reviewer` | opus | каждый PR и каждое спорное решение | только diff против `origin/main` + условия + контракты; ничего не правит | `merge` / `доработать` / `отклонить` с `файл:строка` |
 | `evaluator` | sonnet | после изменения поиска, скоринга, данных | `make eval EXP=<id>`; `eval-final` — только по заморозке | строка в `EXPERIMENTS.md`, числа с интервалами |
 | `operator` | sonnet | после UI-изменений, перед чек-поинтами | UI в роли пользователя (контрактный управляющий заказчика СПб, задача — кого пригласить в закупку ЭМ) | где сценарий не укладывается в 60–90 с, топ-3 правки |
@@ -27,11 +27,11 @@
 
 ```text
 сессия: take #N → worktree → бриф
-  → builder: тест → код → make check (+ make e2e) → merge origin/main → PR (Closes #N)
+  → builder: тест → код → make check-changed (+ e2e по демо-пути) → merge origin/main → PR (Closes #N)
   → reviewer: diff → вердикт
   → (доработать → тот же builder через SendMessage → reviewer; 2 отклонения → jury)
   → evaluator, если менялись поиск/скоринг/данные
-  → merge по одному: git merge origin/main → make check → gh pr merge --merge --delete-branch
+  → merge по одному: git merge origin/main → make check-changed → gh pr merge --merge --delete-branch
   → issues.sh note → уборка worktree
 веха: operator → jury → submission-checklist (перед сдачей)
 ```

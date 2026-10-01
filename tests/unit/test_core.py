@@ -71,7 +71,7 @@ def test_cache_ttl_and_stale_fallback(tmp_path):
 
 
 def test_queue_idempotent_claim_retry(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     eng = Q.engine_from_env()
     a = Q.enqueue(eng, "enrich", "0000100012")
     assert Q.enqueue(eng, "enrich", "0000100012") == a
@@ -86,10 +86,28 @@ def test_queue_idempotent_claim_retry(tmp_path, monkeypatch):
 
 
 def test_requeue_only_stale_running_tasks(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     eng = Q.engine_from_env()
     Q.enqueue(eng, "enrich", "0000100012")
     Q.claim(eng, "enrich")
     assert Q.requeue_stale(eng, older_than_s=600) == 0  # another worker may be on it
     assert Q.requeue_stale(eng, older_than_s=-1) == 1  # older than the timeout: a crashed worker
     assert Q.status_counts(eng) == {"pending": 1}
+
+
+def test_enqueue_retry_failed_flag(tmp_path, monkeypatch):
+    """#38: background enqueue (search) keeps a failed task failed; an explicit one retries it."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
+    eng = Q.engine_from_env()
+    a = Q.enqueue(eng, "enrich", "0000100012")
+    for _ in range(Q.MAX_ATTEMPTS):
+        Q.claim(eng, "enrich")
+        Q.finish(eng, a, error="timeout")
+    assert Q.status_counts(eng) == {"failed": 1}
+    assert Q.enqueue(eng, "enrich", "0000100012", retry_failed=False) == a
+    assert Q.status_counts(eng) == {"failed": 1} and Q.claim(eng, "enrich") is None
+    assert Q.enqueue(eng, "enrich", "0000100012") == a  # default: retry with fresh attempts
+    assert Q.status_counts(eng) == {"pending": 1}
+    Q.claim(eng, "enrich")
+    Q.finish(eng, a, error="timeout")
+    assert Q.status_counts(eng) == {"pending": 1}  # attempts were reset to 0, not left at MAX

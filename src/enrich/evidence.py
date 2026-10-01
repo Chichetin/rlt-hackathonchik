@@ -9,6 +9,9 @@ Rules (CLAUDE.md, «Проверки кодом»):
    email mentioned in its free-text `fact` must be on the page too;
 4. an INN passes the checksum (10 and 12 digits);
 5. the counterparty INN and every contact are backed by an Evidence with the same field/value;
+   the role (`kind`) by an `okved` Evidence whose value is a WHOLE line of the page with the main OKVED
+   of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/enrich/role.py
+   (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19;
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
 
@@ -23,10 +26,12 @@ from collections.abc import Callable
 from functools import cached_property
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
+from src.enrich.role import basis_kind
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
-FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region"}
+FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region",
+          "contract", "contracts", "rnp"}
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
@@ -77,6 +82,10 @@ class _Page:
     @cached_property
     def phones(self) -> set[str]:
         return _phones(self.norm)
+
+    @cached_property
+    def lines(self) -> set[str]:
+        return {line.strip() for line in self.text.splitlines()}
 
     @cached_property
     def emails(self) -> set[str]:
@@ -161,6 +170,17 @@ def _backed(cp: Counterparty, field: str, value: str, page_text: PageText) -> bo
     return any(e.field == field and e.value == value and not check_evidence(e, page_text) for e in cp.evidence)
 
 
+def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
+    pages = cached_pages(page_text)
+    for e in cp.evidence:
+        if e.field != "okved" or e.value is None or basis_kind(e.value, cp.inn) != cp.kind:
+            continue
+        page = pages.page(e.url)
+        if page is not None and e.value.strip() in page.lines and not check_evidence(e, pages):
+            return True
+    return False
+
+
 def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
     page_text = cached_pages(page_text)
     errors: list[str] = []
@@ -171,6 +191,8 @@ def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
     for field, value in cp.contacts.items():
         if not any(e.field == field and e.value == value for e in cp.evidence):
             errors.append(f"контакт {field}={value!r} без Evidence")
+    if cp.kind is not None and not _kind_backed(cp, page_text):
+        errors.append(f"роль {cp.kind} без подтверждённого основного ОКВЭД с этой ролью по правилу")
     return errors
 
 
@@ -180,4 +202,5 @@ def strip_unverified(cp: Counterparty, page_text: PageText) -> Counterparty:
     good = [e for e in cp.evidence if not check_evidence(e, page_text)]
     contacts = {k: v for k, v in cp.contacts.items() if _backed(cp, k, v, page_text)}
     inn = cp.inn if cp.inn is None or _backed(cp, "inn", cp.inn, page_text) else None
-    return cp.model_copy(update={"evidence": good, "contacts": contacts, "inn": inn})
+    kind = cp.kind if cp.kind is None or _kind_backed(cp, page_text) else None
+    return cp.model_copy(update={"evidence": good, "contacts": contacts, "inn": inn, "kind": kind})
