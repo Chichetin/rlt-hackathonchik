@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
 import "./micro.css";
@@ -301,6 +301,11 @@ export function App() {
     setState("idle");
   }
 
+  // stable, so the landing's scroll listener is not re-attached on every render
+  const goRef = useRef(go);
+  goRef.current = go;
+  const startSearch = useCallback(() => goRef.current("/search"), []);
+
   const link = (to: Path) => ({
     href: to,
     "aria-current": path === to ? ("page" as const) : undefined,
@@ -334,7 +339,7 @@ export function App() {
       <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
-      {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} />
+      {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
       : path === "/about" ? <AboutPage onStart={() => go("/search")} />
       : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
