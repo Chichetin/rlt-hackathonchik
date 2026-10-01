@@ -124,3 +124,22 @@ def status_counts(eng: Engine) -> dict[str, int]:
     with eng.connect() as c:
         rows = c.execute(text("SELECT status, COUNT(*) FROM tasks GROUP BY status")).all()
     return {r[0]: int(r[1]) for r in rows}
+
+
+def claim_keys(eng: Engine, kind: str, keys: list[str]) -> tuple[int, str] | None:
+    """Like `claim`, but only for the given keys: a batch job must not take someone else's task."""
+    if not keys:
+        return None
+    lock = " FOR UPDATE SKIP LOCKED" if eng.dialect.name == "postgresql" else ""
+    names = {f"k{i}": k for i, k in enumerate(keys)}
+    marks = ", ".join(f":{n}" for n in names)
+    with eng.begin() as c:
+        row = c.execute(
+            text(
+                "UPDATE tasks SET status='running', attempts=attempts+1, updated_at=:now "
+                "WHERE id = (SELECT id FROM tasks WHERE kind=:kind AND status='pending' "
+                f"AND key IN ({marks}) ORDER BY id LIMIT 1{lock}) AND status='pending' RETURNING id, key"
+            ),
+            {"kind": kind, "now": _now(), **names},
+        ).first()
+    return (row.id, row.key) if row else None
