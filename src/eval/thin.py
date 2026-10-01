@@ -87,6 +87,37 @@ def compute_groups(processed: Path, cutoff: str, channel: str = "ЭМ") -> list[
             for cls, lots, single, med, sup in rows]
 
 
+_DISTINCT_SQL = """
+WITH lot_class AS (
+    SELECT DISTINCT i.okpd2_l4 AS cls, i.lot_id
+    FROM read_parquet(?) i JOIN read_parquet(?) n USING (lot_id)
+    WHERE n.channel = ? AND n.publish_date < CAST(? AS DATE) AND i.okpd2_l4 IS NOT NULL
+), with_offers AS (
+    SELECT DISTINCT lot_id FROM read_parquet(?) WHERE channel = ? AND inn_valid AND supplier_inn IS NOT NULL
+)
+SELECT DISTINCT lc.cls, lc.lot_id FROM lot_class lc JOIN with_offers USING (lot_id)
+"""
+
+
+def lots_by_group(processed: Path, cutoff: str, channel: str = "ЭМ") -> dict[str, set]:
+    """Lots with offers per group: a lot with items of several groups is in each of them."""
+    items, notices, parts = (str(processed / f"{n}.parquet") for n in ("items", "notices", "participants"))
+    con = duckdb.connect()
+    try:
+        rows = con.execute(_DISTINCT_SQL, [items, notices, channel, cutoff, parts, channel]).fetchall()
+    finally:
+        con.close()
+    out: dict[str, set] = {}
+    for cls, lot_id in rows:
+        out.setdefault(cls, set()).add(lot_id)
+    return out
+
+
+def distinct_lots(by_group: dict[str, set], groups: list[Group]) -> int:
+    """Distinct lots over `groups` — not the sum of `Group.lots`, which counts a multi-group lot per group."""
+    return len(set().union(*(by_group.get(g.okpd2, set()) for g in groups)))
+
+
 def is_thin(g: Group, t: Thresholds) -> bool:
     return g.lots >= t.min_lots and g.single_share >= t.min_single and g.per_100_lots <= t.max_per_100
 
@@ -116,9 +147,14 @@ def sensitivity(groups: list[Group], base: Thresholds) -> list[dict]:
 
 
 def build_record(exp_id: str, groups: list[Group], t: Thresholds, cutoff: str, channel: str, top_n: int,
-                 source: dict | None = None) -> dict:
+                 source: dict | None = None, by_group: dict[str, set] | None = None) -> dict:
     eligible = [g for g in groups if g.lots >= t.min_lots]
     thin = thin_groups(groups, t)
+    distinct = {} if by_group is None else {
+        "thin_lots_distinct": distinct_lots(by_group, thin),
+        "eligible_lots_distinct": distinct_lots(by_group, eligible),
+        "all_lots_distinct": distinct_lots(by_group, groups),
+    }
     return {
         "exp_id": exp_id,
         "kind": "thin-categories",
@@ -134,8 +170,9 @@ def build_record(exp_id: str, groups: list[Group], t: Thresholds, cutoff: str, c
             "per_100_lots_quantiles": _quantiles([g.per_100_lots for g in eligible]),
         },
         "metrics": {
+            # *_lots are lot-group pairs (a lot of two groups counts twice); *_lots_distinct are lots with offers
             "thin_groups": len(thin), "thin_lots": sum(g.lots for g in thin),
-            "eligible_lots": sum(g.lots for g in eligible),
+            "eligible_lots": sum(g.lots for g in eligible), **distinct,
             "thin_suppliers_sum": sum(g.suppliers for g in thin),  # a supplier of two groups counts twice
         },
         "sensitivity": sensitivity(groups, t),
@@ -158,19 +195,21 @@ def main(argv: list[str] | None = None) -> int:
     processed = processed_dir()
     try:
         groups = compute_groups(processed, cutoff, args.channel)
+        by_group = lots_by_group(processed, cutoff, args.channel)
     except (duckdb.IOException, FileNotFoundError) as e:
         print(f"данные организаторов не загружены ({processed}): {e}", file=sys.stderr)
         return 2
     manifest = processed / "manifest.json"
     source = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
     source.pop("raw_dir", None)  # a local path of the machine that built the data: not for a committed file
-    rec = build_record(args.exp, groups, t, cutoff, args.channel, args.top, {"manifest": source})
+    rec = build_record(args.exp, groups, t, cutoff, args.channel, args.top, {"manifest": source}, by_group)
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     m = rec["metrics"]
     print(f"групп {rec['population']['groups']}, с >= {t.min_lots} лотов {rec['population']['eligible_groups']}; "
-          f"тонких {m['thin_groups']} ({m['thin_lots']} лотов {args.channel})")
+          f"тонких {m['thin_groups']} ({m['thin_lots_distinct']} лотов {args.channel} с офертами "
+          f"из {m['all_lots_distinct']}; пар лот — группа {m['thin_lots']})")
     print("ОКПД2   лотов  один-оферта  медиана  поставщиков  на 100 лотов")
     for g in rec["top"]:
         print(f"{g['okpd2']:6} {g['lots']:7} {g['single_share']:10.2f} {g['median_offers']:8.1f} "

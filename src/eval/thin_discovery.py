@@ -136,7 +136,7 @@ def build_record(exp_id: str, thin_id: str, results: list[GroupResult], *, offli
             "inactive": sum(r.inactive for r in checked),
             "groups_with_new": sum(1 for r in checked if r.evidence_passed > 0),
         },
-        "groups": [r.__dict__ for r in results],
+        "groups": [{**r.__dict__, "new_inns": sorted(r.new_inns)} for r in results],  # stable file on a rerun
     }
 
 

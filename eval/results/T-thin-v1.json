@@ -1,9 +1,9 @@
 {
   "exp_id": "T-thin-v1",
   "kind": "thin-categories",
-  "created_at": "2026-10-01T19:44:28+00:00",
-  "commit": "44c2d1f7b022105290936959e7f2f0ac73b8969b",
-  "dirty": false,
+  "created_at": "2026-10-01T21:52:29+00:00",
+  "commit": "d2f24733004e93dafc5d116adc4ecfacac9b46f1",
+  "dirty": true,
   "config": {
     "channel": "ЭМ",
     "period": "publish_date < 2025-07-01 (cutoff of configs/split.yaml)",
@@ -46,6 +46,9 @@
     "thin_groups": 47,
     "thin_lots": 61332,
     "eligible_lots": 292730,
+    "thin_lots_distinct": 31228,
+    "eligible_lots_distinct": 194365,
+    "all_lots_distinct": 196085,
     "thin_suppliers_sum": 4854
   },
   "sensitivity": [

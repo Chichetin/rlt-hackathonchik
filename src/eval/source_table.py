@@ -4,7 +4,7 @@
 
 Reads ONLY the SQLite cache of src/sources/cache.py (read-only, no network): every row of the table
 is something the cache holds, with the fetched_at of the answers (min / max) and, for the МСП registry,
-the registry's own timestamp of the answer (`answer.dtQueryEnd`: the data are as of this moment).
+the registry's own timestamp of the answer (`answer.dtQueryEnd`: when it answered, not when the registry was updated).
 An empty cache of a source is a row of zeros
 with a note, not an invented number.
 
@@ -263,7 +263,7 @@ def render(rows: list[Row]) -> str:
     for r in rows:
         span = f"{_iso(r.fetched_min)} … {_iso(r.fetched_max)}" if r.fetched_min is not None else "нет данных"
         if r.data_date:
-            span += f"; дата реестра {r.data_date}"
+            span += f"; ответ реестра получен {r.data_date}"
         dropped = "; ".join(f"{k}: {v}" for k, v in r.dropped.items() if v) or "—"
         lines.append(f"{r.source} | {r.role} | {r.requests} | {r.found} | {r.verified} | "
                      f"{'—' if r.new is None else r.new} | {dropped} | {span}{' | ' + r.note if r.note else ''}")

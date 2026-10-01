@@ -85,7 +85,10 @@ def test_lot_with_two_groups_counts_in_both(tmp_path):
     con.execute(f"COPY (SELECT 1::BIGINT AS lot_id, '17.12' AS okpd2_l4 UNION ALL SELECT 1, '20.30') TO "
                 f"'{(p / 'items.parquet').as_posix()}' (FORMAT parquet)")
     con.close()
-    assert sorted(g.okpd2 for g in T.compute_groups(p, "2025-07-01")) == ["17.12", "20.30"]
+    groups = T.compute_groups(p, "2025-07-01")
+    assert sorted(g.okpd2 for g in groups) == ["17.12", "20.30"]
+    assert sum(g.lots for g in groups) == 2  # lot-group pairs
+    assert T.distinct_lots(T.lots_by_group(p, "2025-07-01"), groups) == 1  # but one lot
 
 
 @pytest.mark.parametrize("lots, single, per100, thin", [
