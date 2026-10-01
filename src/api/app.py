@@ -25,7 +25,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi import Query as Param
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,6 +33,7 @@ from openpyxl import Workbook
 from pydantic import BaseModel
 
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
+from src.api.guard import RETRY_QUEUE_S, live_slot, queue_max, require_api_key, too_many
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.api.ratings import router as ratings_router
 from src.api.testset import UploadLimit
@@ -50,7 +51,7 @@ from src.match.filters import apply_legal, apply_user_filters, entity_of, facets
 from src.match.store import get_store
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired
-from src.worker.queue import engine_from_env, enqueue, status_counts
+from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
 if os.environ.get("DEMO_FIXTURE") == "1":
@@ -330,12 +331,16 @@ def api_okpd2(codes: str = "") -> dict[str, str]:
     return {c: okpd2_label(c) for c in items}
 
 
-@app.get("/api/counterparty/{inn}", response_model=Counterparty)
+@app.get("/api/counterparty/{inn}", response_model=Counterparty, dependencies=[Depends(require_api_key)])
 def api_counterparty(inn: str) -> Counterparty:
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
-        cp = enrich_mod.enrich(inn)
+        try:
+            cp = enrich_mod.enrich(inn, offline=True)  # the cache answers at once
+        except KeyError:
+            with live_slot():  # not cached: a few simultaneous live calls at most (F-10)
+                cp = enrich_mod.enrich(inn)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
     except (CaptchaRequired, TimeoutError, httpx.HTTPError) as e:
@@ -346,11 +351,14 @@ def api_counterparty(inn: str) -> Counterparty:
     return strip_unverified(cp, SourceCache().page_text)
 
 
-@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202)
+@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202, dependencies=[Depends(require_api_key)])
 def api_enqueue(inn: str) -> EnqueueResult:
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
-    return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn))
+    try:
+        return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn, max_pending=queue_max()))
+    except QueueFull as e:
+        raise too_many(str(e), RETRY_QUEUE_S) from e
 
 
 @app.post("/api/export")

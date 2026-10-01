@@ -967,7 +967,9 @@ export interface operations {
     api_counterparty_api_counterparty__inn__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
             path: {
                 inn: string;
             };
@@ -998,7 +1000,9 @@ export interface operations {
     api_enqueue_api_enrich__inn__post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
             path: {
                 inn: string;
             };
