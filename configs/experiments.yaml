@@ -46,3 +46,8 @@ H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (гео�
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+# #196: потолки насыщения experience поверх дефолта H-15f (в дефолте 20 лотов / 10 побед).
+H-196-sat100:
+  options: {sat_lots: 100, sat_wins: 50}
+H-196-sat500:
+  options: {sat_lots: 500, sat_wins: 250}
