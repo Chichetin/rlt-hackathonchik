@@ -5,6 +5,7 @@ import "./styles.css";
 import "./glass.css";
 import "./search-compose.css";
 import "./responsive-ui.css";
+import "./results-view.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
