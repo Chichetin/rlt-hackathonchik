@@ -423,3 +423,15 @@ def test_query_from_a_notice_does_not_find_that_notice(search_data):
     assert "в 1 лот(ах)" in comp(after["780100000090"], "product_fit").explanation
     search(q.model_copy(update={"query_id": "lot-999999"}))  # a notice that is not in the data: nothing removed
     assert search_mod.excluded_lot() is None
+
+
+def test_query_from_a_notice_does_not_find_it_on_the_fallback_ladder(search_data):
+    """Review of #249: lot 9 «Вода питьевая» is the only lot with its text; without it nothing is found by text, and the
+    OKPD2 rung of the fallback ladder must not bring lot 9 back («Участвовал в лоте 9» under «не входит в подбор»)."""
+    q = Query(query_id="lot-9", text="Вода питьевая", okpd2=["11.07.11.130"])
+    res = search(q)
+    assert search_mod.excluded_lot() == 9
+    assert all(e.url != "data:items#9" for m in res for e in m.counterparty.evidence)
+    assert all("(лот 9)" not in comp(m, "product_fit").explanation for m in res)
+    free = search(q.model_copy(update={"query_id": "ui-1"}))
+    assert any(e.url == "data:items#9" for m in free for e in m.counterparty.evidence)  # the leak this guards against

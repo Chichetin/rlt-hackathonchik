@@ -426,7 +426,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     lots = _drop_own(idx.lot_hits(hits), own)
     cands = _retrieve(store, idx, lots, as_of) if len(lots) else []
     if not cands:  # nobody by text: the fallback ladder (src/match/fallback.py)
-        hits, cands, note = fallback.ladder(store, idx, query, tokens, codes, cfg, bad_codes)
+        hits, cands, note = fallback.ladder(store, idx, query, tokens, codes, cfg, bad_codes, own)
         fallback.set_note(note)
         if not cands:
             return []
