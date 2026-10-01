@@ -40,3 +40,7 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+H-15f-geo-c:     # #218: как H-15f-geo, но география от региона ЗАКАЗЧИКА (код, не конфиг) — перепроверка REJECT H-15f-geo
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
+  signals: {inn_region: 1.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}

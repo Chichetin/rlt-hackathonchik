@@ -320,6 +320,20 @@ def _inn_geography(inn: str | None, want: str | None, share: float, why: str) ->
     return 0.0, note
 
 
+def customer_region(query: Query) -> tuple[str, str | None]:
+    """The region «География» is measured against (#218): the customer's, else the query region.
+
+    АИС ГЗ customers work in St Petersburg or the Leningrad region, so only INN 78 / 47 names the customer's
+    region; another prefix (a federal body registered in Moscow, a branch) says nothing about where the
+    goods go — then the query region stays. The second value is the note for the explanation, or None.
+    """
+    inn = (query.customer_inn or "").strip()
+    code = inn[:2] if len(inn) in (10, 12) and inn.isdigit() else ""
+    if code in REGION_NAME:
+        return REGION_NAME[code], f"заказчик — {REGION_NAME[code]} (ИНН {code}…)"
+    return query.region, None
+
+
 def _geography(cp: Counterparty, region: str, inn_share: float = 0.0) -> tuple[float, str]:
     want = REGION_CODE.get(region)
     if not cp.kpp or len(cp.kpp) < 2 or not cp.kpp.strip("0"):  # 000000000 — a stub, not region 00
@@ -398,6 +412,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
+    target, target_note = customer_region(query)  # «География» against the customer's region (#218)
     for c in cands:
         cp = parties.get(c.inn)
         if cp is None:
@@ -408,7 +423,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)
         act, act_why = _activity(cp, ref, as_of)
-        geo, geo_why = _geography(cp, query.region, shares["inn_region"])
+        geo, geo_why = _geography(cp, target, shares["inn_region"])
+        if target_note:
+            geo_why = f"{geo_why}; {target_note}"
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),

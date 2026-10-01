@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from src.contracts import Query, inn_is_valid
+from src.contracts import Counterparty, Query, inn_is_valid
 from src.ingest.build import build
 from src.match import index as index_mod
 from src.match import search as search_mod
@@ -354,3 +354,27 @@ def test_explanations_name_the_okpd2_class(search_data):
     assert "совпадает код 17.12.14.110 «Бумага для печати»" in comp(given, "product_fit").explanation
     by_class = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]), config=v1()))["7801000012"]
     assert "по ОКПД2 17.12 «Бумага и картон» за" in comp(by_class, "experience").explanation  # experience by class
+
+
+# #218: «География» is measured against the customer's region, not a fixed St Petersburg
+@pytest.mark.parametrize(("customer_inn", "target", "noted"), [
+    ("4700000003", "Ленинградская область", True),    # customer in the Leningrad region (synthetic valid INN)
+    ("7800000002", "Санкт-Петербург", True),
+    ("7700000009", "Санкт-Петербург", False),         # a Moscow-registered body: INN says nothing, query region stays
+    (None, "Санкт-Петербург", False),
+])
+def test_customer_region(customer_inn, target, noted):
+    q = Query(query_id="t218", text="бумага", customer_inn=customer_inn)
+    region, note = search_mod.customer_region(q)
+    assert region == target
+    assert (note is not None) == noted
+    if noted:
+        assert note is not None and "заказчик" in note
+
+
+def test_geography_follows_the_customer():
+    org47 = Counterparty(inn="4700000003", name="ООО Ленобл", kpp="470301001")
+    org78 = Counterparty(inn="7800000002", name="ООО Питер", kpp="780101001")
+    lo, _ = search_mod.customer_region(Query(query_id="t218", text="x", customer_inn="4700000003"))
+    assert search_mod._geography(org47, lo)[0] == 1.0
+    assert search_mod._geography(org78, lo)[0] == pytest.approx(search_mod.NEIGHBOUR_VALUE)
