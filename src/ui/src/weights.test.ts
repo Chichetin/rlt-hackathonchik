@@ -67,3 +67,8 @@ test("settings live in this browser only and survive a reload", () => {
   window.localStorage.setItem("mitrandir.weights", "{broken");
   expect(loadWeights()).toEqual(STANDARD);
 });
+
+test("reweight drops the ranker's reason for the next supplier (#278)", () => {
+  const m = { ...match("A", { product_fit: 1 }), rank_reason: "главное отличие от следующего: x" };
+  expect(reweight(m, DEFAULT_WEIGHTS).rank_reason).toBeNull();
+});
