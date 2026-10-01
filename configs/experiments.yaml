@@ -1,6 +1,6 @@
 # Эксперименты скоринга (#22, research/EXPERIMENTS.md): id эксперимента → правки поверх configs/search.yaml.
 # `make eval EXP=<id>` берёт запись по id; id без записи — конфигурация продукта как есть.
-# ВНИМАНИЕ: записи H-15* писались поверх дефолта v1 (до D-073). После смены дефолта на v2 их результаты
+# ВНИМАНИЕ: записи H-15* писались поверх дефолта v1 (до D-074). После смены дефолта на v2 их результаты
 # в eval/results воспроизводятся только на коммите из поля `commit` файла результата; запись V1 — прежний дефолт.
 # Это НЕ конфигурация продукта: дефолт меняется только в configs/search.yaml и только с подтверждением
 # человека №3 (формула и веса — слайд). Блоки weights / signals / options накладываются по ключам.
@@ -27,6 +27,6 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
-V1:              # прежний дефолт v1 (D-004, до D-073) — для сравнения с v2
+V1:              # прежний дефолт v1 (D-004, до D-074) — для сравнения с v2
   weights: {product_fit: 0.35, experience: 0.2, reliability: 0.2, activity: 0.1, geography: 0.1, price: 0.05}
   options: {fit_bm25_share: 0.6, experience_by: class, tie_break: inn}

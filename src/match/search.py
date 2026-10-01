@@ -7,12 +7,12 @@ v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
    matched the query themselves (D-045): group XX.XX first, then the code inside it.
 3. Components in [0, 1], one explanation line each:
    product_fit — BM25 similarity (normalized by the best candidate) + depth of the OKPD2 match;
-   experience  — lots and wins among the lots with similar positions before as_of (v2, D-073;
+   experience  — lots and wins among the lots with similar positions before as_of (v2, D-074;
                  `options.experience_by: class` — in the query's OKPD2 group, as in v1);
    activity    — days from the last participation to as_of (or to the end of the data);
    geography   — region of the KPP (78 / 47) against Query.region; shown, weight 0 in v2;
    reliability, price — no data yet: value 0, weight 0, "нет данных" (D-029).
-   score = Σ weight · value with weights and options from configs/search.yaml (v2: D-073, was D-004).
+   score = Σ weight · value with weights and options from configs/search.yaml (v2: D-074, was D-004).
 Candidates found only in open sources (`origin="discovered"`) are #16: the block is empty here.
 """
 

@@ -61,7 +61,7 @@ def test_unavailable_components_have_zero_weight_and_say_no_data(search_data):
     for name in ("reliability", "price"):
         c = comp(m, name)
         assert c.value == 0.0 and c.weight == 0.0 and c.explanation.startswith("Нет данных")
-    # v2 defaults (D-073): the computable weights sum to 1, geography is shown but not scored
+    # v2 defaults (D-074): the computable weights sum to 1, geography is shown but not scored
     assert comp(m, "product_fit").weight == 0.762 and comp(m, "experience").weight == 0.19
     assert comp(m, "activity").weight == 0.048 and comp(m, "geography").weight == 0.0
     assert m.score <= 1.0
