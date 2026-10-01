@@ -9,8 +9,9 @@ Rules (CLAUDE.md, «Проверки кодом»):
    email mentioned in its free-text `fact` must be on the page too;
 4. an INN passes the checksum (10 and 12 digits);
 5. the counterparty INN and every contact are backed by an Evidence with the same field/value;
-   the role (`kind`) by an `okved` Evidence whose value is the page line `<key>: <code>` and whose
-   code gives the same kind by the rule of src/enrich/role.py (D-057);
+   the role (`kind`) by an `okved` Evidence whose value is a WHOLE line of the page with the main OKVED
+   of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/enrich/role.py
+   (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19;
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
 
@@ -25,7 +26,7 @@ from collections.abc import Callable
 from functools import cached_property
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
-from src.enrich.role import line_kind
+from src.enrich.role import basis_kind
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
@@ -80,6 +81,10 @@ class _Page:
     @cached_property
     def phones(self) -> set[str]:
         return _phones(self.norm)
+
+    @cached_property
+    def lines(self) -> set[str]:
+        return {line.strip() for line in self.text.splitlines()}
 
     @cached_property
     def emails(self) -> set[str]:
@@ -165,8 +170,14 @@ def _backed(cp: Counterparty, field: str, value: str, page_text: PageText) -> bo
 
 
 def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
-    return any(e.field == "okved" and line_kind(e.value) == cp.kind and not check_evidence(e, page_text)
-               for e in cp.evidence)
+    pages = cached_pages(page_text)
+    for e in cp.evidence:
+        if e.field != "okved" or e.value is None or basis_kind(e.value, cp.inn) != cp.kind:
+            continue
+        page = pages.page(e.url)
+        if page is not None and e.value.strip() in page.lines and not check_evidence(e, pages):
+            return True
+    return False
 
 
 def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:

@@ -287,7 +287,7 @@ def from_row(row: dict[str, str], page: CachedPage) -> Counterparty:
         add("okved", okved_name, f"Основной ОКВЭД {okved} — {okved_name}")
     elif okved:  # no name in the row: the code itself is the fact, tied to its own registry line
         add("okved", f"{inn}.okved1: {okved}", f"Основной ОКВЭД {okved}")
-    kind = role.assign(okved, okved_name, f"{inn}.okved1: {okved}", add)
+    kind = role.assign(okved, okved_name, f"row.{inn}.okved1: {okved}", add)
 
     category = row.get("category", "")
     is_msp: bool | None = None

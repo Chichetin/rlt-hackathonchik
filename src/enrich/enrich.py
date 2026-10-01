@@ -147,7 +147,7 @@ def from_rmsp(inn: str, page: CachedPage) -> Counterparty:
     is_msp = _msp(row, add)
     okved = row.get("okved1")
     add("okved", row.get("okved1name"), f"Основной ОКВЭД {okved} — {row.get('okved1name')}")
-    kind = role.assign(okved, row.get("okved1name"), f"{inn}.okved1: {okved}", add)
+    kind = role.assign(okved, row.get("okved1name"), f"row.{inn}.okved1: {okved}", add)
     code = row.get("regioncode")
     add("region", f"regioncode: {code}" if code else None, f"Регион реестра МСП: {_region_by_code(code)}")
     return Counterparty(inn=inn, name=name or f"ИНН {inn}", kind=kind, region=_region_by_code(code), is_msp=is_msp,
@@ -167,7 +167,7 @@ def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> C
         code = f.get("statusCode")
         add("status", f"statusCode: {code}" if code else None, f"Статус в ГИР БО: {code}")
         add("okved", f.get("okved2"), f"Основной ОКВЭД {f.get('okved2')} (код, ГИР БО)")
-        kind = role.assign(f.get("okved2"), None, f"{inn}.okved2: {f.get('okved2')}", add)
+        kind = role.assign(f.get("okved2"), None, f"row.{inn}.okved2: {f.get('okved2')}", add)
     is_msp = None
     if msp_page is not None and not any(r.get("inn") == inn for r in rmsp.parse(msp_page.body).rows):
         add_msp = _evidence(rmsp.SOURCE, msp_page, ev)
