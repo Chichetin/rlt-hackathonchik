@@ -308,3 +308,76 @@ def test_only_manufacturers_keeps_the_producers_of_the_recorded_block(recorded, 
     filtered = _discover(recorded, tmp_path, only_manufacturers=True).matches
     assert filtered and all(m.counterparty.kind == "manufacturer" for m in filtered)
     assert {m.counterparty.inn for m in makers} <= {m.counterparty.inn for m in filtered}
+
+
+# --- priority of the bases: registry → site → main OKVED (v0, #186) -------------------------------------------
+
+@pytest.mark.parametrize("code", ["17.12", "33.12", "46.19", "46.49.33", "47.71.1", "45.20", "01.11", "81.21"])
+def test_okved_alone_decides_exactly_as_the_rule(code):
+    """Without a registry record and a site phrase nothing changes: the decision is the rule of D-057."""
+    rule = role.classify(code)
+    assert rule is not None
+    d = role.decide(okved=role.okved_basis(code, "Название кода"))
+    assert d.kind == rule[0] and not d.conflict
+    assert d.basis is not None and d.basis.source == "okved" and rule[1] in d.basis.why and code in d.basis.why
+    assert d.shown() == (d.basis,)
+
+
+def test_no_basis_no_role():
+    d = role.decide()
+    assert d.kind is None and d.basis is None and d.shown() == () and not d.conflict
+    assert "Роль не определена" in d.explanation()
+    assert role.okved_basis(None) is None and role.okved_basis("46.") is None
+    assert role.decide(okved=role.okved_basis("")).kind is None
+
+
+def test_site_phrase_outranks_okved_and_both_are_returned_on_disagreement():
+    site_b = role.site_basis("manufacturer", "собственное производство")
+    okved_b = role.okved_basis("46.49.33", "Торговля оптовая писчебумажными товарами")
+    d = role.decide(site=site_b, okved=okved_b)
+    assert d.kind == "manufacturer" and d.basis is site_b and d.conflict
+    assert d.shown() == (site_b, okved_b) and d.bases == (site_b, okved_b)
+    text = d.explanation()
+    assert "Роль — производитель: сайт компании" in text and "собственное производство" in text
+    assert "расхождение: основной ОКВЭД — дистрибьютор" in text and "46.49.33" in text
+
+
+def test_agreeing_bases_are_not_a_conflict():
+    site_b, okved_b = role.site_basis("distributor", "официальный дистрибьютор"), role.okved_basis("46.49.33")
+    d = role.decide(site=site_b, okved=okved_b)
+    assert d.kind == "distributor" and d.basis is site_b and not d.conflict
+    assert d.shown() == (site_b,) and d.bases == (site_b, okved_b) and "расхождение" not in d.explanation()
+
+
+def test_registry_outranks_site_and_okved():
+    reg = role.registry_basis("ГИСП, реестровая запись 1234\\1\\2025")
+    site_b, okved_b = role.site_basis("dealer", "официальный дилер"), role.okved_basis("46.49.33")
+    d = role.decide(registry=reg, site=site_b, okved=okved_b)
+    assert d.kind == "manufacturer" and d.basis is reg and d.conflict
+    assert d.shown() == (reg, site_b, okved_b)
+    assert role.decide(registry=reg, okved=role.okved_basis("17.12")).conflict is False
+
+
+def test_unknown_okved_neither_decides_against_a_site_nor_counts_as_disagreement():
+    site_b, okved_b = role.site_basis("manufacturer", "завод-изготовитель"), role.okved_basis("33.12")
+    assert okved_b is not None and okved_b.kind == "unknown"
+    d = role.decide(site=site_b, okved=okved_b)
+    assert d.kind == "manufacturer" and d.basis is site_b and not d.conflict and d.shown() == (site_b,)
+    vague = role.Basis("site", "unknown", "на сайте нет определённой фразы")  # a higher basis that cannot tell
+    lower = role.decide(site=vague, okved=role.okved_basis("17.12"))
+    assert lower.kind == "manufacturer" and lower.basis is not None and lower.basis.source == "okved"
+    assert not lower.conflict and lower.bases[0] is vague
+    alone = role.decide(okved=okved_b)  # nothing else: «не определена» with its basis, as before
+    assert alone.kind == "unknown" and alone.basis is okved_b and "Роль не определена" in alone.explanation()
+
+
+def test_decision_keeps_the_evidence_of_each_basis():
+    from datetime import UTC, datetime
+
+    from src.contracts import Evidence
+
+    ev = Evidence(source="сайт компании", url="https://x.example/", fetched_at=datetime(2026, 10, 2, tzinfo=UTC),
+                  fact="На сайте указано: «официальный дилер»", field="site", value="официальный дилер")
+    d = role.decide(site=role.site_basis("dealer", "официальный дилер", ev), okved=role.okved_basis("17.12"))
+    assert d.basis is not None and d.basis.evidence is ev and d.conflict
+    assert [b.source for b in d.shown()] == ["site", "okved"]
