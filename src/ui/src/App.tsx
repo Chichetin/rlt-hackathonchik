@@ -1,4 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
+import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
+import { ExampleWheel, RollingNumber, WarmHints } from "./Micro";
+import "./micro.css";
+import { Landing } from "./Landing";
+import { easeOut, glide, ScrollTools } from "./Motion";
 import {
   ALL,
   buildQuery,
@@ -73,7 +78,7 @@ function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Quer
   return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
 }
 
-type Path = "/" | "/results" | "/settings" | "/about" | string;
+type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
 
 // History API routing without a router dependency; the API serves index.html for every page path (src/api/app.py)
 function usePath(): [Path, (next: Path) => void] {
@@ -84,9 +89,9 @@ function usePath(): [Path, (next: Path) => void] {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const go = (next: Path) => {
-    if (next !== window.location.pathname) window.history.pushState(null, "", next);
+    if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, "", next);
     setPath(next);
-    window.scrollTo?.({ top: 0 });
+    window.scrollTo?.({ top: 0, behavior: "instant" });
   };
   return [path, go];
 }
@@ -157,6 +162,7 @@ function CompanyName({ name }: { name: string }) {
 }
 
 export function App() {
+  const reduced = useReducedMotion();
   const [saved] = useState(loadSaved);
   const [path, go] = usePath();
   const [text, setText] = useState(saved.text ?? "");
@@ -234,7 +240,7 @@ export function App() {
       setBase(b ?? r);
       setState("idle");
       save({ text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
-      if (window.location.pathname === "/") go("/results");
+      if (window.location.pathname === "/search") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
       setError(String(e));
@@ -296,34 +302,52 @@ export function App() {
     },
   });
 
+  useEffect(() => {
+    const titles: Record<string, string> = { "/": "Поставщики для вашей закупки", "/search": "Подбор поставщиков", "/results": "Результаты подбора", "/settings": "Настройки", "/about": "О сервисе" };
+    document.title = `${titles[path] ?? "Страница не найдена"} — Митрандир`;
+  }, [path]);
+
   function toggle(next: Filters) {
     setFilters(next);
     if (res) void run(next);
   }
 
   return (
-    <>
-    <div className="page" inert={!!open}>
+    <MotionConfig reducedMotion="user">
+    <LayoutGroup id="mitrandir">
+    <div inert={!!open}><ScrollTools /></div>
+    <motion.div className={`page ${path === "/" ? "page-home" : ""}`} inert={!!open}
+      initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
+      <header className="appbar">
       <div className="workspace-bar">
         <a className="brand" {...link("/")} aria-current={undefined} aria-label="Митрандир — главная">
           <span className="brand-mark"><BrandMark /></span>
           митрандир
         </a>
-        <nav className="workspace-nav" aria-label="Разделы страницы">
-          <a {...link("/")}>Подбор</a>
-          <a {...link("/results")}>Результаты</a>
-          <a {...link("/settings")}>Настройки</a>
-          <a {...link("/about")}>Как это работает</a>
-        </nav>
+        <WarmHints route={path}><nav className="workspace-nav" aria-label="Разделы страницы">
+          {[["/", "Главная", "Возможности Митрандира"], ["/search", "Подбор", "Опишите закупку или загрузите извещение"], ["/results", "Результаты", "Найденные компании и основания подбора"], ["/settings", "Настройки", "Регион и требования к поставщикам"], ["/about", "О сервисе", "Источники данных и критерии оценки"]].map(([to, label, hint]) => (
+            <a key={to} data-hint={hint} {...link(to)}>
+              {path === to && <motion.span className="nav-indicator" layoutId="nav-current" transition={glide} aria-hidden="true" />}
+              <span className="nav-label">{label}</span>
+            </a>
+          ))}
+        </nav></WarmHints>
       </div>
-      {path === "/about" ? <AboutPage onStart={() => go("/")} />
-      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
-      : path !== "/" && path !== "/results" ? <NotFound onHome={() => go("/")} />
-      : <>
-      <header className="top">
-        <h1>Подбор поставщиков для закупки</h1>
-        <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
       </header>
+      <div className="content">
+      <AnimatePresence mode="wait" initial={false}>
+      <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
+        initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
+      {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} />
+      : path === "/about" ? <AboutPage onStart={() => go("/search")} />
+      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} />
+      : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
+      : <>
+      <div className="top">
+        <h1>{path === "/results" ? "Поставщики для вашей закупки" : "Подбор поставщиков для закупки"}</h1>
+        <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
+      </div>
 
       {res?.stub && (
         <div className="stub" role="status">
@@ -387,16 +411,10 @@ export function App() {
             resetLot();
           }}
         />
-        <div className="examples">
-          <span>Например</span>
-          {EXAMPLES.map((example) => (
-            <button type="button" key={example} onClick={() => {
-              setText(example);
-              resetLot();
-              document.getElementById("q")?.focus();
-            }}>{example}</button>
-          ))}
-        </div>
+        <ExampleWheel onConfirm={() => document.getElementById("q")?.focus()} options={EXAMPLES} value={lot ? "" : text} onChange={example => {
+          setText(example);
+          resetLot();
+        }} />
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -471,7 +489,7 @@ export function App() {
         </div>
       )}
 
-      {!res && state !== "error" && (
+      {(!res || path === "/search") && state !== "error" && (
         state === "loading" ? <Skeleton /> : path === "/results" ? (
           <section className="getting-started" aria-label="Результаты">
             <h2>Вы ещё не запускали подбор</h2>
@@ -498,19 +516,19 @@ export function App() {
         )
       )}
 
-      {res && state !== "loading" && filterNotes(base, filters).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
       ))}
 
-      {res && (
-        <main id="results" className="results" aria-busy={state === "loading"}>
+      {path === "/results" && res && (
+        <motion.main initial={reduced ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : 0.45, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
           <header className="results-heading">
             <h2 className="results-title">Результаты подбора</h2>
             <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
             <span className="result-total" role="status">
-              С опытом: <strong>{res.total.history}</strong> · Новых: <strong>{res.total.discovered}</strong>
+              С опытом: <strong><RollingNumber value={res.total.history} /></strong> · Новых: <strong><RollingNumber value={res.total.discovered} /></strong>
             </span>
           </header>
           <Block
@@ -544,14 +562,24 @@ export function App() {
                 : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
-        </main>
+        </motion.main>
       )}
       </div>
       </div>
       </>}
-    </div>
-    {open && <Card m={open} onClose={() => setOpen(null)} />}
-    </>
+      </motion.div>
+      </AnimatePresence>
+      </div>
+      <footer className="appfoot">
+        <div className="appfoot-in">
+          <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
+          <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
+        </div>
+      </footer>
+    </motion.div>
+    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} />}</AnimatePresence>
+    </LayoutGroup>
+    </MotionConfig>
   );
 }
 
@@ -567,11 +595,12 @@ function Block(props: {
   variant: "history" | "new";
   tag: string;
 }) {
+  const reduced = useReducedMotion();
   return (
     <section className={`block block-${props.variant}`} aria-label={props.title}>
       <span className="block-tag">{props.tag}</span>
       <h2>
-        {props.title} <span className="count">{props.total}</span>
+        {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
       {props.rows.length === 0 ? (
@@ -582,14 +611,16 @@ function Block(props: {
             const cp = m.counterparty;
             const top = [...m.components].sort((a, b) => b.value * b.weight - a.value * a.weight)[0];
             return (
-              <li key={`${cp.inn ?? cp.name}-${i}`}>
-                <button className="item" onClick={() => props.onOpen(m)}>
+              <motion.li key={cp.inn ?? cp.name} layout={reduced ? false : "position"}
+                initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.05 }} transition={{ duration: reduced ? 0 : 0.45, delay: reduced ? 0 : Math.min(i, 4) * 0.04, ease: easeOut }}>
+                <motion.button className="item" whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
                   <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
                     <span className="score-num">{m.score.toFixed(2)}</span>
                     <span className="score-meter" aria-hidden="true">
-                      <span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%` }} />
+                      <motion.span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%`, originX: 0 }} initial={reduced ? false : { scaleX: 0 }} whileInView={{ scaleX: 1 }} viewport={{ once: true }} transition={{ duration: reduced ? 0 : 0.7, ease: easeOut }} />
                     </span>
                   </span>
                   <span className="meta">
@@ -599,9 +630,9 @@ function Block(props: {
                   <span className="badges">
                     <OriginBadge m={m} />
                   </span>
-                  {top && <span className="why">{top.explanation}</span>}
-                </button>
-              </li>
+                  {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
+                </motion.button>
+              </motion.li>
             );
           })}
         </ol>
@@ -646,6 +677,7 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
 }
 
 function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
+  const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -659,10 +691,10 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
     };
   }, []);
   return (
-    <div className="card-overlay" onClick={(event) => {
+    <motion.div className="card-overlay" initial={{ opacity: reduced ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.2 }} onClick={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-    <aside ref={cardRef} className="card" role="dialog" aria-modal="true" onKeyDown={(event) => {
+    <motion.aside ref={cardRef} initial={reduced ? false : { x: "100%" }} animate={{ x: 0 }} exit={{ x: reduced ? 0 : "100%" }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 38 }} className="card" role="dialog" aria-modal="true" onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
@@ -762,8 +794,8 @@ function Card({ m, onClose }: { m: CounterpartyMatch; onClose: () => void }) {
           </li>
         ))}
       </ul>
-    </aside>
-    </div>
+    </motion.aside>
+    </motion.div>
   );
 }
 

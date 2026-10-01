@@ -4,6 +4,8 @@ Also serves the built UI (src/ui/dist) at "/", so `make demo` is one process + w
 Search is paginated, filtered and sorted on the server (D-024): `POST /api/search?limit=&offset=`
 pages each block, the block sizes after filters are in the X-Total-History / X-Total-Discovered
 headers (the frozen SearchResponse has no total). The xlsx export takes every filtered row.
+Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
+X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Response
@@ -30,6 +33,7 @@ from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.enrich.role import LABEL as ROLE_LABEL
 from src.llm.provider import get_provider
+from src.match import fallback
 from src.match import search as search_mod
 from src.match.filters import apply_filters
 from src.match.store import get_store
@@ -110,9 +114,12 @@ def health() -> Health:
 
 
 def _accepted(query: Query) -> None:
-    """422 for what only a backtest or an abuser sends. `as_of` is the eval knob (search() is called directly
-    there): through the API a client date built a new BM25 index per date under the global index lock —
-    46 s and 110 MB on the full data, every other search waiting, then 503 (#145, F-01)."""
+    """422 before the search for what the product does not take: an empty text (#113); `as_of` — the eval
+    knob (search() is called directly there): through the API a client date built a new BM25 index per date
+    under the global index lock — 46 s and 110 MB on the full data, every other search waiting, then 503
+    (#145, F-01); a text over MAX_TEXT_CHARS (F-02)."""
+    if not query.text.strip():
+        raise HTTPException(422, "Пустой запрос")
     if query.as_of is not None:
         raise HTTPException(422, "as_of задаётся только в backtest (make eval): API ищет по всем данным")
     if len(query.text) > MAX_TEXT_CHARS:
@@ -120,8 +127,8 @@ def _accepted(query: Query) -> None:
                                  + " — оставьте наименование позиции или фрагмент ТЗ")
 
 
-def _found(query: Query, uncached: set[str] | None = None) -> list[CounterpartyMatch]:
-    """Every candidate of the query after the user filters, best first.
+def _found(query: Query, uncached: set[str] | None = None) -> tuple[list[CounterpartyMatch], str | None]:
+    """Every candidate of the query after the user filters, best first; and why history is empty (#113).
 
     «Новые» INNs are the first in the enrichment queue because discover() queues them here, while
     `_enriched` only collects history INNs without a cache into `uncached` and the caller queues them
@@ -137,10 +144,16 @@ def _found(query: Query, uncached: set[str] | None = None) -> list[CounterpartyM
         log.warning("search: %s", e)  # the path goes to the log, not to the client
         raise HTTPException(503, "данные организаторов недоступны: не загружены (src.ingest.build, make db-load) "
                                  "или база не отвечает") from e
+    note = fallback.search_note()
     if not getattr(search_mod, "IS_STUB", False):
         discovered = _discovered(query, found)
         found = [*_enriched(found, uncached if uncached is not None else set()), *discovered]
-    return apply_filters(found, query)
+    shown = apply_filters(found, query)
+    hidden = sum(m.origin == "history" for m in found) - sum(m.origin == "history" for m in shown)
+    if hidden and not any(m.origin == "history" for m in shown):
+        note = f"фильтры скрыли {hidden}"
+        log.info("search %s: %s", query.query_id, note)
+    return shown, note
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -223,7 +236,9 @@ def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
     uncached: set[str] = set()
-    matches = _found(query, uncached)
+    matches, note = _found(query, uncached)
+    if note:
+        response.headers["X-Search-Note"] = quote(note)
     history = [m for m in matches if m.origin == "history"]
     discovered = [m for m in matches if m.origin == "discovered"]
     response.headers["X-Total-History"] = str(len(history))
@@ -276,7 +291,7 @@ def api_enqueue(inn: str) -> EnqueueResult:
 
 @app.post("/api/export")
 def api_export(query: Query) -> StreamingResponse:
-    matches = _verified(_found(query))
+    matches = _verified(_found(query)[0])
     res = SearchResponse(query=query, history=[m for m in matches if m.origin == "history"],
                          discovered=[m for m in matches if m.origin == "discovered"], stub=_is_stub())
     wb = Workbook()

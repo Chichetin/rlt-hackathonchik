@@ -245,14 +245,20 @@ def test_lot_unparsable_price_gives_no_budget(client, monkeypatch, tmp_path):
     assert q["budget"] is None and q["customer_inn"] is None and q["okpd2"] == []
 
 
-def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path):
+@pytest.mark.parametrize(("procedure", "text"), [
+    ("Поставка картриджей", "Поставка картриджей"),
+    ("Закупка, осуществляемая в соответствии с частью 12 статьи 93", "Картридж; Тонер"),  # #113: both templates
+])
+def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path, procedure, text):
     (tmp_path / "Извещения_t.csv").write_text(
         "lot_id;reqnum;procedure_name;subject;start_price;customer_inn;is_eshop_or_aisgz\n"
-        "7;;Поставка картриджей;Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
+        f"7;;{procedure};Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
         encoding="utf-8",
     )
+    (tmp_path / "ТРУ_t.csv").write_text("lot_id;product_name;okpd2_code\n7;Тонер;20.59\n7;Картридж;26.20\n",
+                                        encoding="utf-8")
     monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
-    assert client.get("/api/lot/7").json()["text"] == "Поставка картриджей"
+    assert client.get("/api/lot/7").json()["text"] == text
 
 
 def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
