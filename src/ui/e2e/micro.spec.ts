@@ -1,24 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-test("волны двигаются, пауза и reduced motion останавливают фон", async ({ page }) => {
+test("волны двигаются, reduced motion останавливает фон", async ({ page }) => {
   await page.goto("/");
-  const field = page.locator(".wave-field");
-  const pixels = () => field.evaluate((el: HTMLCanvasElement) => el.toDataURL());
+  const field = page.locator(".wave-field canvas");
+  const pixels = async () => (await field.screenshot()).toString("base64");
   await expect(field).toBeVisible();
   const moving = await pixels();
   await expect.poll(pixels).not.toBe(moving);
-  await page.getByRole("button", { name: "Пауза фона" }).click();
-  await expect(page.getByRole("button", { name: "Продолжить фон" })).toHaveAttribute("aria-pressed", "true");
-  const stopped = await pixels();
-  await page.waitForTimeout(180);
-  expect(await pixels()).toBe(stopped);
-  await page.getByRole("button", { name: "Продолжить фон" }).click();
-  await expect.poll(pixels).not.toBe(stopped);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(page.getByRole("button", { name: "Пауза фона" })).toHaveCount(0);
-  const reduced = await pixels();
-  await page.waitForTimeout(180);
-  expect(await pixels()).toBe(reduced);
+  // two equal frames in a row: the loop has stopped
+  await expect.poll(async () => { const a = await pixels(); await page.waitForTimeout(120); return a === await pixels(); }).toBe(true);
 });
 
 test("колесо выбирает запрос с клавиатуры и сохраняет свободный ввод", async ({ page }) => {
@@ -55,4 +46,27 @@ test("подсказка меню доступна с клавиатуры, за
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("прокрутка на главной сразу ведёт в «Подбор»", async ({ page }) => {
+  await page.goto("/");
+  await page.mouse.move(400, 400);
+  await page.mouse.wheel(0, 400);
+  await expect(page).toHaveURL(/\/search$/);
+  await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
+  // keyboard: ↓ outside of a control does the same
+  await page.goto("/");
+  await page.locator("body").press("ArrowDown");
+  await expect(page).toHaveURL(/\/search$/);
+});
+
+test("масштабирование и прокрутка вверх не открывают подбор", async ({ page }) => {
+  await page.goto("/");
+  await page.mouse.move(400, 400);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, 400);
+  await page.keyboard.up("Control");
+  await page.locator("body").press("Shift+Space");
+  await page.waitForTimeout(200);
+  expect(new URL(page.url()).pathname).toBe("/");
 });

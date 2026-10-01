@@ -1,45 +1,29 @@
 import { expect, test } from "@playwright/test";
 
-test("боковое меню сворачивается, сохраняет навигацию и раскрывается", async ({ page }) => {
+test("главная — один hero без общей панели и переключателей фона", async ({ page }) => {
   await page.goto("/");
-  const toggle = page.getByRole("button", { name: "Свернуть меню" });
-  const sidebar = page.locator(".glass-sidebar");
-  const before = await sidebar.boundingBox();
-  await toggle.click();
-  await expect(page.getByRole("button", { name: "Развернуть меню" })).toHaveAttribute("aria-expanded", "false");
-  await expect.poll(async () => (await sidebar.boundingBox())!.width).toBeLessThan(before!.width - 60);
-  await page.getByRole("navigation").getByRole("link", { name: "Подбор", exact: true }).click();
-  await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
-  await page.getByRole("button", { name: "Развернуть меню" }).click();
-  await expect(page.getByRole("button", { name: "Свернуть меню" })).toHaveAttribute("aria-expanded", "true");
-  await expect(page.locator('.workspace-nav .nav-label').first()).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Поставщики,");
+  await expect(page.locator(".page")).toHaveCSS("border-top-width", "0px");
+  await expect(page.locator(".landing-hero")).toHaveCSS("border-top-width", "0px");
+  await expect(page.locator(".landing-section, .landing-finale, .sidebar-toggle, .wave-tools")).toHaveCount(0);
+  await expect(page.locator(".wave-field-waves .pattern-waves canvas")).toBeVisible();
+  const nav = await page.getByRole("navigation").boundingBox();
+  expect(nav!.y).toBeLessThan(100);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 2)).toBe(true);
 });
 
-test("мобильный dock остаётся в окне при прокрутке и открывает страницы", async ({ page }) => {
+test("меню сверху на телефоне; на подборе рёбра вместо волн", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   const nav = page.getByRole("navigation");
-  await expect(nav).toBeInViewport();
-  await page.getByRole("link", { name: "Посмотреть возможности" }).click();
-  await expect(page.locator("#possibilities")).toBeInViewport();
-  await expect(nav).toBeInViewport();
-  await nav.getByRole("link", { name: "Настройки" }).click();
-  await expect(page.getByRole("heading", { name: "Настройки подбора" })).toBeVisible();
+  expect((await nav.boundingBox())!.y).toBeLessThan(100);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 2)).toBe(true);
   await nav.getByRole("link", { name: "Подбор", exact: true }).click();
   await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
+  await expect(page.locator(".wave-field-slats .micro-slats canvas")).toBeVisible();
+  await expect(page.locator(".wave-patterns, .wave-control")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-});
-
-
-test("рисунок фона переключается между волнами и рёбрами при паузе", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Пауза фона" }).click();
-  const pixels = () => page.locator(".wave-field").evaluate((el: HTMLCanvasElement) => el.toDataURL());
-  const waves = await pixels();
-  await page.getByRole("button", { name: "Рёбра", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Рёбра", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(pixels).not.toBe(waves);
-  await expect(page.getByRole("button", { name: "Продолжить фон" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Волны", exact: true }).click();
-  await expect.poll(pixels).toBe(waves);
+  await nav.getByRole("link", { name: "Настройки" }).click();
+  await expect(page.getByRole("heading", { name: "Настройки подбора" })).toBeVisible();
+  await expect(page.locator(".wave-field")).toHaveCount(0);
 });

@@ -32,6 +32,7 @@ from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.enrich.role import LABEL as ROLE_LABEL
+from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
 from src.match import fallback
 from src.match import search as search_mod
@@ -48,6 +49,8 @@ ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
 # «Тип» of the xlsx: the captions of KIND_LABEL in src/ui/src/api.ts, from the role captions of D-057
 KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Тип не определён"}
+# The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
+MAX_TEXT_CHARS = 20_000
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -111,6 +114,20 @@ def health() -> Health:
     return Health(status="ok", stub=_is_stub(), llm=get_provider().name, queue=status_counts(_queue()), store=store)
 
 
+def _accepted(query: Query) -> None:
+    """422 before the search for what the product does not take: an empty text (#113); `as_of` — the eval
+    knob (search() is called directly there): through the API a client date built a new BM25 index per date
+    under the global index lock — 46 s and 110 MB on the full data, every other search waiting, then 503
+    (#145, F-01); a text over MAX_TEXT_CHARS (F-02)."""
+    if not query.text.strip():
+        raise HTTPException(422, "Пустой запрос")
+    if query.as_of is not None:
+        raise HTTPException(422, "as_of задаётся только в backtest (make eval): API ищет по всем данным")
+    if len(query.text) > MAX_TEXT_CHARS:
+        raise HTTPException(422, f"Текст запроса длиннее {MAX_TEXT_CHARS:_} символов".replace("_", " ")
+                                 + " — оставьте наименование позиции или фрагмент ТЗ")
+
+
 def _found(query: Query, uncached: set[str] | None = None) -> tuple[list[CounterpartyMatch], str | None]:
     """Every candidate of the query after the user filters, best first; and why history is empty (#113).
 
@@ -121,8 +138,7 @@ def _found(query: Query, uncached: set[str] | None = None) -> tuple[list[Counter
     производители» keeps only a role whose basis passed the check; strip_unverified does not check
     status / is_msp / name / region, so those filters rely on the cached card as is.
     """
-    if not query.text.strip():
-        raise HTTPException(422, "Пустой запрос")
+    _accepted(query)
     try:
         found = search_mod.search(query, k=search_mod.CANDIDATES)
     except FileNotFoundError as e:  # organizers' data not ingested / not loaded (src/match/store.py)
@@ -249,6 +265,18 @@ def api_lot(ident: str) -> Query:
         raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
     except LotDataUnavailable as e:
         raise HTTPException(503, str(e)) from e
+
+
+OKPD2_LABELS_MAX = 50
+
+
+@app.get("/api/okpd2", response_model=dict[str, str])
+def api_okpd2(codes: str = "") -> dict[str, str]:
+    """OKPD2 codes, comma-separated → `код «название»` from the dictionary (#199, D-073); unknown → the code."""
+    items = list(dict.fromkeys(c.strip() for c in codes.split(",") if c.strip()))
+    if len(items) > OKPD2_LABELS_MAX:
+        raise HTTPException(422, f"не больше {OKPD2_LABELS_MAX} кодов за запрос")
+    return {c: okpd2_label(c) for c in items}
 
 
 @app.get("/api/counterparty/{inn}", response_model=Counterparty)

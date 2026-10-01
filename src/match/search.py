@@ -35,6 +35,7 @@ import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
+from src.ingest.okpd2 import label
 from src.match import fallback
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
@@ -263,12 +264,12 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
     if c.okpd_level == 0 or c.okpd_code is None:
         return value, f"{head}; {src} {', '.join(codes)} в его истории не встречается"
     return value, (f"{head}; {src}: {OKPD_LEVEL_TEXT[c.okpd_level]} "
-                   f"{_prefix(c.okpd_code, c.okpd_level)}")
+                   f"{label(_prefix(c.okpd_code, c.okpd_level))}")
 
 
 def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class") -> tuple[float, str]:
     if codes and by == "class":
-        groups = ", ".join(sorted({x[2] or x[0] for x in map(levels, codes)}))
+        groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
         lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
