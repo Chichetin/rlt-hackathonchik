@@ -12,7 +12,7 @@ only in options:
       → user filters                             query.filters
     verified(matches)                            the Evidence check of what is shown (card, xlsx, CSV)
 
-`backtest=True` (make eval / eval-final, research/DECISIONS.md D-089): the main list does not depend on the
+`backtest=True` (make eval / eval-final, research/DECISIONS.md D-091): the main list does not depend on the
 cache at all — status, РНП, МСП, role and region in the cache are facts of today, not of the lot date
 (a leak in a backtest, and a different number on every machine). So no cached enrichment, no «Новые»,
 no hard filters, no network or queue; a filter on a cached field (only_msp, kinds) is an error. What
@@ -74,7 +74,7 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
             raise ValueError(f"{query.query_id}: backtest без as_of — это не backtest")
         uf = parse_filters(query.filters)
         if uf.only_msp or uf.kinds is not None:
-            raise ValueError(f"{query.query_id}: фильтр МСП / роли в backtest — это факты кеша на сегодня (D-089)")
+            raise ValueError(f"{query.query_id}: фильтр МСП / роли в backtest — это факты кеша на сегодня (D-091)")
     # `config` only when given: the product reads configs/search.yaml on every call (and tests stub search())
     kw = {"config": config, "weights": config.get("weights")} if config is not None else {}
     found = search_mod.search(query, k=search_mod.CANDIDATES, **kw)
@@ -168,7 +168,7 @@ def _discovered(query: Query, history: list[CounterpartyMatch], enqueue: Callabl
 
 @dataclass
 class TodayAudit:
-    """What today's cache says about a backtest top-k (outside the metrics: D-089)."""
+    """What today's cache says about a backtest top-k (outside the metrics: D-091)."""
     checked: int = 0  # INNs of the top-k looked up
     cached: int = 0  # with a cached card
     dropped: int = 0  # the card fails legal_ok today (liquidated, bankrupt, in РНП)
@@ -203,5 +203,5 @@ class TodayAudit:
                 "cached_share": round(self.cached / self.checked, 4) if self.checked else None,
                 "legal_dropped": self.dropped, "legal_dropped_relevant": self.dropped_relevant,
                 "cases_with_legal_dropped_relevant": self.cases_with_dropped_relevant,
-                "note": "сегодняшний кеш ФНС/РНП по top-10 backtest; в метрики и bootstrap не входит (D-089)"}
+                "note": "сегодняшний кеш ФНС/РНП по top-10 backtest; в метрики и bootstrap не входит (D-091)"}
 

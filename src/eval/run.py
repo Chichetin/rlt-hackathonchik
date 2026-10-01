@@ -90,7 +90,7 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
 def _rank_search(query: Query, cfg: dict) -> list[str]:
     """What the user sees: the history block of /api/search — the same pipeline (src/match/pipeline.py, #220):
     cached enrichment, user filters, the Evidence check; top-k after the filters. Without «Новые» (never
-    relevant) and without the cache: status, РНП, МСП, role are today's facts — a leak in a backtest (D-089)."""
+    relevant) and without the cache: status, РНП, МСП, role are today's facts — a leak in a backtest (D-091)."""
     picked = pipeline.pick(query, config=cfg, backtest=True)
     shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
     return [m.counterparty.inn for m in shown if m.counterparty.inn]
