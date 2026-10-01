@@ -35,7 +35,7 @@ import math
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from src.contracts import Counterparty
 
@@ -102,6 +102,7 @@ def _pct(x: float) -> str:
 
 
 def history_parts(h: History, prior: Prior, ref: date) -> dict[str, float]:
+    """`ref` — the last day of the history: the day before as_of, or the end of the data."""
     s_win = smooth(h.wins, h.lots, prior.win_rate, PRIOR_LOTS)
     s_ret = smooth(h.repeat_customers, h.won_customers, prior.retention, PRIOR_CUSTOMERS)
     s_breadth = min(1.0, math.log1p(h.customers) / math.log1p(SAT_CUSTOMERS))
@@ -114,7 +115,9 @@ def history_parts(h: History, prior: Prior, ref: date) -> dict[str, float]:
 
 
 def history_reliability(h: History | None, prior: Prior, ref: date) -> tuple[float, str]:
-    """(value, one line) for a supplier with history; no history → 0 and "Нет данных"."""
+    """(value, one line) for a supplier with history; no history → 0 and "Нет данных".
+
+    `ref` — the last day of the history (the day before as_of, or the end of the data)."""
     if h is None or h.lots == 0:
         return 0.0, NO_HISTORY
     s = history_parts(h, prior, ref)
@@ -122,9 +125,10 @@ def history_reliability(h: History | None, prior: Prior, ref: date) -> tuple[flo
     first = h.first_seen
     since = (f"в данных с {first.strftime('%m.%Y')}, активен {h.active_months} из {_months(first, ref)} мес."
              if first and first <= ref else "дата первого участия неизвестна")
+    back = (f"повторные победы у {h.repeat_customers} из {h.won_customers} заказчик(ов) с победой"
+            if h.won_customers else "побед у заказчиков ещё не было")
     why = (f"Побед {h.wins} из {h.lots} лот(ов) — {_pct(s['win_rate'])} с поправкой на малую выборку "
-           f"(у похожих поставщиков {_pct(prior.win_rate)}); повторные победы у {h.repeat_customers} "
-           f"из {h.won_customers} заказчик(ов) с победой; всего заказчиков {h.customers}; {since}")
+           f"(у похожих поставщиков {_pct(prior.win_rate)}); {back}; всего заказчиков {h.customers}; {since}")
     return value, why
 
 
@@ -211,7 +215,8 @@ def check(min_after: int = 3, quantiles: int = 5) -> dict:
             FROM {part} WHERE publish_date >= DATE '{cutoff}' AND publish_date < DATE '{until}'
             GROUP BY supplier_inn""").fetchall()}
     prior = pool_prior(hist.values())
-    rel = {inn: history_reliability(h, prior, cutoff)[0] for inn, h in hist.items()}
+    last = cutoff - timedelta(days=1)
+    rel = {inn: history_reliability(h, prior, last)[0] for inn, h in hist.items()}
     raw = {inn: h.wins / h.lots for inn, h in hist.items() if h.lots}
 
     def table(keys: list[str], score: dict[str, float], outcome) -> list[dict]:

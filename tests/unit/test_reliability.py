@@ -205,3 +205,14 @@ def test_spearman_handles_ties():
     assert spearman([1, 2, 3, 4], [10, 20, 30, 40]) == pytest.approx(1.0)
     assert spearman([1, 2, 3, 4], [4, 3, 2, 1]) == pytest.approx(-1.0)
     assert spearman([1, 1, 2, 2], [1, 1, 2, 2]) == pytest.approx(1.0)
+
+
+def test_months_count_to_the_day_before_as_of(search_data):
+    m = next(m for m in search(Query(query_id="q", text="бумага офисная", as_of=CUTOFF))
+             if m.counterparty.inn == "7801000012")
+    assert "в данных с 01.2024, активен 3 из 18 мес." in rel(m).explanation  # 01.2024 … 06.2025
+
+
+def test_no_wins_yet_is_said_in_words():
+    _, why = history_reliability(h(wins=0, won=0, rep=0), PRIOR, REF)
+    assert "побед у заказчиков ещё не было" in why and "из 0" not in why

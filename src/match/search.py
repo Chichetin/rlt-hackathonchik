@@ -27,7 +27,7 @@ import tempfile
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import duckdb
@@ -331,6 +331,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
     ref = as_of or idx.data_end
+    last_day = as_of - timedelta(days=1) if as_of else idx.data_end  # history is strictly before as_of
     history = store.supplier_history([c.inn for c in cands], as_of) if rel_mode != "off" else {}
     prior = pool_prior(history.values())
     out: list[CounterpartyMatch] = []
@@ -347,7 +348,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),
-            _reliability(rel_mode, history.get(c.inn), prior, ref, w),
+            _reliability(rel_mode, history.get(c.inn), prior, last_day, w),
             ScoreComponent(name="price", value=0.0, weight=0.0, explanation=UNAVAILABLE["price"]),
             _component("activity", act, w, act_why),
             _component("geography", geo, w, geo_why),
