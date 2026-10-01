@@ -199,7 +199,7 @@ def test_formula_like_texts_are_escaped_in_the_file(search_data, tmp_path):
 
 
 def test_predict_uses_the_search_pipeline_hard_filters_and_evidence_check(search_data, tmp_path, monkeypatch):
-    """#220, D-092: predict drops a supplier liquidated by its cached ФНС card and passes the Evidence check."""
+    """#220, D-097: predict drops a supplier liquidated by its cached ФНС card and passes the Evidence check."""
     from src.contracts import Counterparty
     from src.match import pipeline
 

@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
+from src.api.ratings import router as ratings_router
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
@@ -86,6 +87,7 @@ app = FastAPI(
 )
 app.add_middleware(UploadLimit)  # 413 on an oversized test export before the body is read (#207)
 app.include_router(testset_router)  # /api/testset: the test export uploaded in the UI (#207), before the SPA route
+app.include_router(ratings_router)  # /api/ratings: customer ratings 1–5★, not in the score (#233)
 _engine = None
 
 
