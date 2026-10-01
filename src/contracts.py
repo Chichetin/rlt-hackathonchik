@@ -4,7 +4,8 @@ Source: section 2 of docs/source/hackathon-research-workflow.md ("Контрак
 Frozen on 01.10 at 11:30 by human confirmation #1 (CLAUDE.md); after that a change is a
 separate PR with the list of consumers (`grep -rn "<Type>" src tests`).
 
-v1 — FROZEN 01.10 (human confirmation #1, research/DECISIONS.md D-022). Fields refined by the organizers' data — notices (Извещения),
+v1 — FROZEN 01.10 (human confirmation #1, research/DECISIONS.md D-022).
+Fields refined by the organizers' data — notices (Извещения),
 participants with INN and winner flag (Поставщики), lot positions with OKPD2 (ТРУ); see
 research/DATA_DICTIONARY.md. The data has no supplier names, contacts or contract prices.
 
