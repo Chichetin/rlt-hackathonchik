@@ -12,7 +12,10 @@ Session tokens and row ids are not stored. For ИП rows only registry facts are
 and locality are dropped before anything is cached (152-ФЗ, research/SOURCES.md «Правила»).
 
 403 / 429 / a non-JSON page / `captchaRequired` → Blocked: we stop talking to the host for
-BLOCK_COOLDOWN_S and never try to get around it. Requests are paced (MIN_INTERVAL_S).
+BLOCK_COOLDOWN_S and never try to get around it. A timeout or a dead connection pauses the host
+for DOWN_COOLDOWN_S: a hanging source is not asked again by every next search.
+Requests are paced (MIN_INTERVAL_S). A caller may pass a `deadline` (time.monotonic()): pacing,
+connect and read together do not outlive it (connect and read get half of the remaining time each).
 
 `python -m src.sources.rmsp seed <dir>` loads recorded answers (tests/fixtures/rmsp) into the cache:
 the e2e demo and an offline demo run on them without network.
@@ -41,6 +44,8 @@ UA = "Mozilla/5.0 (compatible; RLTHack-Discovery/0.1; hackathon, cached, paced)"
 MIN_INTERVAL_S = float(os.environ.get("RMSP_MIN_INTERVAL_S", "1.0"))
 TIMEOUT_S = float(os.environ.get("RMSP_TIMEOUT_S", "3.0"))
 BLOCK_COOLDOWN_S = 900.0
+DOWN_COOLDOWN_S = float(os.environ.get("RMSP_DOWN_COOLDOWN_S", "90"))
+MIN_ATTEMPT_S = 0.2  # less time than this before the deadline — do not start a request
 
 NP_TYPES = ("UL", "IP")
 # Registry facts kept per row, in this order. Everything else (token, id, flags) is not stored.
@@ -60,6 +65,10 @@ _blocked_until = 0.0
 
 class Blocked(RuntimeError):
     """The host refuses us (403/429, captcha, protection page): stop, do not bypass."""
+
+
+class Paused(Blocked):
+    """No request was made: the pause after a refusal or a timeout is still on, or no time is left."""
 
 
 @dataclass(frozen=True)
@@ -129,39 +138,55 @@ def parse(text: str) -> Answer:
 
 
 def blocked() -> bool:
+    """True while the host is paused: after a refusal (15 min) or after a timeout (DOWN_COOLDOWN_S)."""
     return time.monotonic() < _blocked_until
 
 
-def _block(reason: str) -> Blocked:
+def _pause(seconds: float) -> None:
     global _blocked_until
-    _blocked_until = time.monotonic() + BLOCK_COOLDOWN_S
+    _blocked_until = max(_blocked_until, time.monotonic() + seconds)
+
+
+def _block(reason: str) -> Blocked:
+    _pause(BLOCK_COOLDOWN_S)
     return Blocked(f"rmsp.nalog.ru: {reason} — останавливаемся, защиту не обходим")
 
 
-def _post(client: httpx.Client, data: dict[str, str]) -> httpx.Response:
+def _post(client: httpx.Client, data: dict[str, str], deadline: float | None) -> httpx.Response:
     global _last_request
     with _lock:
-        wait = MIN_INTERVAL_S - (time.monotonic() - _last_request)
+        wait = max(0.0, MIN_INTERVAL_S - (time.monotonic() - _last_request))
+        limit = TIMEOUT_S
+        if deadline is not None:
+            limit = min(TIMEOUT_S, deadline - time.monotonic() - wait)
+            if limit < MIN_ATTEMPT_S:
+                raise Paused("rmsp.nalog.ru: на запрос не осталось времени")
         if wait > 0:
             time.sleep(wait)
         try:
-            return client.post(BASE + "/search-proc.json", data=data)
+            # httpx timeouts are per phase: connect and read share the limit, so both ≤ limit in total
+            return client.post(BASE + "/search-proc.json", data=data, timeout=limit / 2)
+        except httpx.TransportError:
+            _pause(DOWN_COOLDOWN_S)  # timeout / no connection: leave the host alone for a while
+            raise
         finally:
             _last_request = time.monotonic()
 
 
-def fetch_raw(okved: str, region: str, np_type: str = "UL", client: httpx.Client | None = None) -> dict[str, Any]:
-    """One live POST: the first page of the extended search. Blocked on 403/429/captcha/non-JSON."""
+def fetch_raw(okved: str, region: str, np_type: str = "UL", client: httpx.Client | None = None,
+              deadline: float | None = None) -> dict[str, Any]:
+    """One live POST: the first page of the extended search. Blocked on 403/429/captcha/non-JSON,
+    Paused when the host is on pause or the deadline leaves no time (no request is made)."""
     _check_args(okved, region, np_type)
     if blocked():
-        raise Blocked("rmsp.nalog.ru: пауза после отказа источника ещё не истекла")
+        raise Paused("rmsp.nalog.ru: пауза после отказа или таймаута источника ещё не истекла")
     own = client is None
     client = client or httpx.Client(
-        timeout=TIMEOUT_S,
         headers={"User-Agent": UA, "X-Requested-With": "XMLHttpRequest", "Referer": BASE + "/search.html"},
     )
     try:
-        r = _post(client, {"mode": "extended", "page": "1", "region": region, "npType": np_type, "okved1": okved})
+        r = _post(client, {"mode": "extended", "page": "1", "region": region, "npType": np_type, "okved1": okved},
+                  deadline)
         if r.status_code in (403, 429):
             raise _block(f"HTTP {r.status_code}")
         r.raise_for_status()
@@ -180,7 +205,8 @@ def fetch_raw(okved: str, region: str, np_type: str = "UL", client: httpx.Client
 
 
 def fetch_search(okved: str, region: str, np_type: str = "UL", cache: SourceCache | None = None,
-                 client: httpx.Client | None = None, offline: bool = False) -> CachedPage | None:
+                 client: httpx.Client | None = None, offline: bool = False,
+                 deadline: float | None = None) -> CachedPage | None:
     """Cached answer text. offline → cache only (stale is fine), None when not cached.
 
     Live: fresh cache → cache; else one POST; POST failed → stale cache if any, else the error.
@@ -192,7 +218,7 @@ def fetch_search(okved: str, region: str, np_type: str = "UL", cache: SourceCach
         return cache.get(url, allow_stale=True)
 
     def live(_: str) -> tuple[int, str]:
-        answer = fetch_raw(okved, region, np_type, client)
+        answer = fetch_raw(okved, region, np_type, client, deadline)
         cache.put(raw_url(okved, region, np_type), json.dumps(
             {"rowCount": answer.get("rowCount"), "dtQueryEnd": answer.get("dtQueryEnd"), "data": clean_rows(answer)},
             ensure_ascii=False))

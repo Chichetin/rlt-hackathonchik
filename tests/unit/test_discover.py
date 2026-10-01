@@ -1,10 +1,12 @@
 """Discovery v0 (#16): rmsp.nalog.ru answer → block «Новые», only with Evidence, no network in tests.
 
 `tests/fixtures/rmsp/UL_17.23_78.json` is a real answer of the extended search recorded 01.10
-(session tokens and row ids removed). ИП and ФНС-card texts used here are synthetic.
+(session tokens and row ids removed, phones and emails replaced with test values of the same shape).
+ИП and ФНС-card texts used here are synthetic.
 """
 
 import json
+import time
 from pathlib import Path
 
 import duckdb
@@ -191,26 +193,27 @@ def test_discover_shows_only_active_new_companies_with_evidence(cache, tmp_path)
     assert first.counterparty.name == 'ООО "МАРКЛИП"' and first.score == 0.45  # 0.35·1.0 + 0.1·1.0
     fit = first.components[0]
     assert fit.value == 1.0 and "ОКВЭД 17.23" in fit.explanation and "классом ОКПД2 запроса 17.23" in fit.explanation
-    assert "вероятно производитель" in fit.explanation and "не указан" not in fit.explanation
+    assert "вероятно производитель" in fit.explanation and "автоматически" not in fit.explanation
+    assert first.components[1].explanation == "В данных организаторов за 2024–2025 не встречается ни в одной закупке"
     assert "ещё не проверен" in first.components[2].explanation and first.components[2].weight == 0.0
 
 
 def test_registry_contacts_of_a_legal_entity_pass_the_evidence_check(cache, tmp_path):
     res = _run(cache, _processed(tmp_path, []))
     cp = next(m.counterparty for m in res.matches if m.counterparty.inn == "7805772436")
-    assert cp.contacts == {"phone": "+7(812)4487815", "email": "evrikapk@mail.ru"}
+    assert cp.contacts == {"phone": "+7(812)5550101", "email": "company1@example.org"}
     assert check_counterparty(cp, cache.page_text) == []
     assert len(res.matches) == 5 and res.known == 0
 
 
 def test_odd_phone_is_not_a_contact_and_legal_form_suffix_is_shortened(tmp_path):
-    # real shapes seen live on 01.10: phone "+7(96507)53515", name with the legal form at the end
-    row = {**ANSWER["data"][2], "phone": "+7(96507)53515",
+    # shapes seen live on 01.10 (digits replaced): a 5-digit area code, the legal form at the end of the name
+    row = {**ANSWER["data"][2], "phone": "+7(96507)00000",
            "name_ex": '" ЭЛАСТИС " ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ'}
     c = SourceCache(tmp_path / "c.sqlite")
     c.put(rmsp.search_url("17.23", "78"), rmsp.flatten("17.23", "78", "UL", {"data": [row]}))
     cp = _run(c, _processed(tmp_path, [])).matches[0].counterparty
-    assert cp.contacts == {"email": "evrikapk@mail.ru"} and "phone" not in {e.field for e in cp.evidence}
+    assert cp.contacts == {"email": "company1@example.org"} and "phone" not in {e.field for e in cp.evidence}
     assert cp.name == 'ООО " ЭЛАСТИС "' and check_counterparty(cp, c.page_text) == []
     assert D.display_name({"nptype": "UL", "name_ex": 'АКЦИОНЕРНОЕ ОБЩЕСТВО "НПО "ИЗОЛЯТОР"'}) == 'АО "НПО "ИЗОЛЯТОР"'
     assert D.display_name({"nptype": "UL", "name_ex": "ФОНД РАЗВИТИЯ"}) == "ФОНД РАЗВИТИЯ"
@@ -266,12 +269,102 @@ def test_live_requests_respect_plan_budget_and_block(tmp_path):
     assert any("защиту не обходим" in n for n in blocked.notes)
 
 
-def test_source_timeout_gives_empty_block_not_an_error(tmp_path):
+def test_source_timeout_gives_empty_block_and_the_rest_of_the_query_is_cache_only(tmp_path):
+    calls = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
         raise httpx.ConnectTimeout("timeout", request=request)
 
-    res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), offline=False, client=_client(handler))
-    assert res.matches == [] and all("не ответил" in r for r in res.requests)
+    processed = _processed(tmp_path, [])
+    res = _run(SourceCache(tmp_path / "c.sqlite"), processed, offline=False, client=_client(handler))
+    assert res.matches == [] and len(calls) == 1  # one attempt, not one per (OKVED, region)
+    assert "не ответил" in res.requests[0] and all("в сеть не ходили" in r for r in res.requests[1:])
+    assert rmsp.blocked()  # the hanging source is left alone for a while: the next search does not wait either
+    again = _run(SourceCache(tmp_path / "c2.sqlite"), processed, offline=False, client=_client(_no_network))
+    assert again.matches == [] and all("в сеть не ходили" in r for r in again.requests)
+
+
+def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
+    calls = []
+    processed = _processed(tmp_path, [])
+    res = _run(SourceCache(tmp_path / "c.sqlite"), processed, offline=False,
+               client=_client(lambda r: (calls.append(1), httpx.Response(500))[1]))
+    assert len(calls) == 1 and "не ответил" in res.requests[0] and not rmsp.blocked()
+    # a failed refresh that fell back to an outdated answer also ends the live part of the query
+    c = SourceCache(tmp_path / "stale.sqlite", ttl_s=10)
+    c.put(rmsp.search_url("17.23", "78"), rmsp.flatten("17.23", "78", "UL", ANSWER), fetched_at=1.0)
+    calls.clear()
+    res = _run(c, processed, offline=False,
+               client=_client(lambda r: (calls.append(1), httpx.Response(500))[1]))
+    assert len(calls) == 1 and len(res.matches) == 5 and "кеш" in res.requests[0]
+
+
+def _hang(calls: list, ok_first: float | None = None):
+    """A source that keeps silent exactly as long as the client agreed to wait (connect + read)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.extensions["timeout"])
+        if ok_first is not None and len(calls) == 1:
+            time.sleep(ok_first)
+            return httpx.Response(200, json={"rowCount": 0, "data": []})
+        t = request.extensions["timeout"]
+        time.sleep(t["connect"] + t["read"])
+        raise httpx.ReadTimeout("silence", request=request)
+    return handler
+
+
+@pytest.mark.parametrize(("ok_first", "pacing", "expected_calls"), [
+    (None, 0.0, 1),  # the very first request hangs
+    (0.2, 0.0, 2),  # the first answers slowly, the second hangs: it only gets what is left
+    (0.0, 0.3, 2),  # the pause between requests is part of the budget too
+    (0.5, 0.0, 1),  # almost nothing left after the first answer → the second request is not started
+])
+def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, monkeypatch, ok_first, pacing,
+                                                                     expected_calls):
+    budget = 0.6
+    monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
+    monkeypatch.setattr(rmsp, "_last_request", 0.0)
+    calls: list = []
+    started = time.monotonic()
+    res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),
+               offline=False, budget_s=budget, client=_client(_hang(calls, ok_first)))
+    elapsed = time.monotonic() - started
+    assert elapsed < budget + 0.25, f"{elapsed:.2f} s for a {budget} s budget"
+    assert len(calls) == expected_calls and len(res.requests) == 4 and res.matches == []
+    assert all(t["connect"] + t["read"] <= budget + 1e-6 for t in calls)
+
+
+def test_request_timeout_is_capped_by_the_default_when_time_is_plenty(tmp_path, monkeypatch):
+    monkeypatch.setattr(rmsp, "TIMEOUT_S", 3.0)
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, json=ANSWER)
+
+    c = SourceCache(tmp_path / "c.sqlite")
+    rmsp.fetch_search("17.23", "78", cache=c, client=_client(handler))  # no deadline: connect + read = 3 s
+    rmsp.fetch_search("17.23", "47", cache=c, client=_client(handler), deadline=time.monotonic() + 60)
+    assert [(t["connect"], t["read"]) for t in seen] == [(1.5, 1.5), (1.5, 1.5)]
+    with pytest.raises(rmsp.Paused):  # too little time: no request at all, and it is not a refusal
+        rmsp.fetch_search("17.12", "78", cache=c, client=_client(_no_network), deadline=time.monotonic() + 0.05)
+    assert not rmsp.blocked()
+
+
+def test_okved_code_without_a_name_still_has_evidence(tmp_path):
+    no_name = {k: v for k, v in ANSWER["data"][0].items() if k != "okved1name"}
+    no_code = {k: v for k, v in ANSWER["data"][2].items() if k not in ("okved1", "okved1name")}
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("17.23", "78"), rmsp.flatten("17.23", "78", "UL", {"data": [no_name, no_code]}))
+    res = _run(c, _processed(tmp_path, []))
+    assert [m.counterparty.inn for m in res.matches] == ["4703173460"] and res.inactive == 0  # no OKVED → not shown
+    cp = res.matches[0].counterparty
+    ev = next(e for e in cp.evidence if e.field == "okved")
+    assert ev.value == "4703173460.okved1: 17.23" and ev.fact == "Основной ОКВЭД 17.23" and cp.okved == ["17.23"]
+    assert check_counterparty(cp, c.page_text) == []
+    assert res.matches[0].components[0].explanation.startswith("Основной ОКВЭД 17.23 совпадает с классом ОКПД2 запроса")
+    fake = ev.model_copy(update={"value": "4703173460.okved1: 46.49"})  # a code the row does not hold
+    assert check_counterparty(cp.model_copy(update={"evidence": [fake, *cp.evidence]}), c.page_text)
 
 
 def _card(inn: str, status: str) -> str:  # synthetic ФНС card text in the pb_nalog.flatten format
@@ -420,7 +513,9 @@ def test_api_search_fills_the_discovered_block(api):
     m = body["discovered"][0]
     assert m["origin"] == "discovered" and m["counterparty"]["name"] == 'ООО "МАРКЛИП"'
     assert all(e["url"].startswith("https://rmsp.nalog.ru/") and e["fetched_at"] for e in m["counterparty"]["evidence"])
-    assert "класс определён по похожим закупкам" in m["components"][0]["explanation"]
+    why = m["components"][0]["explanation"]  # a predicted class is never called «ОКПД2 запроса» (#63)
+    assert "класса ОКПД2 17.12 (в запросе ОКПД2 не указан — класс определён автоматически" in why
+    assert "ОКПД2 запроса" not in why
     assert "7801000012" in [x["counterparty"]["inn"] for x in body["history"]]
     assert api.get("/api/health").json()["queue"] == {"pending": 1}  # the ФНС card is ordered, not fetched inline
     only_lo = api.post("/api/search", json={"query_id": "q", "text": "бумага А4",
