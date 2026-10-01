@@ -14,15 +14,25 @@ export default defineConfig({
   workers: process.env.E2E_WORKERS ? Number(process.env.E2E_WORKERS) : undefined,
   reporter: [["list"]],
   use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure", viewport: { width: 1440, height: 900 } },
+  // The demo scenario is timed (< 15 s, demo.spec.ts): it runs after the rest and alone, so the clock measures the
+  // scenario, not the parallel tests competing for the CPU (#228). A failure elsewhere still fails the run.
+  // One file alone, without the «rest» dependency: npx playwright test e2e/demo.spec.ts --no-deps
+  projects: [
+    { name: "rest", testIgnore: /demo\.spec\.ts/ },
+    { name: "demo", testMatch: /demo\.spec\.ts/, dependencies: ["rest"] },
+  ],
   webServer: {
     command:
+      // a test export uploaded by an earlier run (cache/e2e-testsets/active) must not answer /api/lot (#207)
+      "uv run --frozen python -c \"import shutil; shutil.rmtree('cache/e2e-testsets', ignore_errors=True)\" && " +
       "uv run --frozen python -m src.ingest.build --raw-dir tests/fixtures/ingest --out-dir cache/e2e-processed && " +
       "uv run --frozen python -m src.sources.rmsp seed tests/fixtures/rmsp/e2e && " +
       `uv run --frozen uvicorn src.api.app:app --host 127.0.0.1 --port ${port}`,
     cwd: "../..",
     env: { PYTHONPATH: ".", DATABASE_URL: "sqlite:///cache/e2e-queue.sqlite", DATA_RAW_DIR: "tests/fixtures/raw",
            DATA_PROCESSED_DIR: "cache/e2e-processed", INDEX_DIR: "cache/e2e-indexes",
-           SOURCE_CACHE: "cache/e2e-sources.sqlite", DISCOVERY_OFFLINE: "1" },
+           SOURCE_CACHE: "cache/e2e-sources.sqlite", DISCOVERY_OFFLINE: "1",
+           TESTSETS_DIR: "cache/e2e-testsets" },
     url: `http://127.0.0.1:${port}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,

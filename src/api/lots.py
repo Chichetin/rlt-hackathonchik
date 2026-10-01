@@ -6,9 +6,10 @@ Reads the Postgres store when search uses it (src/match/store.py, schema `data`)
 Data absent -> LotDataUnavailable (API answers 503, the UI falls back
 to free text); lot absent -> LotNotFound (404). Nothing is invented.
 
-TEST_DATA_DIR (#121): a folder with the organizers' test export (same CSV format, src/ingest/testset.py)
-is looked up first, so a test procedure opens by its number like a training lot; a broken export is
-logged and the training data is still searched.
+Lookup order: the test export uploaded in the UI (#207, src/api/testset.py) -> TEST_DATA_DIR (#121): a
+folder with the organizers' test export (same CSV format, src/ingest/testset.py) -> organizers' data, so a
+test procedure opens by its number like a training lot; a broken export is logged and the next place is
+still searched.
 """
 
 from __future__ import annotations
@@ -88,11 +89,21 @@ def _test_lot(ident: str) -> Query | None:
     return lot.query if lot else None
 
 
+def _uploaded_lot(ident: str) -> Query | None:
+    """Lot from the test export uploaded in the UI; None when none is active (src/api/testset.py)."""
+    from src.api.testset import active_testset
+
+    ts = active_testset()
+    lot = ts.find(ident) if ts else None
+    return lot.query if lot else None
+
+
 def find_lot(ident: str) -> Query:
     ident = ident.strip()
-    test = _test_lot(ident)
-    if test is not None:
-        return test
+    for lookup in (_uploaded_lot, _test_lot):
+        test = lookup(ident)
+        if test is not None:
+            return test
     try:
         store = get_store()
     except StoreUnavailable as e:  # DATA_STORE=postgres and the schema is not loaded
