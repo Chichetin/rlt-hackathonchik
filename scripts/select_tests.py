@@ -30,7 +30,8 @@ PYTEST_NEUTRAL_SUFFIXES = (".md", ".sh")
 # The demo scenario (src/ui/e2e/demo.spec.ts) runs on the fixtures through the API and the built UI;
 # its recipe lives in the Makefile.
 E2E_PREFIXES = ("src/ui/", "tests/fixtures/", "configs/", "pyproject.toml", "uv.lock", "Makefile")
-E2E_ENTRY = "src/api/app.py"
+# The API and what playwright.config.ts webServer runs before it (ingest of the fixture, rmsp seed).
+E2E_ENTRIES = ("src/api/app.py", "src/ingest/build.py", "src/sources/rmsp.py")
 UI_SKIP = ("src/ui/node_modules/", "src/ui/dist/", "src/ui/test-results/")
 
 
@@ -245,7 +246,7 @@ def needs_e2e(changed: list[str]) -> bool:
             return True
         if f.startswith("src/") and f.endswith(".py") and not (ROOT / f).exists():
             return True  # a deleted module may be imported on the demo path
-    deps = closure(E2E_ENTRY) | {E2E_ENTRY}
+    deps = set(E2E_ENTRIES).union(*(closure(e) for e in E2E_ENTRIES))
     return any(f in deps for f in changed)
 
 

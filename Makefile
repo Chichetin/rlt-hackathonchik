@@ -99,7 +99,7 @@ up:                ## docker-compose: api + worker + db → http://127.0.0.1:800
 down:
 	docker compose down
 
-db-load:           ## data/processed → Postgres из docker compose (D-023): make up (или docker compose up -d db), затем это
+db-load:           ## data/processed → Postgres из docker compose (D-054): make up (или docker compose up -d db), затем это
 	DATABASE_URL=$${DATABASE_URL:-postgresql://app:app@127.0.0.1:$${PG_PORT:-5432}/app} $(PY) python -m src.db.load   # secret-scan: allow
 
 db-embed:          ## эмбеддинги уникальных наименований → pgvector + HNSW (после db-load; нужен make setup-ml; ≈ 70 мин CPU, возобновляемо)
