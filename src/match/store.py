@@ -67,8 +67,10 @@ class Store(Protocol):
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]: ...
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]: ...
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]: ...
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
+    def lot_names(self, lot_id: int) -> list[str]: ...
 
 
 def levels(code: str) -> tuple[str, str | None, str | None, str | None]:
@@ -181,6 +183,34 @@ WHERE s.inn IN (SELECT unnest(%(inns)s{text_arr}))
 ORDER BY s.inn{c}
 """
 
+# Fallback ladder (src/match/fallback.py): suppliers of the lots with an OKPD2 prefix at one level
+# ({col}: okpd2_code | okpd2_l6 | okpd2_l4 | okpd2_l2), most lots first, before as_of; the latest such lot
+# and one of its matching position names (bytewise min) are the evidence.
+_OKPD2_SUPPLIERS = """
+WITH m AS (
+    SELECT DISTINCT lot_id, product_name FROM {t[items]} WHERE {col} IN (SELECT unnest(%(codes)s{text_arr}))
+),
+j AS (
+    SELECT supplier_inn, lot_id, is_winner, publish_date FROM {t[participants]}
+    WHERE lot_id IN (SELECT lot_id FROM m) AND {cond}
+),
+agg AS (
+    SELECT supplier_inn, count(DISTINCT lot_id) AS n_lots, count(DISTINCT lot_id) FILTER (WHERE is_winner) AS n_wins
+    FROM j GROUP BY supplier_inn
+    ORDER BY n_lots DESC, n_wins DESC, supplier_inn{c} LIMIT %(limit)s
+),
+best AS (
+    SELECT DISTINCT ON (j.supplier_inn) j.supplier_inn, j.lot_id, j.publish_date
+    FROM j JOIN agg USING (supplier_inn)
+    ORDER BY j.supplier_inn, j.publish_date DESC NULLS LAST, j.lot_id DESC
+),
+name AS (SELECT lot_id, min(product_name{c}) AS text FROM m WHERE lot_id IN (SELECT lot_id FROM best) GROUP BY lot_id)
+SELECT agg.supplier_inn, agg.n_lots, agg.n_wins, best.lot_id, name.text, best.publish_date
+FROM agg JOIN best USING (supplier_inn) LEFT JOIN name USING (lot_id)
+ORDER BY agg.n_lots DESC, agg.n_wins DESC, agg.supplier_inn{c}
+"""
+OKPD2_COLUMN = {4: "okpd2_code", 3: "okpd2_l6", 2: "okpd2_l4", 1: "okpd2_l2"}
+
 _LOT = """
 SELECT lot_id, subject, procedure_name, start_price, customer_inn, channel FROM {t[notices]}
 WHERE lot_id = %(lot_id)s OR reqnum = %(ident)s ORDER BY (lot_id = %(lot_id)s) DESC, lot_id LIMIT 1
@@ -190,6 +220,17 @@ _LOT_OKPD2 = """
 SELECT okpd2_code FROM {t[items]}
 WHERE lot_id = %(lot_id)s AND okpd2_code IS NOT NULL AND okpd2_code <> '' GROUP BY okpd2_code ORDER BY okpd2_code{c}
 """
+
+# Position names of a lot: the query text when both subject and procedure_name are templates (src/api/lots.py).
+_LOT_NAMES = """
+SELECT product_name FROM {t[items]}
+WHERE lot_id = %(lot_id)s AND product_name IS NOT NULL AND trim(product_name) <> ''
+GROUP BY product_name ORDER BY product_name{c} LIMIT 5
+"""
+
+
+def _okpd2_sql(level: int) -> str:
+    return _OKPD2_SUPPLIERS.replace("{col}", OKPD2_COLUMN[level])  # a fixed column name, not user input
 
 
 def _as_lot_id(ident: str) -> int:
@@ -285,12 +326,18 @@ class ParquetStore:
                                  suppliers=self._suppliers(as_of))
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]:
+        return self._fetch(_okpd2_sql(level), {"codes": codes, "as_of": as_of, "limit": limit}, as_of=as_of)[1]
+
     def lot(self, ident: str) -> tuple | None:
         rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})[1]
         return rows[0] if rows else None
 
     def lot_okpd2(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_OKPD2, {"lot_id": lot_id})[1]]
+
+    def lot_names(self, lot_id: int) -> list[str]:
+        return [r[0] for r in self._fetch(_LOT_NAMES, {"lot_id": lot_id})[1]]
 
 
 class PgStore:
@@ -398,12 +445,18 @@ class PgStore:
         cols, rows = self._fetch(_SUPPLIERS, {"inns": inns, "as_of": as_of}, as_of=as_of, suppliers=table)
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]:
+        return self._fetch(_okpd2_sql(level), {"codes": codes, "as_of": as_of, "limit": limit}, as_of=as_of)[1]
+
     def lot(self, ident: str) -> tuple | None:
         _, rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})
         return rows[0] if rows else None
 
     def lot_okpd2(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_OKPD2, {"lot_id": lot_id})[1]]
+
+    def lot_names(self, lot_id: int) -> list[str]:
+        return [r[0] for r in self._fetch(_LOT_NAMES, {"lot_id": lot_id})[1]]
 
 
 def processed_dir() -> Path:
