@@ -104,7 +104,8 @@ class Counterparty(_Model):
     contacts: dict[str, str] = Field(default_factory=dict)  # corporate contacts from sources only
     # From organizers' data (as of Query.as_of): lots_participated, lots_won, win_rate,
     # customers, customers_spb, first_seen, last_seen (ISO date), median_start_price,
-    # top_okpd2 (comma-separated). Profile (D-061): okpd2_classes, top_class (most frequent XX), okpd2_groups, top_class_share,
+    # top_okpd2 (comma-separated). Profile (D-061): okpd2_classes, top_class (most frequent XX),
+    # okpd2_groups, top_class_share,
     # assortment_breadth, distinct_codes, items_per_lot, p90_start_price, top_customer_share,
     # repeat_win_share, active_months, lots_last_90d, em_offers, em_wins, aisgz_contracts,
     # avg_rivals, entity_type ("ЮЛ"/"ИП"), kpp_count, smp_contracts.
