@@ -19,17 +19,18 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-import duckdb
 import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
-from src.ingest.load import built_at, counterparties
+from src.ingest.load import from_rows
 from src.match.filters import REGION_CODE
-from src.match.index import LotIndex, get_index, pq_path, processed_dir
+from src.match.index import LotIndex, get_index
+from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
 
 log = logging.getLogger(__name__)
@@ -72,12 +73,6 @@ def _fmt(d: date) -> str:
     return d.strftime("%d.%m.%Y")
 
 
-def _levels(code: str) -> tuple[str, str | None, str | None, str | None]:
-    """(code, level 6, level 4, level 2) as in src/ingest/build.py (items.okpd2_l*)."""
-    return (code, code[:8] if len(code) >= 8 else None, code[:5] if len(code) >= 5 else None,
-            code[:2] if len(code) >= 2 else None)
-
-
 def _prefix(code: str, level: int) -> str:
     return {4: code, 3: code[:8], 2: code[:5], 1: code[:2]}[level]
 
@@ -97,84 +92,25 @@ class Candidate:
     class_wins: int = 0
 
 
-def _retrieve(con: duckdb.DuckDBPyConnection, idx: LotIndex, hits: list[tuple[int, float]],
-              processed: Path, as_of: date | None) -> list[Candidate]:
-    con.execute("CREATE OR REPLACE TEMP TABLE h AS SELECT unnest($d) AS doc_id, unnest($s) AS score",
-                {"d": [d for d, _ in hits], "s": [s for _, s in hits]})
-    con.execute(
-        f"""
-        CREATE OR REPLACE TEMP TABLE lot AS
-        SELECT d.lot_id, max(h.score) AS score, arg_max(h.doc_id, h.score) AS doc_id
-        FROM read_parquet({idx.docs_parquet}) d JOIN h USING (doc_id) GROUP BY d.lot_id
-        """
-    )
-    cond = "p.publish_date < $as_of" if as_of else "TRUE"
-    rows = con.execute(
-        f"""
-        SELECT p.supplier_inn, max(lot.score) AS bm25, count(DISTINCT p.lot_id) AS n_lots,
-               count(DISTINCT p.lot_id) FILTER (WHERE p.is_winner) AS n_wins,
-               arg_max(p.lot_id, (lot.score, p.publish_date, p.lot_id)) AS best_lot,
-               arg_max(t.text, (lot.score, p.publish_date, p.lot_id)) AS best_text,
-               arg_max(p.publish_date, (lot.score, p.publish_date, p.lot_id)) AS best_date
-        FROM read_parquet({pq_path(processed / "participants.parquet")}) p
-        JOIN lot USING (lot_id)
-        JOIN read_parquet({pq_path(idx.path / "texts.parquet")}) t ON t.doc_id = lot.doc_id
-        WHERE {cond}
-        GROUP BY p.supplier_inn
-        ORDER BY bm25 DESC, n_lots DESC, p.supplier_inn
-        LIMIT {CANDIDATES}
-        """,
-        {"as_of": as_of} if as_of else {},
-    ).fetchall()
-    return [Candidate(*r) for r in rows]
+def _retrieve(store: Store, idx: LotIndex, lots: LotHits, as_of: date | None) -> list[Candidate]:
+    """Participants of the matched lots before as_of, best BM25 first (src/match/store.py: _CANDIDATES)."""
+    rows = store.candidates(lots, as_of, CANDIDATES)
+    return [Candidate(inn, bm25, n_lots, n_wins, best_lot, idx.text(doc), best_date)
+            for inn, bm25, n_lots, n_wins, best_lot, doc, best_date in rows]
 
 
-def _predict_okpd2(con: duckdb.DuckDBPyConnection, processed: Path) -> str | None:
-    row = con.execute(
-        f"""
-        WITH top AS (SELECT lot_id, score FROM lot ORDER BY score DESC, lot_id LIMIT {VOTE_LOTS})
-        SELECT i.okpd2_code FROM read_parquet({pq_path(processed / "items.parquet")}) i JOIN top USING (lot_id)
-        WHERE i.okpd2_code IS NOT NULL
-        GROUP BY i.okpd2_code ORDER BY sum(top.score) DESC, i.okpd2_code LIMIT 1
-        """
-    ).fetchone()
-    return row[0] if row else None
+def _predict_okpd2(store: Store, lots: LotHits) -> str | None:
+    """The OKPD2 code with the largest summed BM25 score over the positions of the top lots."""
+    score = dict(lots.top(VOTE_LOTS))
+    votes: dict[str, float] = defaultdict(float)
+    for lot_id, code in store.lot_codes(list(score)):  # one row per position: a code votes per position
+        votes[code] += score[lot_id]
+    return min(votes, key=lambda c: (-votes[c], c.encode())) if votes else None
 
 
-def _class_history(con: duckdb.DuckDBPyConnection, cands: list[Candidate], codes: list[str],
-                   processed: Path, as_of: date | None) -> None:
+def _class_history(store: Store, cands: list[Candidate], codes: list[str], as_of: date | None) -> None:
     """Deepest OKPD2 match over each candidate's history and lots/wins in the query's group."""
-    lv = [_levels(c) for c in codes]
-    params: dict = {
-        "inns": [c.inn for c in cands],
-        "q9": [x[0] for x in lv], "q6": [x[1] for x in lv if x[1]],
-        "q4": [x[2] for x in lv if x[2]], "q2": [x[3] for x in lv if x[3]],
-    }
-    cond = "publish_date < $as_of" if as_of else "TRUE"
-    if as_of:
-        params["as_of"] = as_of
-    rows = con.execute(
-        f"""
-        WITH p AS (
-            SELECT lot_id, supplier_inn, is_winner FROM read_parquet({pq_path(processed / "participants.parquet")})
-            WHERE supplier_inn IN (SELECT unnest($inns)) AND {cond}
-        ),
-        m AS (
-            SELECT p.supplier_inn, p.lot_id, p.is_winner, i.okpd2_code,
-                   CASE WHEN list_contains($q9, i.okpd2_code) THEN 4
-                        WHEN list_contains($q6, i.okpd2_l6) THEN 3
-                        WHEN list_contains($q4, i.okpd2_l4) THEN 2
-                        WHEN list_contains($q2, i.okpd2_l2) THEN 1 ELSE 0 END AS lvl
-            FROM p JOIN read_parquet({pq_path(processed / "items.parquet")}) i USING (lot_id)
-        )
-        SELECT supplier_inn, max(lvl), arg_max(okpd2_code, (lvl, okpd2_code)),
-               count(DISTINCT lot_id) FILTER (WHERE lvl >= 2),
-               count(DISTINCT lot_id) FILTER (WHERE lvl >= 2 AND is_winner)
-        FROM m GROUP BY supplier_inn
-        """,
-        params,
-    ).fetchall()
-    by_inn = {r[0]: r[1:] for r in rows}
+    by_inn = store.class_history([c.inn for c in cands], codes, as_of)
     for c in cands:
         if c.inn in by_inn:
             c.okpd_level, c.okpd_code, c.class_lots, c.class_wins = by_inn[c.inn]
@@ -207,7 +143,7 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
 
 def _experience(c: Candidate, codes: list[str], as_of: date | None) -> tuple[float, str]:
     if codes:
-        groups = ", ".join(sorted({x[2] or x[0] for x in map(_levels, codes)}))
+        groups = ", ".join(sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
         lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
@@ -248,9 +184,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built."""
     cfg = load_config()  # every call: eval passes weights, the retriever still comes from the config
     w = weights or cfg["weights"]
-    processed = processed_dir()
+    store = get_store()
     as_of = query.as_of
-    idx = get_index(processed, as_of)
+    idx = get_index(store, as_of)
     hits = idx.retrieve(tokenize(query.text), TOP_DOCS)
     how = ""
     if cfg["retriever"] == "pg_hybrid":
@@ -265,22 +201,19 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None) -
             log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
     if not hits:
         return []
-    con = duckdb.connect()
-    try:
-        cands = _retrieve(con, idx, hits, processed, as_of)
-        if not cands:
-            return []
-        codes = list(dict.fromkeys(c.strip() for c in query.okpd2 if c.strip()))
-        predicted = False
-        if not codes:
-            guess = _predict_okpd2(con, processed)
-            codes, predicted = ([guess], True) if guess else ([], False)
-        if codes:
-            _class_history(con, cands, codes, processed, as_of)
-        parties = counterparties([c.inn for c in cands], as_of, processed, con)
-    finally:
-        con.close()
-    fetched = built_at(processed)
+    lots = idx.lot_hits(hits)
+    cands = _retrieve(store, idx, lots, as_of)
+    if not cands:
+        return []
+    codes = list(dict.fromkeys(c.strip() for c in query.okpd2 if c.strip()))
+    predicted = False
+    if not codes:
+        guess = _predict_okpd2(store, lots)
+        codes, predicted = ([guess], True) if guess else ([], False)
+    if codes:
+        _class_history(store, cands, codes, as_of)
+    fetched = store.built_at()
+    parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []

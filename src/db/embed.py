@@ -83,7 +83,7 @@ def embed(conn: psycopg.Connection, encode: Encoder, data_schema: str = "data", 
             cur.executemany(sql.SQL("UPDATE {} SET emb = %s::vector WHERE norm = %s").format(t),
                             [(_vec(v), x) for v, x in zip(vecs, texts, strict=True)])
         done, last = done + len(texts), texts[-1]
-        rate = done / (time.monotonic() - started)
+        rate = done / max(time.monotonic() - started, 1e-6)  # Windows: monotonic() ticks by ~15 ms
         log.info("%d/%d (%.0f текстов/с, осталось ≈ %.0f мин)", done, todo, rate, (todo - done) / rate / 60)
     left = conn.execute(sql.SQL("SELECT count(*) FROM {} WHERE emb IS NULL").format(t)).fetchone()[0]  # type: ignore[index]
     return {"total": total, "done": total - left}
@@ -123,7 +123,7 @@ def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000) -> i
             emb = np.asarray(encode(part), dtype=np.float16).reshape(-1)
             w.write_table(pa.table({"norm": part, "emb": pa.FixedSizeListArray.from_arrays(emb, DIM)}, schema=schema))
             done = i + len(part)
-            rate = done / (time.monotonic() - started)
+            rate = done / max(time.monotonic() - started, 1e-6)  # Windows: monotonic() ticks by ~15 ms
             left = (len(texts) - done) / rate / 60
             log.info("%d/%d (%.0f текстов/с, осталось ≈ %.1f мин)", done, len(texts), rate, left)
     return len(texts)

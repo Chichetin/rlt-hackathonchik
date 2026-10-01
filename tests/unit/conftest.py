@@ -27,6 +27,7 @@ def search_data(fixture_processed: Path, tmp_path: Path, monkeypatch: pytest.Mon
     from src.match import index
 
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(fixture_processed))
+    monkeypatch.setenv("DATA_STORE", "parquet")  # tests on Postgres set DATA_STORE=postgres themselves
     monkeypatch.setenv("INDEX_DIR", str(tmp_path / "indexes"))
     index.clear_memory_cache()
     yield fixture_processed
