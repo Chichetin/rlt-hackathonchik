@@ -75,6 +75,7 @@ def measure(q: Query, cache: SourceCache, processed: Path) -> dict:
         "history_checked": res.history_checked,
         "pool": len(res.pool), "pool_distributors": pool.get("distributor", 0),
         "shown": len(res.matches), "shown_distributors": shown.get("distributor", 0),
+        "shown_manufacturers": shown.get("manufacturer", 0),
         "pool_by_kind": {str(k): v for k, v in sorted(pool.items(), key=lambda kv: str(kv[0]))},
         "evidence_failed": bad, "requests": res.requests,
     }
@@ -109,13 +110,19 @@ def main(argv: list[str] | None = None) -> int:
     missing = list(dict.fromkeys(missing))
 
     rows = [measure(q, cache, processed) for q in qs]
+    unchecked = [r["query_id"] for r in rows if not r["history_checked"]]
+    if unchecked:  # without organizers' data «новые» is not established: the numbers mean nothing
+        print(f"нет данных организаторов в {processed} (DATA_PROCESSED_DIR?): сверка не выполнена для "
+              f"{', '.join(unchecked)} — результат не пишу")
+        return 3
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                             cwd=ROOT).stdout.strip()
     total = {k: sum(r[k] for r in rows) for k in ("pool", "pool_distributors", "shown", "shown_distributors",
-                                                  "evidence_failed")}
+                                                  "shown_manufacturers", "evidence_failed")}
     total["queries_with_shown_distributors"] = sum(r["shown_distributors"] > 0 for r in rows)
     result = {"exp": f"K3-distributors-{args.rule}", "rule": args.rule, "commit": commit,
               "at": datetime.now(UTC).isoformat(timespec="seconds"), "cache_only": True,
+              "processed_dir": str(processed.resolve()), "source_cache": str(cache.path.resolve()),
               "pages_not_in_cache": missing, "max_requests": D.MAX_REQUESTS, "queries": len(rows),
               "total": total, "per_query": rows}
     for r in rows:

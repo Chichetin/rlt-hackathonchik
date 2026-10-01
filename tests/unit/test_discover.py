@@ -174,7 +174,7 @@ def test_okved_plan_more_wholesale_channels_for_distributors():
     assert [c.okved for c in D.okved_plan(["17.23.13.191"])] == ["17.23", "46.49.33"]  # 46.76.1 only for 17.12
     assert [c.okved for c in D.okved_plan(["26.20.40.120"])] == ["26.20", "46.51", "46.66"]
     assert [c.okved for c in D.okved_plan(["20.20.14.000"])] == ["20.20", "46.75"]
-    assert [c.okved for c in D.okved_plan(["20.30.22.110"])] == ["20.30", "46.73.6"]
+    assert [c.okved for c in D.okved_plan(["20.30.22.110"])] == ["20.30", "46.73.4"]  # paints (not 46.73.6)
     assert [c.okved for c in D.okved_plan(["26.40.20.120"])] == ["26.40", "46.43"]
     assert [c.okved for c in D.okved_plan(["27.51.11.110"])] == ["27.51", "46.43.1"]
     assert [c.okved for c in D.okved_plan(["26.60.12.120"])] == ["26.60", "46.46.2"]
