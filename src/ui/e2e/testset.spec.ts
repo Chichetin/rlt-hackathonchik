@@ -9,6 +9,8 @@ test("тестовая выгрузка: загрузка CSV → процеду
   await request.delete("/api/testset"); // start clean: the set survives API restarts
   await page.goto("/search");
   const panel = page.getByRole("region", { name: "Тестовая выгрузка" });
+  await expect(panel.getByRole("button", { name: "Тестовая выгрузка" })).toHaveAttribute("aria-expanded", "false");
+  await panel.getByRole("button", { name: "Тестовая выгрузка" }).click();
   await panel.getByLabel("Файлы тестовой выгрузки").setInputFiles([
     resolve(FIXTURE, "Извещения_24-25.csv"),
     resolve(FIXTURE, "ТРУ_24-25.csv"),
