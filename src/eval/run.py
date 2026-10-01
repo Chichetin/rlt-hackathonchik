@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import logging
+import random
 import subprocess
 import sys
 import time
@@ -31,6 +32,7 @@ SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 # Baselines (T-08): experiment id -> method and its parameters; configs/search.yaml stays the product method.
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
 # Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
+SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
 RANKED_LIMIT = 5000  # per-case top-k lists are stored for parts up to this size
 RESULTS = ROOT / "eval" / "results"
@@ -170,6 +172,10 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             if len(cases) <= ranked_limit:
                 row["ranked"] = ranked
             per_query.append(row)
+            if (i + 1) % 50 == 0 or i + 1 == len(cases):  # progress for `Get-Content logs/<run>.log -Wait`
+                el = time.monotonic() - started
+                log.warning("eval %d/%d, %.1f с/запрос, осталось ≈ %.0f мин", i + 1, len(cases), el / (i + 1),
+                            el / (i + 1) * (len(cases) - i - 1) / 60)
     finally:
         search_mod.STRICT_RETRIEVER = strict
     return {"n_queries": len(per_query), "elapsed_s": round(time.monotonic() - started, 1),
@@ -276,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
+    ap.add_argument("--sample", type=int, default=None,
+                    help="first screen on N cases of the part (fixed seed): winners only go to the full run")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
@@ -288,7 +296,13 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    rec = result_record(args.exp, args.part, cfg, evaluate(load_cases(args.part, split_config()), cfg))
+    cases = load_cases(args.part, split_config())
+    part = args.part
+    if args.sample and args.sample < len(cases):
+        keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
+        cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
+        part = f"{args.part}-s{args.sample}"
+    rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(dump_record(rec), encoding="utf-8")
