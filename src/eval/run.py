@@ -281,8 +281,9 @@ def load_method_config(exp: str, baseline: str | None = None, config_of: str | N
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--exp", required=True, help="experiment id, e.g. H-07 (research/EXPERIMENTS.md)")
-    ap.add_argument("--part", default="dev", choices=("dev", "dev_full", "real"),
-                    help="dev sample (default), all dev cases or the 5–10 real cases; never holdout")
+    ap.add_argument("--part", default="dev", choices=("dev", "dev_full", "real", "folds"),
+                    help="dev sample (default), all dev cases, the 5–10 real cases or the rolling-origin folds "
+                         "(configs/folds.yaml, src/eval/folds.py); never holdout")
     ap.add_argument("--baseline", default=None,
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
     ap.add_argument("--config-of", default=None,
@@ -301,6 +302,10 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
+    if args.part == "folds":  # several time folds, each with its own cutoff (#79)
+        from src.eval.folds import run_experiment
+
+        return run_experiment(args.exp, cfg)
     cases = load_cases(args.part, split_config())
     part = args.part
     if args.sample and args.sample < len(cases):
