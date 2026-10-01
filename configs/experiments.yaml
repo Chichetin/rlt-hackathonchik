@@ -46,6 +46,17 @@ R-198-lr:        # обученный ранжировщик (#198): логис�
   ranker: {kind: logreg, model: models/ranker/R-198-lr.json}
 R-198-gbm:       # обученный ранжировщик (#198): LightGBM LambdaMART, объяснение — pred_contrib
   ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}
+# #268 (E1): признак sem — косинус USER-base запроса и лучшей позиции кандидата (src/match/semantic.py).
+# Одна матрица признаков (ranker_train --n 3000, as_of 2025-04-01, этот коммит): E1-* — все признаки,
+# E1-base-* — те же строки и seed без столбца sem (парная база). E1-* требуют SEM_VECTORS=<vecs-user-base.parquet>.
+E1-lr:
+  ranker: {kind: logreg, model: models/ranker/E1-lr.json}
+E1-gbm:
+  ranker: {kind: lgbm, model: models/ranker/E1-gbm.txt}
+E1-base-lr:
+  ranker: {kind: logreg, model: models/ranker/E1-base-lr.json}
+E1-base-gbm:
+  ranker: {kind: lgbm, model: models/ranker/E1-base-gbm.txt}
 H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (география от заказчика); не прогоняется — см. EXPERIMENTS
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}

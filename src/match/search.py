@@ -38,7 +38,7 @@ import yaml
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
 from src.ingest.okpd2 import label
-from src.match import fallback, ranker
+from src.match import fallback, ranker, semantic
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
@@ -442,7 +442,13 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if codes:
         _class_history(store, cands, codes, as_of)
     rk = ranker.spec(cfg)
+    model = ranker.load(rk) if rk is not None else None
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
+    # `sem` (#268): only for a model that has it or for training with the vectors at hand; the texts are the best
+    # positions of the candidates in the index as_of — nothing after as_of
+    with_sem = ("sem" in model.features) if model is not None else (features_out is not None and semantic.available())
+    sem = dict(zip((c.inn for c in cands), semantic.similarity(query.text, [c.best_text for c in cands]),
+                   strict=True)) if with_sem else {}
     incumbent: dict[str, int] = {}
     if (shares["incumbent"] > 0 or ranked) and query.customer_inn:
         incumbent = customer_lots(store, [c.inn for c in cands], query.customer_inn, as_of)
@@ -488,11 +494,11 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         if ranked:
             rows.append(ranker.feature_row(c, top_bm25, {x.name: x.value for x in comps},
                                            incumbent.get(c.inn, 0) if query.customer_inn else None,
-                                           cp, query, ref, codes, predicted))
+                                           cp, query, ref, codes, predicted, sem.get(c.inn, math.nan)))
     if features_out is not None:
         features_out.extend(zip((m.counterparty.inn for m in out), rows, strict=True))
-    if rk is not None:
-        return ranker.rerank(ranker.load(rk), out, rows, k)
+    if model is not None:
+        return ranker.rerank(model, out, rows, k)
     if opts["tie_break"] == "bm25":
         sims = {id(m): s for m, s in zip(out, bm25_of, strict=True)}
         out.sort(key=lambda m: (-m.score, -sims[id(m)], m.counterparty.inn or "~"))

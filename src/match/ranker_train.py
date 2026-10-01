@@ -13,10 +13,14 @@ sample of n with a fixed seed. Features: search() of the product configuration w
 the window — only history strictly before it (the BM25 index and the supplier aggregates of that date).
 Labels: grade of the case (ЭМ: offer 1, winner 2; АИС ГЗ: winner 2), else 0.
 
-Writes models/ranker/R-198-lr.json (logistic regression on standardized features, label > 0) and
-models/ranker/R-198-gbm.txt (LightGBM LambdaMART, labels 0/1/2); features are cached in --cache (npz),
-`--from-cache` retrains without search(). 15% of the training queries (by seeded hash) are the early-stopping
-validation of LightGBM — dev is never read here.
+Writes models/ranker/<name>-lr.json (logistic regression on standardized features, label > 0) and
+models/ranker/<name>-gbm.txt (LightGBM LambdaMART, labels 0/1/2), --name R-198 by default; features are cached
+in --cache (npz, with their names), `--from-cache` retrains without search(). 15% of the training queries (by
+seeded hash) are the early-stopping validation of LightGBM — dev is never read here.
+
+`sem` (#268): with `SEM_VECTORS=<vecs parquet>` the features include the meaning similarity
+(src/match/semantic.py); `--without sem` trains the same rows without that column — the paired base on the
+same candidates and seed (one variable).
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ from pathlib import Path
 import numpy as np
 
 from src.eval.build_cases import SEED, _h, exclusion, read_lots, stratified_sample, to_case
-from src.match import ranker
+from src.match import ranker, semantic
 from src.match.search import load_config, search
 from src.match.store import processed_dir
 
@@ -68,7 +72,7 @@ def collect(cases: list, cfg: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray,
             np.asarray([c.query.channel == "ЭМ" for c in cases]))
 
 
-def fit_logreg(x: np.ndarray, y: np.ndarray) -> dict:
+def fit_logreg(x: np.ndarray, y: np.ndarray, names: list[str]) -> dict:
     """L2 logistic regression by L-BFGS on standardized features; NaN -> the training median."""
     from scipy.optimize import minimize
 
@@ -90,11 +94,11 @@ def fit_logreg(x: np.ndarray, y: np.ndarray) -> dict:
         return val, grad
 
     res = minimize(loss, np.zeros(z.shape[1] + 1), jac=True, method="L-BFGS-B", options={"maxiter": 500})
-    return {"features": ranker.NAMES, "fill": fill.tolist(), "mean": mean.tolist(), "std": std.tolist(),
+    return {"features": names, "fill": fill.tolist(), "mean": mean.tolist(), "std": std.tolist(),
             "coef": res.x[:-1].tolist(), "intercept": float(res.x[-1]), "converged": bool(res.success)}
 
 
-def fit_lgbm(x: np.ndarray, y: np.ndarray, q: np.ndarray, seed: int = SEED):
+def fit_lgbm(x: np.ndarray, y: np.ndarray, q: np.ndarray, names: list[str], seed: int = SEED):
     import lightgbm as lgb
 
     queries = np.unique(q)
@@ -103,7 +107,7 @@ def fit_lgbm(x: np.ndarray, y: np.ndarray, q: np.ndarray, seed: int = SEED):
 
     def dataset(mask: np.ndarray, ref=None):
         _, sizes = np.unique(q[mask], return_counts=True)  # q is sorted: rows of a query are contiguous
-        return lgb.Dataset(x[mask], label=y[mask], group=sizes, feature_name=ranker.NAMES, reference=ref,
+        return lgb.Dataset(x[mask], label=y[mask], group=sizes, feature_name=names, reference=ref,
                            free_raw_data=False)
 
     train = dataset(~is_valid)
@@ -125,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cache", type=Path, default=ROOT / "data" / "ranker" / "train-2025-04-01.npz")
     ap.add_argument("--from-cache", action="store_true")
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--name", default="R-198", help="model files <name>-lr.json, <name>-gbm.txt")
+    ap.add_argument("--without", default="", help="features left out, comma-separated (e.g. sem)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING)
     cfg = load_config()
@@ -134,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         d = np.load(args.cache)
         x, y, q = d["x"], d["y"], d["q"]
         n_cases = int(d["n_cases"])
+        names = [str(n) for n in d["names"]] if "names" in d else list(ranker.NAMES)[:x.shape[1]]
     else:
         processed = processed_dir()
         print(f"данные: {processed} (DATA_PROCESSED_DIR), INDEX_DIR={os.environ.get('INDEX_DIR', 'indexes')}")
@@ -141,32 +148,52 @@ def main(argv: list[str] | None = None) -> int:
         if any(c.query.as_of != args.as_of for c in cases):
             raise AssertionError("as_of признаков не равен началу окна обучения")
         print(f"обучающих запросов: {len(cases)} из [{args.as_of}, {args.until}), as_of признаков = {args.as_of}")
+        print(f"sem: {'векторы ' + str(semantic.source()) if semantic.available() else 'нет векторов — NaN'}")
         x, y, q, _ = collect(cases, cfg)
         n_cases = len(cases)
+        names = list(ranker.NAMES)
         args.cache.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(args.cache, x=x, y=y, q=q, n_cases=n_cases)
+        np.savez_compressed(args.cache, x=x, y=y, q=q, n_cases=n_cases, names=np.asarray(names))
+    drop = {n for n in args.without.split(",") if n}
+    if drop - set(names):
+        print(f"--without: нет таких признаков {sorted(drop - set(names))}", file=sys.stderr)
+        return 2
+    keep = [i for i, n in enumerate(names) if n not in drop]
+    x, names = x[:, keep], [names[i] for i in keep]
+    if "sem" in names and np.isnan(x[:, names.index("sem")]).all():
+        print(f"sem: все значения NaN — задайте {semantic.ENV} или --without sem", file=sys.stderr)
+        return 2
     t_feat = time.monotonic() - t0
     hit = len(np.unique(q[y > 0]))
     print(f"строк {len(y)}, положительных {int((y > 0).sum())}, запросов с участником среди кандидатов "
           f"{hit}/{n_cases} ({hit / max(n_cases, 1):.1%}); признаки {t_feat:.0f} с")
     args.out.mkdir(parents=True, exist_ok=True)
     meta = {"as_of": args.as_of.isoformat(), "until": args.until.isoformat(), "n_cases": n_cases,
-            "rows": len(y), "positives": int((y > 0).sum()), "queries_with_positive": hit}
+            "rows": len(y), "positives": int((y > 0).sum()), "queries_with_positive": hit,
+            "without": sorted(drop)}
+    if "sem" in names:
+        col = x[:, names.index("sem")]
+        meta["sem_coverage"] = round(float(np.mean(~np.isnan(col))), 4)
+        print(f"sem: покрытие {meta['sem_coverage']:.1%} строк")
     t1 = time.monotonic()
-    lr = fit_logreg(x, y)
+    lr = fit_logreg(x, y, names)
     lr["meta"] = {**meta, "train_s": round(time.monotonic() - t1, 1), "l2": L2}
-    (args.out / "R-198-lr.json").write_text(json.dumps(lr, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    print(f"logreg: {lr['meta']['train_s']} с, сходимость {lr['converged']}")
-    for name, w in sorted(zip(ranker.NAMES, lr["coef"], strict=True), key=lambda t: -abs(t[1]))[:12]:
-        print(f"  {name:<20} {w:+.3f}")
+    lr_path = args.out / f"{args.name}-lr.json"
+    lr_path.write_text(json.dumps(lr, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"logreg {lr_path.name}: {lr['meta']['train_s']} с, сходимость {lr['converged']}")
+    for rank, (name, w) in enumerate(sorted(zip(names, lr["coef"], strict=True), key=lambda t: -abs(t[1])), 1):
+        if rank <= 12 or name == "sem":
+            print(f"  {rank:>2}. {name:<20} {w:+.3f}")
     t2 = time.monotonic()
-    booster, n_valid = fit_lgbm(x, y, q)
-    (args.out / "R-198-gbm.txt").write_text(booster.model_to_string(), encoding="utf-8")  # C API: no non-ASCII paths
+    booster, n_valid = fit_lgbm(x, y, q, names)
+    gbm_path = args.out / f"{args.name}-gbm.txt"
+    gbm_path.write_text(booster.model_to_string(), encoding="utf-8")  # C API: no non-ASCII paths
     gain = booster.feature_importance("gain")
-    print(f"lgbm: {time.monotonic() - t2:.1f} с, деревьев {booster.best_iteration}, валидация {n_valid} запросов, "
-          f"ndcg@10 {booster.best_score['valid_0']['ndcg@10']:.4f}")
-    for name, g in sorted(zip(ranker.NAMES, gain, strict=True), key=lambda t: -t[1])[:12]:
-        print(f"  {name:<20} {g / max(gain.sum(), 1e-12):.3f}")
+    print(f"lgbm {gbm_path.name}: {time.monotonic() - t2:.1f} с, деревьев {booster.best_iteration}, "
+          f"валидация {n_valid} запросов, ndcg@10 {booster.best_score['valid_0']['ndcg@10']:.4f}")
+    for rank, (name, g) in enumerate(sorted(zip(names, gain, strict=True), key=lambda t: -t[1]), 1):
+        if rank <= 12 or name == "sem":
+            print(f"  {rank:>2}. {name:<20} {g / max(gain.sum(), 1e-12):.3f}")
     if math.isnan(float(np.sum(lr["coef"]))):
         print("logreg: NaN в весах", file=sys.stderr)
         return 1

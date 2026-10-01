@@ -208,12 +208,16 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
 
 
 def _vectors(cfg: dict) -> dict | None:
-    """Model, table and rows of the vector half (pg_hybrid) the run actually used."""
-    if cfg.get("retriever") != "pg_hybrid":
-        return None
-    from src.match import pg_retriever
+    """Model, table and rows of the vector half (pg_hybrid) and of the ranker feature `sem` (#268) the run used."""
+    from src.match import semantic
 
-    return pg_retriever.coverage(cfg.get("embedding_model"))
+    out = None
+    if cfg.get("retriever") == "pg_hybrid":
+        from src.match import pg_retriever
+
+        out = pg_retriever.coverage(cfg.get("embedding_model"))
+    sem = semantic.coverage()
+    return {**(out or {}), "sem": sem} if sem else out
 
 
 def _store() -> str:

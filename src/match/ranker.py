@@ -10,6 +10,11 @@ is v2 (D-077) byte for byte. One feature function (`feature_row`) serves trainin
 
 The card says which features lifted the supplier the most (product_fit explanation); the contract and
 the six components are unchanged — they keep their values and weights, the order is the model's.
+
+A model stores the names of its features (a subset of NAMES): `feature_row` gives all of them, the model takes
+its own columns — so a model trained without a feature (R-198, E1-base without `sem`, #268) keeps loading.
+`sem` (meaning similarity, src/match/semantic.py) is computed only when the model has it or features are
+collected for training.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ import json
 import logging
 import math
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -86,6 +91,7 @@ FEATURES: dict[str, str] = {
     "channel_em": "канал запроса — ЭМ",
     "channel_share": "доля его лотов в канале запроса",
     "okpd_predicted": "ОКПД2 запроса определён по похожим позициям",
+    "sem": "смысловое сходство запроса и лучшей позиции поставщика",
 }
 NAMES = list(FEATURES)
 
@@ -99,8 +105,11 @@ def _num(v: Any) -> float:
 
 
 def feature_row(c: Candidate, top_bm25: float, comps: dict[str, float], cust_lots: int | None, cp: Counterparty,
-                query: Query, ref: date | None, codes: list[str], predicted: bool) -> list[float]:
-    """Features of one candidate, in NAMES order; NaN = not known (no KPP, no profile key, no customer)."""
+                query: Query, ref: date | None, codes: list[str], predicted: bool,
+                sem: float = math.nan) -> list[float]:
+    """Features of one candidate, in NAMES order; NaN = not known (no KPP, no profile key, no customer).
+
+    `sem`: cosine of the query and `c.best_text` (src/match/semantic.py), NaN when not computed."""
     st = cp.stats
     want = REGION_CODE.get(query.region)
     kpp = cp.kpp if cp.kpp and len(cp.kpp) >= 2 and cp.kpp.strip("0") else None
@@ -142,6 +151,7 @@ def feature_row(c: Candidate, top_bm25: float, comps: dict[str, float], cust_lot
         "channel_em": channel,
         "channel_share": (em_share if channel == 1.0 else 1.0 - em_share) if not math.isnan(channel) else math.nan,
         "okpd_predicted": float(predicted) if codes else math.nan,
+        "sem": sem,
     }
     return [float(row[n]) for n in NAMES]
 
@@ -152,15 +162,21 @@ class Model:
     path: Path
     params: dict  # logreg: fill, mean, std, coef, intercept
     booster: Any = None  # lgbm.Booster
+    features: list[str] = field(default_factory=lambda: list(NAMES))  # the model's own, a subset of NAMES
+
+    def __post_init__(self) -> None:
+        self.cols = np.asarray([NAMES.index(n) for n in self.features], dtype=int)
 
     def raw(self, x: np.ndarray) -> np.ndarray:
         """Ranking score (higher is better) of rows x (n, len(NAMES))."""
+        x = x[:, self.cols]
         if self.kind == "lgbm":
             return np.asarray(self.booster.predict(x, raw_score=True, num_threads=1), dtype=float)
         return self._z(x) @ self.params["coef"] + self.params["intercept"]
 
     def contrib(self, x: np.ndarray) -> np.ndarray:
-        """Per-feature contribution to raw() (n, len(NAMES)), the bias excluded."""
+        """Per-feature contribution to raw() (n, len(self.features)), the bias excluded."""
+        x = x[:, self.cols]
         if self.kind == "lgbm":
             return np.asarray(self.booster.predict(x, pred_contrib=True, num_threads=1), dtype=float)[:, :-1]
         return self._z(x) * self.params["coef"]
@@ -201,19 +217,22 @@ def load(sp: dict) -> Model:
         import lightgbm as lgb
 
         booster = lgb.Booster(model_str=path.read_text(encoding="utf-8"))  # not model_file: non-ASCII paths
-        if booster.feature_name() != NAMES:
-            raise ValueError(f"{path}: признаки модели не совпадают с ranker.NAMES — переобучите")
-        model = Model("lgbm", path, {}, booster)
+        model = Model("lgbm", path, {}, booster, _known(path, booster.feature_name()))
     else:
         body = json.loads(path.read_text(encoding="utf-8"))
-        if body.get("features") != NAMES:
-            raise ValueError(f"{path}: признаки модели не совпадают с ranker.NAMES — переобучите")
         params: dict[str, Any] = {k: np.asarray(body[k], dtype=float) for k in ("fill", "mean", "std", "coef")}
         params["intercept"] = float(body["intercept"])
-        model = Model("logreg", path, params)
+        model = Model("logreg", path, params, None, _known(path, body.get("features")))
     with _lock:
         _models[key] = model
     return model
+
+
+def _known(path: Path, names: Any) -> list[str]:
+    """The model's feature names: distinct, every one of NAMES (feature_row computes it)."""
+    if not isinstance(names, list) or not names or len(set(names)) != len(names) or set(names) - set(NAMES):
+        raise ValueError(f"{path}: признаки модели не входят в ranker.NAMES — переобучите")
+    return names
 
 
 KIND_TEXT = {"logreg": "логистическая регрессия", "lgbm": "LightGBM LambdaMART"}
@@ -224,7 +243,8 @@ def explain(model: Model, contrib: np.ndarray, top: int = 2) -> str:
     order = [i for i in np.argsort(-contrib, kind="stable")[:top] if contrib[i] > 0]
     if not order:
         return f"ранжировщик ({KIND_TEXT[model.kind]}): ни один признак не поднял выше среднего"
-    return f"ранжировщик ({KIND_TEXT[model.kind]}): главный вклад — " + ", ".join(FEATURES[NAMES[i]] for i in order)
+    return f"ранжировщик ({KIND_TEXT[model.kind]}): главный вклад — " + ", ".join(
+        FEATURES[model.features[i]] for i in order)
 
 
 def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
