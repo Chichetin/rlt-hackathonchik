@@ -275,6 +275,7 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
     notes = list(lot.notes)
     pool_k = top * CHECK_FACTOR
     query: Query = lot.query
+    for_new: list[CounterpartyMatch] | None = None
     try:
         text_query = query.model_copy(update={"okpd2": []})
         by_text = search_mod.search(text_query, k=pool_k)
@@ -285,7 +286,7 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
             notes.append(f"{why}; «История» — по коду и по тексту поочерёдно, «Новые» — по классу текста")
             rep.searched_by = "код и текст поочерёдно"
             history = interleave(search_mod.search(query, k=pool_k), by_text)
-            query = text_query
+            query, for_new = text_query, by_text  # «Новые» by the class of the text, not voted by the code's lots
         elif query.okpd2:
             history = search_mod.search(query, k=pool_k)
         else:
@@ -299,13 +300,19 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
     rep.counts["history_candidates"] = len(history)
     if not history:
         notes.append("в истории нет поставщиков по этому предмету")
-    shown = _pick(history, top, pool_k, verify_fn, rep, "history")
+    try:
+        shown = _pick(history, top, pool_k, verify_fn, rep, "history")
+    except Exception as e:  # noqa: BLE001 — one bad lot must not stop the whole export
+        log.exception("проверка «Истории», лот %s", lot.lot_id)
+        notes.append(f"ошибка проверки «Истории»: {type(e).__name__}")
+        shown = []
     if history and not shown:
         notes.append(f"в истории {len(history)} кандидатов, ни один не прошёл проверку (статус, РНП)")
 
     try:
-        res = discover_mod.discover(query, history, offline=offline, budget_s=FULL_BUDGET_S, max_requests=None,
-                                    pages=FULL_PAGES, predicted_class=True)
+        res = discover_mod.discover(query, history if for_new is None else for_new, offline=offline,
+                                    budget_s=FULL_BUDGET_S, max_requests=None, pages=FULL_PAGES,
+                                    predicted_class=True)
         rep.requests = res.requests
         if any("не ответил" in r or "отказал" in r for r in res.requests):
             rep.unavailable.add("реестр МСП (поиск по ОКВЭД)")
@@ -378,9 +385,17 @@ def _done(out: Path) -> set[str]:
 
 
 class _Csv:
-    """Append-only `;` CSV with the header written once; every cell escaped (F-08)."""
+    """Append-only `;` CSV with the header written once; every cell escaped (F-08). A file with another
+    header (an older format) is moved aside to `<name>.old.csv`, never appended to."""
 
     def __init__(self, path: Path, columns: Sequence[str]):
+        if path.exists():
+            with path.open(encoding="utf-8-sig", newline="") as f:
+                head = next(csv.reader(f, delimiter=";"), [])
+            if head != list(columns):
+                old = path.with_name(f"{path.stem}.old.csv")
+                log.warning("predict: %s другого формата — перенесён в %s", path.name, old.name)
+                path.replace(old)
         new_file = not path.exists()
         self.f = path.open("a", encoding="utf-8-sig" if new_file else "utf-8", newline="")
         self.w = csv.writer(self.f, delimiter=";")
@@ -403,12 +418,15 @@ def run(csv_dir: Path, out: Path, top: int = 10, offline: bool | None = None, mo
     """Write the answer for every lot not yet in `out`. `mode="full"` — #229 (the CLI default)."""
     ts = load_testset(csv_dir)
     out.parent.mkdir(parents=True, exist_ok=True)
+    w = _Csv(out, COLUMNS)  # first: a file of an older format is moved aside before resuming
     done = _done(out)
     stats = {"lots": len(ts.lots), "skipped": 0, "with_history": 0, "with_discovered": 0, "empty": 0,
              "rows": 0, "rows_checked": 0}
     if mode == "full":
         log.info("predict full: источники, ещё не подключённые к этому режиму: %s", "; ".join(NOT_CONNECTED))
-    w = _Csv(out, COLUMNS)
+        if rnp and not offline:
+            log.info("predict full: РНП ЕИС — crawl-delay 60 с на запрос, до %d проверок на лот: ≈ %d–%d мин на лот "
+                     "без кеша (NO_RNP=1 — без РНП)", 2 * top * CHECK_FACTOR, 2 * top, 2 * top * CHECK_FACTOR)
     rw = _Csv(report_path(out), REPORT_COLUMNS) if mode == "full" else None
     try:
         for i, lot in enumerate(ts.lots, start=1):

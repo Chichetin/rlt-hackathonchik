@@ -64,7 +64,7 @@ def test_verify_real_card_and_rnp_from_cache(card_cache):
 
 def test_verify_without_card_is_not_shown(tmp_path):
     v = V.verify(Counterparty(inn=UL, name=f"ИНН {UL}"), SourceCache(tmp_path / "e.sqlite"), offline=True)
-    assert not v.ok and "статус не подтверждён" in v.why
+    assert not v.ok and "не подтверждён" in v.why
 
 
 def test_verify_rejects_liquidated_rnp_and_bad_inn(card_cache):
@@ -136,21 +136,75 @@ def test_section_shares_from_text_matches(search_data):
 
 # --- full run ------------------------------------------------------------------------------------------
 
-def test_full_mode_every_row_has_name_and_status(search_data, tmp_path):
+def _seed_cards(cache: SourceCache, inns: list[str], nameless: frozenset[str] = frozenset()) -> None:
+    """A pb card and a «no results» RNP page per INN: the real recorded pages with the INN replaced (a
+    stub of the transport); `nameless` — cards without any name line."""
+    card = (FIX / "pb_nalog" / f"{UL}.txt").read_text(encoding="utf-8")
+    rnp = (FIX / "eis_rnp" / f"inn_{UL}_no_results.html").read_text(encoding="utf-8")
+    for inn in inns:
+        body = card.replace(UL, inn)
+        if inn in nameless:
+            body = "\n".join(line for line in body.splitlines()
+                              if not line.startswith(("search.namec", "search.namep", "vyp.НаимЮЛ")))
+        cache.put(pb_nalog.card_url(inn), body)
+        cache.put(eis_rnp.search_url(inn), rnp.replace(UL, inn))
+
+
+def _supplier_inns(processed: Path) -> list[str]:
+    import duckdb
+
+    return [r[0] for r in duckdb.connect().execute(
+        "SELECT DISTINCT inn FROM read_parquet(?) WHERE inn IS NOT NULL", [str(processed / "suppliers.parquet")]
+    ).fetchall()]
+
+
+def test_full_mode_every_row_has_name_and_status(search_data, tmp_path, monkeypatch):
+    """Acceptance (#229): the real check on a stubbed transport — every row of both blocks has a checked
+    name and status, cache only (offline): no network."""
+    cache_path = tmp_path / "sources.sqlite"
+    monkeypatch.setenv("SOURCE_CACHE", str(cache_path))
+    inns = _supplier_inns(search_data)
+    _seed_cards(SourceCache(cache_path), inns)
     out = tmp_path / "out.csv"
-    stats = P.run(TESTSET, out, top=5, offline=True, mode="full", verify_fn=_ok)
+    stats = P.run(TESTSET, out, top=5, offline=True, mode="full")
     rows = _rows(out)
     assert {r["lot_id"] for r in rows} == {"9001", "9002", "9003"}
     shown = [r for r in rows if r["inn"]]
-    assert shown and all(r["name"] and not r["name"].startswith("ИНН ") and r["status"] for r in shown)
-    assert all(r["check"].startswith("проверен") and r["rnp"] == "нет" for r in shown)
+    assert shown and all(r["name"] and not r["name"].startswith("ИНН ") for r in shown)
+    assert all(r["status"] == "Действующая организация" and r["rnp"] == "нет" for r in shown)
+    assert all(r["check"].startswith("проверен") for r in shown)
     assert {r["inn"] for r in shown if r["lot_id"] == "9001"} & PAPER_SUPPLIERS
     report = _rows(P.report_path(out))
     assert [r["lot_id"] for r in report] == ["9001", "9002", "9003"]
     assert all(r["mode"] == "full" and int(r["history_checked"]) >= int(r["history_shown"]) for r in report)
     assert stats["rows"] == stats["rows_checked"] == len(shown)
-    again = P.run(TESTSET, out, top=5, offline=True, mode="full", verify_fn=_ok)
+    again = P.run(TESTSET, out, top=5, offline=True, mode="full")
     assert again["skipped"] == 3 and len(_rows(P.report_path(out))) == 3
+
+
+def test_full_mode_drops_a_company_without_a_checked_name(search_data, tmp_path, monkeypatch):
+    cache_path = tmp_path / "sources.sqlite"
+    monkeypatch.setenv("SOURCE_CACHE", str(cache_path))
+    inns = _supplier_inns(search_data)
+    _seed_cards(SourceCache(cache_path), inns, nameless=frozenset({"7801000012"}))
+    out = tmp_path / "out.csv"
+    P.run(TESTSET, out, top=5, offline=True, mode="full")
+    assert "7801000012" not in {r["inn"] for r in _rows(out)}  # the only water supplier: no name → no row
+    assert any(r["inn"] for r in _rows(out) if r["lot_id"] == "9001")
+
+
+def test_verify_offline_never_asks_rnp(card_cache, monkeypatch):
+    def no_network(*a, **k):
+        raise AssertionError("RNP request in an offline run")
+
+    monkeypatch.setattr(eis_rnp, "_get", no_network)
+    card_cache.put(eis_rnp.search_url(UL), "")  # placeholder, removed below: only the card stays cached
+    page = card_cache.get(pb_nalog.card_url(UL))
+    assert page is not None
+    bare = SourceCache(card_cache.path.with_name("bare.sqlite"))
+    bare.put(pb_nalog.card_url(UL), page.body)
+    v = V.verify(Counterparty(inn=UL, name="x"), bare, offline=True)
+    assert not v.ok and "РНП не проверен" in v.why
 
 
 def test_full_mode_shows_only_verified(search_data, tmp_path):
@@ -341,3 +395,12 @@ def test_new_block_steps_by_basis(search_data, monkeypatch):
     rows, _, _ = P.full_recommend(P.load_testset(TESTSET).lots[0], 10, offline=True, verify_fn=_ok)
     assert sorted(r.match.counterparty.inn or "" for r in rows if r.match.origin == "discovered") == [
         "7805772436", "7807032363"]
+
+
+def test_old_format_file_is_moved_aside(search_data, tmp_path):
+    out = tmp_path / "o.csv"
+    out.write_text("lot_id;reqnum;query_text;okpd2;block;rank;inn;name;score;components;note\n9001;;x;;;;;;;;\n",
+                   encoding="utf-8-sig")
+    stats = P.run(TESTSET, out, top=3, offline=True, mode="demo")
+    assert stats["skipped"] == 0  # the old rows are not taken for finished lots
+    assert list(_rows(out)[0]) == list(P.COLUMNS) and out.with_name("o.old.csv").exists()

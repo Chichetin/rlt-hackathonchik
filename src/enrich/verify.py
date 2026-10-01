@@ -6,8 +6,9 @@ verified companies are shown:
 - the INN passes the checksum and is backed by a cached page (Evidence);
 - the legal status from a card is «действующая» (pb.nalog.ru card; ГИР БО when the card has no status,
   e.g. pb asked for a captcha and enrich() fell back to the МСП registry, which has no legal status);
+- the name comes from a card whose Evidence passes (no «ИНН …» placeholder in the file);
 - the company is not in the RNP of the ЕИС (zakupki.gov.ru, crawl-delay 60 s; `rnp=False` skips it and
-  the reason says so).
+  the reason says so; `offline=True` — the cached RNP page only).
 Every fact goes through strip_unverified: a status or a name whose Evidence does not pass is not used.
 Network errors never raise: the verdict says which source was unavailable.
 """
@@ -68,14 +69,15 @@ def merge(cp: Counterparty, card: Counterparty) -> Counterparty:
     return cp.model_copy(update=upd)
 
 
-def _checked(card: Counterparty, pages: CachedPages) -> Counterparty:
-    """Only facts whose Evidence passes; status / name without a passing Evidence are dropped."""
+def _checked(card: Counterparty, pages: CachedPages, keep_name: bool = False) -> Counterparty:
+    """Only facts whose Evidence passes; status / name without a passing Evidence are dropped (the name
+    becomes the placeholder «ИНН …»; `keep_name` — a placeholder already there stays as it is)."""
     card = strip_unverified(card, pages)
     have = {e.field for e in card.evidence}
     upd: dict[str, object] = {}
     if "status" not in have:
         upd["status"] = None
-    if "name" not in have:
+    if "name" not in have and not (keep_name and card.name.startswith("ИНН ")):
         upd["name"] = f"ИНН {card.inn}" if card.inn else card.name
     return card.model_copy(update=upd) if upd else card
 
@@ -111,11 +113,14 @@ def verify(cp: Counterparty, cache: SourceCache | None = None, *, offline: bool 
     """Check one candidate now (network unless `offline`); never raises on a source failure."""
     cache = cache or SourceCache()
     enrich_fn = enrich_fn or enrich_mod.enrich
-    rnp_fn = rnp_fn or (lambda inn, c: eis_rnp.check(inn, c))
+    rnp_fn = rnp_fn or (lambda inn, c: eis_rnp.check(inn, c, offline=offline))
     down: list[str] = []
     inn = cp.inn
     if not inn or not inn_is_valid(inn):
         return Verdict(cp, False, "ИНН не подтверждён")
+    # the candidate's own facts count only with a passing Evidence too (a stale card of discover(), F-07);
+    # the INN itself is checked after the card below
+    cp = _checked(cp, cache_pages_fresh(cache), keep_name=True).model_copy(update={"inn": inn})
 
     card = _card(inn, cache, offline, down, enrich_fn)
     if card is not None:
@@ -124,6 +129,12 @@ def verify(cp: Counterparty, cache: SourceCache | None = None, *, offline: bool 
         bo = _bo_card(inn, cache, offline, down) if len(inn) == 10 else None
         if bo is not None:
             cp = merge(cp, _checked(bo, cache_pages_fresh(cache)))
+    if strip_unverified(cp, cache_pages_fresh(cache)).inn is None:
+        why = "ИНН не подтверждён источником" + (f" (не ответили: {', '.join(down)})" if down else "")
+        return Verdict(cp, False, why, down)
+    if cp.name.startswith("ИНН "):  # the file for the jury has no rows without a name (#229)
+        return Verdict(cp, False, "название не подтверждено" + (f" (не ответили: {', '.join(down)})" if down else ""),
+                       down)
     active = is_active(cp.status)
     if active is False:
         return Verdict(cp, False, f"статус: {cp.status}", down)

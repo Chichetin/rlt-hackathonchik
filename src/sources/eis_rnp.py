@@ -156,11 +156,13 @@ def _get(client: httpx.Client, url: str) -> tuple[int, str]:
     return r.status_code, r.text
 
 
-def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None) -> CachedPage:
+def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None, *,
+          offline: bool | None = None) -> CachedPage:
+    """Cached RNP page. `offline=True` (None — by ENRICH_OFFLINE) — cache only, KeyError when not cached."""
     cache = cache or SourceCache()
     url = search_url(inn)
     hit = cache.get(url, allow_stale=True)
-    if os.environ.get("ENRICH_OFFLINE") == "1":
+    if os.environ.get("ENRICH_OFFLINE") == "1" if offline is None else offline:
         if hit is None:
             raise KeyError(url)
         return hit
@@ -180,10 +182,11 @@ def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | Non
     return cache.put(url, body, status)
 
 
-def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None) -> RnpResult:
+def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None, *,
+          offline: bool | None = None) -> RnpResult:
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
-    page = fetch(inn, cache, client)
+    page = fetch(inn, cache, client, offline=offline)
     at = datetime.fromtimestamp(page.fetched_at, tz=UTC)
     day = at.astimezone(MSK).strftime("%d.%m.%Y")
 
