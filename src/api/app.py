@@ -10,6 +10,7 @@ import logging
 import os
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +24,7 @@ from src.llm.provider import get_provider
 from src.match import search as search_mod
 from src.match.filters import apply_filters
 from src.sources.cache import SourceCache
+from src.sources.pb_nalog import CaptchaRequired
 from src.worker.queue import engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
@@ -88,6 +90,8 @@ def api_counterparty(inn: str) -> Counterparty:
         cp = enrich_mod.enrich(inn)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
+    except (CaptchaRequired, TimeoutError, httpx.HTTPError) as e:
+        raise HTTPException(503, "реестр ФНС сейчас недоступен, кеша по этому ИНН нет") from e
     if getattr(enrich_mod, "IS_STUB", False):
         return cp
     # A fact without a verified source is not shown (CLAUDE.md, «Проверки кодом»).

@@ -39,8 +39,12 @@ def test_search_filters(client):
     assert rows and all(m["counterparty"]["kind"] == "manufacturer" for m in rows)
 
 
-def test_counterparty(client):
-    assert client.get("/api/counterparty/0000100012").json()["inn"] == "0000100012"
+def test_counterparty(client, tmp_path, monkeypatch):
+    # real enrich (pb.nalog.ru via cache) — offline and with an empty cache an INN is not found;
+    # the card itself is covered in tests/unit/test_enrich.py
+    monkeypatch.setenv("ENRICH_OFFLINE", "1")
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources.sqlite"))
+    assert client.get("/api/counterparty/0000100012").status_code == 404
     assert client.get("/api/counterparty/7707083894").status_code == 422
 
 
