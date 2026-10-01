@@ -195,14 +195,18 @@ def clear_memory_cache() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Prebuild the product index (as_of=None) and the eval one (split cutoff): no wait on the first query.
+    """Prebuild the product index (as_of=None) and the eval one (split cutoff), each with its position
+    codes (#83): no wait on the first query, with or without an OKPD2 code.
 
         uv run python -m src.match.index
     """
     import sys
     import time
 
+    import duckdb
+
     from src.eval.split import split_config
+    from src.match.search import prebuild_doc_codes
 
     for as_of in (None, date.fromisoformat(str(split_config()["cutoff"]))):
         t0 = time.time()
@@ -212,7 +216,14 @@ def main(argv: list[str] | None = None) -> int:
         except FileNotFoundError as e:
             print(e, file=sys.stderr)
             return 2
-        print(f"as_of={as_of}: {idx.n_docs} документов из {store.name}, {idx.path} ({time.time() - t0:.1f} с)")
+        try:
+            codes = prebuild_doc_codes(store, idx)
+            where = ("рядом с индексом" if codes.parent == idx.path
+                     else f"ВНЕ индекса ({codes}): контейнер его не увидит")
+        except (OSError, ValueError, duckdb.Error) as e:  # search falls back to the lot vote (D-045)
+            where = f"НЕ построены ({e}) — запрос без кода определит класс по лотам"
+        print(f"as_of={as_of}: {idx.n_docs} документов из {store.name}, {idx.path}; коды позиций {where} "
+              f"({time.time() - t0:.1f} с)")
     return 0
 
 
