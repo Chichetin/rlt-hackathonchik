@@ -10,9 +10,12 @@ Machine (zakupki.gov.ru itself did not answer from this machine on 02.10 — TLS
   14.13.22.120;
 - `search_no_results.html` — contract search «Поиск не дал результатов» (04.05.2026).
 No card of a contract listed on the search page is archived, so the positive path takes its list of
-contracts from the card header itself (`_listed`) — a list of real contracts, not a made-up page.
+contracts from the card header itself (`_listed`) — a list of real contracts, not a made-up page; the
+search page cached for it is SEARCH with those numbers appended (derived, marked in `_listed`). Every
+other page marked «derived» below is a real page with one edit, to reach a state no snapshot shows.
 """
 
+import re
 import time
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -48,10 +51,16 @@ def cache(tmp_path, monkeypatch):
 
 
 def _listed(monkeypatch, cache, as_of, *bodies, total=None):
-    """The search answer lists the contracts of these real cards (header: number, status, customer, date)."""
-    cache.put(m.search_url(SUPPLIER, as_of), SEARCH, fetched_at=AT)
-    entries = [m.parse_card(b) for b in bodies]
+    """The search answer lists the contracts of these real cards (header: number, status, customer, date).
+    Derived page: SEARCH with the card numbers appended, so the number of a search fact is on the page."""
+    entries = [c for c in (m.parse_card(b) for b in bodies) if c is not None]
+    tail = "".join(f"<p>№ {c.number}</p>" for c in entries)
+    cache.put(m.search_url(SUPPLIER, as_of), SEARCH + tail, fetched_at=AT)
     monkeypatch.setattr(m, "parse_search", lambda body: (entries, len(entries) if total is None else total))
+
+
+def _card_facts(evs: list[Evidence]) -> list[Evidence]:
+    return [e for e in evs if not m._is_search(e.url)]
 
 
 # --- parsing --------------------------------------------------------------------------------------
@@ -120,8 +129,13 @@ def test_supplied_class_gives_basis_and_evidence_that_passes(cache, monkeypatch)
     assert res.supplied is True and res.error is None
     url = m.card_url(N_IT)
     assert res.basis == f"поставлял этот товар по госконтрактам: 1 контракт, последний — 15.07.2019, {url}"
-    [ev] = res.evidence
+    [ev, listed] = res.evidence  # the card, and the entry in the search by supplier INN
     assert (ev.source, ev.url, ev.field, ev.value) == (m.SOURCE, url, "contract", N_IT)
+    assert (listed.url, listed.field, listed.value) == (m.search_url(SUPPLIER, as_of), "contract", N_IT)
+    assert m.supplier_of(listed.url) == SUPPLIER
+    assert m.check_supply(res.evidence, cache.page_text, SUPPLIER) == []
+    assert m.check_supply(res.evidence, cache.page_text, "7820324037")  # another supplier's INN
+    assert m.check_supply([ev], cache.page_text, SUPPLIER)  # the card alone does not tie it to the supplier
     assert ev.fetched_at == datetime.fromtimestamp(AT, tz=UTC)
     assert "ОКПД2 62.01.11.000" in ev.fact and "от 15.07.2019" in ev.fact
     assert m.check_evidence(ev, cache.page_text) == []
@@ -266,7 +280,7 @@ def test_invalid_input_is_an_error_not_an_answer(cache):
 
 def _good(cache, monkeypatch) -> Evidence:
     _listed(monkeypatch, cache, None, CARD)
-    [ev] = m.supplied(SUPPLIER, "62.01", cache=cache).evidence
+    [ev] = _card_facts(m.supplied(SUPPLIER, "62.01", cache=cache).evidence)
     assert m.check_evidence(ev, cache.page_text) == []
     return ev
 
@@ -279,6 +293,8 @@ def _good(cache, monkeypatch) -> Evidence:
     {"url": m.card_url("1771014610219000999")},  # page not in cache
     {"url": m.card_url(N_GOODS)},  # the card of another contract
     {"field": "name"},  # not a contract fact
+    {"fact": "Госконтракт № 1771014610219000243 от 15.07.2019, заказчик ФЕДЕРАЛЬНАЯ НАЛОГОВАЯ СЛУЖБА, "
+             "позиция ОКПД2 62.01.11.000"},  # another customer
 ])
 def test_made_up_contract_fact_is_rejected(cache, monkeypatch, update):
     ev = _good(cache, monkeypatch).model_copy(update=update)
@@ -295,3 +311,73 @@ def test_number_elsewhere_on_a_card_is_not_that_contract(cache, monkeypatch):
     forged = ev.model_copy(update={"url": url, "value": other, "fact": ev.fact.replace(N_IT, other)})
     assert ev_check.value_in_page("contract", other, cache.page_text(url) or "")
     assert m.check_evidence(forged, cache.page_text)
+
+
+# --- review #273: incomplete answers are None, the supplier link is a fact -----------------------
+
+_TOTAL_47 = "47 записей"
+_FIRST_DATE = re.compile(r'(Заключение контракта</div>\s*<div class="data-block__value">)28\.12\.2024')
+BEFORE_ALL = date(2024, 11, 1)  # every contract on SEARCH is concluded later: none is eligible
+
+
+def _search_as(cache, body: str, as_of: date) -> m.Supply:
+    cache.put(m.search_url(SUPPLIER, as_of), body, fetched_at=AT)
+    return m.supplied(SUPPLIER, "62.01", as_of, cache=cache)
+
+
+def test_complete_page_with_nothing_before_as_of_is_false(cache):
+    """Derived: the total «47 записей» → «10 записей», so the page is the whole answer."""
+    assert _search_as(cache, SEARCH.replace(_TOTAL_47, "10 записей"), BEFORE_ALL).supplied is False
+
+
+def test_entry_without_date_makes_the_answer_none(cache):
+    """Derived: as above, and the first entry lost its date «Заключение контракта»."""
+    body, n = _FIRST_DATE.subn(r"\1", SEARCH.replace(_TOTAL_47, "10 записей"), count=1)
+    assert n == 1
+    res = _search_as(cache, body, BEFORE_ALL)
+    assert res.supplied is None and res.error and "1770732915224000102" in res.error
+
+
+@pytest.mark.parametrize("old, new", [
+    ('registry-entry__header-mid__title">', 'registry-entry__header-mid__title-new">'),  # status not read
+    ("Исполнение завершено", "Новая стадия"),  # a status outside the known stages
+])
+def test_entry_with_unread_or_unknown_status_makes_the_answer_none(cache, old, new):
+    body = SEARCH.replace(_TOTAL_47, "10 записей").replace(old, new, 1)
+    assert body != SEARCH.replace(_TOTAL_47, "10 записей")
+    assert _search_as(cache, body, BEFORE_ALL).supplied is None
+
+
+def test_card_without_readable_codes_is_not_opened(cache, monkeypatch):
+    """Derived: CARD with the codes written without brackets — the positions table gives no code."""
+    bare = CARD.replace("(62.01.11.000)", "62.01.11.000").replace("(62.02.20.130)", "62.02.20.130")
+    card = m.parse_card(bare)
+    assert card is not None and card.codes == ()
+    _listed(monkeypatch, cache, None, CARD)
+    cache.put(m.card_url(N_IT), bare, fetched_at=AT)
+    res = m.supplied(SUPPLIER, "17.12", cache=cache)
+    assert res.supplied is None and res.error and N_IT in res.error
+
+
+LISTED = "1770732915224000102"  # first contract on the real SEARCH page
+
+
+def _search_fact(url: str, number: str = LISTED) -> Evidence:
+    fact = f"Госконтракт № {number} — в выдаче реестра контрактов ЕИС по фильтру «Поставщик»"
+    return Evidence(source=m.SOURCE, url=url, fetched_at=datetime.fromtimestamp(AT, tz=UTC), field="contract",
+                    value=number, fact=fact)
+
+
+def test_search_fact_on_the_real_search_page(cache):
+    url = m.search_url(SUPPLIER)
+    cache.put(url, SEARCH, fetched_at=AT)
+    assert m.check_evidence(_search_fact(url), cache.page_text, SUPPLIER) == []
+    assert m.check_evidence(_search_fact(url, N_IT), cache.page_text, SUPPLIER)  # not in this answer
+    # a 19-digit number that IS on the page but is a purchase notice, not a contract entry
+    assert "0173100007824000071" in SEARCH
+    assert m.check_evidence(_search_fact(url, "0173100007824000071"), cache.page_text, SUPPLIER)
+    assert m.check_evidence(_search_fact(url), cache.page_text, "7820324037")  # filtered by another INN
+    unfiltered = f"{m.BASE}{m.SEARCH_PATH}?searchString=%D0%BD%D0%B0%D0%BB%D0%BE%D0%B3"
+    cache.put(unfiltered, SEARCH, fetched_at=AT)
+    assert m.supplier_of(unfiltered) is None
+    assert m.check_evidence(_search_fact(unfiltered), cache.page_text)  # no supplier filter in the URL
