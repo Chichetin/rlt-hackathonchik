@@ -180,7 +180,7 @@ def test_okved_plan_more_wholesale_channels_for_distributors():
     assert [c.okved for c in D.okved_plan(["26.60.12.120"])] == ["26.60", "46.46.2"]
     assert [c.okved for c in D.okved_plan(["25.73.30.110"])] == ["25.73", "46.74"]
     assert [c.relation for c in D.okved_plan(["26.20.40.120"])] == ["class", "wholesale", "wholesale"]
-    assert all(role.classify(code)[0] == "distributor" for codes in D.WHOLESALE.values() for code in codes)
+    assert all((role.classify(code) or ("",))[0] == "distributor" for codes in D.WHOLESALE.values() for code in codes)
     assert D.wholesale_okved("43.12.11") is None and D.wholesale_okveds("43.12.11") == ()
 
 
@@ -498,7 +498,7 @@ def test_top_ten_keeps_both_producers_and_distributors(tmp_path):
     assert shown[:7] == sorted(makers)[:7] and shown[7:] == sorted(traders)  # score order, INN inside a score
     pool = [m.counterparty for m in res.pool]  # #108: every candidate before the top-10 cut
     assert len(pool) == len(makers) + len(traders)
-    assert sorted(cp.inn for cp in pool if cp.kind == "distributor") == sorted(traders)
+    assert sorted(cp.inn or "" for cp in pool if cp.kind == "distributor") == sorted(traders)
     assert "всего в реестре не сообщается" in res.requests[0]  # rowCount -1 is not shown as a number
 
 
