@@ -27,3 +27,20 @@ test("меню сверху на телефоне; на подборе рёбр�
   await expect(page.getByRole("heading", { name: "Настройки подбора" })).toBeVisible();
   await expect(page.locator(".wave-field")).toHaveCount(0);
 });
+
+// A shared wrapper regression must be caught on work pages as well as the hero.
+test("все рабочие страницы на чёрном фоне без общей панели", async ({ page }) => {
+  for (const path of ["/search", "/results", "/settings", "/about"]) {
+    await page.goto(path);
+    const shell = page.locator(".page");
+    await expect(shell).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(shell).toHaveCSS("border-top-width", "0px");
+    await expect(shell).toHaveCSS("box-shadow", "none");
+    await expect(shell).toHaveCSS("backdrop-filter", "none");
+    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(2, 2, 3)");
+    await expect(page.locator(".sidebar-toggle")).toHaveCount(0);
+    expect((await page.getByRole("navigation").boundingBox())!.y).toBeLessThan(100);
+    await expect(shell).toHaveCSS("max-width", "none");
+    await expect(shell).toHaveCSS("margin-left", "0px");
+  }
+});

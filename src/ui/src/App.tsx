@@ -160,13 +160,21 @@ export function Logo({ cp, large = false }: { cp: CounterpartyMatch["counterpart
 }
 
 /** What puts the company in its block: its procurement record, or that it is new to АИС ГЗ. */
+function OriginIcon({ origin }: { origin: "history" | "new" }) {
+  return <svg className="origin-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {origin === "history"
+      ? <><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /><path d="M12 7v5l3 2" /></>
+      : <><circle cx="12" cy="12" r="8" /><path d="M12 8v8M8 12h8" /></>}
+  </svg>;
+}
+
 function OriginBadge({ m }: { m: CounterpartyMatch }) {
   const st = m.counterparty.stats ?? {};
-  if (m.origin !== "history") return <span className="badge badge-new">Новый · нет в АИС ГЗ</span>;
+  if (m.origin !== "history") return <span className="badge badge-new"><OriginIcon origin="new" />Новый · нет в АИС ГЗ</span>;
   const lots = st.lots_participated;
-  if (typeof lots !== "number") return <span className="badge badge-history">Участник закупок АИС ГЗ</span>;
+  if (typeof lots !== "number") return <span className="badge badge-history"><OriginIcon origin="history" />Участник закупок АИС ГЗ</span>;
   const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
-  return <span className="badge badge-history">{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
+  return <span className="badge badge-history"><OriginIcon origin="history" />{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
 }
 
 function CompanyName({ name }: { name: string }) {
@@ -590,7 +598,7 @@ export function App() {
           </header>
           <Block
             variant="history"
-            tag="Проверенные"
+            tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             rows={weights ? rerank(res.history, weights).slice(0, shown) : res.history}
@@ -606,7 +614,7 @@ export function App() {
           />
           <Block
             variant="new"
-            tag="Новые"
+            tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             rows={rerank(res.discovered, weights)}
@@ -655,7 +663,7 @@ function Block(props: {
   const reduced = useReducedMotion();
   return (
     <section className={`block block-${props.variant}`} aria-label={props.title}>
-      <span className="block-tag">{props.tag}</span>
+      <span className="block-tag"><OriginIcon origin={props.variant} />{props.tag}</span>
       <h2>
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
@@ -780,7 +788,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         <Logo cp={cp} large />
         <h2>{cp.name}</h2>
       </div>
-      <div className="card-summary">
+      <div className={`card-summary card-summary-${m.origin === "history" ? "history" : "new"}`}>
         <span>{m.origin === "history" ? "С опытом госзакупок" : "Из открытых источников"}</span>
         <span>Оценка <strong>{m.score.toFixed(2)}</strong></span>
       </div>
