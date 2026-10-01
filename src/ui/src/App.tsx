@@ -556,7 +556,7 @@ export function App() {
       <footer className="appfoot">
         <div className="appfoot-in">
           <span>Митрандир — подбор поставщиков для АИС ГЗ и Электронного магазина СПб</span>
-          <span>Данные: АИС ГЗ 2024–2025 · реестр МСП ФНС</span>
+          <span>Данные: АИС ГЗ 2024–2025 · открытые реестры ФНС (МСП, «Прозрачный бизнес», ГИР БО)</span>
         </div>
       </footer>
     </div>

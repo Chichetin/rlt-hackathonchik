@@ -425,10 +425,13 @@ html { scroll-padding-top: 80px; }
 .appfoot { border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
 .appfoot-in { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding-block: 18px; }
 @media (max-width: 1100px) {
-  .page { margin: 0; padding: 0; }
   .appbar .workspace-bar, .content, .appfoot-in { padding-inline: 24px; }
 }
 @media (max-width: 480px) {
-  .page { margin: 0; padding: 0; border: 0; }
   .appbar .workspace-bar, .content, .appfoot-in { padding-inline: 16px; }
+  .appbar { position: static; }
+  html { scroll-padding-top: 16px; }
 }
+/* the sticky form must fit a 1366×768 / 1280×720 projector: scroll inside instead of hiding «Выгрузить» */
+.query { max-height: calc(100dvh - 92px); overflow-y: auto; }
+@media (max-width: 760px) { .query { max-height: none; overflow: visible; } }
