@@ -18,7 +18,8 @@ from datetime import UTC, datetime
 
 import httpx
 
-from src.contracts import Counterparty, Evidence, inn_is_valid
+from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
+from src.enrich import role
 from src.sources import bo_nalog, pb_nalog, rmsp
 from src.sources.cache import CachedPage, SourceCache
 
@@ -70,6 +71,8 @@ def from_card(inn: str, page: CachedPage) -> Counterparty:
     okved_code = f.get("vyp.КодОКВЭД") or f.get("search.okved2main")
     okved_name = f.get("vyp.НаимОКВЭД") or f.get("search.okved2mainname")
     add("okved", okved_name, f"Основной ОКВЭД {okved_code} — {okved_name}")
+    key = "vyp.КодОКВЭД" if f.get("vyp.КодОКВЭД") else "search.okved2main"
+    kind = role.assign(okved_code, okved_name, f"{key}: {okved_code}", add)
 
     # МСП only from the card's own value: the line `vyp.rsmpcategory: <c>` is the Evidence value.
     # No key (empty card, ИП without it) → None («не проверено»), never a guessed «нет».
@@ -88,6 +91,7 @@ def from_card(inn: str, page: CachedPage) -> Counterparty:
         inn=inn,
         kpp=kpp,
         name=name or f"ИНН {inn}",
+        kind=kind,
         region=_region(kpp) if kpp else None,  # KPP is evidenced; INN prefix is not a fact
         status=status,
         is_msp=is_msp,
@@ -143,9 +147,10 @@ def from_rmsp(inn: str, page: CachedPage) -> Counterparty:
     is_msp = _msp(row, add)
     okved = row.get("okved1")
     add("okved", row.get("okved1name"), f"Основной ОКВЭД {okved} — {row.get('okved1name')}")
+    kind = role.assign(okved, row.get("okved1name"), f"{inn}.okved1: {okved}", add)
     code = row.get("regioncode")
     add("region", f"regioncode: {code}" if code else None, f"Регион реестра МСП: {_region_by_code(code)}")
-    return Counterparty(inn=inn, name=name or f"ИНН {inn}", region=_region_by_code(code), is_msp=is_msp,
+    return Counterparty(inn=inn, name=name or f"ИНН {inn}", kind=kind, region=_region_by_code(code), is_msp=is_msp,
                         okved=[okved] if okved else [], evidence=ev)
 
 
@@ -154,6 +159,7 @@ def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> C
     f = bo_nalog.parse(page.body)
     ev: list[Evidence] = []
     add = _evidence(bo_nalog.SOURCE, page, ev)
+    kind: Kind | None = None
     if f:
         add("inn", inn, f"ИНН {inn} найден в ГИР БО")
         add("ogrn", f.get("ogrn"), f"ОГРН {f.get('ogrn')}")
@@ -161,13 +167,14 @@ def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> C
         code = f.get("statusCode")
         add("status", f"statusCode: {code}" if code else None, f"Статус в ГИР БО: {code}")
         add("okved", f.get("okved2"), f"Основной ОКВЭД {f.get('okved2')} (код, ГИР БО)")
+        kind = role.assign(f.get("okved2"), None, f"{inn}.okved2: {f.get('okved2')}", add)
     is_msp = None
     if msp_page is not None and not any(r.get("inn") == inn for r in rmsp.parse(msp_page.body).rows):
         add_msp = _evidence(rmsp.SOURCE, msp_page, ev)
         add_msp("msp", "inn_rows: 0", "В реестре МСП не найден (запрос по ИНН)")
         is_msp = False
     status = {"ACTIVE": "действующая"}.get(f.get("statusCode", ""), f.get("statusCode"))
-    return Counterparty(inn=inn, name=f.get("shortName") or f"ИНН {inn}", region=None, status=status,
+    return Counterparty(inn=inn, name=f.get("shortName") or f"ИНН {inn}", kind=kind, region=None, status=status,
                         is_msp=is_msp, okved=[f["okved2"]] if f.get("okved2") else [], evidence=ev)
 
 

@@ -48,19 +48,28 @@ test("демо: запрос → два блока → карточка → фи
   await expect(card.locator(".components li")).toHaveCount(6);
   await expect(card.locator(".evidence li a").first()).toHaveAttribute("href", /^https:\/\/rmsp\.nalog\.ru\//);
   await expect(card.locator(".evidence li").first()).toContainText(/\d{2}\.\d{2}\.\d{4}/);
+  // роль и её основание — факт с источником (D-057): основной ОКВЭД из реестра МСП
+  await expect(card.locator(".evidence .fact", { hasText: /^Роль — производитель: заявленный основной ОКВЭД 17\.12/ })).toHaveCount(1);
   await card.getByRole("button", { name: "Закрыть карточку" }).click();
 
-  // 4. Фильтры (D-030). «Только производители»: тип в данных организаторов не указан, реестр его
-  // не подтверждает (ОКВЭД — только «вероятно») — фильтр не угадывает, а говорит, у скольких
-  // признак неизвестен; блок «Новые» пуст из-за фильтра и так и говорит (#84).
+  // 4. Фильтры (D-030). «Только производители»: в данных организаторов тип не указан — фильтр не
+  // угадывает, а говорит, у скольких признак неизвестен; в блоке «Новые» роль определена по основному
+  // ОКВЭД из реестра МСП (D-057) — остаются производители, дистрибьюторы скрыты.
+  const makers = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === "/api/search" &&
+      JSON.parse(r.request().postData() ?? "{}").filters?.only_manufacturers === true,
+  );
   await page.getByLabel("Только производители").check();
+  const onlyMakers = await (await makers).json();
+  expect(onlyMakers.discovered.length).toBeGreaterThan(0);
+  for (const m of onlyMakers.discovered) expect(m.counterparty.kind).toBe("manufacturer");
   await expect(page.locator(".filternote")).toHaveText(
     /^Тип поставщика ещё не определён у \d+ из \d+ — признак появится после обогащения\.$/,
   );
   await expect(history.locator(".empty")).toContainText("у кандидатов этот признак ещё не известен");
-  await expect(discovered.locator(".empty")).toHaveText(
-    /^Под фильтр «Только производители» не попал никто из \d+ новых компаний из реестра МСП: тип поставщика реестр не подтверждает/,
-  );
+  await expect(discovered.locator(".item")).toHaveCount(onlyMakers.discovered.length);
+  for (const meta of await discovered.locator(".item .meta").allTextContents()) expect(meta).toMatch(/^Производитель · /);
   await page.getByLabel("Только производители").uncheck();
   await expect(history.locator(".item").first()).toBeVisible();
 

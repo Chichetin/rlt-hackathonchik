@@ -46,6 +46,7 @@ import httpx
 import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
+from src.enrich import role
 from src.enrich.enrich import MSP_CATEGORY, enrich, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.ingest.load import suppliers_path
@@ -286,6 +287,7 @@ def from_row(row: dict[str, str], page: CachedPage) -> Counterparty:
         add("okved", okved_name, f"Основной ОКВЭД {okved} — {okved_name}")
     elif okved:  # no name in the row: the code itself is the fact, tied to its own registry line
         add("okved", f"{inn}.okved1: {okved}", f"Основной ОКВЭД {okved}")
+    kind = role.assign(okved, okved_name, f"{inn}.okved1: {okved}", add)
 
     category = row.get("category", "")
     is_msp: bool | None = None
@@ -311,6 +313,7 @@ def from_row(row: dict[str, str], page: CachedPage) -> Counterparty:
     return Counterparty(
         inn=inn,
         name=display_name(row) or f"ИНН {inn}",
+        kind=kind,
         region=region,
         is_msp=is_msp,
         okved=[okved] if okved else [],
@@ -336,10 +339,6 @@ def with_card(cp: Counterparty, cache: SourceCache) -> tuple[Counterparty, bool]
     }), True
 
 
-def _is_goods_producer(okved: str) -> bool:
-    return okved[:2].isdigit() and 10 <= int(okved[:2]) <= 33  # OKVED2 section C «Обрабатывающие производства»
-
-
 def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: bool, has_card: bool,
                 region: str, weights: dict[str, float]) -> list[ScoreComponent]:
     okved, okved_name = row["okved1"], row.get("okved1name", "")
@@ -347,10 +346,10 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
     # A predicted class is never presented as the class of the query (#63: the prediction can be wrong).
     cls = (f"ОКПД2 {ch.okpd_class} (в запросе ОКПД2 не указан — класс определён автоматически по похожим "
            "закупкам в данных АИС ГЗ)") if predicted else f"ОКПД2 запроса {ch.okpd_class}"
-    if ch.relation == "class":
-        role = ("вероятно производитель (по ОКВЭД)" if _is_goods_producer(okved)
+    if ch.relation == "class":  # the same rule as the role of the card (src/enrich/role.py, D-057)
+        what = ("вероятно производитель (по ОКВЭД)" if cp.kind == "manufacturer"
                 else "основной вид деятельности соответствует предмету закупки")
-        fit_why = f"{head} совпадает с классом {cls} — {role}; совпадение по классу ОКВЭД (4 знака), не по товару"
+        fit_why = f"{head} совпадает с классом {cls} — {what}; совпадение по классу ОКВЭД (4 знака), не по товару"
     else:
         fit_why = (f"{head} — оптовая торговля товарами класса {cls}, "
                    "по таблице соответствия ОКПД2 → ОКВЭД — вероятно дистрибьютор")
