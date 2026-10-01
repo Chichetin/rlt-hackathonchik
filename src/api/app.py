@@ -243,7 +243,7 @@ def api_counterparty(inn: str) -> Counterparty:
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
         # rnp_offline=True: a direct card lookup must not wait on the 60 s РНП Crawl-delay pause
-        # (research/SOURCES.md, D-068) — only the worker does a live РНП request.
+        # (research/SOURCES.md, D-071) — only the worker does a live РНП request.
         cp = enrich_mod.enrich(inn, rnp_offline=True)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e

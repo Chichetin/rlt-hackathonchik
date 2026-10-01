@@ -23,7 +23,7 @@ robots.txt: `Crawl-delay: 60` → at most one request per MIN_INTERVAL_S (60 s, 
 only raise it, never lower), blocking; for the
 final shortlist only. Pages go to SourceCache as is (Evidence values literally occur there);
 a cached answer older than MAX_AGE_S is refetched. `ENRICH_OFFLINE=1` — cache only; `enrich()`
-(D-068, #111) passes `offline` explicitly instead so the API (always offline for РНП) and the
+(D-071, #111) passes `offline` explicitly instead so the API (always offline for РНП) and the
 worker (live) do not depend on process-wide environment state.
 """
 
@@ -160,7 +160,7 @@ def _get(client: httpx.Client, url: str) -> tuple[int, str]:
 
 def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None,
           offline: bool | None = None) -> CachedPage:
-    """`offline` explicit (passed by enrich(), D-068) wins; None falls back to `ENRICH_OFFLINE`
+    """`offline` explicit (passed by enrich(), D-071) wins; None falls back to `ENRICH_OFFLINE`
     (CLI / standalone use) — cache only either way, never a live request."""
     cache = cache or SourceCache()
     url = search_url(inn)
