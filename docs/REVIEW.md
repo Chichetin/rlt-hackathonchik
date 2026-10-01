@@ -262,11 +262,11 @@ v1 на свободном тексте теряет четверть recall о�
 одном месте; случай #153 «`as_of` через API → 200 с пояснением» заменён: через API — 422 (D-073), пояснение
 «нет истории до …» проверяется на уровне `search()` (`tests/unit/test_search_edge.py`).
 
-Проверки этого прохода: `pytest tests/unit/test_api.py tests/unit/test_api_enrich.py
-tests/unit/test_eval_seal.py tests/unit/test_fresh_eval.py` — зелёные; ruff и pyright по изменённым
-файлам — чисто; `openapi-check`, `seal-check`, `stubs` — OK. **Полный `make check-changed` (весь pytest из-за
-`configs/`) и `make e2e` после слияния с `origin/main` не запускались** — ноутбук перегревался (96 °C при
-пороге 100 °C), прогоны остановлены по просьбе пользователя; это обязательный шаг перед merge.
+Проверки после слияния с `origin/main` (c691278): `make check-changed` — ruff и pyright по изменённым файлам
+и их импортёрам чисто, pytest (весь — затронут `configs/`) 497 passed, 29 skipped (Postgres без
+`TEST_DATABASE_URL`), `openapi-check`, `seal-check`, `stubs` — OK; `make e2e` (порт 8767) — 9 passed, включая
+сценарий демо. Тяжёлые прогоны eval остановлены по перегреву ноутбука (96 °C при пороге 100 °C) —
+`R-free-H-15f` и `R-fresh-H-15g` не досчитаны.
 
 ## 7. Остаточные риски и следующие шаги
 
