@@ -51,8 +51,12 @@ test("демо: запрос → два блока → карточка → фи
   await expect(history.locator(".item").first()).toBeVisible();
 
   // «Регион»: по реестру, иначе по КПП (78 — СПб); остаются строки, и у всех КПП 78…
+  // Ждём именно запрос с фильтром: query.region = СПб есть в каждом запросе по лоту, а при активном
+  // фильтре UI шлёт ещё и запрос без фильтров (подсчёт скрытых) — тот иногда отвечал первым (#36).
   const regional = page.waitForResponse(
-    (r) => r.url().endsWith("/api/search") && (r.request().postData() ?? "").includes('"region":"Санкт-Петербург"'),
+    (r) =>
+      r.url().endsWith("/api/search") &&
+      JSON.parse(r.request().postData() ?? "{}")?.filters?.region === "Санкт-Петербург",
   );
   await page.getByLabel("Регион").selectOption("Санкт-Петербург");
   const body = await (await regional).json();
