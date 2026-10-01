@@ -14,6 +14,13 @@ export default defineConfig({
   workers: process.env.E2E_WORKERS ? Number(process.env.E2E_WORKERS) : undefined,
   reporter: [["list"]],
   use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure", viewport: { width: 1440, height: 900 } },
+  // The demo scenario is timed (< 15 s, demo.spec.ts): it runs after the rest and alone, so the clock measures the
+  // scenario, not the parallel tests competing for the CPU (#228). A failure elsewhere still fails the run.
+  // One file alone, without the «rest» dependency: npx playwright test e2e/demo.spec.ts --no-deps
+  projects: [
+    { name: "rest", testIgnore: /demo\.spec\.ts/ },
+    { name: "demo", testMatch: /demo\.spec\.ts/, dependencies: ["rest"] },
+  ],
   webServer: {
     command:
       // a test export uploaded by an earlier run (cache/e2e-testsets/active) must not answer /api/lot (#207)
