@@ -371,31 +371,37 @@ def test_search_min_score_on_fixture(search_client):
     assert got == [s for s in scores if s >= cut] and len(got) >= 3 and int(kept.headers["X-Total-History"]) == len(got)
 
 
-def test_search_facets_before_user_filters_after_legal_status(roles_client):
-    import json
+def test_search_facets_after_legal_status_each_group_after_the_other_groups(roles_client):
+    """Liquidated / RNP never counted; a group is counted after the filters of the other groups (review of #240)."""
     q = {"query_id": "q", "text": "x", "filters": {"kinds": "distributor"}}
     r = roles_client.post("/api/search?limit=1", json=q)
     raw = r.headers["X-Facets"]
     assert raw.isascii()
     assert json.loads(raw) == {
-        "history": {"kind": {"manufacturer": 1, "distributor": 1, "dealer": 1, "unknown": 2},
-                    "entity": {"ul": 2, "ip": 2, "unknown": 1},
-                    # ЮЛ without a KPP: region unknown; ИП 78… and 47… by the INN — both near, only 78 worked (#242)
-                    "near": {"worked": 1, "near": 2}},
+        "history": {"kind": {"manufacturer": 1, "distributor": 1, "dealer": 1, "unknown": 2},  # kinds itself: off
+                    "entity": {"ul": 0, "ip": 1, "unknown": 0},  # among distributors: «Опт», ИП
+                    "near": {"worked": 1, "near": 1}},  # «Опт»: ИП, INN 78… (#242)
         "discovered": ZERO}
-    # facets do not depend on the filters, the page or the offset
-    other = roles_client.post("/api/search?limit=2&offset=1", json={"query_id": "q", "text": "x",
-                                                                     "filters": {"entity": "ul", "min_score": 0.8}})
-    assert json.loads(other.headers["X-Facets"]) == json.loads(raw)
+    # the page and the offset do not change the facets, nor does another choice in the same group
+    again = roles_client.post("/api/search?limit=2&offset=1", json=q)
+    assert json.loads(again.headers["X-Facets"]) == json.loads(raw)
+    makers = roles_client.post("/api/search", json={**q, "filters": {"kinds": "manufacturer,dealer"}})
+    assert json.loads(makers.headers["X-Facets"])["history"]["kind"] == json.loads(raw)["history"]["kind"]
+    other = roles_client.post("/api/search", json={"query_id": "q", "text": "x",
+                                                   "filters": {"entity": "ul", "min_score": 0.8}})
+    assert json.loads(other.headers["X-Facets"])["history"] == {
+        "kind": {"manufacturer": 1, "distributor": 0, "dealer": 0, "unknown": 0},  # ЮЛ with score ≥ 0.8: «Завод»
+        "entity": {"ul": 1, "ip": 0, "unknown": 0},  # score ≥ 0.8: «Завод» (ЮЛ)
+        "near": {"worked": 0, "near": 0}}  # «Завод»: ЮЛ without a KPP — region unknown
 
 
 def test_search_facets_on_fixture(search_client):
     import json
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага", "filters": {"entity": "ip"}})
     facets = json.loads(r.headers["X-Facets"])
-    assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 6},
-                                 "entity": {"ul": 4, "ip": 2, "unknown": 0},
-                                 "near": {"worked": 6, "near": 6}}  # the fixture: KPP 78 / 47, customers 78
+    assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 2},  # ИП
+                                 "entity": {"ul": 4, "ip": 2, "unknown": 0},  # entity itself: off
+                                 "near": {"worked": 2, "near": 2}}  # the two ИП: INN 78… / 47…, customers 78
     assert r.headers["X-Total-History"] == "2"
 
 
@@ -543,11 +549,15 @@ def test_search_context_without_customer_inn_or_okpd2(near_client):
     assert (ctx["purchase_type"], ctx["default_near"], ctx["applied_near"]) == ("goods", "any", "worked")
 
 
-def test_search_facets_near_before_the_user_filters(near_client):
+def test_search_facets_near_after_the_other_filters(near_client):
     r, _ = _near_search(near_client, filters={"near_customer": "near", "entity": "ip"})
     facets = json.loads(r.headers["X-Facets"])
-    assert facets["history"]["near"] == {"worked": 3, "near": 3}
+    assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 1},
+                                 "entity": {"ul": 2, "ip": 1, "unknown": 0},  # near: СПб, ЛО, ИП СПб
+                                 "near": {"worked": 1, "near": 1}}  # ИП: «ИП СПб»
     assert facets["discovered"]["near"] == {"worked": 0, "near": 0}
+    every = json.loads(_near_search(near_client)[0].headers["X-Facets"])["history"]["near"]
+    assert every == {"worked": 3, "near": 3}
     lo = json.loads(_near_search(near_client, customer_inn="4703173460")[0].headers["X-Facets"])
     assert lo["history"]["near"] == {"worked": 1, "near": 3}
 
@@ -575,6 +585,9 @@ def test_facets_near_of_new_count_the_candidates(search_client, monkeypatch):
                               origin="discovered", components=[])
             for i, reg in (("7811777270", "Санкт-Петербург"), ("4703173460", "Ленинградская область"),
                            ("7810400592", "регион 77"), ("7807032363", None))]
+    pool.append(CounterpartyMatch(  # liquidated: never counted, whatever discover() returns
+        counterparty=Counterparty(inn="7805772436", name="ликв", region="Санкт-Петербург",
+                                  status="В процессе ликвидации"), score=0.9, origin="discovered", components=[]))
     monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
         matches=pool, candidates=pool, history_checked=True))
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})

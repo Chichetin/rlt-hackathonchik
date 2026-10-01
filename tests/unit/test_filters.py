@@ -133,14 +133,15 @@ def test_facet_equals_the_rows_a_single_chip_keeps():
 # --- #242: «Может работать у заказчика» (near_customer) --------------------------------------------------------------
 
 def _r(name: str, *, region: str | None = None, kpp: str | None = None, inn: str | None = None,
-       entity: str | None = None, spb: int | None = None, origin: str = "history") -> CounterpartyMatch:
+       entity: str | None = None, spb: int | None = None, origin: str = "history", kind=None,
+       score: float = 0.5) -> CounterpartyMatch:
     stats: dict[str, float | int | str] = {}
     if entity:
         stats["entity_type"] = entity
     if spb is not None:
         stats["customers_spb"] = spb
-    cp = Counterparty(inn=inn, name=name, region=region, kpp=kpp, stats=stats)
-    return CounterpartyMatch(counterparty=cp, score=0.5, origin=origin,  # type: ignore[arg-type]
+    cp = Counterparty(inn=inn, name=name, region=region, kpp=kpp, stats=stats, kind=kind)
+    return CounterpartyMatch(counterparty=cp, score=score, origin=origin,  # type: ignore[arg-type]
                              components=[ScoreComponent(name="product_fit", value=0.5, weight=1, explanation="x")])
 
 
@@ -245,3 +246,59 @@ def test_near_facets_equal_the_rows_each_choice_keeps():
         got = F.near_facets(NEAR_ROWS, F.near_of(q))
         assert got == {c: len(_near(customer_inn=inn, near_customer=c)) for c in ("worked", "near")}
     assert F.near_facets(NEAR_ROWS, F.near_of(Query(query_id="q", text="x"))) == {"worked": 4, "near": 7}
+
+
+# --- review of #240, item 3: each chip group counted after the filters of the OTHER groups -------------------------
+
+CHIP_ROWS = [
+    _r("maker-ul-spb", kind="manufacturer", inn=UL, kpp="780101001", spb=1, score=0.9),
+    _r("maker-ip-spb", kind="manufacturer", inn=IP, spb=1, score=0.8),
+    _r("dist-ul-msk", kind="distributor", inn="7707049388", kpp="770701001", spb=2, score=0.7),
+    _r("dist-ip-lo", kind="distributor", inn="470100000088", score=0.6),
+    _r("dealer-ul-lo", kind="dealer", inn="4701000038", kpp="470101001", score=0.5),
+    _r("unknown-ip-msk", kind="unknown", inn="770100000079", score=0.4),
+    _r("none-no-inn", region="Санкт-Петербург", score=0.3),
+    _r("maker-ul-msk", kind="manufacturer", inn="7804428656", kpp="770401001", spb=0, score=0.95),
+]
+
+
+def _chips(f: dict, customer_inn: str | None = None) -> dict[str, dict[str, int]]:
+    return F.chip_facets(CHIP_ROWS, Query(query_id="q", text="x", customer_inn=customer_inn, filters=f))
+
+
+def test_chip_facets_count_each_group_after_the_other_groups():
+    f = {"entity": "ul", "near_customer": "near", "kinds": "distributor"}  # nothing passes all three
+    assert _near(CHIP_ROWS, **f) == []
+    assert _chips(f) == {
+        "kind": {"manufacturer": 1, "distributor": 0, "dealer": 1, "unknown": 0},  # ЮЛ near the customer
+        "entity": {"ul": 0, "ip": 1, "unknown": 0},  # distributors near the customer
+        "near": {"worked": 1, "near": 0},  # distributors-ЮЛ: one from Moscow that bid for St Petersburg
+    }
+
+
+@pytest.mark.parametrize("f", [
+    {}, {"entity": "ul", "near_customer": "near", "kinds": "distributor"},
+    {"min_score": 0.5, "near_customer": "worked"}, {"kinds": "manufacturer,distributor", "entity": "ip"},
+    {"only_msp": True}, {"near_customer": "auto"},
+])
+@pytest.mark.parametrize("customer_inn", [None, "4703173460"])
+def test_a_chip_count_is_what_its_choice_gives_with_the_other_filters_on(f, customer_inn):
+    got = _chips(f, customer_inn)
+    others = {k: v for k, v in f.items() if k != "kinds"}
+    for kind in F.KINDS:
+        assert got["kind"][kind] == len(_near(CHIP_ROWS, customer_inn=customer_inn, **{**others, "kinds": kind}))
+    for entity in ("ul", "ip"):
+        assert got["entity"][entity] == len(_near(CHIP_ROWS, customer_inn=customer_inn, **{**f, "entity": entity}))
+    no_entity = {k: v for k, v in f.items() if k != "entity"}
+    assert sum(got["entity"].values()) == len(_near(CHIP_ROWS, customer_inn=customer_inn, **no_entity))
+    for choice in ("worked", "near"):
+        assert got["near"][choice] == len(_near(CHIP_ROWS, customer_inn=customer_inn,
+                                                **{**f, "near_customer": choice}))
+
+
+def test_a_group_choice_does_not_change_its_own_counts():
+    assert _chips({"kinds": "dealer"})["kind"] == _chips({"kinds": "manufacturer,unknown"})["kind"] == \
+        _chips({})["kind"]
+    assert _chips({"entity": "ip"})["entity"] == _chips({"entity": "ul"})["entity"] == _chips({})["entity"]
+    assert _chips({"near_customer": "worked"})["near"] == _chips({"near_customer": "near"})["near"] == \
+        _chips({})["near"]

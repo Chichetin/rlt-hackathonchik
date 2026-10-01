@@ -26,9 +26,11 @@ User filters (`Query.filters`, docs/ui.md; the contract is a plain dict — keys
   never passes (not guessed); "worked" / "near" with a customer's region without a code is an error.
 
 A user filter keeps only confirmed matches (D-030): МСП / role / ЮЛ-ИП unknown -> dropped, and the UI says how
-many were hidden because the attribute is not known yet; `facets()` gives those counts (X-Facets of
-/api/search). A bad value (a typo in kinds, entity "fl", min_score "high") is a ValueError — the API answers
-422 — not a silently disabled filter. Unknown keys are ignored.
+many were hidden because the attribute is not known yet; `chip_facets()` gives those counts (X-Facets of
+/api/search): each chip group is counted after the filters of the OTHER groups (review of #240), so the number on a
+chip is the block size its choice gives with the other filters already on. A bad value (a typo in kinds, entity
+"fl", min_score "high") is a ValueError — the API answers 422 — not a silently disabled filter. Unknown keys are
+ignored.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from src.contracts import Counterparty, CounterpartyMatch, Query
@@ -256,3 +258,18 @@ def near_facets(matches: Iterable[CounterpartyMatch], nc: NearCustomer) -> dict[
         out["worked"] += worked
         out["near"] += near
     return out
+
+
+def chip_facets(matches: Iterable[CounterpartyMatch], query: Query) -> dict[str, dict[str, int]]:
+    """X-Facets of one block: every chip group counted after the user filters of the OTHER groups (call it on the
+    rows after the legal status). kind — every filter but kinds / only_manufacturers; entity — every filter but
+    entity; near — every filter but near_customer. A chip count = the rows its choice gives with the rest on."""
+    uf = parse_filters(query.filters)
+    nc = near_of(query, uf)
+    rows = [(m, passes_near(m.counterparty, nc)) for m in matches]
+    no_kind, no_entity = replace(uf, kinds=None), replace(uf, entity=None)
+    return {
+        "kind": facets(m for m, near in rows if near and keeps(m, no_kind))["kind"],
+        "entity": facets(m for m, near in rows if near and keeps(m, no_entity))["entity"],
+        "near": near_facets((m for m, _ in rows if keeps(m, uf)), nc),
+    }
