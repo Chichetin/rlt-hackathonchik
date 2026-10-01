@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
+import { ResultInspector } from "./ResultInspector";
 import "./micro.css";
 import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
@@ -14,7 +15,12 @@ import {
   COMPONENT_LABEL,
   exportXlsx,
   fetchLot,
+  facetCount,
   filterNotes,
+  filtersActive,
+  NO_FILTERS,
+  normalizeFilters,
+  type Facets,
   formatStat,
   KIND_LABEL,
   LotError,
@@ -31,7 +37,10 @@ import {
   type Counterparty,
 } from "./api";
 import { reviewLinks } from "./reviews";
+import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
+import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
+import "./filters.css";
 import "./testset.css";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
@@ -69,20 +78,94 @@ function Skeleton() {
   );
 }
 
-/** «Новые» emptied by «Только производители», judged by the filters of the shown answer (#84): the role of
+/** «Новые» emptied by the role chip «Производитель» alone, judged by the filters of the shown answer (#84): the role of
  *  a new company is set by its main OKVED (D-057), so the filter hides all of them only when none of them is a
  *  manufacturer. If the base answer has one, other filters emptied the block: the general text. Other filters
  *  alone keep the general text too: region and МСП of new companies are known, their empty block has other reasons. */
 function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Query | null): string | undefined {
   const n = base?.discovered.length ?? 0;
-  if (res.discovered.length || !n || base === res || !shown?.filters?.only_manufacturers) return undefined;
+  if (res.discovered.length || !n || base === res || String(shown?.filters?.kinds ?? "") !== "manufacturer") return undefined;
   const kinds = base?.discovered.map((m) => m.counterparty.kind) ?? [];
   if (kinds.includes("manufacturer")) return undefined;
   const undetermined = kinds.filter((k) => !k).length;
   const why = undetermined
     ? `подтверждённых производителей среди них нет — у ${undetermined} из ${n} роль ещё не определена`
     : "по основному ОКВЭД среди них нет производителей";
-  return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+  return `Под фильтр «Производитель» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+}
+
+/** «Минимальная релевантность» on the locally re-ranked score (local weights, D-079). */
+function atLeast(rows: CounterpartyMatch[], level: MinLevel): CounterpartyMatch[] {
+  const min = minScore(level);
+  return min === undefined ? rows : rows.filter((m) => m.score >= min);
+}
+
+/** Role chips: multiple choice; a count from X-Facets when the server sends it (#232). */
+function RoleChips({ filters, onChange, facets }: { filters: Filters; onChange: (f: Filters) => void; facets?: Facets }) {
+  return (
+    <fieldset className="role-chips">
+      <legend className="sr-only">Роль</legend>
+      {KINDS.map((k) => {
+        const on = filters.kinds.includes(k);
+        const n = facetCount(facets, "kind", k);
+        return (
+          <label key={k} className={`role-chip role-${k}${on ? " is-on" : ""}`}>
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => onChange({ ...filters, kinds: e.target.checked ? [...filters.kinds, k] : filters.kinds.filter((x) => x !== k) })}
+            />
+            <RoleIcon kind={k} />
+            {ROLE[k].chip}
+            {n !== undefined && <span className="chip-count">{n}</span>}
+          </label>
+        );
+      })}
+    </fieldset>
+  );
+}
+
+/** Filters over the results (#232): role chips, ЮЛ / ИП, minimal relevance, and the legend of the levels. */
+function FilterBar({ filters, facets, onChange }: { filters: Filters; facets?: Facets; onChange: (f: Filters) => void }) {
+  // 12 INN digits: a sole trader or a natural person — «ИП/ФЛ», not a guessed «ИП»
+  const entities: [Filters["entity"], string][] = [["", "Все"], ["ul", "ЮЛ"], ["ip", "ИП/ФЛ"]];
+  return (
+    <div className="filterbar" role="group" aria-label="Фильтры выдачи">
+      <RoleChips filters={filters} onChange={onChange} facets={facets} />
+      <div className="filterbar-row">
+        <fieldset className="seg">
+          <legend>Форма</legend>
+          {entities.map(([v, label]) => {
+            const n = v ? facetCount(facets, "entity", v) : undefined;
+            return (
+              <label key={label} className={filters.entity === v ? "is-on" : ""}>
+                <input type="radio" name="entity" checked={filters.entity === v} onChange={() => onChange({ ...filters, entity: v })} />
+                {label}
+                {n !== undefined && <span className="chip-count">{n}</span>}
+              </label>
+            );
+          })}
+        </fieldset>
+        <label className="minlevel">
+          Релевантность
+          <select value={filters.min_level} onChange={(e) => onChange({ ...filters, min_level: e.target.value as MinLevel })}>
+            <option value="">любая</option>
+            <option value="mid">средняя и выше</option>
+            <option value="high">только высокая</option>
+          </select>
+        </label>
+        <p className="legend-levels">
+          <span className="sr-only">Уровни релевантности:</span>
+          {LEVELS.map((l, i) => (
+            <span key={l.id} className={`relevance relevance-${l.id}`}>
+              <i aria-hidden="true" />
+              {l.label} {i === 0 ? `≥ ${l.min.toFixed(2)}` : i === LEVELS.length - 1 ? `< ${LEVELS[i - 1].min.toFixed(2)}` : `${l.min.toFixed(2)}–${LEVELS[i - 1].min.toFixed(2)}`}
+            </span>
+          ))}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /** Server's reason for an empty answer (X-Search-Note, #166) as a sentence; none — the general empty text. */
@@ -205,11 +288,16 @@ export function App() {
   const reduced = useReducedMotion();
   const [saved] = useState(loadSaved);
   const [path, go] = usePath();
+  const filterReturn = useRef<Path>("/search");
+  useEffect(() => { if (path === "/search" || path === "/results") filterReturn.current = path; }, [path]);
   const [text, setText] = useState(saved.text ?? "");
-  const [filters, setFilters] = useState<Filters>(saved.filters ?? { only_msp: false, only_manufacturers: false, region: "" });
+  const [filters, setFilters] = useState<Filters>(() => normalizeFilters(saved.filters));
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
   const [more, setMore] = useState(false);
+  const [editQuery, setEditQuery] = useState(false);
+  const [resultGroup, setResultGroup] = useState<"history" | "new">("history");
+  const [selectedSuppliers, setSelectedSuppliers] = useState<Partial<Record<"history" | "new", string>>>({});
   // the same query without user filters: how many candidates a filter hides for an unknown attribute
   const [base, setBase] = useState<SearchResponse | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
@@ -319,9 +407,10 @@ export function App() {
     setState("loading");
     setOpen(null);
     try {
-      const active = nextFilters.only_msp || nextFilters.only_manufacturers || !!nextFilters.region;
-      const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
-      const q = buildQuery(qText, nextFilters, qExtra());
+      const active = filtersActive(nextFilters);
+      const none: Filters = NO_FILTERS;
+      // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
+      const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
@@ -382,7 +471,7 @@ export function App() {
       /* nothing stored */
     }
     runSeq.current++; // drop an answer still in flight
-    setFilters({ only_msp: false, only_manufacturers: false, region: "" });
+    setFilters(NO_FILTERS);
     setText("");
     setLotId("");
     setBudget("");
@@ -411,7 +500,7 @@ export function App() {
   });
 
   useEffect(() => {
-    const titles: Record<string, string> = { "/": "Поставщики для вашей закупки", "/search": "Подбор поставщиков", "/results": "Результаты подбора", "/settings": "Настройки", "/about": "О сервисе" };
+    const titles: Record<string, string> = { "/": "Поставщики для вашей закупки", "/search": "Подбор поставщиков", "/results": "Результаты подбора", "/settings": "Фильтры", "/about": "О сервисе" };
     document.title = `${titles[path] ?? "Страница не найдена"} — Митрандир`;
   }, [path]);
 
@@ -435,6 +524,40 @@ export function App() {
     if (res) void run(next);
   }
 
+  const rankedHistory = res ? (weights ? atLeast(rerank(res.history, weights), filters.min_level) : res.history) : [];
+  const historyRows = weights ? rankedHistory.slice(0, shown) : rankedHistory;
+  const newRows = res ? (weights ? atLeast(rerank(res.discovered, weights), filters.min_level) : res.discovered) : [];
+  const historyTotal = res ? (weights ? rankedHistory.length : res.total.history) : 0;
+  const newTotal = res ? (weights ? newRows.length : res.total.discovered) : 0;
+  const activeRows = resultGroup === "history" ? historyRows : newRows;
+  const selectedResult = activeRows.find(m => supplierKey(m) === selectedSuppliers[resultGroup]) ?? activeRows[0] ?? null;
+  const selectedIndex = selectedResult ? activeRows.indexOf(selectedResult) : -1;
+  const revealSelection = useRef(false);
+  const selectResult = (m: CounterpartyMatch) => {
+    revealSelection.current = true;
+    setSelectedSuppliers(prev => ({ ...prev, [resultGroup]: supplierKey(m) }));
+    if (window.matchMedia("(max-width: 900px)").matches) requestAnimationFrame(() => {
+      document.getElementById("supplier-preview")?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "start" });
+    });
+  };
+
+  const selectedKey = selectedResult ? supplierKey(selectedResult) : "";
+  useEffect(() => {
+    if (!revealSelection.current) return;
+    revealSelection.current = false;
+    const list = document.querySelector<HTMLElement>(".result-list-scroll:not([hidden])");
+    const row = list?.querySelector<HTMLElement>('.item[aria-pressed="true"]');
+    if (!list || !row) return;
+    const box = list.getBoundingClientRect(), item = row.getBoundingClientRect();
+    if (item.top < box.top) list.scrollTop += item.top - box.top;
+    else if (item.bottom > box.bottom) list.scrollTop += item.bottom - box.bottom;
+  }, [selectedKey, path]);
+  function returnToList() {
+    const row = document.querySelector<HTMLElement>('.result-list-scroll:not([hidden]) .item[aria-pressed="true"]');
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "center" });
+  }
+
   return (
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
@@ -450,12 +573,12 @@ export function App() {
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
       {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
       : path === "/about" ? <AboutPage onStart={() => go("/search")} />
-      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
+      : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => go(filterReturn.current)} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
       <div className="top">
         <h1>{path === "/results" ? "Поставщики для вашей закупки" : "Подбор поставщиков для закупки"}</h1>
-        <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
+        {path !== "/results" && <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>}
       </div>
 
       {res?.stub && (
@@ -464,10 +587,24 @@ export function App() {
         </div>
       )}
 
-      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""}`}>
+      {path === "/results" && res && <div className="results-commandbar">
+        <p><span>Закупка</span><strong>{res.query.text}</strong></p>
+        <div className="results-commands">
+          <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
+          <button type="button" className="secondary" aria-expanded={editQuery} aria-controls="supplier-search" onClick={() => setEditQuery(v => !v)}>
+            {editQuery ? "Скрыть параметры" : "Изменить закупку"}
+          </button>
+          <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
+            setError(`выгрузка в Excel: ${String(e)}`); setState("error");
+          })}>Выгрузить в Excel</button>
+        </div>
+        {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
+      </div>}
+      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""} ${path === "/results" && res ? "results-workspace" : ""}`}>
       <form
         id="supplier-search"
         className="query"
+        hidden={path === "/results" && !!res && !editQuery}
         onSubmit={(e) => {
           e.preventDefault();
           void run();
@@ -509,6 +646,7 @@ export function App() {
               {lotMsg.text}
             </p>
           )}
+          {lot && lotMsg?.kind === "ok" && <BacktestPanel key={lotQueryId} ident={lotId} />}
         </div>
         <div className="query-divider"><span>или введите описание</span></div>
         <label htmlFor="q">Что нужно закупить</label>
@@ -549,54 +687,20 @@ export function App() {
           </div>
         )}
         <div className="row">
-          <fieldset className="filters">
-            <legend>Фильтры</legend>
-            <label>
-              <input
-                type="checkbox"
-                checked={filters.only_msp}
-                onChange={(e) => toggle({ ...filters, only_msp: e.target.checked })}
-              />
-              Только МСП
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={filters.only_manufacturers}
-                onChange={(e) => toggle({ ...filters, only_manufacturers: e.target.checked })}
-              />
-              Только производители
-            </label>
-            <label>
-              Регион{" "}
-              <select value={filters.region} onChange={(e) => toggle({ ...filters, region: e.target.value })}>
-                {REGIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r || "Любой"}
-                  </option>
-                ))}
+          <div className="query-refinements">
+            <a className="filter-link" {...link("/settings")}>Фильтры <span aria-hidden="true">↗</span></a>
+            <label className="query-region">Регион поставщика
+              <select aria-label="Регион" value={filters.region} onChange={(e) => toggle({ ...filters, region: e.target.value })}>
+                {REGIONS.map(r => <option key={r} value={r}>{r || "Любой регион"}</option>)}
               </select>
             </label>
-          </fieldset>
+          </div>
           <div className="actions">
             <button type="submit" disabled={!text.trim() || state === "loading"}>
               <SearchIcon />
               {state === "loading" ? "Ищем…" : "Найти поставщиков"}
             </button>
-            {path === "/results" && <button
-              type="button"
-              className="secondary"
-              disabled={!res}
-              onClick={() =>
-                void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch((e) => {
-                  setError(`выгрузка в Excel: ${String(e)}`);
-                  setState("error");
-                })
-              }
-            >
-              Выгрузить в Excel
-            </button>}
-            {path === "/results" && weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
+
           </div>
         </div>
         </div>
@@ -635,50 +739,52 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
       ))}
 
       {path === "/results" && res && (
-        <motion.main initial={reduced ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : 0.45, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
-          <header className="results-heading">
-            <h2 className="results-title">Результаты подбора</h2>
-            <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
-            {weights && (
-              <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
-                Оценка: {presetTitle(weightSet)} · только у вас
-              </a>
-            )}
-            <span className="result-total" role="status">
-              С опытом: <strong><RollingNumber value={res.total.history} /></strong> · Новых: <strong><RollingNumber value={res.total.discovered} /></strong>
-            </span>
-          </header>
+        <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
+          {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
+            Оценка: {presetTitle(weightSet)} · только у вас
+          </a>}
+          <div className="result-browser">
+          <div className="result-list-pane">
+            <div className="result-groups" role="group" aria-label="Группа поставщиков">
+              <button type="button" className="group-history" aria-pressed={resultGroup === "history"} onClick={() => setResultGroup("history")}>С опытом <span>{historyTotal}</span></button>
+              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span></button>
+            </div>
+            <div className="result-list-scroll" hidden={resultGroup !== "history"}>
           <Block
+            selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
             variant="history"
             tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
-            rows={weights ? rerank(res.history, weights).slice(0, shown) : res.history}
-            total={res.total.history}
+            rows={historyRows}
+            total={historyTotal}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
             loadingMore={more}
-            onOpen={setOpen}
+            onOpen={selectResult}
             empty={
-              filterNotes(base, filters).length
+              filterNotes(base, filters, res.facets).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
                 : noteText(res.note)
             }
           />
+          </div>
+          <div className="result-list-scroll" hidden={resultGroup !== "new"}>
           <Block
+            selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
             variant="new"
             tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
-            rows={rerank(res.discovered, weights)}
-            total={res.total.discovered}
-            onOpen={setOpen}
+            rows={newRows}
+            total={newTotal}
+            onOpen={selectResult}
             empty={
               hiddenNew(res, base, shownQuery) ??
               (res.query.okpd2?.length
@@ -686,6 +792,12 @@ export function App() {
                 : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
+          </div>
+          </div>
+          <ResultInspector onBack={returnToList} loadingMore={more} onMore={resultGroup === "history" && selectedIndex === activeRows.length - 1 && activeRows.length < historyTotal ? (weights ? () => setShown(n => n + PAGE) : () => void showMore()) : undefined} match={selectedResult} weightsNote={weights ? presetTitle(weightSet) : undefined} onOpen={setOpen}
+            onPrevious={selectedIndex > 0 ? () => selectResult(activeRows[selectedIndex - 1]) : undefined}
+            onNext={selectedIndex >= 0 && selectedIndex + 1 < activeRows.length ? () => selectResult(activeRows[selectedIndex + 1]) : undefined} />
+          </div>
         </motion.main>
       )}
       </div>
@@ -701,6 +813,8 @@ export function App() {
   );
 }
 
+function supplierKey(m: CounterpartyMatch) { return `${m.origin}:${m.counterparty.inn ?? m.counterparty.name}`; }
+
 function Block(props: {
   title: string;
   hint: string;
@@ -712,6 +826,7 @@ function Block(props: {
   empty?: string;
   variant: "history" | "new";
   tag: string;
+  selectedKey?: string;
 }) {
   const reduced = useReducedMotion();
   return (
@@ -732,20 +847,22 @@ function Block(props: {
               <motion.li key={cp.inn ?? cp.name} layout={reduced ? false : "position"}
                 initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, amount: 0.05 }} transition={{ duration: reduced ? 0 : 0.45, delay: reduced ? 0 : Math.min(i, 4) * 0.04, ease: easeOut }}>
-                <motion.button className="item" whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
+                <motion.button className="item" aria-controls="supplier-preview" aria-pressed={props.selectedKey === supplierKey(m)} whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
-                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
+                  <span className={`score score-level-${levelOf(m.score)}`} title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
                     <span className="score-num">{m.score.toFixed(2)}</span>
+                    <RelevanceTag score={m.score} />
                     <span className="score-meter" aria-hidden="true">
                       <motion.span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%`, originX: 0 }} initial={reduced ? false : { scaleX: 0 }} whileInView={{ scaleX: 1 }} viewport={{ once: true }} transition={{ duration: reduced ? 0 : 0.7, ease: easeOut }} />
                     </span>
                   </span>
                   <span className="meta">
-                    {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}
+                    {regionLabel(cp)}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
                   <span className="badges">
+                    <RoleBadge kind={cp.kind} />
                     <OriginBadge m={m} />
                   </span>
                   {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
@@ -843,8 +960,9 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
       </div>
       <div className={`card-summary card-summary-${m.origin === "history" ? "history" : "new"}`}>
         <span>{m.origin === "history" ? "С опытом госзакупок" : "Из открытых источников"}</span>
-        <span>Оценка <strong>{m.score.toFixed(2)}</strong></span>
+        <span>Оценка <strong>{m.score.toFixed(2)}</strong> <RelevanceTag score={m.score} /></span>
       </div>
+      <p className="card-role"><RoleBadge kind={cp.kind} /></p>
       <Breakdown m={m} />
       <h3>Почему в списке</h3>
       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
@@ -1075,15 +1193,15 @@ function WeightsSettings({ value, onChange }: { value: WeightSettings; onChange:
   );
 }
 
-function SettingsPage({ filters, onChange, onReset, weightSet, onWeights }: {
-  filters: Filters; onChange: (f: Filters) => void; onReset: () => void;
+function SettingsPage({ facets, onBack, filters, onChange, onReset, weightSet, onWeights }: {
+  facets?: Facets; onBack: () => void; filters: Filters; onChange: (f: Filters) => void; onReset: () => void;
   weightSet: WeightSettings; onWeights: (s: WeightSettings) => void;
 }) {
   return (
     <section className="subpage" aria-labelledby="settings-title">
       <header className="top">
-        <h1 id="settings-title">Настройки подбора</h1>
-        <p className="sub">Фильтры применяются к каждому поиску и к выгрузке в Excel; их же можно менять в форме подбора. Веса оценки — только у вас.</p>
+        <h1 id="settings-title">Фильтры подбора</h1>
+        <p className="sub">Требования к поставщикам применяются к подбору и выгрузке. Регион выбирается в подборе. Веса оценки — только у вас.</p>
       </header>
       <div className="settings">
         <fieldset className="setting-group">
@@ -1095,37 +1213,12 @@ function SettingsPage({ filters, onChange, onReset, weightSet, onWeights }: {
               <small>Субъекты малого и среднего предпринимательства по реестру ФНС — для закупок у СМП.</small>
             </span>
           </label>
-          <label className="setting">
-            <input
-              type="checkbox"
-              checked={filters.only_manufacturers}
-              onChange={(e) => onChange({ ...filters, only_manufacturers: e.target.checked })}
-            />
-            <span>
-              <strong>Только производители</strong>
-              <small>Роль определяется по основному ОКВЭД; у кого он неизвестен — скрываются, это видно в выдаче.</small>
-            </span>
-          </label>
-        </fieldset>
-        <fieldset className="setting-group">
-          <legend>География</legend>
-          <label className="setting setting-select">
-            <span>
-              <strong>Регион поставщика</strong>
-              <small>По КПП или адресу из реестра.</small>
-            </span>
-            <select aria-label="Регион поставщика" value={filters.region} onChange={(e) => onChange({ ...filters, region: e.target.value })}>
-              {REGIONS.map((r) => (
-                <option key={r} value={r}>
-                  {r || "Любой"}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterBar filters={filters} facets={facets} onChange={onChange} />
         </fieldset>
         <WeightsSettings value={weightSet} onChange={onWeights} />
         <div className="settings-actions">
-          <button type="button" className="secondary" onClick={onReset}>Сбросить настройки и сохранённый запрос</button>
+          <button type="button" className="subpage-cta" onClick={onBack}>Готово, вернуться к подбору</button>
+          <button type="button" className="secondary" onClick={onReset}>Сбросить фильтры и сохранённый запрос</button>
         </div>
       </div>
     </section>
