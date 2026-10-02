@@ -1,0 +1,272 @@
+{
+  "stage": "warm LotIndex.lot_hits only; excludes index load, BM25 retrieval and supplier search",
+  "reference_commit": "75bd77e038a5962cec1a879ec15f0e7a6ac41338",
+  "python": "3.12.13",
+  "numpy": "2.5.3",
+  "bm25s": "0.3.11",
+  "index": "/home/m1x/Documents/hackathons/rlt-hackathonchik/indexes/bm25-0591312044e44272",
+  "index_meta": {
+    "n_docs": 1047638,
+    "n_pairs": 2086901,
+    "as_of": "2025-07-01",
+    "data_end": "2025-06-30",
+    "tokenizer": "prefix5-v1"
+  },
+  "docs_sha256": "533ce1d5189917f0136c49f7e90db72c87bf811df695c8c66d0832598079bb99",
+  "implementation_sha256": "ef9e977f69750a590d015e7f2e50d5c059cea499b47875b4555762bf1a22ee3e",
+  "cases": "/home/m1x/Documents/hackathons/rlt-hackathonchik/.claude/worktrees/522-algorithm-review/eval/cases/dev.jsonl",
+  "cases_sha256": "61e22fd9edd20d4c6182f72da87648250db3ba098a91b9935474a70567c36d12",
+  "selection": "evenly spaced rows including endpoints; no shuffle",
+  "queries": 24,
+  "top": 500,
+  "repeats_per_method": 25,
+  "all_arrays_and_dtypes_equal": true,
+  "median_old_ms": 1.0042304999999998,
+  "median_new_ms": 0.171503,
+  "median_paired_speedup": 5.85120478404648,
+  "memory_scope": "peak traced Python/NumPy allocations per call, measured separately; not RSS",
+  "median_old_peak_bytes": 206308.0,
+  "median_new_peak_bytes": 106909.5,
+  "records": [
+    {
+      "query_id": "lot-5594995",
+      "hits": 500,
+      "lots": 855,
+      "expanded_pairs": 1123,
+      "old_ms": 1.012986,
+      "new_ms": 0.17589,
+      "old_peak_bytes": 211040,
+      "new_peak_bytes": 112283
+    },
+    {
+      "query_id": "lot-5756747",
+      "hits": 500,
+      "lots": 918,
+      "expanded_pairs": 1525,
+      "old_ms": 1.078237,
+      "new_ms": 0.185195,
+      "old_peak_bytes": 224941,
+      "new_peak_bytes": 126557
+    },
+    {
+      "query_id": "lot-5762525",
+      "hits": 500,
+      "lots": 1090,
+      "expanded_pairs": 1241,
+      "old_ms": 1.023369,
+      "new_ms": 0.193089,
+      "old_peak_bytes": 214344,
+      "new_peak_bytes": 119937
+    },
+    {
+      "query_id": "lot-5766769",
+      "hits": 500,
+      "lots": 472,
+      "expanded_pairs": 585,
+      "old_ms": 0.992403,
+      "new_ms": 0.164737,
+      "old_peak_bytes": 195976,
+      "new_peak_bytes": 90083
+    },
+    {
+      "query_id": "lot-5771023",
+      "hits": 500,
+      "lots": 398,
+      "expanded_pairs": 793,
+      "old_ms": 1.012845,
+      "new_ms": 0.168579,
+      "old_peak_bytes": 201800,
+      "new_peak_bytes": 94081
+    },
+    {
+      "query_id": "lot-5775517",
+      "hits": 500,
+      "lots": 482,
+      "expanded_pairs": 604,
+      "old_ms": 0.994471,
+      "new_ms": 0.164911,
+      "old_peak_bytes": 196508,
+      "new_peak_bytes": 90595
+    },
+    {
+      "query_id": "lot-5780408",
+      "hits": 500,
+      "lots": 2780,
+      "expanded_pairs": 2969,
+      "old_ms": 1.010374,
+      "new_ms": 0.183742,
+      "old_peak_bytes": 354369,
+      "new_peak_bytes": 204001
+    },
+    {
+      "query_id": "lot-5785206",
+      "hits": 500,
+      "lots": 586,
+      "expanded_pairs": 888,
+      "old_ms": 0.986147,
+      "new_ms": 0.170392,
+      "old_peak_bytes": 204460,
+      "new_peak_bytes": 100224
+    },
+    {
+      "query_id": "lot-5788712",
+      "hits": 500,
+      "lots": 767,
+      "expanded_pairs": 859,
+      "old_ms": 0.993762,
+      "new_ms": 0.164436,
+      "old_peak_bytes": 203648,
+      "new_peak_bytes": 102895
+    },
+    {
+      "query_id": "lot-5792940",
+      "hits": 500,
+      "lots": 1698,
+      "expanded_pairs": 2009,
+      "old_ms": 1.018193,
+      "new_ms": 0.185995,
+      "old_peak_bytes": 270817,
+      "new_peak_bytes": 155009
+    },
+    {
+      "query_id": "lot-5796896",
+      "hits": 500,
+      "lots": 714,
+      "expanded_pairs": 890,
+      "old_ms": 0.994771,
+      "new_ms": 0.167633,
+      "old_peak_bytes": 204516,
+      "new_peak_bytes": 102338
+    },
+    {
+      "query_id": "lot-5801508",
+      "hits": 500,
+      "lots": 1161,
+      "expanded_pairs": 2205,
+      "old_ms": 1.035278,
+      "new_ms": 0.194699,
+      "old_peak_bytes": 275749,
+      "new_peak_bytes": 152885
+    },
+    {
+      "query_id": "lot-5805828",
+      "hits": 500,
+      "lots": 479,
+      "expanded_pairs": 570,
+      "old_ms": 0.989878,
+      "new_ms": 0.162177,
+      "old_peak_bytes": 195556,
+      "new_peak_bytes": 90215
+    },
+    {
+      "query_id": "lot-5810025",
+      "hits": 500,
+      "lots": 616,
+      "expanded_pairs": 685,
+      "old_ms": 1.008685,
+      "new_ms": 0.169467,
+      "old_peak_bytes": 198776,
+      "new_peak_bytes": 96067
+    },
+    {
+      "query_id": "lot-5814879",
+      "hits": 500,
+      "lots": 759,
+      "expanded_pairs": 932,
+      "old_ms": 0.991598,
+      "new_ms": 0.172614,
+      "old_peak_bytes": 205692,
+      "new_peak_bytes": 104444
+    },
+    {
+      "query_id": "lot-5819329",
+      "hits": 500,
+      "lots": 403,
+      "expanded_pairs": 532,
+      "old_ms": 0.979711,
+      "new_ms": 0.161128,
+      "old_peak_bytes": 194492,
+      "new_peak_bytes": 87175
+    },
+    {
+      "query_id": "lot-5824836",
+      "hits": 500,
+      "lots": 2119,
+      "expanded_pairs": 4362,
+      "old_ms": 1.147193,
+      "new_ms": 0.295807,
+      "old_peak_bytes": 439910,
+      "new_peak_bytes": 239394
+    },
+    {
+      "query_id": "lot-5830980",
+      "hits": 500,
+      "lots": 1146,
+      "expanded_pairs": 1304,
+      "old_ms": 0.996879,
+      "new_ms": 0.176488,
+      "old_peak_bytes": 216108,
+      "new_peak_bytes": 122912
+    },
+    {
+      "query_id": "lot-5836428",
+      "hits": 500,
+      "lots": 467,
+      "expanded_pairs": 590,
+      "old_ms": 0.997356,
+      "new_ms": 0.162482,
+      "old_peak_bytes": 196116,
+      "new_peak_bytes": 89943
+    },
+    {
+      "query_id": "lot-5840442",
+      "hits": 500,
+      "lots": 832,
+      "expanded_pairs": 1086,
+      "old_ms": 1.000854,
+      "new_ms": 0.168087,
+      "old_peak_bytes": 210004,
+      "new_peak_bytes": 110694
+    },
+    {
+      "query_id": "lot-5845870",
+      "hits": 500,
+      "lots": 1403,
+      "expanded_pairs": 4921,
+      "old_ms": 1.111305,
+      "new_ms": 0.256993,
+      "old_peak_bytes": 467025,
+      "new_peak_bytes": 246385
+    },
+    {
+      "query_id": "lot-5850816",
+      "hits": 500,
+      "lots": 1259,
+      "expanded_pairs": 1558,
+      "old_ms": 1.007607,
+      "new_ms": 0.185396,
+      "old_peak_bytes": 232674,
+      "new_peak_bytes": 133102
+    },
+    {
+      "query_id": "lot-5856551",
+      "hits": 500,
+      "lots": 223,
+      "expanded_pairs": 554,
+      "old_ms": 0.979304,
+      "new_ms": 0.157019,
+      "old_peak_bytes": 195108,
+      "new_peak_bytes": 83394
+    },
+    {
+      "query_id": "lot-5864444",
+      "hits": 500,
+      "lots": 921,
+      "expanded_pairs": 976,
+      "old_ms": 1.016458,
+      "new_ms": 0.17286,
+      "old_peak_bytes": 206924,
+      "new_peak_bytes": 109375
+    }
+  ]
+}
