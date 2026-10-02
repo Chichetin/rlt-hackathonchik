@@ -414,3 +414,15 @@ def test_a_card_with_registry_facts_gets_no_second_role(gdir, cache):
     card = add_open_data([found], cache)[0]
     assert card.evidence == found.evidence
     assert sum(e.fact.startswith("Роль") for e in card.evidence) == 1
+
+
+def test_default_directory_follows_data_processed_dir(tmp_path, monkeypatch):
+    # #465: the e2e server has its own DATA_PROCESSED_DIR and must not see the real export in data/external/gisp
+    monkeypatch.setattr(gisp, "DIR", None)
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "e2e" / "processed"))
+    assert gisp.gisp_dir() == tmp_path / "e2e" / "external" / "gisp"
+    assert gisp.available() is False
+    monkeypatch.delenv("DATA_PROCESSED_DIR")
+    assert gisp.gisp_dir() == gisp.ROOT / "data" / "external" / "gisp"
+    monkeypatch.setattr(gisp, "DIR", tmp_path / "x")  # an explicit override still wins
+    assert gisp.gisp_dir() == tmp_path / "x"
