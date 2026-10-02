@@ -8,7 +8,7 @@ test("пресет весов пересчитывает выдачу тольк
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mitrandir.weights") ?? "{}").preset)).toBe("local");
 
   await page.goto("/search");
-  await page.getByLabel("Название товара").fill("Бумага офисная А4");
+  await page.getByLabel("Что нужно закупить").fill("Бумага офисная А4");
   await page.getByRole("button", { name: "Найти поставщиков", exact: true }).click();
   await expect(page.getByRole("link", { name: /Оценка: Рядом с заказчиком · только у вас/ })).toBeVisible();
   const history = page.getByRole("region", { name: "С опытом госзакупок" });

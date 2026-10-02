@@ -158,21 +158,3 @@ def test_load_refuses_foreign_schemas(built: Path) -> None:
     for bad in ("public", "data", "vec", "pg_x", "Pool;drop"):
         with pytest.raises(ValueError):
             pool.load(built, "postgresql://x", schema=bad)
-
-
-def test_candidates_by_size_keeps_the_largest_within_the_limit(tmp_path: Path) -> None:
-    """#518: the limit kept the lowest INNs (other regions' codes first); by_size keeps the largest (#377)."""
-    import duckdb
-
-    okved = (tmp_path / "okved.parquet").as_posix()
-    companies = (tmp_path / "companies.parquet").as_posix()
-    duckdb.sql("SELECT * FROM (VALUES ('0100000001', '81.21', true, '78'), ('7800000002', '81.21', true, '78'), "
-               "('7800000003', '81.21', true, '78'), ('7800000004', '81.21.1', false, '78')) "
-               "t(inn, code, main, region_code)").write_parquet(okved)
-    duckdb.sql("SELECT * FROM (VALUES ('0100000001', 1), ('7800000002', 40), ('7800000003', NULL), "
-               "('7800000004', 900)) t(inn, employees)").write_parquet(companies)
-    got = pool.candidates(["81.21"], regions=["78"], pool_dir=tmp_path, by_size=True)
-    assert [r["inn"] for r in got] == ["7800000002", "0100000001", "7800000003", "7800000004"]  # main first
-    assert got[0]["employees"] == 40
-    assert [r["inn"] for r in pool.candidates(["81.21"], pool_dir=tmp_path, by_size=True, limit=1)] == ["7800000002"]
-    assert [r["inn"] for r in pool.candidates(["81.21"], pool_dir=tmp_path, limit=1)] == ["0100000001"]  # as before

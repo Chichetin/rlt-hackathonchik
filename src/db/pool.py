@@ -230,14 +230,9 @@ def lookup(inns: Iterable[str], *, url: str | None = None, schema: str = "pool",
 
 
 def candidates(prefixes: Sequence[str], *, regions: Sequence[str] | None = None, limit: int | None = None,
-               url: str | None = None, schema: str = "pool", pool_dir: Path = POOL,
-               by_size: bool = False) -> list[dict[str, Any]]:
+               url: str | None = None, schema: str = "pool", pool_dir: Path = POOL) -> list[dict[str, Any]]:
     """Companies with a main or additional OKVED under one of `prefixes`, one row per INN — its best match
-    (main before additional, then the longest code); main first, then by INN. Ranking is not done here.
-
-    `by_size` — within main / additional, larger headcount first (`employees`, the only registry signal that
-    orders the pool, N-order-size of #377), then INN; each row gets `employees`. Without it the order is by INN
-    and the limit keeps the lowest INNs — other regions' codes first, whatever the company's region (#518)."""
+    (main before additional, then the longest code); main first, then by INN. Ranking is not done here."""
     for p in prefixes:
         if not _PREFIX.fullmatch(p):
             raise ValueError(f"не префикс ОКВЭД: {p!r}")
@@ -248,25 +243,16 @@ def candidates(prefixes: Sequence[str], *, regions: Sequence[str] | None = None,
         return []
     like = " OR ".join(f"code LIKE {_lit(p + '%')}" for p in prefixes)  # checked: digits and dots only
     where = f"({like})" + (f" AND region_code IN ({','.join(map(_lit, regions))})" if regions else "")
-    lim = f" LIMIT {int(limit)}" if limit is not None else ""
+    tail = " ORDER BY main DESC, inn" + (f" LIMIT {int(limit)}" if limit is not None else "")
     best = ("SELECT inn, code, main FROM (SELECT inn, code, main, row_number() OVER "
             "(PARTITION BY inn ORDER BY main DESC, length(code) DESC, code) AS rn FROM {t} WHERE {w}) b WHERE rn = 1")
-    sized = ("SELECT b.inn, b.code, b.main, c.employees FROM (" + best + ") b LEFT JOIN {c} c ON c.inn = b.inn "
-             "ORDER BY main DESC, employees DESC NULLS LAST, inn")  # no headcount — after the counted ones
-    plain = best + " ORDER BY main DESC, inn"
     if url:
         _check_schema(schema)
-        q = (sized if by_size else plain).format(t=f"{schema}.okved", w=where.replace("%", "%%"),
-                                                 c=f"{schema}.companies")
-        return _pg_rows(url, q + lim, [])
+        return _pg_rows(url, best.format(t=f"{schema}.okved", w=where.replace("%", "%%")) + tail, [])
     if (path := _parquet(pool_dir, "okved")) is None:
         return []
-    cpath = _parquet(pool_dir, "companies") if by_size else None
-    q = sized.format(t=f"read_parquet({path})", w=where, c=f"read_parquet({cpath})") if cpath else \
-        plain.format(t=f"read_parquet({path})", w=where)
-    cur = duckdb.connect().execute(q + lim)
-    cols = [d[0] for d in cur.description]
-    return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+    cur = duckdb.connect().execute(best.format(t=f"read_parquet({path})", w=where) + tail)
+    return [{"inn": i, "code": c, "main": m} for i, c, m in cur.fetchall()]
 
 
 def counterparties(inns: Iterable[str], cache: SourceCache, *, url: str | None = None, schema: str = "pool",

@@ -45,8 +45,7 @@ def extra(store: Store, have: set[str], codes: list[str], customer_inn: str | No
     out: list[Candidate] = []
     seen = set(have)
 
-    def add(rows: list[tuple], limit: int, why: str, counted: str) -> None:
-        added = 0
+    def add(rows: list[tuple], why: str, counted: str) -> None:
         for inn, n_lots, n_wins, lot_id, text, day in rows:
             if inn in seen:
                 continue
@@ -55,20 +54,15 @@ def extra(store: Store, have: set[str], codes: list[str], customer_inn: str | No
             c.found_by = why.format(n=int(n_lots))
             c.counted = counted  # experience counts these lots, not lots with similar positions
             out.append(c)
-            added += 1
-            if added == limit:
-                break
 
     g = ", ".join(groups)
     exclude = -1 if own is None else own
-    # Each store query returns unique suppliers. At most len(seen) can be duplicates, so this
-    # bounded overfetch fills the quota with new suppliers even when the source overlaps BM25.
     if n_customer and customer_inn:
-        add(store.customer_suppliers(customer_inn, groups, as_of, n_customer + len(seen), exclude), n_customer,
+        add(store.customer_suppliers(customer_inn, groups, as_of, n_customer, exclude),
             f"Не найден по названию; поставщик этого заказчика: {{n}} лот(ов) в группе ОКПД2 {g}",
             f"этого заказчика в группе ОКПД2 {g}")
     if n_okpd2:
-        add(store.okpd2_suppliers(2, groups, as_of, n_okpd2 + len(seen), exclude), n_okpd2,
+        add(store.okpd2_suppliers(2, groups, as_of, n_okpd2, exclude),
             f"Не найден по названию; частый поставщик группы ОКПД2 {g}: {{n}} лот(ов)",
             f"в группе ОКПД2 {g}")
     return out

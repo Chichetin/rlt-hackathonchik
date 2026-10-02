@@ -216,9 +216,7 @@ def _discovered(query: Query, history: list[CounterpartyMatch], enqueue: Callabl
     user filters (X-Facets) and the Discovery.
     """
     try:
-        # the offline pool (#185, #219) joins «Новые» as in make predict (#518): no network, cache and parquet only
-        res = discover_mod.discover(query, history, enqueue=enqueue, offline=offline, predicted_code=predicted,
-                                    pool=True)
+        res = discover_mod.discover(query, history, enqueue=enqueue, offline=offline, predicted_code=predicted)
     except Exception as e:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
         log.exception("discovery: блок «Новые» пуст из-за ошибки")
         return [], [], None, type(e).__name__

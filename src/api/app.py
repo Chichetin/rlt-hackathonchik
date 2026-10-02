@@ -105,23 +105,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         cfg = search_mod.load_config()
         retriever, model = cfg["retriever"], cfg.get("embedding_model")
-        if (short := search_mod.hybrid_short(cfg)) and search_mod.routed(cfg, "прогрев")["retriever"] == "pg_hybrid":
-            retriever, model = "pg_hybrid", short["model"]  # #485: short queries go to pg_hybrid with their own model
         reliability = reliability_mode(cfg)
     except (OSError, ValueError, KeyError):
         retriever = model = reliability = None
     if reliability in ("shadow", "on") and not _is_stub():
         threading.Thread(target=_warm_reliability, name="warm-reliability", daemon=True).start()
     if retriever == "pg_hybrid":
+        from src.match import pg_retriever
+
         try:
-            from src.match import pg_retriever
-        except ImportError as e:  # no extra pg (psycopg): search() falls back to BM25 the same way
+            log.info("pg_hybrid прогрет: %s", pg_retriever.warm(model))
+        except pg_retriever.VectorsUnavailable as e:
             log.warning("pg_hybrid недоступен, поиск пойдёт по BM25: %s", e)
-        else:
-            try:
-                log.info("pg_hybrid прогрет: %s", pg_retriever.warm(model))
-            except pg_retriever.VectorsUnavailable as e:
-                log.warning("pg_hybrid недоступен, поиск пойдёт по BM25: %s", e)
     yield
 
 
@@ -454,7 +449,7 @@ def api_export(query: Query) -> StreamingResponse:
         for place, m in enumerate(rows, 1):
             cp = m.counterparty
             ws.append([
-                block, cp.name, cp.inn or cp.foreign_id or "ИНН не подтверждён",
+                block, cp.name, cp.inn or "ИНН не подтверждён",
                 KIND_LABEL[kind_of(cp)], ENTITY_LABEL.get(entity_of(cp) or "", "не определено"), cp.region or "",
                 {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], place, round(m.score, 3),
                 m.rank_reason or "",

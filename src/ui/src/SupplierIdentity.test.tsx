@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { companyMonogram, companyPattern, supplierKey, SupplierId, SupplierMetrics } from "./SupplierIdentity";
+import { companyMonogram, companyPattern, supplierKey, SupplierMetrics } from "./SupplierIdentity";
 import type { CounterpartyMatch } from "./api";
 
 describe("company identity", () => {
@@ -28,17 +28,5 @@ describe("company identity", () => {
   it("does not turn absent data into zeros or a negative assessment", () => {
     const { container } = render(<SupplierMetrics cp={{ name: 'Стиль', inn: null }} />);
     expect(container).toBeEmptyDOMElement();
-  });
-
-  it("names the country and the national identifier of an EAEU company instead of an unconfirmed INN", () => {
-    const { container, rerender } = render(<SupplierId cp={{ name: 'ОАО «Пример»', inn: null, country: 'BY', foreign_id: 'BY:190000000' }} />);
-    expect(container).toHaveTextContent('Беларусь, УНП 190000000');
-    expect(container).not.toHaveTextContent('не подтверждён');
-    rerender(<SupplierId cp={{ name: 'ТОО «Пример»', inn: null, country: 'KZ' }} />);
-    expect(container).toHaveTextContent('Казахстан, БИН не подтверждён');
-    rerender(<SupplierId cp={{ name: 'Стиль', inn: null }} />);
-    expect(container).toHaveTextContent('ИНН не подтверждён');
-    rerender(<SupplierId cp={{ name: 'Стиль', inn: '7707083893', country: 'RU' }} />);
-    expect(container).toHaveTextContent('ИНН 7707083893');
   });
 });

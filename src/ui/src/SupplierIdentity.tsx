@@ -20,23 +20,6 @@ function times(count: number): string {
   return count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? "раза" : "раз";
 }
 
-/** EAEU countries (#200): the country name and what its national identifier is called. */
-export const COUNTRY: Record<string, { name: string; id: string }> = {
-  BY: { name: "Беларусь", id: "УНП" },
-  KZ: { name: "Казахстан", id: "БИН" },
-  AM: { name: "Армения", id: "ИНН" },
-  KG: { name: "Кыргызстан", id: "ИНН" },
-};
-
-/** «ИНН 7800000000», «Беларусь, УНП 100000000» for a foreign company, else «ИНН не подтверждён». */
-export function SupplierId({ cp }: { cp: Counterparty }) {
-  if (cp.inn) return <>ИНН <strong>{cp.inn}</strong></>;
-  const country = cp.country && cp.country !== "RU" ? COUNTRY[cp.country] ?? { name: cp.country, id: "идентификатор" } : null;
-  if (!country) return <>ИНН не подтверждён</>;
-  const id = cp.foreign_id?.split(":")[1];
-  return <>{country.name}, {country.id} {id ? <strong>{id}</strong> : "не подтверждён"}</>;
-}
-
 export function companyMonogram(name: string): string {
   const core = name.trim().toLocaleUpperCase("ru-RU")
     .replace(/^(ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ|(?:ПУБЛИЧНОЕ|НЕПУБЛИЧНОЕ|ЗАКРЫТОЕ|ОТКРЫТОЕ) АКЦИОНЕРНОЕ ОБЩЕСТВО|АКЦИОНЕРНОЕ ОБЩЕСТВО|ИНДИВИДУАЛЬНЫЙ ПРЕДПРИНИМАТЕЛЬ|ООО|ПАО|НАО|ОАО|ЗАО|АО|ИП)(?=[\s«"“„]|$)/u, "")

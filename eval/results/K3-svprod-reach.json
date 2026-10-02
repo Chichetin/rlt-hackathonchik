@@ -1,0 +1,16 @@
+{
+ "exp_id": "K3-svprod-reach",
+ "commit": "dcc16e8a434fba656c8c95cfe2cb505dcf5dbd0c",
+ "part": "dev",
+ "companies_with_svprod": 2092,
+ "companies_with_svprod_spb_lo": 303,
+ "lots": 1978,
+ "lots_with_candidate_class": 1936,
+ "lots_with_candidate_group": 1333,
+ "candidates_group_median": 1,
+ "candidates_group_p90": 6,
+ "winner_in_candidates_class": 0,
+ "winner_in_candidates_group": 0,
+ "dev_winner_inns": 1299,
+ "dev_winners_with_svprod": 2
+}

@@ -43,7 +43,6 @@ import logging
 import re
 import time
 from collections.abc import Callable, Iterator, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -53,9 +52,9 @@ import duckdb
 import httpx
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
-from src.enrich import eaeu, web_discover
+from src.enrich import web_discover
 from src.enrich.enrich import enrich, from_bo, from_card
-from src.enrich.evidence import cached_pages, check_counterparty, strip_unverified, value_in_page
+from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.match import new_fit
 from src.match import search as search_mod
 from src.match.filters import apply_filters, apply_legal
@@ -148,7 +147,6 @@ class Discovery:
     source_failed: bool = False  # a registry request was refused or failed: the block may be incomplete (#287)
     gisp: list[str] = field(default_factory=list)  # ГИСП (#74): what the registry of industrial products gave
     gisp_backed: set[str] = field(default_factory=set)  # INNs whose product the registry confirms (product_fit 1.0)
-    eaeu: list[str] = field(default_factory=list)  # EAEU companies (#200): what happened to the leads, one line
 
 
 def predicted_class_allowed() -> bool:
@@ -775,7 +773,6 @@ def discover(
     predicted_class: bool | None = None,
     fit_mode: str | None = None,
     predicted_code: str | None = None,
-    pool: bool = False,
 ) -> Discovery:
     """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data.
 
@@ -786,8 +783,6 @@ def discover(
     `fit_mode` (off | shadow | on) overrides new_fit.mode() — for the off/on comparison (#77).
     `predicted_code` — the OKPD2 code search() predicted from the text of this query (search.predicted_code());
     used only when the query has no OKPD2 of its own, and then its full code picks the wholesale row.
-    `pool` — add the offline pool of companies (#185, #219) to the block, as `make predict` does (#518): offline,
-    after the history check; a company another channel found keeps that channel's row.
     """
     cache = cache or SourceCache()
     store = store_for(processed)  # organizers' data: the store search() read unless a parquet dir is given
@@ -915,13 +910,6 @@ def discover(
         relation.update(lead_relation)
         if line:
             res.leads.append(line)
-    pool_step: dict[str, str] = {}  # INN → STEP key of a pool company (class / extra / wholesale)
-    if pool and res.history_checked:
-        found_pool, pool_step = pool_matches(query, codes, {m.counterparty.inn or "" for m in matches} | set(found),
-                                             res, weights, cache, store)
-        matches.extend(found_pool)
-        # an additional OKVED of the class takes a producer's slot of _mix; its own step stays in res.relation
-        relation.update({inn: "wholesale" if r == "wholesale" else "class" for inn, r in pool_step.items()})
     gisp_no_card: list[str] = []
     gisp_step: dict[str, str] = {}  # INN → STEP key of the registry's product match (#74)
     if gisp.available():  # ГИСП (#74): registry makers of the query's product; no export → nothing changes
@@ -976,20 +964,8 @@ def discover(
     matches.sort(key=order)
     res.pool = matches
     res.relation = dict(relation)
-    res.relation.update(pool_step)  # extra: an additional OKVED of the class (STEP 0.5)
     res.relation.update(gisp_step)  # the registry's step for make predict (STEP), over the OKVED one
     res.matches = _mix(matches, relation, res.gisp_backed)
-    if res.history_checked and res.okpd_classes and eaeu.enabled():  # EAEU (#200): goods only, cache only
-        try:
-            abroad, line = eaeu.matches(codes, res.okpd_classes, cache, weights, res.predicted)
-        except Exception:  # noqa: BLE001 — the EAEU rows never take the block down
-            log.exception("discovery: компании ЕАЭС пропущены из-за ошибки")
-            abroad, line = [], None
-        if line:
-            res.eaeu.append(line)
-        # after the block's own rows: confirmed by a registry as a company, not as a maker of the product
-        res.candidates = [*res.candidates, *apply_legal(abroad)]
-        res.matches = [*res.matches, *apply_filters(abroad, query)]
     if res.fit_new:
         log.info("discovery %s: product_fit_new (%s), профиль ОКПД2 %s: %s", query.query_id, res.fit_mode,
                  res.profile.code if res.profile else "—",
@@ -1058,40 +1034,13 @@ def pool_source() -> tuple[str | None, Path | None]:
     return (url, None) if url.startswith("postgres") else (None, None)
 
 
-_POOL_ROWS: dict[tuple, tuple[list[dict], list[dict]]] = {}  # (prefixes, region, limit, source) → rows; #518
-_POOL_ROWS_MAX = 256
-
-
-def _pool_rows(prefixes: Sequence[str], region: str, limit: int, url: str | None,
-               pool_dir: Path) -> tuple[list[dict], list[dict]]:
-    """Rows of the pool for one (OKVED prefixes, region): the registry dump (`candidates`, at most `limit`)
-    and the companies outside it (`large`). The okved table is 79 M rows and a parquet scan by a code prefix
-    takes seconds on it, so a repeated query (the demo, a page of /api/search) reads it once per process;
-    the key holds the files' mtime — a rebuilt pool is read again."""
-    from src.db import pool as pool_mod
-
-    stamp = tuple((pool_dir / f"{t}.parquet").stat().st_mtime if (pool_dir / f"{t}.parquet").exists() else None
-                  for t in ("okved", pool_mod.LARGE))
-    key = (tuple(prefixes), region, limit, url, pool_dir.as_posix(), stamp)
-    hit = _POOL_ROWS.get(key)
-    if hit is None:
-        hit = (pool_mod.candidates(prefixes, regions=[region], limit=limit, url=url, pool_dir=pool_dir, by_size=True),
-               pool_mod.large_candidates(prefixes, regions=[region], pool_dir=pool_dir))
-        if len(_POOL_ROWS) >= _POOL_ROWS_MAX:
-            _POOL_ROWS.clear()
-        _POOL_ROWS[key] = hit
-    return hit
-
-
 def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: dict[str, float],
-              processed: Path | None, cache: SourceCache, url: str | None = None, pool_dir: Path | None = None,
-              limit: int = POOL_LIMIT, store: Store | None = None,
-              ) -> tuple[list[CounterpartyMatch], dict[str, str], bool | None]:
+              processed: Path, cache: SourceCache, url: str | None = None, pool_dir: Path | None = None,
+              limit: int = POOL_LIMIT) -> tuple[list[CounterpartyMatch], dict[str, str], bool | None]:
     """«Новые» from the offline МСП pool (#185) by the same OKVED plan as the live registry search: the
     class (product_fit 1.0 for the main OKVED, POOL_EXTRA_FIT for an additional one) and the wholesale codes
-    (0.6). Regions: the query's, then the neighbour. Organizers' suppliers are dropped (`store` — the store
-    the caller searched, else the one of `processed`). The third value: organizers' data checked (None — the
-    pool is not loaded, nothing was searched)."""
+    (0.6). Regions: the query's, then the neighbour. Organizers' suppliers are dropped. The third value:
+    organizers' data checked (None — the pool is not loaded, nothing was searched)."""
     from src.db import pool as pool_mod
 
     if url is None and pool_dir is None:
@@ -1103,17 +1052,16 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
         return [], {}, False
     rows: dict[str, dict] = {}
     large: set[str] = set()  # companies outside the registry dump (#219): the `large` table of the pool
-    prefixes, regions = [ch.okved for ch in plan], _regions(query)
-    with ThreadPoolExecutor(max_workers=len(regions)) as ex:  # a scan per region; DuckDB releases the GIL
-        per_region = list(ex.map(lambda rg: _pool_rows(prefixes, rg, limit, url, pool_dir or pool_mod.POOL), regions))
-    for dump_rows, large_rows in per_region:  # the query's region first: its rows win the limit
-        for r in dump_rows:
+    for region in _regions(query):  # the query's region first: its rows win the limit
+        prefixes = [ch.okved for ch in plan]
+        for r in pool_mod.candidates(prefixes, regions=[region], limit=limit, url=url,
+                                     pool_dir=pool_dir or pool_mod.POOL):
             rows.setdefault(r["inn"], r)
-        for r in large_rows:
+        for r in pool_mod.large_candidates(prefixes, regions=[region], pool_dir=pool_dir or pool_mod.POOL):
             if r["inn"] not in rows:
                 rows[r["inn"]] = r
                 large.add(r["inn"])
-    known = known_inns(list(rows), query.as_of, store or store_for(processed))
+    known = known_inns(list(rows), query.as_of, store_for(processed))
     if known is None:
         return [], {}, False
     fresh = [inn for inn in rows if inn not in known]
@@ -1151,67 +1099,8 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                      score=round(sum(c.value * c.weight for c in comps), 4)))
     out = apply_filters(out, query)
-    # equal scores within a basis: larger headcount first (N-order-size, #377: winner@10 +0.018), then INN (#518)
-    size = {inn: r.get("employees") or 0 for inn, r in rows.items()}
-    out.sort(key=lambda m: (-m.score, -size.get(m.counterparty.inn or "", 0), m.counterparty.inn or "~"))
+    out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
     return out, relation, True
-
-
-# pool rows per region for one /api/search query: the block shows MAX_SHOWN of them, and the pool's scores tie within
-# a basis (class / wholesale), so more rows change nothing on the screen but cost the lookup and the Evidence check
-# (≈ 2 s per 100 companies on the real pool, #518)
-POOL_API_LIMIT = 25
-POOL_MEMO_TTL_S = 600.0  # one answer of the pool per query: the pages, the card and the export repeat the search
-_POOL_MEMO: dict[str, tuple[float, list[CounterpartyMatch], dict[str, str], str]] = {}
-_POOL_MEMO_MAX = 64
-POOL_ABSENT = ("офлайн-пул компаний не загружен (make data PART=pool) — «Новые» только из реестра МСП, "
-               "веб-лидов и ГИСП")
-
-
-def _store_key(store: Store) -> str:
-    """Which organizers' data a memoized pool answer was checked against: the parquet dir or the Postgres schema."""
-    return f"{type(store).__name__}:{getattr(store, 'processed', None) or getattr(store, 'schema', '')}"
-
-
-def pool_matches(query: Query, codes: Sequence[str], skip: set[str], res: Discovery, weights: dict[str, float],
-                 cache: SourceCache, store: Store, limit: int = POOL_API_LIMIT
-                 ) -> tuple[list[CounterpartyMatch], dict[str, str]]:
-    """«Новые» of the offline pool for discover(pool=True) — the from_pool() of `make predict` (#518): the same
-    OKVED plan, regions, organizers' history before as_of (of the store the query searched), Evidence from the
-    pool's cached pages; facts that fail the check are stripped. INNs in `skip` (another channel) are left
-    out. No pool — nothing, one note; a broken pool — nothing, one line in `res.requests`."""
-    try:
-        url, pool_dir = pool_source()
-        if url is None and pool_dir is None:
-            res.notes.append(POOL_ABSENT)
-            return [], {}
-        started = time.monotonic()
-        key = repr((query.model_dump_json(exclude={"query_id"}), list(codes), res.predicted, sorted(weights.items()),
-                    url, pool_dir.as_posix() if pool_dir else None, limit, _store_key(store), cache.path.as_posix()))
-        hit = _POOL_MEMO.get(key)
-        if hit is not None and started - hit[0] < POOL_MEMO_TTL_S:
-            _, extra, relation, _ = hit
-            how = f"из памяти процесса, первый запрос {hit[3]}"
-        else:
-            found, relation, checked = from_pool(query, codes, predicted=res.predicted, weights=weights,
-                                                 processed=None, cache=cache, url=url, pool_dir=pool_dir, limit=limit,
-                                                 store=store)
-            if checked is None:
-                res.notes.append(POOL_ABSENT)
-                return [], {}
-            pages = cached_pages(cache.page_text)  # the pool's pages were cached by from_pool: checked like any
-            extra = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in found]
-            how = f"{time.monotonic() - started:.1f} с"
-            if len(_POOL_MEMO) >= _POOL_MEMO_MAX:
-                _POOL_MEMO.clear()
-            _POOL_MEMO[key] = (started, extra, relation, how)
-    except Exception as e:  # noqa: BLE001 — a broken pool never takes the other channels down
-        log.exception("discovery: пул пропущен из-за ошибки")
-        res.requests.append(f"пул: ошибка {type(e).__name__} — канал пропущен")
-        return [], {}
-    added = [m for m in extra if (m.counterparty.inn or "") not in skip]
-    res.requests.append(f"пул: кандидатов {len(extra)}, новых к остальным каналам {len(added)} ({how})")
-    return added, {m.counterparty.inn or "": relation[m.counterparty.inn or ""] for m in added}
 
 
 def _report(query: Query, res: Discovery, cache: SourceCache) -> None:

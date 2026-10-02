@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
-import { isTemplate, predictEstimate, TestsetPanel } from "./TestsetPanel";
+import { predictEstimate, TestsetPanel } from "./TestsetPanel";
 
 const SET = {
   id: "abc123def456",
@@ -59,7 +59,7 @@ test("not a CSV: a hint, no request", async () => {
   const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ detail: "нет" }, 404));
   render(<TestsetPanel onPick={vi.fn()} busyLot={null} />);
   await userEvent.click(screen.getByRole("button", { name: "Тестовая выгрузка" }));
-  await userEvent.upload(screen.getByLabelText("Файлы тестовой выгрузки"), new File(["x"], "отчёт.pdf"), { applyAccept: false });
+  await userEvent.upload(screen.getByLabelText("Файлы тестовой выгрузки"), new File(["x"], "отчёт.xlsx"), { applyAccept: false });
   expect(await screen.findByRole("alert")).toHaveTextContent("Нужны файлы .csv");
   expect(fetchSpy.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
 });
@@ -193,48 +193,4 @@ test("removing an active import exposes the file picker for another upload", asy
   expect(await screen.findByRole("button", { name: "Выбрать файлы" })).toBeVisible();
   expect(screen.queryByRole("list", { name: "Процедуры выгрузки" })).not.toBeInTheDocument();
   expect(fetchSpy.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true);
-});
-
-test("a list of purchases by the template: one file as base64 to /api/testset/template, Excel download offered", async () => {
-  const calls: { url: string; init?: RequestInit }[] = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-    calls.push({ url: String(url), init });
-    if (String(url) === "/api/testset" && !init?.method) return json({ detail: "нет" }, 404);
-    return json(SET);
-  });
-  render(<TestsetPanel onPick={vi.fn()} busyLot={null} />);
-  await userEvent.click(screen.getByRole("button", { name: "Тестовая выгрузка" }));
-  expect(screen.getByRole("link", { name: "скачайте шаблон" })).toHaveAttribute("href", "/api/testset/template.xlsx");
-  await userEvent.upload(screen.getByLabelText("Файлы тестовой выгрузки"), new File(["ab"], "Мои закупки.xlsx"));
-  await screen.findByRole("list", { name: "Процедуры выгрузки" });
-  const post = calls.find((c) => c.init?.method === "POST");
-  expect(post?.url).toBe("/api/testset/template");
-  expect(JSON.parse(String(post?.init?.body))).toEqual({ name: "Мои закупки.xlsx", data: "YWI=" });
-  expect(screen.getByRole("button", { name: "То же в Excel — с листом «Ошибки»" })).toBeEnabled();
-});
-
-test("which files are a template", () => {
-  expect(isTemplate(new File([""], "закупки.xlsx"))).toBe(true);
-  expect(isTemplate(new File([""], "список.csv"))).toBe(true);
-  expect(isTemplate(new File([""], "Извещения_24-25.csv"))).toBe(false);
-  expect(isTemplate(new File([""], "ТРУ_24-25.csv"))).toBe(false);
-  expect(isTemplate(new File([""], "Поставщики.csv"))).toBe(false);
-});
-
-test("a template picked together with the export is not sent, a note names it", async () => {
-  const calls: { url: string; init?: RequestInit }[] = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-    calls.push({ url: String(url), init });
-    if (!init?.method) return json({ detail: "нет" }, 404);
-    return json(SET);
-  });
-  render(<TestsetPanel onPick={vi.fn()} busyLot={null} />);
-  await userEvent.click(screen.getByRole("button", { name: "Тестовая выгрузка" }));
-  await userEvent.upload(screen.getByLabelText("Файлы тестовой выгрузки"), [
-    new File(["lot_id;subject\n9001;Бумага\n"], "Извещения_тест.csv", { type: "text/csv" }),
-    new File(["x"], "мои.xlsx"),
-  ]);
-  await screen.findByRole("list", { name: "Процедуры выгрузки" });
-  expect(calls.filter((c) => c.init?.method === "POST").map((c) => c.url)).toEqual(["/api/testset"]);
-  expect(screen.getByText(/Не загружено вместе с выгрузкой организаторов: мои\.xlsx/)).toBeInTheDocument();
 });

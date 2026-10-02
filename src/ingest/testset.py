@@ -48,9 +48,8 @@ class TestSet:
     warnings: list[str] = field(default_factory=list)
 
     def find(self, ident: str) -> TestLot | None:
-        ident = ident.strip()  # lot_id first: a template's lot_id is a row number, its reqnum may be one too (#501)
-        return (next((lt for lt in self.lots if ident == lt.lot_id), None)
-                or next((lt for lt in self.lots if ident == lt.reqnum), None))
+        ident = ident.strip()
+        return next((lt for lt in self.lots if ident in (lt.lot_id, lt.reqnum)), None)
 
 
 def _one(folder: Path, prefix: str, required: bool) -> Path | None:

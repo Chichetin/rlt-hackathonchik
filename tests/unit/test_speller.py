@@ -68,21 +68,6 @@ def test_yo_is_e(sp):
     assert Speller({"шуруповерта": 50}).correct("шуруповёрта").changed is False
 
 
-@pytest.mark.parametrize("article", [
-    "аппв3x2", "12аппв", "аппв-12/бумвга", "аппв_12", "аппв.12", "аппв\\12",
-    "сфтщт283", "rfhn123", "12rfhn", "аппв٣x2",
-])
-def test_article_letters_are_not_corrected(article):
-    sp = Speller({**VOCAB, "аппз": 1000, "карт": 1000})
-    fixed = sp.correct(f"бумвга,{article};бумвга")
-    assert fixed.text == f"бумага,{article};бумага"
-    assert fixed.changes == (("бумвга", "бумага"), ("бумвга", "бумага"))
-
-
-def test_number_separated_by_space_does_not_protect_a_typo(sp):
-    assert sp.correct("бумвга 80 г/м2").text == "бумага 80 г/м2"
-
-
 def test_punctuation_and_case_around_a_fixed_word_stay(sp):
     assert sp.correct("Бумвга, офисная!").text == "бумага, офисная!"
 

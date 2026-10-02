@@ -2,19 +2,16 @@ import { expect, test } from "@playwright/test";
 
 async function search(page: import("@playwright/test").Page) {
   await page.goto("/search");
-  await page.goto(`/search?lot=${"6"}`);
-  await expect(page.getByLabel("Название товара")).toHaveValue(/Бумага/);
+  await page.getByLabel("Номер закупки (необязательно)").fill("6");
+  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага/);
   await page.getByRole("button", { name: "Найти поставщиков", exact: true }).click();
   await expect(page.locator("#results")).toHaveAttribute("aria-busy", "false");
 }
 
-// Motion is checked by sampling frames; when the machine is loaded a frame may outlast the whole animation and
-// no intermediate frame is seen. A retry tells load from a real regression (an instant switch fails every run) (#524).
-test.describe.configure({ retries: 2 });
-
 test("просмотр без модального окна сохраняет выбор и место в каждой группе", async ({ page }) => {
   await search(page);
-  await expect(page.getByLabel("Название товара")).toBeVisible();
+  await expect(page.getByLabel("Что нужно закупить")).toBeHidden();
   const list = page.locator('.result-list-scroll:not([hidden])');
   const rows = list.locator(".item");
   const preview = page.getByRole("complementary", { name: "Просмотр поставщика" });
@@ -35,17 +32,16 @@ test("просмотр без модального окна сохраняет �
   await expect(preview.locator("h2")).toHaveText(selectedName);
 
   await page.getByRole("navigation").getByRole("link", { name: "Подбор", exact: true }).click();
-  await page.getByLabel("Название товара").fill("Новая закупка — мебель");
+  await page.getByLabel("Что нужно закупить").fill("Новая закупка — мебель");
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: "Может работать у заказчика" })).toBeVisible(); // #242: instead of the region
-  await page.locator(".query-options > summary").click();
   await page.locator(".query-refinements").getByRole("link", { name: /Фильтры/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Фильтры подбора");
   await expect(page.getByRole("checkbox", { name: /^Производители/ })).toHaveCount(1);
   await expect(page.getByRole("combobox", { name: /Регион|Может работать у заказчика/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
-  await expect(page).toHaveURL(/\/search(\?.*)?$/);
-  await expect(page.getByLabel("Название товара")).toHaveValue("Новая закупка — мебель");
+  await expect(page).toHaveURL(/\/search$/);
+  await expect(page.getByLabel("Что нужно закупить")).toHaveValue("Новая закупка — мебель");
 });
 
 test("на телефоне можно перейти от компании к деталям и вернуться в список", async ({ page }) => {
@@ -91,7 +87,7 @@ test("переход меняет весь набор данных, сохран
   const rows = page.locator('.result-list-scroll:not([hidden]) .item');
   const secondName = await rows.nth(1).locator('.name').innerText();
   const secondScore = await rows.nth(1).locator('.score-num').innerText();
-  const frames = await page.evaluate(async secondName => {
+  const frames = await page.evaluate(async () => {
     const pane = document.querySelector<HTMLElement>('#supplier-preview')!;
     const body = pane.querySelector<HTMLElement>('.inspector-content')!;
     const list = document.querySelector<HTMLElement>('.result-list-scroll:not([hidden])')!;
@@ -102,8 +98,7 @@ test("переход меняет весь набор данных, сохран
     rows[1].click();
     const samples: { opacity: number; y: number; name: string; score: string; inert: boolean; chosen: boolean; same: boolean; height: number; width: number; listTop: number; paneTop: number }[] = [];
     const start = performance.now();
-    // until the chosen record has settled, not a fixed window: under parallel workers frames come late (#524)
-    while (performance.now() - start < 3000) {
+    while (performance.now() - start < 500) {
       await new Promise(requestAnimationFrame);
       const style = getComputedStyle(body);
       const box = pane.getBoundingClientRect();
@@ -113,15 +108,11 @@ test("переход меняет весь набор данных, сохран
         same: document.querySelector('#supplier-preview') === pane && pane.querySelector('.inspector-content') === body,
         height: box.height - initialBox.height, width: box.width - initialBox.width,
         listTop: list.scrollTop - initialListTop, paneTop: pane.scrollTop });
-      const last = samples.at(-1)!;
-      if (last.name === secondName && last.opacity === 1 && !last.inert) break;
     }
     return samples;
-  }, secondName);
+  });
   expect(frames.every(f => f.chosen && f.same && Math.abs(f.height) < 1 && Math.abs(f.width) < 1 && Math.abs(f.listTop) < 1)).toBe(true);
-  // a fade out and a fade in; under load a frame comes every ~50 ms and easeOut may jump .04 → .93 in one (#524)
-  expect(frames.some(f => f.name !== secondName && f.opacity < 1)).toBe(true);
-  expect(frames.some(f => f.name === secondName && f.opacity < 1)).toBe(true);
+  expect(frames.some(f => f.opacity > .04 && f.opacity < .95)).toBe(true);
   expect(frames.some(f => f.y > 0 && f.y <= 8)).toBe(true);
   expect(frames.filter(f => f.name === secondName).every(f => f.score === secondScore)).toBe(true);
   expect(frames.filter(f => f.name !== secondName).every(f => f.inert)).toBe(true);
@@ -152,24 +143,19 @@ test("группы плавно переключаются без перемон
     document.querySelector<HTMLButtonElement>('.group-new')!.click();
     const frames = [];
     const start = performance.now();
-    // until the new group has settled, not a fixed window: under parallel workers frames come late (#524)
-    while (performance.now() - start < 3000) {
+    while (performance.now() - start < 450) {
       await new Promise(requestAnimationFrame);
       const style = getComputedStyle(body);
       frames.push({ group: body.dataset.displayedGroup, opacity: Number(style.opacity), y: new DOMMatrix(style.transform).m42,
         inert: body.inert, hiddenFromAT: body.getAttribute('aria-hidden'), selected: document.querySelector('.group-new')!.getAttribute('aria-pressed'),
         same: document.querySelector('.result-list-transition') === body && lists.every(el => el.isConnected),
         height: body.getBoundingClientRect().height - before.height });
-      const last = frames.at(-1)!;
-      if (last.group === 'new' && last.opacity === 1 && !last.inert) break;
     }
     return { frames, top };
   });
   expect(samples.frames.every(f => f.selected === 'true' && f.same && Math.abs(f.height) < 1)).toBe(true);
   expect(samples.frames.filter(f => f.group === 'history').every(f => f.inert && f.hiddenFromAT === 'true')).toBe(true);
-  // a fade out and a fade in; under load a frame comes every ~50 ms and easeOut may jump .04 → .93 in one (#524)
-  expect(samples.frames.some(f => f.group === 'history' && f.opacity < 1)).toBe(true);
-  expect(samples.frames.some(f => f.group === 'new' && f.opacity < 1)).toBe(true);
+  expect(samples.frames.some(f => f.opacity > .04 && f.opacity < .95)).toBe(true);
   expect(samples.frames.some(f => f.group === 'new' && f.y > 0 && f.y <= 8)).toBe(true);
   expect(samples.frames.at(-1)).toMatchObject({ group: 'new', opacity: 1, inert: false });
   await page.evaluate(async () => {
@@ -202,12 +188,10 @@ test("выделение групп скользит в обе стороны к
       button.click();
       const frames = [];
       const start = performance.now();
-      // until the indicator has settled, not a fixed window: under parallel workers frames come late (#524)
-      while (performance.now() - start < 3000) {
+      while (performance.now() - start < 700) {
         await new Promise(requestAnimationFrame);
         frames.push({ x: indicator().getBoundingClientRect().x, selected: button.getAttribute('aria-pressed'),
           count: document.querySelectorAll('.result-group-indicator').length });
-        if (frames.length > 3 && frames.slice(-3).every(f => Math.abs(f.x - to) < 1)) break;
       }
       return { from, to, frames };
     }, target);
@@ -230,7 +214,7 @@ test("выделение групп скользит в обе стороны к
   });
   expect(reversal.group).toBe('history');
   expect(reversal.before).toBeLessThan(.99);
-  expect(reversal.after).toBeLessThan(1); // continues from the visible opacity; a long frame under load gets near 1 (#524)
+  expect(reversal.after).toBeLessThan(.99);
   await expect(page.locator('.result-list-transition')).toHaveCSS('opacity', '1');
 });
 
@@ -291,11 +275,9 @@ test("фон различим, шкала релевантности видна,
     const start = performance.now();
     const samples: number[] = [];
     row.click();
-    // until settled, not a fixed window: under parallel workers frames come late (#524)
-    while (performance.now() - start < 3000) {
+    while (performance.now() - start < 550) {
       await new Promise(requestAnimationFrame);
       samples.push(new DOMMatrix(getComputedStyle(row).transform).m41);
-      if (samples.length > 3 && samples.slice(-3).every(x => Math.abs(x - 6) < .05)) break;
     }
     return { samples, siblingShift: sibling && siblingTop !== undefined ? sibling.getBoundingClientRect().top - siblingTop : 0 };
   });

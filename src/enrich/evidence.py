@@ -40,7 +40,6 @@ FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/s
 FIELDS |= {"review"}  # a quote of a public review (src/enrich/reviews.py), a normalized substring of the page
 FIELDS |= {"licence"}  # src/sources/msp_dump.py: licences of the МСП dump (#188)
 FIELDS |= {"product"}  # src/sources/gisp.py: a product of the company in the registry of industrial products
-FIELDS |= {"foreign_id"}  # #200: national identifier of an EAEU company, "<ISO-2>:<id>" — the id is on the page
 FIELDS |= {"sro"}  # src/sources/nostroy.py: membership in an SRO of builders (#368)
 ROLE_FIELDS = ("okved", "product")  # Evidence that may hold the basis of the role (src/sources/role.py)
 MIN_TEXT = 6
@@ -132,10 +131,6 @@ def _in_page(field: str, value: str, page: _Page) -> bool:
         return len(want) in (10, 11) and want[-10:] in page.phones
     if field == "email":
         return value.strip().lower() in page.emails
-    if field == "foreign_id":  # "BY:100582333": the identifier itself stands on the page, not inside a longer one
-        ident = value.partition(":")[2]
-        return bool(ident) and ident.isascii() and ident.isalnum() and re.search(
-            rf"(?<![0-9a-z]){re.escape(ident.lower())}(?![0-9a-z])", page.norm) is not None
     if field in ("inn", "ogrn", "kpp"):
         return value.isascii() and value.isdigit() and re.search(
             rf"(?<!\d){re.escape(value)}(?!\d)", page.norm) is not None
@@ -214,8 +209,6 @@ def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
         errors += check_evidence(ev, page_text)
     if cp.inn is not None and not any(e.field == "inn" and e.value == cp.inn for e in cp.evidence):
         errors.append(f"ИНН {cp.inn} без Evidence с field='inn'")
-    if cp.foreign_id is not None and not any(e.field == "foreign_id" and e.value == cp.foreign_id for e in cp.evidence):
-        errors.append(f"идентификатор {cp.foreign_id} без Evidence с field='foreign_id'")
     for field, value in cp.contacts.items():
         if not any(e.field == field and e.value == value for e in cp.evidence):
             errors.append(f"контакт {field}={value!r} без Evidence")
@@ -235,8 +228,5 @@ def strip_unverified(cp: Counterparty, page_text: PageText) -> Counterparty:
     inn = cp.inn if cp.inn is None or _backed(cp, "inn", cp.inn, page_text) else None
     kind = cp.kind if cp.kind is None or _kind_backed(cp, page_text) else None
     in_rnp = cp.in_rnp if cp.in_rnp is None or _rnp_backed(cp, page_text) else None
-    # #200: the country of a foreign company stands only on its verified national identifier
-    foreign = cp.foreign_id if cp.foreign_id is None or _backed(cp, "foreign_id", cp.foreign_id, page_text) else None
-    country = cp.country if foreign is not None or cp.country in (None, "RU") else None
     return cp.model_copy(update={"evidence": good, "contacts": contacts, "inn": inn, "kind": kind,
-                                 "in_rnp": in_rnp, "foreign_id": foreign, "country": country})
+                                 "in_rnp": in_rnp})

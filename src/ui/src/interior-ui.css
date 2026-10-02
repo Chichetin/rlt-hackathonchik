@@ -191,6 +191,18 @@
 .page-workspace .ratings, .interior-card .ratings { border-color: var(--work-line); }
 .page-workspace .ratings :is(.ratings-note,.ratings-origin,.rating-reviews p,.ratings-summary > small), .interior-card .ratings :is(.ratings-note,.ratings-origin,.rating-reviews p,.ratings-summary > small) { font-size: var(--ui-small); }
 .page-workspace .rating-picker button, .interior-card .rating-picker button { font-size: 26px; }
+/* On a full desktop viewport only the two reading columns scroll. Expanded
+   search parameters and short windows retain normal document scrolling. */
+@media (min-width: 1101px) and (min-height: 760px) {
+  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) { height: 100dvh; min-height: 0; overflow: hidden; }
+  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) :is(.content,.interior-route,.results-workspace,.output,#results) { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: stretch; width: 100%; }
+  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) .content { padding-bottom: 24px; }
+  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) :is(.top,.results-commandbar,.own-lot-note,.filternote,.weights-chip,.result-groups,.appbar) { flex-shrink: 0; }
+  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) .result-browser { flex: 1; min-height: 0; align-items: stretch; }
+  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) .result-list-pane { min-height: 0; display: flex; flex-direction: column; }
+  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) .result-list-scroll { flex: 1; min-height: 0; max-height: none; }
+  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) .result-inspector { max-height: none; min-height: 0; }
+}
 @media (max-width: 1100px) {
   .page-workspace .search-workbench:not(.results-workspace) { grid-template-columns: minmax(0,1fr); gap: 28px; }
   .page-workspace .getting-started .steps { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 22px; }

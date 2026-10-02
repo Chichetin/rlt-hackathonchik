@@ -44,18 +44,10 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     from src.sources import web_leads
 
     monkeypatch.setattr(web_leads, "LEADS_DIR", tmp_path / "leads-default")
-    # EAEU leads (#200): no test depends on the real configs/eaeu; tests/unit/test_eaeu.py sets it back
-    from src.enrich import eaeu
-
-    monkeypatch.setattr(eaeu, "LEADS", tmp_path / "eaeu-leads-default.csv")
     # the registry export of industrial products (#74): not the dev machine's; tests/unit/test_gisp.py builds its own
     from src.sources import gisp
 
     monkeypatch.setattr(gisp, "DIR", tmp_path / "gisp-default")
-    # the offline pool of «Новые» (#185, #518): not the dev machine's; a test sets its own (pool_source / POOL)
-    from src.db import pool
-
-    monkeypatch.setattr(pool, "POOL", tmp_path / "pool-default")
     yield
     for pacer in pacers:
         pacer.reset()
@@ -84,13 +76,12 @@ def search_data(fixture_processed: Path, tmp_path: Path, monkeypatch: pytest.Mon
 @pytest.fixture
 def v2_formula(monkeypatch: pytest.MonkeyPatch) -> None:
     """The product config without the learned ranker (#198): tests of the v2 formula itself — scores as the
-    weighted sum of components, the fallback ladder depths. The ranker on top is tested in test_ranker.py.
-    Without `no_customer_options` too (#511): these tests pin `options:`; the no-customer path has its own test."""
+    weighted sum of components, the fallback ladder depths. The ranker on top is tested in test_ranker.py."""
     from src.match import search as search_mod
 
     plain = search_mod.load_config
 
     def load_config(*args, **kwargs) -> dict:
-        return {k: v for k, v in plain(*args, **kwargs).items() if k not in ("ranker", "no_customer_options")}
+        return {k: v for k, v in plain(*args, **kwargs).items() if k != "ranker"}
 
     monkeypatch.setattr(search_mod, "load_config", load_config)

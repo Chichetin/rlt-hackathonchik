@@ -19,17 +19,13 @@ import re
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ComponentName = Literal["product_fit", "experience", "reliability", "activity", "geography", "price"]
 Origin = Literal["history", "discovered"]
 Kind = Literal["manufacturer", "distributor", "dealer", "unknown"]
 # Извещения.is_eshop_or_aisgz: Электронный магазин / АИС ГЗ (порталы 44, 223 [ПРОВЕРИТЬ])
 Channel = Literal["ЭМ", "АИС ГЗ"]
-# EAEU members besides Russia (#200): goods of these countries are admitted on the national regime; the national
-# identifier of a company: BY — УНП (9 digits), KZ — БИН (12 digits), AM — ՀՎՀՀ/ИНН (8 digits), KG — ИНН (14 digits)
-EAEU_COUNTRIES = ("BY", "KZ", "AM", "KG")
-_FOREIGN_ID = re.compile(r"([A-Z]{2}):[0-9A-Za-z]{4,20}", re.ASCII)
 
 _INN10_W = (2, 4, 10, 3, 5, 9, 4, 6, 8)
 _INN12_W1 = (7, 2, 4, 10, 3, 5, 9, 4, 6, 8)
@@ -96,11 +92,6 @@ class Evidence(_Model):
 
 class Counterparty(_Model):
     inn: str | None  # key; None — INN is not confirmed yet ("ИНН не подтверждён" in UI)
-    # #200, EAEU: ISO 3166-1 alpha-2 of the country of registration ("BY", "KZ", "AM", "KG"); None / "RU" — Russia.
-    # A foreign company has inn=None (a Kazakh БИН of 12 digits may pass the checksum of a Russian INN) and its
-    # national identifier with the country prefix in `foreign_id`: "BY:<УНП>", "KZ:<БИН>". UI: «Беларусь, УНП …».
-    country: str | None = None
-    foreign_id: str | None = None
     # Поставщики.supplier_kpp — the most frequent one (some INNs have several); 2 digits — region
     kpp: str | None = None
     name: str  # organizers' data has no names: until enrich(), the loader puts "ИНН <inn>"
@@ -128,24 +119,6 @@ class Counterparty(_Model):
         if v is not None and not inn_is_valid(v):
             raise ValueError(f"INN {v!r} fails the checksum; unresolved company must have inn=None")
         return v
-
-    @model_validator(mode="after")
-    def _foreign(self) -> Counterparty:
-        foreign = self.country not in (None, "RU")
-        if self.country is not None and not re.fullmatch(r"[A-Z]{2}", self.country, re.ASCII):
-            raise ValueError(f"country {self.country!r} is not an ISO 3166-1 alpha-2 code")
-        if foreign and self.inn is not None:
-            raise ValueError(f"a company of {self.country} has no Russian INN: inn must be None, "
-                             "the national identifier goes to foreign_id")
-        if self.foreign_id is not None:
-            m = _FOREIGN_ID.fullmatch(self.foreign_id)
-            if m is None:
-                raise ValueError(f"foreign_id {self.foreign_id!r} is not '<ISO-2>:<national identifier>'")
-            if not foreign or self.inn is not None:
-                raise ValueError("foreign_id is only for a company with inn=None and a country other than RU")
-            if m.group(1) != self.country:
-                raise ValueError(f"foreign_id prefix {m.group(1)!r} differs from country {self.country!r}")
-        return self
 
 
 class ScoreComponent(_Model):
