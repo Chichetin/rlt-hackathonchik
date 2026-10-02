@@ -119,8 +119,14 @@ def test_search_rejects_client_as_of_without_building_an_index(search_client, se
     for path in ("/api/search", "/api/export"):
         r = search_client.post(path, json={"query_id": "q", "text": "бумага", "as_of": "2025-03-01"})
         assert r.status_code == 422 and "as_of" in r.json()["detail"]
+    import json
+
     built = Path(os.environ["INDEX_DIR"])
-    assert not built.exists() or not any(built.iterdir())  # nothing was built for the client's date
+    # nothing was built for the client's date; the full index (as_of None) is the product's own — #589 reads its
+    # data_end to accept a lot after the data (#605)
+    dirs = built.glob("bm25-*") if built.exists() else []
+    metas = [json.loads((d / "meta.json").read_text(encoding="utf-8")) for d in dirs]
+    assert all(m.get("as_of") is None for m in metas), metas
 
 
 
