@@ -8,11 +8,11 @@ RUN npx vite build
 
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /usr/local/bin/uv
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*   # lightgbm (#198)
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*   # lightgbm (#198); opencv of the captcha (#547)
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 PYTHONPATH=/app UV_PROJECT_ENVIRONMENT=/opt/venv PATH=/opt/venv/bin:$PATH
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --frozen --no-dev --extra pg --extra ml   # ml: torch CPU (pytorch-cpu index) for retriever pg_hybrid
+RUN uv sync --frozen --no-dev --extra pg --extra ml --extra captcha   # ml: torch CPU (pytorch-cpu index) for retriever pg_hybrid; captcha: pb.nalog.ru (#547)
 COPY src/ src/
 COPY configs/ configs/
 # ranker R-198-gbm (D-103); Docker has no trailing comments: on the COPY line they become source paths
