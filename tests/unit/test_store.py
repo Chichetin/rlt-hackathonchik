@@ -262,6 +262,7 @@ DIRECT_PARQUET_OK = {
     "src/eval/okpd2_predict.py": "one-off tool (#293: not touched)",
     "src/eval/emb_bench.py": "the GPU embedding bench (#115), not the product path",
     "src/eval/finetune.py": "offline training pairs of the embedder fine-tuning (#270, E3), not the product path",
+    "src/eval/ce_bench.py": "the cross-encoder rerank bench (#269, E4), not the product path",
     "src/eval/pool_recall.py": "the SMB pool parquet (#187); organizers' INNs via discover",
     "src/eval/judge_hist.py": "eval tool (#301): item history for blind judge packets, not the product path",
     "src/sources/msp_dump.py": "the SMB register dump, not organizers' data",
