@@ -58,6 +58,7 @@ STRICT_RETRIEVER = False
 TOP_DOCS = 500  # BM25 documents (distinct position texts) taken per query
 CANDIDATES = 200  # suppliers scored per query (by best BM25 of their lots)
 VOTE_DOCS = 100  # best matched position texts that vote for the query's OKPD2 when it has none (D-045)
+EXACT_DOCS = 20  # best texts checked for the very name of the query before the vote (P-02, #235)
 DOC_CODES = "doc_codes.parquet"  # sidecar of the index: OKPD2 codes of the positions carrying each text
 VOTE_LOTS = 20  # fallback: only lot subjects matched — top lots vote, a lot's vote split over its positions
 FIT_BM25_SHARE = 0.6  # product_fit = 0.6 · BM25 + 0.4 · OKPD2 depth (BM25 only without a class)
@@ -206,7 +207,19 @@ def _position_codes(store: Store, idx: LotIndex) -> tuple[np.ndarray, pa.Array, 
     return idx.sidecars["doc_codes"]
 
 
-def _predict_okpd2(store: Store, idx: LotIndex, hits: list[tuple[int, float]], lots: LotHits) -> str | None:
+def _same_name_code(idx: LotIndex, tokens: list[str], docs: list[tuple[int, float]], off: np.ndarray,
+                    codes: pa.Array, n: np.ndarray) -> str | None:
+    """The most frequent code of the positions named exactly like the query; None when no such text."""
+    counts: dict[str, int] = defaultdict(int)
+    for d, _ in docs:
+        if tokens and tokenize(idx.text(d)) == tokens:
+            for i in range(off[d], off[d + 1]):
+                counts[codes[i].as_py()] += int(n[i])
+    return min(counts, key=lambda c: (-counts[c], c.encode())) if counts else None
+
+
+def _predict_okpd2(store: Store, idx: LotIndex, hits: list[tuple[int, float]], lots: LotHits,
+                   query_tokens: list[str] | None = None) -> str | None:
     """OKPD2 of a query without a code, from the documents that matched it; D-045.
 
     A matched text votes with the codes of the positions that carry this very text — not with the
@@ -215,6 +228,10 @@ def _predict_okpd2(store: Store, idx: LotIndex, hits: list[tuple[int, float]], l
     vote only when no position matched at all — the VOTE_LOTS best lots, a lot's score split over
     its positions. The heaviest group XX.XX wins, then the heaviest code inside it (9 digits
     scatter the votes). Ties: bytewise order of the group / code.
+
+    Before the vote (P-02, #235): when one of the EXACT_DOCS best texts is the query itself (the same
+    BM25 tokens), the code most often given to positions with this name decides — the vote of a hundred
+    neighbours used to outweigh it (P-01: class 0.718 → 0.922 on names seen before).
     """
     votes: dict[str, float] = defaultdict(float)
     try:
@@ -223,6 +240,8 @@ def _predict_okpd2(store: Store, idx: LotIndex, hits: list[tuple[int, float]], l
         log.warning("коды позиций не построены (%s) — класс определяют лучшие лоты", e)
     else:
         coded = sorted(((d, s) for d, s in hits if off[d + 1] > off[d]), key=lambda h: (-h[1], h[0]))
+        if exact := _same_name_code(idx, query_tokens or [], coded[:EXACT_DOCS], off, codes, n):
+            return exact
         for d, s in coded[:VOTE_DOCS]:
             total = int(n[off[d]:off[d + 1]].sum())
             for i in range(off[d], off[d + 1]):
@@ -421,7 +440,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if idx.n_docs == 0:
         fallback.set_note(fallback.no_history(as_of))
         return []
-    tokens = fallback.cap_tokens(idx, tokenize(query.text))
+    words = tokenize(query.text)
+    tokens = fallback.cap_tokens(idx, words)
     hits = idx.retrieve(tokens, TOP_DOCS)
     how = ""
     if cfg["retriever"] == "pg_hybrid":
@@ -447,7 +467,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         fallback.set_note(f"ОКПД2 не распознан и не учтён: {', '.join(bad_codes)}")
     predicted = False
     if not codes:
-        guess = _predict_okpd2(store, idx, hits, lots)
+        guess = _predict_okpd2(store, idx, hits, lots, words)
         codes, predicted = ([guess], True) if guess else ([], False)
     if codes:
         _class_history(store, cands, codes, as_of)
