@@ -7,10 +7,6 @@
 # Схема слоёв — scripts/check_layers.py (LAYERS) и docs/project-structure.md, «Правила импортов».
 # Устранение — #294; список печатает `python scripts/check_layers.py --all`.
 
-# Ядро знает про инструмент (eval): печать holdout и конфиг разбиения нужны данным — split_config() вниз.
-src.ingest.build -> src.eval.split      # L1 -> инструмент; split_config()
-src.match.index -> src.eval.split       # L2 -> инструмент; ленивый, в main() сборки индексов
-
 # Нижний слой тянет верхний: роль по ОКВЭД и MSP_CATEGORY лежат в enrich, а нужны источникам и пулу.
 src.db.pool -> src.enrich.role          # L1 -> L3; role.py — чистая функция над contracts, уедет вниз
 src.sources.msp_dump -> src.enrich.role         # L1 -> L3; то же

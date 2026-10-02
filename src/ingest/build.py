@@ -29,8 +29,8 @@ from pathlib import Path
 
 import duckdb
 
-from src.eval.split import split_config
 from src.ingest.profile import FILES, inn_valid_sql
+from src.ingest.split_config import split_config
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "data" / "processed"
