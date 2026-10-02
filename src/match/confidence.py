@@ -3,11 +3,11 @@
 product_fit is normalized by the best candidate, so the first row always looks like a perfect match.
 This is the absolute view: how strongly the best similar lot matches the query words.
 
-What the data says (dev, 2 000 cases cut to ≤ 4 words and in full, hit = any participant of the lot in the
-top-10; research/EXPERIMENTS.md, W-281): a SHORT query whose best BM25 per query token is below 2.0 finds
-a participant in ~19 % of cases against ~58 % for the rest. For a long query the same signal does not
-discriminate (AUC ≈ 0.5), and «few similar lots» is not a sign of a bad answer at all: a narrow query has
-FEWER candidates and a HIGHER hit rate. So the warning is only the first case, and says so.
+Measured (research/EXPERIMENTS.md W-281, eval/results/W-281-short.json and W-281-full.json, 400 dev cases):
+a query cut to 3 words that gets the warning has recall@10 0.172 against 0.400 for the rest; on full lot names
+the warning fires in 4 of 400 cases. The threshold was chosen on dev queries before that run (a preliminary,
+unsaved look), so it is not an independent check. «Few similar lots» was NOT a sign of a bad answer: a narrow
+query has fewer candidates and a higher hit rate, so the warning is only about a weak match of a short query.
 """
 
 from __future__ import annotations
