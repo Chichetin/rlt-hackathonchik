@@ -274,7 +274,8 @@ def _enrich(inn: str, cache: SourceCache, offline: bool | None) -> Counterparty:
             return from_card(inn, fresh)
         try:
             return from_card(inn, pb_nalog.fetch_card(inn, cache))
-        except (pb_nalog.CaptchaRequired, pb_nalog.NotFound, TimeoutError, httpx.HTTPError) as e:
+        # ValueError: an answer pb.nalog.ru gives that we cannot read (a JSON `null`, #357) — the fallbacks, not a 500
+        except (pb_nalog.CaptchaRequired, pb_nalog.NotFound, TimeoutError, httpx.HTTPError, ValueError) as e:
             err = e
             log.warning("enrich %s: pb.nalog.ru не ответил (%s) — запасные источники", inn, e)
     fallback = _fallback(inn, cache, offline)
