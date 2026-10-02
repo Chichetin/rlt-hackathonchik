@@ -71,7 +71,11 @@ def test_product_without_customer_orders_as_f511_sat100_and_scores_by_the_produc
     got = search_mod.search(FREE, config=product)
     assert len(got) > 2
     measured = search_mod.search(FREE, config=run.load_method_config("F-511-sat100"))
-    assert [m.counterparty.inn for m in got] == [m.counterparty.inn for m in measured]
+    # equal order keys go by the card's score (#612), F-511 had them by BM25: the same set, keys never go up
+    keys = {m.counterparty.inn: m.score for m in measured}
+    assert {m.counterparty.inn for m in got} == set(keys)
+    assert [keys[m.counterparty.inn] for m in got] == sorted(keys.values(), reverse=True)
+    assert all(a.score >= b.score for a, b in zip(got, got[1:], strict=False) if keys[a.counterparty.inn] == keys[b.counterparty.inn])
     by_activity_only = {**product, "no_customer_options": {**product["no_customer_options"],
                                                            "order_weights": {"activity": 1.0}}}
     # eval (pipeline.pick with a config) passes the config's own weights: the same order as the product
@@ -91,12 +95,40 @@ def test_product_without_customer_orders_as_f511_sat100_and_scores_by_the_produc
 
 
 def test_order_weights_explain_a_row_above_a_higher_score(search_data):
-    """#612: «Выше следующего» names the order key only where the next supplier has a higher score."""
+    """#612: «Выше следующего» names what put a row above a higher score — only there."""
     got = sorted(search_mod.search(FREE, config=search_mod.load_config()), key=lambda m: m.score)[:3]
     assert len(got) == 3 and got[0].score < got[1].score
-    ranker.set_order(got, [0.9, 0.5, 0.1])
+    w = {"product_fit": 0.762, "experience": 0.19, "activity": 0.048}
+    vals = [{"product_fit": 1.0, "experience": 0.9, "activity": 0.5}, {"product_fit": 1.0, "experience": 0.4,
+                                                                         "activity": 0.5}, dict.fromkeys(w, 0.0)]
+    ranker.set_order(got, [0.9, 0.5, 0.1], vals, [3.0, 2.0, 1.0], w)
     shown = ranker.reasons(got)
-    assert shown[0].rank_reason == "выше следующего: соответствие товару и опыт — 0.90 против 0.50"
+    assert shown[0].rank_reason == "выше следующего: компонента «опыт» — 0.90 против 0.40"
     assert shown[-1].rank_reason is None
     ranker.forget()
     assert ranker.reasons(got) == got
+
+
+def test_order_reason_names_the_tie_break_and_values_that_differ_as_shown():
+    """Review of #613: never «1.00 против 1.00» — a lead hidden by rounding is skipped; equal keys go by the score."""
+    w = {"product_fit": 0.762, "experience": 0.19, "activity": 0.048}
+    same = dict.fromkeys(w, 1.0)
+    assert ranker.order_reason(ranker.Ordered(1.0, same, 7.5), ranker.Ordered(1.0, same, 6.25), w) == (
+        "ключ порядка равен — порядок условный")
+    near = ranker.Ordered(0.9512, {"product_fit": 0.9301, "experience": 1.0, "activity": 0.6}, 1.0)
+    far = ranker.Ordered(0.9480, {"product_fit": 0.9298, "experience": 1.0, "activity": 0.5}, 1.0)
+    assert ranker.order_reason(near, far, w) == "выше следующего: компонента «активность» — 0.60 против 0.50"
+    tiny = ranker.Ordered(0.9481, {"product_fit": 0.9299, "experience": 1.0, "activity": 0.5}, 1.0)
+    assert ranker.order_reason(tiny, far, w) == "по совокупности компонент порядка — 0.9481 против 0.9480"
+
+
+def test_weights_other_than_the_config_order_by_the_score(search_data):
+    """#612: order_weights only with the config's own weights; other weights order by the score."""
+    product = search_mod.load_config()
+    other = {**product["weights"], "activity": 0.5}
+    got = search_mod.search(FREE, config=product, weights=other)
+    assert got and [m.score for m in got] == sorted((m.score for m in got), reverse=True)
+    with pytest.raises(ValueError, match="order_weights"):
+        search_mod.check_config({**product, "no_customer_options": {"order_weights": {"activity": 0.0}}})
+    with pytest.raises(ValueError, match="order_weights"):
+        search_mod.check_config({**product, "no_customer_options": {"order_weights": {"activity": float("nan")}}})
