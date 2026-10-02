@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -29,8 +28,9 @@ import duckdb
 import numpy as np
 import pyarrow as pa
 
+from src.settings import get_settings
+
 log = logging.getLogger(__name__)
-ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = ("manifest.json", "notices.parquet", "participants.parquet", "items.parquet", "suppliers.parquet")
 
 
@@ -78,6 +78,9 @@ class Store(Protocol):
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
     def lot_names(self, lot_id: int) -> list[str]: ...
+    def top_suppliers(self, limit: int) -> list[str]: ...
+    def participations(self, as_of: date | None) -> pa.Table: ...
+    def lot_classes(self) -> pa.Table: ...
 
 
 def levels(code: str) -> tuple[str, str | None, str | None, str | None]:
@@ -289,6 +292,36 @@ GROUP BY product_name ORDER BY product_name{c} LIMIT 5
 """
 
 
+# The most active suppliers first (src/worker/prefetch.py warms the source cache in this order, D-056).
+_TOP_SUPPLIERS = """
+SELECT inn FROM {t[suppliers]} WHERE inn_valid
+ORDER BY lots_won DESC NULLS LAST, lots_participated DESC NULLS LAST, last_seen DESC NULLS LAST, inn{c}
+LIMIT %(limit)s
+"""
+
+# The baselines of the backtest (src/eval/baselines.py): one row per lot x supplier x customer before as_of and
+# the OKPD2 groups of every lot. inn_valid: an INN with a wrong checksum is never relevant (D-032).
+_PARTICIPATIONS = """
+SELECT lot_id, supplier_inn AS inn, customer_inn, bool_or(is_winner) AS is_winner
+FROM {t[participants]} WHERE inn_valid AND {cond}
+GROUP BY lot_id, supplier_inn, customer_inn
+"""
+PARTICIPATIONS = pa.schema([("lot_id", pa.int64()), ("inn", pa.string()), ("customer_inn", pa.string()),
+                            ("is_winner", pa.bool_())])
+
+_LOT_CLASSES = """
+SELECT DISTINCT lot_id, okpd2_l4 AS l4, okpd2_l2 AS l2 FROM {t[items]} WHERE okpd2_l2 IS NOT NULL
+"""
+LOT_CLASSES = pa.schema([("lot_id", pa.int64()), ("l4", pa.string()), ("l2", pa.string())])
+
+
+def _table(cols: list[str], rows: list[tuple], schema: pa.Schema) -> pa.Table:
+    """Rows of a query as an Arrow table of `schema` — the same types from both backends."""
+    assert cols == schema.names, (cols, schema.names)
+    columns = list(zip(*rows, strict=True)) if rows else [[] for _ in cols]
+    return pa.table([pa.array(list(c), f.type) for c, f in zip(columns, schema, strict=True)], schema=schema)
+
+
 def _okpd2_sql(level: int) -> str:
     return _OKPD2_SUPPLIERS.replace("{col}", OKPD2_COLUMN[level])  # a fixed column name, not user input
 
@@ -342,7 +375,13 @@ class ParquetStore:
 
     def _fetch(self, template: str, params: dict, *, as_of: date | None = None, suppliers: str = "",
                lots: pa.Table | None = None) -> tuple[list[str], list[tuple]]:
-        t = {n: _pq(self.processed / f"{n}.parquet") for n in ("notices", "items", "participants")}
+        names = ("notices", "items", "participants")
+        missing = [f"{n}.parquet" for n in names if f"{{t[{n}]}}" in template
+                   and not (self.processed / f"{n}.parquet").exists()]
+        if missing:
+            raise StoreUnavailable(f"данные организаторов не собраны: нет {', '.join(missing)} в {self.processed} — "
+                                   "`uv run python -m src.ingest.build` (DATA_RAW_DIR → DATA_PROCESSED_DIR)")
+        t = {n: _pq(self.processed / f"{n}.parquet") for n in names}
         sql = template.format(t=t | {"suppliers": suppliers}, cond=_cond(as_of), lots="lots_in l", **self._sql_kw)
         for k in params:
             sql = sql.replace(f"%({k})s", f"${k}")
@@ -405,6 +444,15 @@ class ParquetStore:
 
     def lot_names(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_NAMES, {"lot_id": lot_id})[1]]
+
+    def top_suppliers(self, limit: int) -> list[str]:
+        return [r[0] for r in self._fetch(_TOP_SUPPLIERS, {"limit": limit}, suppliers=self._suppliers(None))[1]]
+
+    def participations(self, as_of: date | None) -> pa.Table:
+        return _table(*self._fetch(_PARTICIPATIONS, {"as_of": as_of}, as_of=as_of), PARTICIPATIONS)
+
+    def lot_classes(self) -> pa.Table:
+        return _table(*self._fetch(_LOT_CLASSES, {}), LOT_CLASSES)
 
 
 class PgStore:
@@ -546,11 +594,19 @@ class PgStore:
     def lot_names(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_NAMES, {"lot_id": lot_id})[1]]
 
+    def top_suppliers(self, limit: int) -> list[str]:
+        return [r[0] for r in self._fetch(_TOP_SUPPLIERS, {"limit": limit})[1]]
+
+    def participations(self, as_of: date | None) -> pa.Table:
+        return _table(*self._fetch(_PARTICIPATIONS, {"as_of": as_of}, as_of=as_of), PARTICIPATIONS)
+
+    def lot_classes(self) -> pa.Table:
+        return _table(*self._fetch(_LOT_CLASSES, {}), LOT_CLASSES)
+
 
 def processed_dir() -> Path:
     """DATA_PROCESSED_DIR, default data/processed."""
-    d = Path(os.environ.get("DATA_PROCESSED_DIR") or ROOT / "data/processed")
-    return d if d.is_absolute() else ROOT / d
+    return get_settings().data_processed_dir
 
 
 MANIFEST_TTL_S = 30.0  # a new `make db-load` is seen by search within this time
@@ -564,9 +620,8 @@ def get_store() -> Store:
 
     auto without Postgres falls back to parquet for RETRY_PG_S: a refused connection costs seconds
     (≈ 10 s on Windows), it must not be paid on every request; a later `make db-load` is picked up."""
-    mode = (os.environ.get("DATA_STORE") or "auto").strip().lower()
-    url = os.environ.get("DATABASE_URL") or ""
-    schema = os.environ.get("DATA_SCHEMA") or "data"
+    cfg = get_settings()
+    mode, url, schema = cfg.data_store, cfg.database_url, cfg.data_schema
     key = (mode, url, schema, str(processed_dir()))
     with _lock:
         if key in _stores and _stores[key][1] > time.monotonic():
