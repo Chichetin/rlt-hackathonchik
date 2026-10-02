@@ -10,9 +10,9 @@ Rules (CLAUDE.md, «Проверки кодом»):
 4. an INN passes the checksum (10 and 12 digits);
 5. the counterparty INN and every contact are backed by an Evidence with the same field/value;
    the role (`kind`) by an `okved` Evidence whose value is a WHOLE line of the page with the main OKVED
-   of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/enrich/role.py
+   of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/sources/role.py
    (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; `in_rnp` (True or
-   False) by at least one passing `field="rnp"` Evidence (D-101, #111) — an unbacked flag is None;
+   False) by at least one passing `field="rnp"` Evidence (D-141, #111) — an unbacked flag is None;
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
 
@@ -27,12 +27,13 @@ from collections.abc import Callable
 from functools import cached_property
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
-from src.enrich.role import basis_kind
+from src.sources.role import basis_kind
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
 FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region",
           "rnp"}
+FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/sources/fns_opendata.py
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
@@ -183,7 +184,7 @@ def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
 
 
 def _rnp_backed(cp: Counterparty, page_text: PageText) -> bool:
-    """True/False `in_rnp` needs at least one passing `field="rnp"` Evidence (D-101, #111): an
+    """True/False `in_rnp` needs at least one passing `field="rnp"` Evidence (D-141, #111): an
     unbacked flag (forged, or its page evicted from the cache) is stripped to None («не проверено»),
     never shown as a guessed «да»/«нет»."""
     page_text = cached_pages(page_text)

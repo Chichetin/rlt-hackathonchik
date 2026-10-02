@@ -16,6 +16,15 @@ remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_n
 worked | near | any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
+What the speller changed in the query (#282, layout or typos) is the X-Query-Corrected header: percent-encoded
+UTF-8 JSON `[[typed, searched], …]`, at most MAX_CORRECTIONS pairs — never the whole text (a notice is up to 20 000
+characters); `filters.spell = "off"` searches the query as typed.
+A short query whose best match with past lots is weak (#281, src/match/confidence.py) gets the X-Weak-Match header:
+the sentence for the user, percent-encoded UTF-8; the score and the order do not change.
+Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error header: the exception type when
+discover() failed (no message, no path), `source_unavailable` when a registry request was refused or failed and
+discover() went on with the rest, or `history_unchecked` when the companies were found but could not be checked
+against organizers' data (so none is called «новая»). Absent — the block is what the sources gave.
 """
 
 from __future__ import annotations
@@ -23,20 +32,20 @@ from __future__ import annotations
 import io
 import json
 import logging
-import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from pathlib import Path
+from contextlib import asynccontextmanager, nullcontext
+from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi import Query as Param
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 
+from src.api import guard
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.api.ratings import router as ratings_router
@@ -45,7 +54,6 @@ from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import strip_unverified
-from src.enrich.role import LABEL as ROLE_LABEL
 from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
 from src.match import pipeline
@@ -53,33 +61,38 @@ from src.match import search as search_mod
 from src.match.filters import entity_of, kind_of, near_of, parse_filters
 from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
 from src.match.store import get_store
+from src.settings import get_settings
 from src.sources.cache import SourceCache
-from src.sources.pb_nalog import CaptchaRequired
-from src.worker.queue import engine_from_env, enqueue, status_counts
+from src.sources.pb_nalog import CaptchaRequired, card_url
+from src.sources.role import LABEL as ROLE_LABEL
+from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
-if os.environ.get("DEMO_FIXTURE") == "1":
+if get_settings().demo_fixture:
     log.warning("DEMO_FIXTURE=1: synthetic fixture, not the organizers' data")
-ROOT = Path(__file__).resolve().parents[2]
-UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
+UI_DIST = get_settings().ui_dist
 # «Роль» of the xlsx: the captions of the role chips (KIND_LABEL in src/ui/src/api.ts), from D-057 (#232)
 KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Роль не определена"}
 ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or a natural person (DATA_DICTIONARY)
 # The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
 MAX_TEXT_CHARS = 20_000
+MAX_CORRECTIONS = 10  # X-Query-Corrected: pairs (typed, searched) shown to the user (#282)
+HISTORY_UNCHECKED = "history_unchecked"  # X-Discovery-Error: found, but novelty not checked (#287)
+SOURCE_UNAVAILABLE = "source_unavailable"  # X-Discovery-Error: a registry request was refused or failed (#287)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Q-24: with retriever pg_hybrid load the query model and check the vectors before the first request."""
     try:
-        retriever = search_mod.load_config()["retriever"]
+        cfg = search_mod.load_config()
+        retriever, model = cfg["retriever"], cfg.get("embedding_model")
     except (OSError, ValueError, KeyError):
-        retriever = None
+        retriever = model = None
     if retriever == "pg_hybrid":
         from src.match import pg_retriever
 
         try:
-            log.info("pg_hybrid прогрет: %s", pg_retriever.warm())
+            log.info("pg_hybrid прогрет: %s", pg_retriever.warm(model))
         except pg_retriever.VectorsUnavailable as e:
             log.warning("pg_hybrid недоступен, поиск пойдёт по BM25: %s", e)
     yield
@@ -106,7 +119,7 @@ def _queue():
 
 def _is_stub() -> bool:
     # DEMO_FIXTURE=1 (scripts/demo.sh without organizers' data) serves the synthetic fixture (D-050).
-    if os.environ.get("DEMO_FIXTURE") == "1":
+    if get_settings().demo_fixture:
         return True
     return bool(getattr(search_mod, "IS_STUB", False) or getattr(enrich_mod, "IS_STUB", False))
 
@@ -166,9 +179,23 @@ def _context(query: Query) -> dict[str, object]:
     }
 
 
-def _found(query: Query, uncached: set[str] | None = None
-           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]]]:
-    """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets.
+def _discovery_error(res: pipeline.Picked) -> str | None:
+    """X-Discovery-Error (#287): why «Новые» may be incomplete; None — nothing went wrong."""
+    if res.discovery_error:  # an exception type name: an identifier, ASCII for the latin-1 header
+        return res.discovery_error if res.discovery_error.isascii() else "Error"
+    if res.discovery is None:
+        return None
+    # a class was resolved and the registry searched, but organizers' data was not there to check novelty
+    if res.discovery.okpd_classes and not res.discovery.history_checked:
+        return HISTORY_UNCHECKED
+    if res.discovery.source_failed:  # captcha, refusal, timeout: discover() kept going with what it had
+        return SOURCE_UNAVAILABLE
+    return None
+
+
+def _found(query: Query, uncached: set[str] | None = None) -> pipeline.Picked:
+    """Every candidate of the query after the filters, best first (`matches`); why history is empty (#113,
+    `note`); X-Facets (`facets`); X-Discovery-Error, X-Query-Corrected and X-Weak-Match (#281) come from it as well.
 
     The selection itself is src/match/pipeline.py — the same for make eval and make predict (#220).
     """
@@ -181,7 +208,7 @@ def _found(query: Query, uncached: set[str] | None = None
                                  "или база не отвечает") from e
     if uncached is not None:
         uncached.update(res.uncached)
-    return res.matches, res.note, res.facets
+    return res
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -210,9 +237,18 @@ def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
     uncached: set[str] = set()
-    matches, note, chips = _found(query, uncached)
+    res = _found(query, uncached)
+    matches, note, chips, discovery_error = res.matches, res.note, res.facets, _discovery_error(res)
+    weak = res.weak_match
     if note:
         response.headers["X-Search-Note"] = quote(note)
+    if weak:  # a short query with a weak match (#281): the UI warns above the history block
+        response.headers["X-Weak-Match"] = quote(weak)
+    if discovery_error:
+        response.headers["X-Discovery-Error"] = discovery_error
+    if res.correction is not None:  # searched as corrected: the UI says so and offers the query as typed (#282)
+        pairs = [list(p) for p in res.correction.changes[:MAX_CORRECTIONS]]
+        response.headers["X-Query-Corrected"] = quote(json.dumps(pairs, ensure_ascii=False, separators=(",", ":")))
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
     response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
     if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
@@ -272,14 +308,29 @@ def api_okpd2(codes: str = "") -> dict[str, str]:
     return {c: okpd2_label(c) for c in items}
 
 
-@app.get("/api/counterparty/{inn}", response_model=Counterparty)
+_LIMITED: dict[int | str, dict[str, Any]] = {
+    401: {"description": "нужен ключ API (X-API-Key), если на сервере задан API_KEY"},
+    429: {"description": "лимит очереди или живых обогащений; повторите через Retry-After секунд"},
+}
+
+
+def _answers_from_cache(inn: str) -> bool:
+    """True when enrich() needs no network: offline mode, or a fresh pb card in the cache (its first branch)."""
+    return get_settings().enrich_offline or SourceCache().get(card_url(inn)) is not None
+
+
+@app.get("/api/counterparty/{inn}", response_model=Counterparty, dependencies=[Depends(guard.require_api_key)],
+         responses=_LIMITED)
 def api_counterparty(inn: str) -> Counterparty:
+    """The card by INN: from the cache at once, otherwise the registries are asked inside the request, so at most
+    COUNTERPARTY_LIVE_MAX of those at once (F-10)."""
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
-        # rnp_offline=True: a direct card lookup must not wait on the 60 s РНП Crawl-delay pause
-        # (research/SOURCES.md, D-101) — only the worker does a live РНП request.
-        cp = enrich_mod.enrich(inn, rnp_offline=True)
+        with nullcontext() if _answers_from_cache(inn) else guard.live_slots.take():
+            # rnp_offline=True: a direct card lookup must not wait on the 60 s РНП Crawl-delay pause
+            # (research/SOURCES.md, D-141) — only the worker does a live РНП request.
+            cp = enrich_mod.enrich(inn, rnp_offline=True)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
     except (CaptchaRequired, TimeoutError, httpx.HTTPError) as e:
@@ -290,16 +341,22 @@ def api_counterparty(inn: str) -> Counterparty:
     return strip_unverified(cp, SourceCache().page_text)
 
 
-@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202)
+@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202,
+          dependencies=[Depends(guard.require_api_key)], responses=_LIMITED)
 def api_enqueue(inn: str) -> EnqueueResult:
+    """Queue the enrichment of an INN for the worker; a new INN over ENRICH_QUEUE_MAX waiting tasks is a 429 (F-10)."""
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
-    return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn))
+    try:
+        return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn, max_pending=guard.queue_max()))
+    except QueueFull as e:
+        log.warning("enrich: очередь полна, %s не поставлен: %s", inn, e)
+        raise guard.busy("очередь обогащения заполнена, повторите позже") from e
 
 
 @app.post("/api/export")
 def api_export(query: Query) -> StreamingResponse:
-    matches = _verified(_found(query)[0])
+    matches = _verified(_found(query).matches)
     res = SearchResponse(query=query, history=[m for m in matches if m.origin == "history"],
                          discovered=[m for m in matches if m.origin == "discovered"], stub=_is_stub())
     wb = Workbook()

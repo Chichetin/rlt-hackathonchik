@@ -8,9 +8,11 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from src.contracts import Counterparty
 from src.enrich.evidence import check_counterparty, strip_unverified
 from src.ingest.build import build
-from src.ingest.load import counterparties, suppliers_path
+from src.ingest.load import from_rows, suppliers_path
+from src.match.store import ParquetStore
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
 CUTOFF = date(2025, 7, 1)
@@ -22,6 +24,11 @@ def processed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("processed")
     build(FIXTURE, out, as_of=None, cutoff=CUTOFF)
     return out
+
+
+def counterparties(inns: list[str], as_of: date | None = None, *, store: ParquetStore) -> dict[str, Counterparty]:
+    """Counterparty per INN of the history before as_of — as search() builds them (store rows -> from_rows)."""
+    return from_rows(store.supplier_rows(inns, as_of), store.built_at())
 
 
 def _rows(path: Path, sql: str) -> list[tuple]:
@@ -56,7 +63,7 @@ def test_okpd2_levels(processed: Path) -> None:
 
 def test_invalid_inn_flagged_not_dropped(processed: Path) -> None:
     assert _rows(processed / "suppliers.parquet", f"SELECT inn_valid FROM '{{p}}' WHERE inn = '{BAD}'") == [(False,)]
-    cp = counterparties([BAD], processed=processed)[BAD]
+    cp = counterparties([BAD], store=ParquetStore(processed))[BAD]
     assert cp.inn is None and cp.evidence == []
 
 
@@ -79,7 +86,7 @@ def test_as_of_cuts_history(processed: Path) -> None:
 
 
 def test_counterparty_evidence_and_stats(processed: Path) -> None:
-    now = counterparties([A, "0000000000"], processed=processed)
+    now = counterparties([A, "0000000000"], store=ParquetStore(processed))
     assert set(now) == {A}  # unknown INN is absent, not invented
     cp = now[A]
     assert cp.inn == A and cp.name == f"ИНН {A}" and cp.kpp == "780101001" and cp.region is None
@@ -90,7 +97,7 @@ def test_counterparty_evidence_and_stats(processed: Path) -> None:
     assert check_counterparty(cp, lambda url: None) == []
     assert strip_unverified(cp, lambda url: None).inn == A
 
-    past = counterparties([A], as_of=CUTOFF, processed=processed)[A]
+    past = counterparties([A], as_of=CUTOFF, store=ParquetStore(processed))[A]
     assert past.stats["lots_participated"] == 3
     assert past.evidence[0].url == "data:participants#3"  # latest lot before the cutoff
 
@@ -127,5 +134,5 @@ def test_supplier_profile_keys(processed: Path) -> None:
     ]
     ip = _rows(processed / "suppliers.parquet", "SELECT entity_type FROM '{p}' WHERE inn = '780100000090'")
     assert ip == [("ИП",)]
-    st = counterparties([A], processed=processed)[A].stats
+    st = counterparties([A], store=ParquetStore(processed))[A].stats
     assert st["top_class_share"] == 0.8 and st["entity_type"] == "ЮЛ"

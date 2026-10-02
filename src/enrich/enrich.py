@@ -3,12 +3,13 @@
 Main source: ФНС «Прозрачный бизнес» (src/sources/pb_nalog.py) through the disk cache, so the demo
 works on cache without internet. While pb asks for a captcha (#58, D-052) the fallback is the registry
 of МСП by INN (src/sources/rmsp.py), then ГИР БО (src/sources/bo_nalog.py): fewer facts, each with its
-own source and url. Every fact is an Evidence whose `value` literally occurs in the
-cached card text (src/enrich/evidence.py checks it; the API shows only what passes).
+own source and url. On top of any of them: offline facts from ФНС open data (src/sources/fns_opendata.py:
+headcount, income, tax regime, tax debt) when its parquet is built. Every fact is an Evidence whose `value`
+literally occurs in the cached card text (src/enrich/evidence.py checks it; the API shows only what passes).
 Organizers' data stats (`Counterparty.stats`) come from search(), not from here.
 
 After the ФНС card, `_merge_rnp` adds РНП ЕИС (`Counterparty.in_rnp`, src/sources/eis_rnp.py),
-D-101 (#111): a failure or a captcha never turns into a guessed fact, only a logged warning.
+D-141 (#111): a failure or a captcha never turns into a guessed fact, only a logged warning.
 The Электронный магазин СПб registry is NOT a source of enrich() or discover() (D-061: an expert's
 feedback after checkpoint 1 — АИС ГЗ is the primary source, "обогащение вашими данными" reads as
 circular to the jury); the estore.py client was removed (D-067).
@@ -25,13 +26,11 @@ from datetime import UTC, datetime
 import httpx
 
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
-from src.enrich import role
-from src.sources import bo_nalog, eis_rnp, pb_nalog, rmsp
+from src.sources import bo_nalog, eis_rnp, fns_opendata, pb_nalog, rmsp, role
 from src.sources.cache import CachedPage, SourceCache
+from src.sources.rmsp import MSP_CATEGORY
 
 log = logging.getLogger(__name__)
-
-MSP_CATEGORY = {"1": "микропредприятие", "2": "малое предприятие", "3": "среднее предприятие"}
 
 
 def _region(kpp: str) -> str | None:
@@ -225,7 +224,7 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
 
 
 def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) -> Counterparty:
-    """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-101, #111). `offline` is passed through
+    """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-141, #111). `offline` is passed through
     explicitly (never the `ENRICH_OFFLINE` environment variable) so the caller — not a process-wide
     flag — decides whether a live request (paced, under lock, Crawl-delay 60 s) may happen at all:
     the API always passes `offline=True` via `rnp_offline` below, the worker does not, and only the
@@ -248,21 +247,36 @@ def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) ->
     return cp.model_copy(update=update) if update else cp
 
 
+def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counterparty]:
+    """The cards plus the offline facts of ФНС open data, each with its own url (one query for all, no network)."""
+    facts = fns_opendata.lookup_many([c.inn for c in cards if c.inn and inn_is_valid(c.inn)], cache)
+
+    def merged(c: Counterparty) -> Counterparty:
+        have = {(e.url, e.field, e.value) for e in c.evidence}  # a card that already has them gets them once
+        new = [e for e in facts.get(c.inn or "", []) if (e.url, e.field, e.value) not in have]
+        return c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
+    return [merged(c) for c in cards]
+
+
 def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
-           rnp_offline: bool | None = None) -> Counterparty:
-    """pb card from cache → pb live (unless blocked) → rmsp by INN → bo, then РНП ЕИС is merged in
-    (D-101, #111). The error of pb is raised only if no fallback source answered; otherwise the
-    source of every fact is in its Evidence. Электронный магазин СПб (its client was removed, D-067) is
-    NOT a source here (D-061).
-    `offline=True` — cache only (KeyError when nothing is cached); None — by `ENRICH_OFFLINE`.
-    `rnp_offline` governs the РНП step only; None follows `offline`. The API passes
-    `rnp_offline=True` explicitly on every call that is not already `offline=True`
-    (src/api/app.py `api_counterparty`), so a direct card lookup never waits on the 60 s
-    Crawl-delay pause — only the worker (`src/worker/worker.py`, `src/worker/prefetch.py`), which
-    calls `enrich(inn)` with neither flag set, may do a live РНП request."""
+           open_data: bool = True, rnp_offline: bool | None = None) -> Counterparty:
+    """The base card (below), then РНП ЕИС merged in (D-141, #111), plus add_open_data(); `open_data=False` —
+    no ФНС open-data facts (the search loop over 200 candidates needs none: the page and the export add them to
+    what they show). Электронный магазин СПб (its client was removed, D-067) is NOT a source here (D-061).
+    `rnp_offline` governs the РНП step only; None follows `offline`. The API passes `rnp_offline=True`
+    explicitly (src/api/app.py `api_counterparty`), so a direct card lookup never waits on the 60 s
+    Crawl-delay pause — only the worker (`src/worker/worker.py`, `src/worker/prefetch.py`), which calls
+    `enrich(inn)` with neither flag set, may do a live РНП request."""
+    cache = cache or SourceCache()
+    cp = _enrich(inn, cache, offline, rnp_offline)
+    return add_open_data([cp], cache)[0] if open_data else cp
+
+
+def _enrich(inn: str, cache: SourceCache, offline: bool | None, rnp_offline: bool | None) -> Counterparty:
+    """The base card, then РНП ЕИС. `offline=True` — cache only (KeyError when nothing is cached); None — by
+    `ENRICH_OFFLINE`."""
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
-    cache = cache or SourceCache()
     if offline is None:
         offline = os.environ.get("ENRICH_OFFLINE") == "1"
     if rnp_offline is None:
