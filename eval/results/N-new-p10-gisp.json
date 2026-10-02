@@ -1,0 +1,68 @@
+{
+  "exp_id": "N-new-p10-gisp",
+  "part": "new-suppliers",
+  "created_at": "2026-10-02T09:44:12+00:00",
+  "commit": "c218a1df234df3031da7050e88d5f5c3a4b5f8b2",
+  "dirty": false,
+  "config": {
+    "block": "discovered",
+    "k": 10,
+    "labels": "new_suppliers_gisp.csv",
+    "with_llm": false,
+    "tokenizer": "prefix5"
+  },
+  "tokenizer_version": "prefix5-v1",
+  "exact_docs": 20,
+  "config_sha256": "e6feee49723087c0b85f6900627bc0125fa833b28b50755d3ac527166787d849",
+  "stub": false,
+  "vectors": null,
+  "store": "parquet",
+  "data": {
+    "built_at": null,
+    "rows": null,
+    "queries_without_profile": 0
+  },
+  "elapsed_s": 0.0,
+  "n_queries": 10,
+  "metrics": {
+    "precision@10": {
+      "value": 0.31416666666666665,
+      "ci95": [
+        0.11499999999999999,
+        0.5400208333333333
+      ]
+    }
+  },
+  "labeled": 46,
+  "labeled_by": {
+    "человек": 46
+  },
+  "agreement_human_llm": {
+    "overlap": 0,
+    "share": null,
+    "kappa": null,
+    "confusion": {
+      "human0_llm0": 0,
+      "human0_llm1": 0,
+      "human1_llm0": 0,
+      "human1_llm1": 0
+    },
+    "llm_used": false
+  },
+  "n_selected": 12,
+  "empty_blocks": [
+    "lot-5860547"
+  ],
+  "per_query": [
+    {"query_id": "lot-5656255", "precision@10": 0.0, "labeled": 8, "relevant": 0, "shown": 10},
+    {"query_id": "lot-5673496", "precision@10": 0.0, "labeled": 2, "relevant": 0, "shown": 10},
+    {"query_id": "lot-5761234", "precision@10": 0.2, "labeled": 5, "relevant": 1, "shown": 10},
+    {"query_id": "lot-5767253", "precision@10": 0.0, "labeled": 1, "relevant": 0, "shown": 3},
+    {"query_id": "lot-5779719", "precision@10": 0.9, "labeled": 10, "relevant": 9, "shown": 10},
+    {"query_id": "lot-5786484", "precision@10": 0.875, "labeled": 8, "relevant": 7, "shown": 9},
+    {"query_id": "lot-5798959", "precision@10": 0.25, "labeled": 4, "relevant": 1, "shown": 10},
+    {"query_id": "lot-5802116", "precision@10": 0.6666666666666666, "labeled": 3, "relevant": 2, "shown": 10},
+    {"query_id": "lot-5804197", "precision@10": 0.25, "labeled": 4, "relevant": 1, "shown": 10},
+    {"query_id": "lot-5809419", "precision@10": 0.0, "labeled": 1, "relevant": 0, "shown": 10}
+  ]
+}
