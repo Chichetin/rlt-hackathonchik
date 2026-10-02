@@ -98,7 +98,6 @@ select { flex: 1; max-width: 240px; font-size: 12px; padding: 6px 8px; }
 .hint { color: var(--muted); font-size: 13px; margin: 12px 0 20px; }
 .empty { color: var(--muted); font-size: 13px; border: 1px dashed #ffffff40; padding: 18px; border-radius: 4px; }
 .list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
-.list > li { content-visibility: auto; contain-intrinsic-size: auto 190px; } /* #615: up to 200 rows, only those near the screen are laid out and painted */
 .item { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px 12px; width: 100%; padding: 18px; text-align: left; background: #070f164a; color: var(--ink); border: 1px solid #ffffff26; }
 .item:hover:not(:disabled) { background: #bca3f31a; border-color: #d6c2ff80; }
 .name { font-size: 15px; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
