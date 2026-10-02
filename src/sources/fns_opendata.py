@@ -25,7 +25,6 @@ says that every debtor is listed; Ростелеком is in none of the four se
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import sys
 import time
@@ -43,6 +42,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.contracts import Evidence, inn_is_valid
+from src.settings import get_settings
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -89,12 +89,12 @@ DATASETS = {
 
 # read at call time: tests and the demo point these elsewhere after import (as SourceCache does)
 def _external() -> Path:
-    return Path(os.environ.get("FNS_OPENDATA_DIR", "data/external/fns_opendata"))
+    return get_settings().fns_opendata_dir
 
 
 def _parquet() -> Path:
-    default = Path(os.environ.get("DATA_PROCESSED_DIR", "data/processed")) / "fns_opendata.parquet"
-    return Path(os.environ.get("FNS_OPENDATA_PARQUET", default))
+    s = get_settings()
+    return s.fns_opendata_parquet or s.data_processed_dir / "fns_opendata.parquet"
 
 
 def archive_path(ds: Dataset, root: Path | None = None) -> Path:

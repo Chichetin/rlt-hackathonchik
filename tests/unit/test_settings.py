@@ -143,3 +143,22 @@ def test_every_setting_is_documented_in_env_example() -> None:
     documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]*)=", ENV_EXAMPLE.read_text(encoding="utf-8"), re.M))
     missing = sorted(set(settings.env_names()) - documented)
     assert not missing, f"нет в .env.example: {missing}"
+
+
+def test_source_defaults_are_the_ones_the_modules_had() -> None:
+    """src/sources moved here (#297): names and defaults unchanged; relative paths stay as given (cwd)."""
+    s = settings.get_settings({})
+    assert s.source_cache == Path("cache/sources.sqlite") and s.source_cache_ttl_s == 7 * 24 * 3600
+    assert (s.pb_min_interval_s, s.bo_min_interval_s, s.bo_timeout_s) == (1.0, 1.0, 5.0)
+    rmsp = (s.rmsp_min_interval_s, s.rmsp_timeout_s, s.rmsp_quick_timeout_s, s.rmsp_down_cooldown_s)
+    assert rmsp == (1.0, 3.0, 10.0, 90.0)
+    assert s.rnp_min_interval_s is None and s.rnp_max_age_s == 24 * 3600 and s.pb_disabled is False
+    assert s.fns_opendata_dir == Path("data/external/fns_opendata") and s.fns_opendata_parquet is None
+    yandex = (s.yandex_search_ttl_s, s.yandex_search_daily_max, s.yandex_search_min_interval_s)
+    assert yandex == (30 * 24 * 3600, 100, 1.0)
+    assert (s.yandex_search_api_key, s.yandex_search_offline, s.yandex_search_cache, s.yandex_search_region) == \
+        ("", False, None, None)
+    over = settings.get_settings({"YANDEX_SEARCH_DAILY_MAX": "7.9", "RNP_MIN_INTERVAL_S": "2.5", "PB_DISABLED": "1",
+                                  "YANDEX_SEARCH_API_KEY": " key "})
+    assert (over.yandex_search_daily_max, over.rnp_min_interval_s, over.pb_disabled, over.yandex_search_api_key) == \
+        (7, 2.5, True, "key")
