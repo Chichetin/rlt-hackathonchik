@@ -27,7 +27,8 @@ services:
               "${HOME}/.cache/huggingface:/root/.cache/huggingface:ro"]
     depends_on: {db: {condition: service_healthy}}
   worker:
-    build: .
+    build: {context: ., dockerfile: Dockerfile.worker}   # без UI и torch: воркеру они не нужны
+    # ночной режим (сон на капче, restart) — не здесь, а в docker-compose.night.yml (D-155): make up его не включает
     command: ["python", "-m", "src.worker.worker"]
     env_file: [{path: .env, required: false}]
     environment:

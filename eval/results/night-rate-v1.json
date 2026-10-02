@@ -1,0 +1,54 @@
+{
+ "exp_id": "night-rate-v1",
+ "part": "throughput",
+ "created_at": "2026-10-02",
+ "commit": "c6da32d",
+ "measured_by": "Ivana-banana, #20 (PR #159); записано из её отчёта в issue #20 и pitch/architecture.md 3.3 сессией M1hairu",
+ "reproducible_here": false,
+ "why_not_reproducible": "кеш источников и очередь Postgres замера — на машине Ivana-banana (WSL2); ночной прогон по рангу активности не перезапускается (решение человека 02.10)",
+ "note": "Карточки без РНП (после #111 enrich() РНП живьём не спрашивает). Живые ИНН/мин — верхняя оценка: запрос реестра МСП считается за ИНН. Цифры разных замеров не усредняются и не сравниваются как «быстрее/медленнее».",
+ "runs": [
+  {
+   "id": "local-30",
+   "what": "без Docker, локальный воркер, чистый кеш, пауза 1 с; 30 ИНН — ранги 201–230 по активности, вне кеша #11",
+   "command": "uv run python -m src.worker.prefetch (на 30 ИНН рангов 201–230), вывод prefetch",
+   "result": {
+    "total": 30,
+    "done_total": 30,
+    "errors_this_run": 0,
+    "elapsed_s": 150.0,
+    "inn_per_min": 12.0
+   },
+   "caveat": "pb.nalog.ru в прогоне отключён защитой от капчи — ответили реестр МСП и ГИР БО"
+  },
+  {
+   "id": "compose-night",
+   "what": "Docker в WSL2: db + worker из Dockerfile.worker, --captcha-sleep 900; очередь Postgres из prefetch --enqueue-only --top 100000",
+   "window_utc": [
+    "2026-10-01T18:03",
+    "2026-10-01T18:37"
+   ],
+   "queue": {
+    "enqueued": 44174,
+    "invalid_inn_skipped": 22,
+    "done": 340,
+    "failed": 0,
+    "pending": 43833
+   },
+   "command": "uv run python scripts/cache_rate.py <кеш> 2026-10-01T18:03 2026-10-01T18:37",
+   "live_pages_by_host": {
+    "pb.nalog.ru": 12,
+    "rmsp.nalog.ru": 147,
+    "bo.nalog.gov.ru": 29
+   },
+   "live_inn_upper_bound": 159,
+   "window_min": 34,
+   "inn_per_min_upper_bound": 4.7,
+   "caveat": "окно включает сон 15 мин после капчи pb и сбои реестра МСП; остальные done — кеш top-200 из #11; кеш — копия, восстановленная после повреждения (1241 из 1243 страниц)"
+  }
+ ],
+ "metrics": {
+  "inn_per_min_local_30": 12.0,
+  "inn_per_min_compose_live_upper_bound": 4.7
+ }
+}
