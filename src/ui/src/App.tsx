@@ -465,11 +465,12 @@ export function App() {
 
   // a procedure of the uploaded test export (#207): load it by number and search at once
   const [pickedLot, setPickedLot] = useState<string | null>(null);
-  async function pickTestLot(id: string) {
+  async function pickTestLot(id: string, procedureId?: string) {
     setPickedLot(id);
     setLotId(id);
+    if (procedureId) setProcedureInput(procedureId);
     try {
-      const ready = await loadLot(id, true);
+      const ready = procedureId ? await loadLot(procedureId, true, "procedure") : await loadLot(id, true);
       if (ready) await run(filters, ready);
     } finally {
       setPickedLot(null);
@@ -911,7 +912,7 @@ export function App() {
 
         </div>
         </details>
-        <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
+        <TestsetPanel onPick={(id, procedureId) => void pickTestLot(id, procedureId)} busyLot={pickedLot} />
       </form>
       <div className="output">
       {lotMsg?.kind === "err" && <p className="lotmsg lotmsg-err" role="alert">{lotMsg.text}</p>}

@@ -361,7 +361,7 @@ export async function fetchBacktest(ident: string): Promise<Backtest> {
 }
 // Organizers' test export uploaded from the UI (#207): CSV of the training format, sent as text in JSON
 // (no multipart). The server keeps it in cache/testsets and makes it the active set: /api/lot finds its lots.
-export type TestsetLot = { lot_id: string; reqnum: string | null; text: string; okpd2: string[]; notes: string[] };
+export type TestsetLot = { lot_id: string; reqnum: string | null; procedure_id?: string | null; text: string; okpd2: string[]; notes: string[] };
 export type Testset = { id: string; files: string[]; lots: number; warnings: string[]; items: TestsetLot[] };
 
 async function detail(r: Response): Promise<string> {
