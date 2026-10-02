@@ -157,7 +157,7 @@ CA» (Минцифры): без него `curl: (60) SEC_E_UNTRUSTED_ROOT`. Ре
 | Checko / api-fns | `GET api.checko.ru/v2/company?inn=…`, `api-fns.ru/api/egr?req=…` | 401 / 200 «нет key» | нужен ключ |
 | 2ГИС Catalog API | `GET catalog.api.2gis.com/3.0/items?q=…` | 400 | «Incorrect values of params: 'key'» |
 | Яндекс Search API | `GET searchapi.api.cloud.yandex.net/v2/web/search` | таймаут | плюс нужен ключ Yandex Cloud (платно) |
-| Яндекс Search API, 02.10 | `POST …/v2/web/search`, `Authorization: Api-Key`, без `folderId`, тело в UTF-8 | 200 | ключ команды работает; 1 запрос, 3 результата (rusprofile, checko, star-pro с ИНН в заголовке). Клиент только через кеш и с дневным потолком — `src/sources/yandex_search.py`, D-112 |
+| Яндекс Search API, 02.10 | `POST …/v2/web/search`, `Authorization: Api-Key`, без `folderId`, тело в UTF-8 | 200 | ключ команды работает; 1 запрос, 3 результата (rusprofile, checko, star-pro с ИНН в заголовке). Клиент только через кеш и с дневным потолком — `src/sources/yandex_search.py`, D-112; потолок 2500 на хакатон, без `YANDEX_MAX_PER_LOT` / `YANDEX_MAX_PER_RUN` выключен — D-145 (#438) |
 | clearspending.ru | `GET /` | TLS: `CRYPT_E_REVOCATION_OFFLINE` | не используем |
 
 ### Проверено 02.10 (#244, разведка реестра контрактов)
