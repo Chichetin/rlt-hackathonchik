@@ -9,16 +9,20 @@
 # воспроизводятся на commit из файла результата; на HEAD различие ≤ 9 из 2000 dev-кейсов (ИНН заказчика 47…).
 # #198 (D-103): с 02.10 дефолт продукта — v2 + ранжировщик LightGBM (`ranker:` в search.yaml); записи, снятые
 # до него, выключают его явно (`ranker: null`), `v2` — формула D-077 без ранжировщика (eval/results/v2.json).
+# #511 (D-179): `no_customer_options` из search.yaml действует только на запросы без заказчика при выключенном
+# ранжировщике; у всех dev-кейсов заказчик есть — записи ниже на dev не меняются; v1, v2 и F-511-v2 задают null явно.
 # #282 (D-109): с 02.10 запрос исправляется до поиска (`spell: true` в search.yaml); записи, снятые до него,
 # ищут запрос как введён (`spell: false`).
 v2:              # формула v2 (H-15f, D-077) без ранжировщика — база для R-198-*
   spell: false
   ranker: null
+  no_customer_options: null # #511: как до D-179 и для запроса без заказчика (null — не {}: словари сливаются)
 v1:              # прежний дефолт продукта (D-004, D-029) — воспроизводит E-002 / bm25-dev-v1
   spell: false
   weights: &v1_weights {product_fit: 0.35, experience: 0.2, reliability: 0.2, activity: 0.1, geography: 0.1, price: 0.05}
   options: &v1_options {fit_bm25_share: 0.6, experience_by: class, tie_break: inn}
   ranker: null
+  no_customer_options: null # #511: как до D-179 и для запроса без заказчика (null — не {}: словари сливаются)
 H-15a-03:        # инкумбент-сигнал в experience, доля 0.3
   spell: false
   weights: *v1_weights
@@ -221,9 +225,9 @@ R-w4-gbm:
 # #511: путь без ML — свободный текст без заказчика (`src.eval.run --free-text-bare`: только предмет лота, без ОКПД2,
 # заказчика, НМЦК и канала). Порядок задаёт формула v2 (без ранжировщика, как по правилу #490); исправление запроса
 # включено, как в продукте. `no_customer_options` действует только на запросы без заказчика и без ранжировщика.
-F-511-v2:        # база: формула v2 как есть
+F-511-v2:        # база: формула v2 как есть (null, а не {}: словарь слился бы с no_customer_options из search.yaml)
   ranker: null
-  no_customer_options: {}
+  no_customer_options: null
 F-511-sat100:    # + насыщение опыта 100 лотов / 50 побед только на этом пути (как H-196-sat100)
   ranker: null
   no_customer_options: {sat_lots: 100, sat_wins: 50}
