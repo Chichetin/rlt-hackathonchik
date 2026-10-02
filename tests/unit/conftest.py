@@ -44,6 +44,10 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     from src.sources import web_leads
 
     monkeypatch.setattr(web_leads, "LEADS_DIR", tmp_path / "leads-default")
+    # the registry export of industrial products (#74): not the dev machine's; tests/unit/test_gisp.py builds its own
+    from src.sources import gisp
+
+    monkeypatch.setattr(gisp, "DIR", tmp_path / "gisp-default")
     yield
     for pacer in pacers:
         pacer.reset()
