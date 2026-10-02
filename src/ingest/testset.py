@@ -46,7 +46,6 @@ class TestLot:
     reqnum: str | None
     query: Query
     notes: list[str] = field(default_factory=list)
-    procedure_id: str | None = None
 
 
 @dataclass
@@ -58,10 +57,6 @@ class TestSet:
         ident = ident.strip()  # lot_id first: a template's lot_id is a row number, its reqnum may be one too (#501)
         return (next((lt for lt in self.lots if ident == lt.lot_id), None)
                 or next((lt for lt in self.lots if ident == lt.reqnum), None))
-
-    def find_procedure(self, ident: str) -> TestLot | None:
-        ident = ident.strip()
-        return next((lt for lt in self.lots if lt.procedure_id and ident == lt.procedure_id), None)
 
 
 NOTICE_NAMES = ("Извещения",)
@@ -166,8 +161,7 @@ def load_testset(folder: Path) -> TestSet:
         published = _publish_date(row.get("publish_date", ""))
         if published is not None:  # the lot is searched as of its own date (#589)
             q = q.model_copy(update={"as_of": published})
-        lots.append(TestLot(lot_id=lot_id, reqnum=row.get("reqnum") or None, query=q, notes=notes,
-                            procedure_id=row.get("procedure_id") or None))
+        lots.append(TestLot(lot_id=lot_id, reqnum=row.get("reqnum") or None, query=q, notes=notes))
     if not lots:
         raise TestDataError(f"{n_name}: ни одного лота с lot_id")
     for w in warnings:

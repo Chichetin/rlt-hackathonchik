@@ -30,7 +30,7 @@
 .search-compose .query { grid-template-columns: minmax(0,1.5fr) minmax(320px,1fr); gap: var(--ui-gap); }
 .search-compose .query-main, .search-compose .query-options { padding: calc(30 * var(--ui-unit)); }
 .query .section-heading h2, .search-compose .section-heading h2 { font-size: calc(23 * var(--ui-unit)); }
-.query .section-heading p, .query-main > label, .query-codes > label, .query .lot-section > label, .query .optional label,
+.query .section-heading p, .query-main > label, .query .lot-section > label, .query .optional label,
 .query .filters, .query .lotrow button, .query .actions button { font-size: var(--ui-small); }
 .query input:not([type="checkbox"]), .query textarea, .query select { font-size: var(--ui-body); padding: calc(13 * var(--ui-unit)) calc(14 * var(--ui-unit)); }
 .query input::placeholder, .query textarea::placeholder { font-size: var(--ui-small); }
