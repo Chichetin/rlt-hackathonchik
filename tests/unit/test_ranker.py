@@ -198,3 +198,32 @@ def test_fixture_data_has_the_supplier_profile(search_data, monkeypatch):
     monkeypatch.setattr(ranker, "without_profile", 0)
     assert search(Q, config=search_mod.load_config())
     assert ranker.without_profile == 0
+
+
+# the 12 columns of suppliers*.parquet in the release data-2026-10-01 (ingest before the profile, #114)
+RELEASE_COLUMNS = ["inn", "kpp", "inn_valid", "lots_participated", "lots_won", "win_rate", "customers", "customers_spb",
+                   "first_seen", "last_seen", "median_start_price", "top_okpd2"]
+
+
+def test_search_on_data_built_before_the_profile_is_counted(fixture_processed, tmp_path, monkeypatch, caplog):
+    """The whole chain on the release's columns: store → stats without the profile → features → rerank (#421)."""
+    import shutil
+
+    import pyarrow.parquet as pq
+
+    from src.match import index
+
+    old = tmp_path / "processed"
+    shutil.copytree(fixture_processed, old)
+    for f in old.glob("suppliers*.parquet"):
+        pq.write_table(pq.read_table(f, columns=RELEASE_COLUMNS), f)
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(old))
+    monkeypatch.setenv("DATA_STORE", "parquet")
+    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "indexes"))
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    index.clear_memory_cache()
+    with caplog.at_level(logging.WARNING, logger=ranker.__name__):
+        assert search(Q, config=search_mod.load_config())
+    index.clear_memory_cache()
+    assert ranker.without_profile == 1
+    assert sum("нет профиля поставщика" in r.getMessage() for r in caplog.records) == 1

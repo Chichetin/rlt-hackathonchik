@@ -91,12 +91,21 @@ FEATURES: dict[str, str] = {
 }
 NAMES = list(FEATURES)
 # The supplier profile (#114, D-064) is NaN for EVERY candidate only when data/processed was built before the profile
-# existed (e.g. the release data-2026-10-01, ingest of 01.10 11:45 UTC): a supplier with any participation has at
-# least smp_contracts. The model then ranks without these inputs and quality drops — dev recall@10 0.503 against
-# 0.572 on the same code (#421). Counted per rerank and warned once; make eval writes the count to the result.
+# existed (e.g. the release data-2026-10-01, ingest of 01.10 11:45 UTC): every row of the current suppliers table has
+# the count() keys (active_months, em_offers, kpp_count…), and a candidate without a row never reaches the ranker.
+# The model then ranks without the 16 profile inputs and the ones derived from them (class_match, channel_share) —
+# dev recall@10 0.503 against 0.572 on the same code (#421). Counted per rerank and warned once; make eval resets the
+# count per run and writes it to the result (D-144).
 PROFILE_IDX = [NAMES.index(n) for n in (*PROFILE_LOG, *PROFILE_RAW)]
 without_profile = 0
 _profile_lock = threading.Lock()
+
+
+def reset_without_profile() -> None:
+    """A new eval run counts its own queries (several evaluate() in one process must not add up)."""
+    global without_profile
+    with _profile_lock:
+        without_profile = 0
 
 
 def _log(v: Any) -> float:
@@ -319,8 +328,9 @@ def _check_profile(x: np.ndarray) -> None:
         first = without_profile == 1
     if first:
         log.warning("ранжировщик: ни у одного кандидата нет профиля поставщика (#114, D-064) — data/processed "
-                    "собран ingest до профиля (релиз data-2026-10-01?): %d признаков пусты, качество ниже (#421); "
-                    "пересоберите: make data PART=raw && uv run python -m src.ingest.build", len(PROFILE_IDX))
+                    "собран ingest до профиля (релиз data-2026-10-01?): пусты %d признаков профиля и производные от "
+                    "них, качество ниже (#421, #435); пересоберите: make data PART=raw && uv run python -m "
+                    "src.ingest.build", len(PROFILE_IDX))
 
 
 def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:

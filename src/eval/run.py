@@ -23,7 +23,7 @@ from src.contracts import Query
 from src.eval import baselines, corrupt
 from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
-from src.match import pipeline
+from src.match import pipeline, ranker
 from src.match import search as search_mod
 from src.match.profiles import procurement_type
 
@@ -170,6 +170,7 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     """
     cutoff = cutoff or date.fromisoformat(str(split_config()["cutoff"]))
     method = cfg.get("method", "search")
+    ranker.reset_without_profile()  # result_record reports this run's queries only (D-144)
     novelty = winner_novelty(cases, cutoff)
     per_query = []
     audit = pipeline.TodayAudit() if method == "search" else None
@@ -262,7 +263,6 @@ def _store() -> str:
 def _data() -> dict:
     """The ingest snapshot the run read and how many queries the ranker scored without the supplier profile:
     a metric level compares only between runs on the same data (#421 — the release data predates the profile)."""
-    from src.match import ranker
     from src.match.store import StoreUnavailable, get_store
 
     try:
