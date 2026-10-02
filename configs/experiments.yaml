@@ -208,3 +208,10 @@ rel-on-f:        # на H-15f: + reliability 0.2 поверх нормирова
   weights: {reliability: 0.2}
   reliability: {mode: "on"}
   ranker: null
+# Гибрид BM25 + дообученный эмбеддер E3 только для коротких запросов (#485): запрос из 1–4 слов → pg_hybrid с
+# e3/user-base-okpd2 (векторы — vec.names_e3_okpd2), длиннее — BM25 как в дефолте. База — дефолт (`E485-base`).
+# rrf — баллы RRF, как у pg_hybrid; bm25 — порядок RRF, баллы в шкале BM25 запроса (ранжировщик D-103 учился на ней).
+E485-short-rrf:
+  hybrid_short: {model: e3/user-base-okpd2, max_words: 4}
+E485-short-bm25:
+  hybrid_short: {model: e3/user-base-okpd2, max_words: 4, scores: bm25}
