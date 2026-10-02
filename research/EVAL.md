@@ -137,7 +137,8 @@ Excel; строится командой `uv run python -m src.eval.label_new pr
 для каждого общего `query_id` — `per_query[].ranked` (ИНН в порядке выдачи, как их видит пользователь) побитово,
 состав и порядок.
 
-Процедура (прогон dev ≈ 500–600 с: E-002 498.7 с, H-15f 609.7 с — на пару ≈ 17–20 минут):
+Процедура (прогон dev ≈ 500–600 с: E-002 498.7 с, H-15f 609.7 с — на пару ≈ 17–20 минут плюс сборка индекса в пустом
+`INDEX_DIR` у каждого прогона, время сборки не замерено):
 
 ```bash
 # 1. базовый коммит <base> (origin/main до правки), чистое дерево, sha — первые 8 символов;
@@ -162,9 +163,12 @@ make parity A=parity-base-<sha> B=parity-new-<sha>
   `<tmp>/rlt-doc-codes-<ключ>/` (docker, read-only) и оттуда же читается: если такой каталог остался с прошлого запуска — удалить.
 - **Данные** `data/processed` (ingest parquet, `suppliers_<cutoff>.parquet`) и кейсы `eval/cases/dev.jsonl` берутся готовыми:
   код `src/ingest`, `src/eval/build_cases`, `src/db` (`make db-load`) при `make eval` не исполняется. Правка `src/ingest` — собрать
-  ingest каждым коммитом в свой каталог и указать его: `uv run python -m src.ingest.build --out-dir data/processed-parity-<base|new>`,
-  затем `DATA_PROCESSED_DIR=data/processed-parity-<base|new> INDEX_DIR=indexes/parity-<base|new> make eval EXP=…`
-  (`data/*` в `.gitignore`). Без этого паритет покрывает только исполняемое при запросе; сменившийся состав кейсов даёт код 2.
+  ingest каждым коммитом в свой каталог и указать его: `uv run python -m src.ingest.build --raw-dir <data/raw> --out-dir
+  data/processed-parity-<base|new>` (в отдельном worktree `data/raw` свой — путь указать явно), затем
+  `DATA_STORE=parquet DATA_PROCESSED_DIR=data/processed-parity-<base|new> INDEX_DIR=indexes/parity-<base|new> make eval EXP=…`
+  (`data/*` в `.gitignore`). `DATA_STORE=parquet` обязателен, как в `scripts/demo.sh`: при `DATABASE_URL` на Postgres и
+  `DATA_STORE=auto` поиск читает Postgres и `DATA_PROCESSED_DIR` не видит — снова ложный OK; паритет для Postgres —
+  свой `DATA_SCHEMA` через `make db-load` на каждый коммит. Без этого паритет покрывает только исполняемое при запросе; сменившийся состав кейсов даёт код 2.
 
 - Id `parity-*` не входят в `configs/experiments.yaml`: прогон идёт на конфигурации продукта
   (`configs/search.yaml`; `make eval` пишет в лог «записи в experiments.yaml нет»). Паритет другой
