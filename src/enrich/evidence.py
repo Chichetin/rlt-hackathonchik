@@ -178,7 +178,7 @@ def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
     for e in cp.evidence:
         if e.field != "okved" or e.value is None or (rule := basis_kind(e.value, cp.inn)) is None:
             continue
-        if rule != cp.kind and not (cp.kind == "unknown" and is_service_basis(e.fact)):
+        if rule != cp.kind and not (cp.kind == "unknown" and is_service_basis(e.fact, e.value)):
             continue
         page = pages.page(e.url)
         if page is not None and e.value.strip() in page.lines and not check_evidence(e, pages):

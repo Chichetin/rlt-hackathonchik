@@ -85,9 +85,12 @@ def assign(code: str | None, name: str | None, line: str, add: Callable[[str, st
     return kind if add("okved", line, f"{head}: заявленный основной ОКВЭД {code}{named} — {why}") else None
 
 
-def is_service_basis(fact: str) -> bool:
-    """The fact of a basis line rewritten by for_purchase(): it backs `unknown` whatever the code's rule kind."""
-    return fact.startswith(SERVICE_HEAD)
+def is_service_basis(fact: str, value: str | None) -> bool:
+    """The fact of a basis line rewritten by for_purchase(): it backs `unknown` whatever the code's rule kind —
+    only when it names the code of its own line (`ОКВЭД 17.12` for `row.<inn>.okved1: 17.12`)."""
+    code = (value or "").partition(": ")[2].strip()
+    return bool(code) and fact.startswith(SERVICE_HEAD) and re.search(
+        rf"ОКВЭД {re.escape(code)}(?![\d.])", fact) is not None
 
 
 def for_purchase(cp: Counterparty, purchase: str | None) -> Counterparty:

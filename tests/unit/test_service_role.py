@@ -93,6 +93,19 @@ def test_service_basis_of_a_forged_line_fails_the_check(cached):
     assert strip_unverified(bad, cache.page_text).kind is None
 
 
+def test_service_basis_must_name_the_code_of_its_own_line(cached):
+    cache, cps = cached
+    cp = role.for_purchase(cps[UL], "services")
+    for wrong in ("81.21", "17.1", "17.121"):  # the line is okved1: 17.12; another code or a prefix is no basis
+        forged = [e.model_copy(update={"fact": e.fact.replace("ОКВЭД 17.12 ", f"ОКВЭД {wrong} ")})
+                  if e.fact.startswith(SERVICE_PREFIX) else e for e in cp.evidence]
+        bad = cp.model_copy(update={"evidence": forged})
+        assert any("роль" in err for err in check_counterparty(bad, cache.page_text)), wrong
+        assert strip_unverified(bad, cache.page_text).kind is None
+    assert not role.is_service_basis(SERVICE_PREFIX + "услугам не применяются; исполнитель по основному ОКВЭД 17.12",
+                                     None)
+
+
 def test_other_roles_need_their_own_rule_not_the_service_basis(cached):
     cache, cps = cached
     cp = role.for_purchase(cps[UL], "services")

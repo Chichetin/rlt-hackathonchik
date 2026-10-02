@@ -257,6 +257,19 @@ test("filterNotes: «unknown» is a role the rule has set (with a basis), «null
   expect(filterNotes(base, f)).toEqual(["Роль ещё не определена у 1 из 2 — признак появится после обогащения; они скрыты фильтром роли."]);
 });
 
+test("filterNotes: a service or works query says the roles do not apply, not «not manufacturing» (#188)", () => {
+  const f: Filters = { ...NO_FILTERS, only_msp: false, kinds: ["manufacturer"] };
+  const base = structuredClone(response);
+  base.history[0].counterparty.kind = "unknown";
+  const service = "У 1 из 2 роль не определена: к услугам и работам роли производитель / дистрибьютор / дилер не применяются (основание — в карточке). Чип «Роль не определена» покажет их.";
+  for (const kind of ["services", "remote", "works"] as const) expect(filterNotes(base, f, undefined, kind)).toEqual([service]);
+  for (const kind of ["goods", null, undefined] as const) {
+    expect(filterNotes(base, f, undefined, kind)).toEqual([
+      "У 1 из 2 основной ОКВЭД — не производство и не торговля: роль по нему не определяется (основание — в карточке). Чип «Роль не определена» покажет их.",
+    ]);
+  }
+});
+
 test("filter that hides unknown-type suppliers says so instead of 'nothing found'", async () => {
   const base = structuredClone(response);
   base.stub = false;

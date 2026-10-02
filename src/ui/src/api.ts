@@ -252,7 +252,8 @@ export function regionLabel(cp: Pick<Counterparty, "region" | "kpp">): string {
 
 // Фильтр оставляет только подтверждённые совпадения (D-030): у кого признак неизвестен — скрыт.
 // Пользователь видит, сколько скрыто из-за неизвестного признака, а не «никого не нашли».
-export function filterNotes(base: SearchResponse | null, f: Filters, facets?: Facets): string[] {
+export function filterNotes(base: SearchResponse | null, f: Filters, facets?: Facets,
+  purchase?: SearchContext["purchase_type"]): string[] {
   if (!base) return [];
   const rows = [...base.history, ...base.discovered];
   const total = rows.length;
@@ -264,9 +265,12 @@ export function filterNotes(base: SearchResponse | null, f: Filters, facets?: Fa
     const n = unknown((cp) => !cp.kind);
     if (n) notes.push(`Роль ещё не определена у ${n} из ${total} — признак появится после обогащения; они скрыты фильтром роли.`);
     const u = unknown((cp) => cp.kind === "unknown");
+    // a service or works query (#188): the server sets "unknown" for every role — the roles do not apply
+    const service = purchase === "services" || purchase === "remote" || purchase === "works";
     if (u) {
-      notes.push(
-        `У ${u} из ${total} основной ОКВЭД — не производство и не торговля: роль по нему не определяется (основание — в карточке). Чип «Роль не определена» покажет их.`,
+      notes.push(service
+        ? `У ${u} из ${total} роль не определена: к услугам и работам роли производитель / дистрибьютор / дилер не применяются (основание — в карточке). Чип «Роль не определена» покажет их.`
+        : `У ${u} из ${total} основной ОКВЭД — не производство и не торговля: роль по нему не определяется (основание — в карточке). Чип «Роль не определена» покажет их.`,
       );
     }
   }
