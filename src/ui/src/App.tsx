@@ -897,6 +897,7 @@ export function App() {
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
+            alert={res.weakMatch}
             rows={historyRows}
             total={historyTotal}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
@@ -963,7 +964,7 @@ function Block(props: {
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
-  alert?: string; // the block may be incomplete and why (#287)
+  alert?: string; // «Новые»: the block may be incomplete and why (#287); history: weak match with past lots (#281)
   variant: "history" | "new";
   tag: string;
   customerRegion?: string;
@@ -977,7 +978,7 @@ function Block(props: {
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
-      {props.alert && <p className="stub block-alert" role="status" data-testid="discovery-error">{props.alert}</p>}
+      {props.alert && <p className="stub block-alert" role="status" data-testid={props.variant === "new" ? "discovery-error" : "weak-match"}>{props.alert}</p>}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
