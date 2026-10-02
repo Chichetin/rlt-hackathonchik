@@ -1,6 +1,6 @@
 {
  "lot": "5903085",
- "saved_at": "2026-10-02T04:34:23+00:00",
+ "saved_at": "2026-10-02T08:31:10+00:00",
  "query": {
   "query_id": "lot-5903085",
   "text": "Поставка  хозяйственных шкафов",
@@ -18,10 +18,10 @@
  "facets": {
   "history": {
    "kind": {
-    "manufacturer": 2,
-    "distributor": 32,
-    "dealer": 14,
-    "unknown": 152
+    "manufacturer": 22,
+    "distributor": 113,
+    "dealer": 31,
+    "unknown": 34
    },
    "entity": {
     "ul": 106,
@@ -30,13 +30,13 @@
    },
    "near": {
     "worked": 200,
-    "near": 166,
+    "near": 158,
     "any": 200
    }
   },
   "discovered": {
    "kind": {
-    "manufacturer": 8,
+    "manufacturer": 9,
     "distributor": 10,
     "dealer": 0,
     "unknown": 0
@@ -57,12 +57,110 @@
  "discovered": [
   {
    "counterparty": {
-    "inn": "4702005286",
+    "inn": "7817136210",
     "kpp": null,
+    "name": "ООО \"АФАГО+\"",
+    "kind": "manufacturer",
+    "region": null,
+    "status": null,
+    "is_msp": null,
+    "in_rnp": null,
+    "okved": [],
+    "contacts": {},
+    "stats": {},
+    "evidence": [
+     {
+      "source": "Минпромторг: реестр российской промышленной продукции (ГИСП)",
+      "url": "https://gisp.gov.ru/pp719v2/pub/prod/#inn=7817136210&reg=10737176",
+      "fetched_at": "2026-10-02T04:20:38.560706Z",
+      "fact": "ИНН 7817136210 — изготовитель продукции в реестре российской промышленной продукции Минпромторга",
+      "field": "inn",
+      "value": "7817136210"
+     },
+     {
+      "source": "Минпромторг: реестр российской промышленной продукции (ГИСП)",
+      "url": "https://gisp.gov.ru/pp719v2/pub/prod/#inn=7817136210&reg=10737176",
+      "fetched_at": "2026-10-02T04:20:38.560706Z",
+      "fact": "Наименование по реестру Минпромторга: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"АФАГО+\"",
+      "field": "name",
+      "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"АФАГО+\""
+     },
+     {
+      "source": "Минпромторг: реестр российской промышленной продукции (ГИСП)",
+      "url": "https://gisp.gov.ru/pp719v2/pub/prod/#inn=7817136210&reg=10737176",
+      "fetched_at": "2026-10-02T04:20:38.560706Z",
+      "fact": "ОГРН 1247800033920",
+      "field": "ogrn",
+      "value": "1247800033920"
+     },
+     {
+      "source": "Минпромторг: реестр российской промышленной продукции (ГИСП)",
+      "url": "https://gisp.gov.ru/pp719v2/pub/prod/#inn=7817136210&reg=10737176",
+      "fetched_at": "2026-10-02T04:20:38.560706Z",
+      "fact": "Производит: «Мебель промышленная, в том числе антистатическая (ESD): шкафы комбинированные» — ОКПД2 31.01.11, реестровая запись № 10737176, действует до 27.10.2030 (реестр российской промышленной продукции Минпромторга, ГИСП)",
+      "field": "product",
+      "value": "gisp.7817136210.product: Мебель промышленная, в том числе антистатическая (ESD): шкафы комбинированные"
+     },
+     {
+      "source": "Минпромторг: реестр российской промышленной продукции (ГИСП)",
+      "url": "https://gisp.gov.ru/pp719v2/pub/prod/#inn=7817136210&reg=10737176",
+      "fetched_at": "2026-10-02T04:20:38.560706Z",
+      "fact": "Роль — производитель: госреестр производителей (ГИСП) — запись реестра: «Мебель промышленная, в том числе антистатическая (ESD): шкафы комбинированные», ОКПД2 31.01.11, реестровая запись № 10737176 (реестр российской промышленной продукции Минпромторга, ПП РФ № 719)",
+      "field": "product",
+      "value": "gisp.7817136210.product: Мебель промышленная, в том числе антистатическая (ESD): шкафы комбинированные"
+     }
+    ]
+   },
+   "score": 0.762,
+   "components": [
+    {
+     "name": "product_fit",
+     "value": 1.0,
+     "weight": 0.762,
+     "explanation": "Производит этот товар по реестру Минпромторга (ГИСП): «Мебель промышленная, в том числе антистатическая (ESD): шкафы комбинированные», ОКПД2 31.01.11 — совпадает с ОКПД2 запроса 31.01.11.120; слова позиций в наименовании продукции: шкафы; реестровая запись № 10737176"
+    },
+    {
+     "name": "experience",
+     "value": 0.0,
+     "weight": 0.19,
+     "explanation": "В данных организаторов за 2024–2025 не встречается ни в одной закупке"
+    },
+    {
+     "name": "reliability",
+     "value": 0.0,
+     "weight": 0.0,
+     "explanation": "Изготовитель в реестре Минпромторга; статус в ЕГРЮЛ ещё не проверен (обогащение в очереди) — в score не входит"
+    },
+    {
+     "name": "activity",
+     "value": 0.0,
+     "weight": 0.048,
+     "explanation": "Участий в закупках в данных организаторов нет"
+    },
+    {
+     "name": "geography",
+     "value": 1.0,
+     "weight": 0.0,
+     "explanation": "По ИНН (код налогового органа 78; регион не подтверждён карточкой ФНС): Санкт-Петербург; ИНН заказчика выдан в Санкт-Петербурге — сравниваем с этим регионом"
+    },
+    {
+     "name": "price",
+     "value": 0.0,
+     "weight": 0.0,
+     "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
+    }
+   ],
+   "origin": "discovered",
+   "rank_reason": null
+  },
+  {
+   "counterparty": {
+    "inn": "4702005286",
+    "kpp": "470201001",
     "name": "ООО \"ИНТЕРЬЕР\"",
     "kind": "manufacturer",
     "region": "Ленинградская область",
-    "status": null,
+    "status": "Действующая организация",
     "is_msp": true,
     "in_rnp": null,
     "okved": [
@@ -74,7 +172,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "ИНН 4702005286 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4702005286"
@@ -82,7 +180,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "ОГРН 1024700532724",
       "field": "ogrn",
       "value": "1024700532724"
@@ -90,7 +188,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ИНТЕРЬЕР\"",
       "field": "name",
       "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ИНТЕРЬЕР\""
@@ -98,7 +196,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Основной ОКВЭД 31.01 — Производство мебели для офисов и предприятий торговли",
       "field": "okved",
       "value": "Производство мебели для офисов и предприятий торговли"
@@ -106,7 +204,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Роль — производитель: заявленный основной ОКВЭД 31.01 «Производство мебели для офисов и предприятий торговли» — обрабатывающее производство (раздел C, коды 10–32)",
       "field": "okved",
       "value": "row.4702005286.okved1: 31.01"
@@ -114,7 +212,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Реестр МСП: микропредприятие, включено 01.08.2016",
       "field": "msp",
       "value": "4702005286.category: 1"
@@ -122,10 +220,34 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Регион по реестру МСП: Ленинградская область (код 47)",
       "field": "region",
       "value": "4702005286.regioncode: 47"
+     },
+     {
+      "source": "ФНС «Прозрачный бизнес»",
+      "url": "https://pb.nalog.ru/search.html#queryAll=4702005286",
+      "fetched_at": "2026-10-02T06:58:39.573156Z",
+      "fact": "КПП 470201001",
+      "field": "kpp",
+      "value": "470201001"
+     },
+     {
+      "source": "ФНС «Прозрачный бизнес»",
+      "url": "https://pb.nalog.ru/search.html#queryAll=4702005286",
+      "fetched_at": "2026-10-02T06:58:39.573156Z",
+      "fact": "Адрес: 187402, ЛЕНИНГРАДСКАЯ ОБЛАСТЬ, Р-Н ВОЛХОВСКИЙ, Г. ВОЛХОВ, УЛ. ВОКЗАЛЬНАЯ, Д. 8",
+      "field": "address",
+      "value": "187402, ЛЕНИНГРАДСКАЯ ОБЛАСТЬ, Р-Н ВОЛХОВСКИЙ, Г. ВОЛХОВ, УЛ. ВОКЗАЛЬНАЯ, Д. 8"
+     },
+     {
+      "source": "ФНС «Прозрачный бизнес»",
+      "url": "https://pb.nalog.ru/search.html#queryAll=4702005286",
+      "fetched_at": "2026-10-02T06:58:39.573156Z",
+      "fact": "Статус: Действующая организация",
+      "field": "status",
+      "value": "Действующая организация"
      }
     ]
    },
@@ -147,7 +269,7 @@
      "name": "reliability",
      "value": 0.0,
      "weight": 0.0,
-     "explanation": "Состоит в реестре МСП; статус в ЕГРЮЛ ещё не проверен (обогащение в очереди) — в score не входит"
+     "explanation": "Статус по реестру ФНС: Действующая организация — в score не входит"
     },
     {
      "name": "activity",
@@ -168,7 +290,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   },
   {
    "counterparty": {
@@ -189,7 +312,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "ИНН 4703004736 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4703004736"
@@ -197,7 +320,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "ОГРН 1024700556715",
       "field": "ogrn",
       "value": "1024700556715"
@@ -205,7 +328,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Наименование: АКЦИОНЕРНОЕ ОБЩЕСТВО \"ПРЕДПРИЯТИЕ ГАЛЬВАНИК\"",
       "field": "name",
       "value": "АКЦИОНЕРНОЕ ОБЩЕСТВО \"ПРЕДПРИЯТИЕ ГАЛЬВАНИК\""
@@ -213,7 +336,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Основной ОКВЭД 31.01 — Производство мебели для офисов и предприятий торговли",
       "field": "okved",
       "value": "Производство мебели для офисов и предприятий торговли"
@@ -221,7 +344,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Роль — производитель: заявленный основной ОКВЭД 31.01 «Производство мебели для офисов и предприятий торговли» — обрабатывающее производство (раздел C, коды 10–32)",
       "field": "okved",
       "value": "row.4703004736.okved1: 31.01"
@@ -229,7 +352,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Реестр МСП: среднее предприятие, включено 10.08.2018",
       "field": "msp",
       "value": "4703004736.category: 3"
@@ -237,7 +360,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Регион по реестру МСП: Ленинградская область (код 47)",
       "field": "region",
       "value": "4703004736.regioncode: 47"
@@ -283,7 +406,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   },
   {
    "counterparty": {
@@ -304,7 +428,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "ИНН 4703131050 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4703131050"
@@ -312,7 +436,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "ОГРН 1154703002002",
       "field": "ogrn",
       "value": "1154703002002"
@@ -320,7 +444,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"КАТТИНГ\"",
       "field": "name",
       "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"КАТТИНГ\""
@@ -328,7 +452,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Основной ОКВЭД 31.01 — Производство мебели для офисов и предприятий торговли",
       "field": "okved",
       "value": "Производство мебели для офисов и предприятий торговли"
@@ -336,7 +460,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Роль — производитель: заявленный основной ОКВЭД 31.01 «Производство мебели для офисов и предприятий торговли» — обрабатывающее производство (раздел C, коды 10–32)",
       "field": "okved",
       "value": "row.4703131050.okved1: 31.01"
@@ -344,7 +468,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Реестр МСП: микропредприятие, включено 01.08.2016",
       "field": "msp",
       "value": "4703131050.category: 1"
@@ -352,7 +476,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:37:04.319841Z",
+      "fetched_at": "2026-10-02T04:35:20.920243Z",
       "fact": "Регион по реестру МСП: Ленинградская область (код 47)",
       "field": "region",
       "value": "4703131050.regioncode: 47"
@@ -398,7 +522,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   },
   {
    "counterparty": {
@@ -419,7 +544,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
+      "fetched_at": "2026-10-02T04:35:18.631791Z",
       "fact": "ИНН 4703175570 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4703175570"
@@ -427,7 +552,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
+      "fetched_at": "2026-10-02T04:35:18.631791Z",
       "fact": "ОГРН 1204700009425",
       "field": "ogrn",
       "value": "1204700009425"
@@ -435,7 +560,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
+      "fetched_at": "2026-10-02T04:35:18.631791Z",
       "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"НАУЧНО-ПРОИЗВОДСТВЕННОЕ ПРЕДПРИЯТИЕ КОНТАКТ ИННОВАЦИИ\"",
       "field": "name",
       "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"НАУЧНО-ПРОИЗВОДСТВЕННОЕ ПРЕДПРИЯТИЕ КОНТАКТ ИННОВАЦИИ\""
@@ -443,7 +568,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
+      "fetched_at": "2026-10-02T04:35:18.631791Z",
       "fact": "Основной ОКВЭД 31.01 — Производство мебели для офисов и предприятий торговли",
       "field": "okved",
       "value": "Производство мебели для офисов и предприятий торговли"
@@ -451,7 +576,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
+      "fetched_at": "2026-10-02T04:35:18.631791Z",
       "fact": "Роль — производитель: заявленный основной ОКВЭД 31.01 «Производство мебели для офисов и предприятий торговли» — обрабатывающее производство (раздел C, коды 10–32)",
       "field": "okved",
       "value": "row.4703175570.okved1: 31.01"
@@ -459,7 +584,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
+      "fetched_at": "2026-10-02T04:35:18.631791Z",
       "fact": "Реестр МСП: микропредприятие, включено 10.07.2020",
       "field": "msp",
       "value": "4703175570.category: 1"
@@ -467,7 +592,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
+      "fetched_at": "2026-10-02T04:35:18.631791Z",
       "fact": "Регион по реестру МСП: Санкт-Петербург (код 78)",
       "field": "region",
       "value": "4703175570.regioncode: 78"
@@ -513,122 +638,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
-  },
-  {
-   "counterparty": {
-    "inn": "4703181277",
-    "kpp": null,
-    "name": "ООО \"ДОЧИА МОБИЛИ\"",
-    "kind": "manufacturer",
-    "region": "Санкт-Петербург",
-    "status": null,
-    "is_msp": true,
-    "in_rnp": null,
-    "okved": [
-     "31.01"
-    ],
-    "contacts": {},
-    "stats": {},
-    "evidence": [
-     {
-      "source": "ФНС: единый реестр субъектов МСП",
-      "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
-      "fact": "ИНН 4703181277 — запись в едином реестре субъектов МСП",
-      "field": "inn",
-      "value": "4703181277"
-     },
-     {
-      "source": "ФНС: единый реестр субъектов МСП",
-      "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
-      "fact": "ОГРН 1214700002417",
-      "field": "ogrn",
-      "value": "1214700002417"
-     },
-     {
-      "source": "ФНС: единый реестр субъектов МСП",
-      "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
-      "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ДОЧИА МОБИЛИ\"",
-      "field": "name",
-      "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ДОЧИА МОБИЛИ\""
-     },
-     {
-      "source": "ФНС: единый реестр субъектов МСП",
-      "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
-      "fact": "Основной ОКВЭД 31.01 — Производство мебели для офисов и предприятий торговли",
-      "field": "okved",
-      "value": "Производство мебели для офисов и предприятий торговли"
-     },
-     {
-      "source": "ФНС: единый реестр субъектов МСП",
-      "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
-      "fact": "Роль — производитель: заявленный основной ОКВЭД 31.01 «Производство мебели для офисов и предприятий торговли» — обрабатывающее производство (раздел C, коды 10–32)",
-      "field": "okved",
-      "value": "row.4703181277.okved1: 31.01"
-     },
-     {
-      "source": "ФНС: единый реестр субъектов МСП",
-      "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
-      "fact": "Реестр МСП: микропредприятие, включено 10.03.2021",
-      "field": "msp",
-      "value": "4703181277.category: 1"
-     },
-     {
-      "source": "ФНС: единый реестр субъектов МСП",
-      "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=78&npType=UL&okved1=31.01",
-      "fetched_at": "2026-10-01T14:36:58.546675Z",
-      "fact": "Регион по реестру МСП: Санкт-Петербург (код 78)",
-      "field": "region",
-      "value": "4703181277.regioncode: 78"
-     }
-    ]
-   },
-   "score": 0.762,
-   "components": [
-    {
-     "name": "product_fit",
-     "value": 1.0,
-     "weight": 0.762,
-     "explanation": "Основной ОКВЭД 31.01 «Производство мебели для офисов и предприятий торговли» совпадает с классом ОКПД2 запроса 31.01 — вероятно производитель (по ОКВЭД); совпадение по классу ОКВЭД (4 знака), не по товару"
-    },
-    {
-     "name": "experience",
-     "value": 0.0,
-     "weight": 0.19,
-     "explanation": "В данных организаторов за 2024–2025 не встречается ни в одной закупке"
-    },
-    {
-     "name": "reliability",
-     "value": 0.0,
-     "weight": 0.0,
-     "explanation": "Состоит в реестре МСП; статус в ЕГРЮЛ ещё не проверен (обогащение в очереди) — в score не входит"
-    },
-    {
-     "name": "activity",
-     "value": 0.0,
-     "weight": 0.048,
-     "explanation": "Участий в закупках в данных организаторов нет"
-    },
-    {
-     "name": "geography",
-     "value": 1.0,
-     "weight": 0.0,
-     "explanation": "Реестр МСП: Санкт-Петербург; ИНН заказчика выдан в Санкт-Петербурге — сравниваем с этим регионом"
-    },
-    {
-     "name": "price",
-     "value": 0.0,
-     "weight": 0.0,
-     "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
-    }
-   ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   },
   {
    "counterparty": {
@@ -649,7 +660,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ИНН 4704121055 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4704121055"
@@ -657,7 +668,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ОГРН 1264700008980",
       "field": "ogrn",
       "value": "1264700008980"
@@ -665,7 +676,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ТРИ Х\"",
       "field": "name",
       "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ТРИ Х\""
@@ -673,7 +684,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Основной ОКВЭД 46.65 — Торговля оптовая офисной мебелью",
       "field": "okved",
       "value": "Торговля оптовая офисной мебелью"
@@ -681,7 +692,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Роль — дистрибьютор: заявленный основной ОКВЭД 46.65 «Торговля оптовая офисной мебелью» — оптовая торговля",
       "field": "okved",
       "value": "row.4704121055.okved1: 46.65"
@@ -689,7 +700,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Реестр МСП: микропредприятие, включено 10.07.2026",
       "field": "msp",
       "value": "4704121055.category: 1"
@@ -697,7 +708,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Регион по реестру МСП: Ленинградская область (код 47)",
       "field": "region",
       "value": "4704121055.regioncode: 47"
@@ -743,7 +754,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   },
   {
    "counterparty": {
@@ -764,7 +776,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ИНН 4706069107 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4706069107"
@@ -772,7 +784,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ОГРН 1234700030795",
       "field": "ogrn",
       "value": "1234700030795"
@@ -780,7 +792,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ПРЕСТИЖ\"",
       "field": "name",
       "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ПРЕСТИЖ\""
@@ -788,7 +800,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Основной ОКВЭД 46.65 — Торговля оптовая офисной мебелью",
       "field": "okved",
       "value": "Торговля оптовая офисной мебелью"
@@ -796,7 +808,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Роль — дистрибьютор: заявленный основной ОКВЭД 46.65 «Торговля оптовая офисной мебелью» — оптовая торговля",
       "field": "okved",
       "value": "row.4706069107.okved1: 46.65"
@@ -804,7 +816,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Реестр МСП: микропредприятие, включено 10.11.2023",
       "field": "msp",
       "value": "4706069107.category: 1"
@@ -812,7 +824,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Регион по реестру МСП: Ленинградская область (код 47)",
       "field": "region",
       "value": "4706069107.regioncode: 47"
@@ -858,7 +870,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   },
   {
    "counterparty": {
@@ -879,7 +892,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ИНН 4706073431 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4706073431"
@@ -887,7 +900,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ОГРН 1244700000995",
       "field": "ogrn",
       "value": "1244700000995"
@@ -895,7 +908,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ЭЛЕВЕН\"",
       "field": "name",
       "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ЭЛЕВЕН\""
@@ -903,7 +916,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Основной ОКВЭД 46.65 — Торговля оптовая офисной мебелью",
       "field": "okved",
       "value": "Торговля оптовая офисной мебелью"
@@ -911,7 +924,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Роль — дистрибьютор: заявленный основной ОКВЭД 46.65 «Торговля оптовая офисной мебелью» — оптовая торговля",
       "field": "okved",
       "value": "row.4706073431.okved1: 46.65"
@@ -919,7 +932,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Реестр МСП: микропредприятие, включено 10.02.2024",
       "field": "msp",
       "value": "4706073431.category: 1"
@@ -927,7 +940,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Регион по реестру МСП: Ленинградская область (код 47)",
       "field": "region",
       "value": "4706073431.regioncode: 47"
@@ -973,7 +986,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   },
   {
    "counterparty": {
@@ -994,7 +1008,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ИНН 4707049495 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4707049495"
@@ -1002,7 +1016,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ОГРН 1234700003713",
       "field": "ogrn",
       "value": "1234700003713"
@@ -1010,7 +1024,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ЦКО-ЛАБ\"",
       "field": "name",
       "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ЦКО-ЛАБ\""
@@ -1018,7 +1032,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Основной ОКВЭД 46.65 — Торговля оптовая офисной мебелью",
       "field": "okved",
       "value": "Торговля оптовая офисной мебелью"
@@ -1026,7 +1040,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Роль — дистрибьютор: заявленный основной ОКВЭД 46.65 «Торговля оптовая офисной мебелью» — оптовая торговля",
       "field": "okved",
       "value": "row.4707049495.okved1: 46.65"
@@ -1034,7 +1048,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Реестр МСП: микропредприятие, включено 10.03.2023",
       "field": "msp",
       "value": "4707049495.category: 1"
@@ -1042,7 +1056,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Регион по реестру МСП: Ленинградская область (код 47)",
       "field": "region",
       "value": "4707049495.regioncode: 47"
@@ -1088,7 +1102,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   },
   {
    "counterparty": {
@@ -1109,7 +1124,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ИНН 4714017543 — запись в едином реестре субъектов МСП",
       "field": "inn",
       "value": "4714017543"
@@ -1117,7 +1132,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "ОГРН 1054700472430",
       "field": "ogrn",
       "value": "1054700472430"
@@ -1125,7 +1140,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Наименование: ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ОФИС - МЕБЕЛЬ\"",
       "field": "name",
       "value": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ОФИС - МЕБЕЛЬ\""
@@ -1133,7 +1148,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Основной ОКВЭД 46.65 — Торговля оптовая офисной мебелью",
       "field": "okved",
       "value": "Торговля оптовая офисной мебелью"
@@ -1141,7 +1156,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Роль — дистрибьютор: заявленный основной ОКВЭД 46.65 «Торговля оптовая офисной мебелью» — оптовая торговля",
       "field": "okved",
       "value": "row.4714017543.okved1: 46.65"
@@ -1149,7 +1164,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Реестр МСП: микропредприятие, включено 01.08.2016",
       "field": "msp",
       "value": "4714017543.category: 1"
@@ -1157,7 +1172,7 @@
      {
       "source": "ФНС: единый реестр субъектов МСП",
       "url": "https://rmsp.nalog.ru/search.html?mode=extended&region=47&npType=UL&okved1=46.65",
-      "fetched_at": "2026-10-01T14:37:05.862618Z",
+      "fetched_at": "2026-10-02T04:35:31.995901Z",
       "fact": "Регион по реестру МСП: Ленинградская область (код 47)",
       "field": "region",
       "value": "4714017543.regioncode: 47"
@@ -1203,7 +1218,8 @@
      "explanation": "Нет данных: в открытых источниках нет цен — в score не входит"
     }
    ],
-   "origin": "discovered"
+   "origin": "discovered",
+   "rank_reason": null
   }
  ]
 }

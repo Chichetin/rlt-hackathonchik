@@ -275,7 +275,24 @@ def test_four_letter_words_are_stems():
     # 4-letter words that name no product stay out, compared whole; 3 letters are still too short
     assert D.query_stems("мыло жидкое года типа штук цена при") == ["мыло", "жидко"]
     assert D.query_stems("годами") == ["годам"]  # a longer word is not a short stop word
-    assert D._stem("шкаф") == "шка"  # _stem is unchanged (PR #473 edits it); query_stems keeps the whole word
+    assert D._stem("шкаф") == "шка"  # _stem drops a letter of a short word; query_stems keeps a 4-letter one whole
+
+
+def test_plural_endings_are_cut_from_stems():
+    """#471: «шкафов» became «шкафо» and never met the registry's «Шкафы» (lot 5903085 got no ГИСП company)."""
+    for word, stem in {"шкафов": "шкаф", "столов": "стол", "картриджей": "картр", "принтеров": "принт",
+                       "мониторов": "монит", "ножей": "ноже", "папки": "папк", "бахилы": "бахил", "кресел": "кресе",
+                       "мебелями": "мебел",
+                       "шкафами": "шкаф", "дверей": "двер", "мягких": "мягк", "детских": "детск",
+                       "кроватях": "крова", "ручьев": "ручь", "прямых": "прям", "землях": "земл",
+                       "землями": "земл", "прилавках": "прила", "лот": "лот"}.items():
+        assert D._stem(word) == stem, word
+    assert D.query_stems("Поставка хозяйственных шкафов") == ["хозяй", "шкаф"]
+    assert D.shared_words(D.query_stems("шкафов металлических"), "Шкафы офисные МастерПром") == ["шкаф"]
+    # a word whose rest would be shorter than MIN_STEM is not a stem: «мнн», «при», «лот», «ов»
+    assert D.query_stems("при мнн лот ящиков дел") == ["ящик"]
+    # stop words are matched by the first five letters of the whole word, not by the cut stem
+    assert D.query_stems("материалов препаратов медицинских") == []
 
 
 def test_discover_keeps_the_inn_types_and_regions_of_the_block(gdir, cache, tmp_path, monkeypatch):

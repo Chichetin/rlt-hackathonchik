@@ -136,6 +136,16 @@ def labeled_rows(table: Sequence[dict[str, str]], labels: Sequence[dict[str, str
     return out
 
 
+def unlabeled_count(table: Sequence[dict[str, str]], labels: Sequence[dict[str, str]]) -> int:
+    """Table rows still waiting for a human 0/1: an `llm:*` label does not count as labeled (D-133, D-163)."""
+    done = {
+        ((r.get("query_id") or "").strip(), label_new._key(r))
+        for r in labels
+        if label_new._kind(r) == label_new.HUMAN and (r.get("label") or "").strip() in ("0", "1")
+    }
+    return sum(1 for r in table if (r["query_id"], label_new._key(r)) not in done)
+
+
 def score(exp: str, label_files: Sequence[Path]) -> int:
     labels = [r for p in label_files if p.exists() for r in label_new.read_labels(p)]
     if not labels:
@@ -149,7 +159,7 @@ def score(exp: str, label_files: Sequence[Path]) -> int:
     for mode in MODES:
         table = label_new.read_labels(table_path(mode))
         rows = labeled_rows(table, labels)
-        unlabeled = sum(1 for r in rows if (r.get("label") or "").strip() not in ("0", "1"))
+        unlabeled = unlabeled_count(table, labels)
         shown: dict[str, int] = {}
         for r in table:
             shown[r["query_id"]] = shown.get(r["query_id"], 0) + 1
