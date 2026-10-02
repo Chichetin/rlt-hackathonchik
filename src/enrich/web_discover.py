@@ -238,8 +238,11 @@ def lot_leads(lot: str, text: str, okpd_class: str, strong: int, *, okpd2: Seque
         timed_out = timed_out or (not offline and not ok)
         return ok
 
+    floor = int(cfg["min_strong"])
     for q in out.queries:
         if len(out.sites) >= max_sites:  # nothing more would be opened: do not pay for another answer
+            break
+        if not force and strong + len(out.leads) >= floor:  # topped up to min_strong (#558): no more paid queries
             break
         try:
             if live():

@@ -71,7 +71,7 @@ from src.sources.rmsp import MSP_CATEGORY
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 
-MAX_SHOWN = 10  # producers / distributors mixed at the top of the block; the strong count of the Yandex fallback
+MAX_SHOWN = 10  # producers / distributors mixed at the top of the block
 MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wholesale codes × 2 regions
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
@@ -526,15 +526,15 @@ def yandex_matches(
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """The paid fallback (#194, src/enrich/web_discover.py): Yandex → company site → INN → the road of a web lead.
 
-    Asked only when the free sources — the first MAX_SHOWN of the history block and every «Новые» found so far —
-    hold fewer strong candidates than `min_strong`. The lot of the per-lot ceiling is `query.query_id`. `deadline` —
+    Asked only when the free sources — every history candidate and every «Новые» found so far, after the legal
+    filters — hold fewer strong candidates than `min_strong` (#558: 5, topped up to it). The lot of the per-lot ceiling is `query.query_id`. `deadline` —
     the one of the whole discover(): after it Yandex and the sites are read from their caches only. Leads answer the
     first class of the query. A company already in `skip` (found by the registry or a lead file) is not repeated.
     Returns what `lead_matches` returns. `force` (#550, the button «Искать в реальном времени») — asked whatever the
     strong count is, the explanation says «найдена в реальном времени»; `fetch_card(inn)` — gets the ФНС card of a
     found INN that has none in the cache before the lead road, which shows only a company with a cached card.
     """
-    strong = 0 if force else web_discover.strong_count([*history[:MAX_SHOWN], *apply_legal(list(current))])
+    strong = 0 if force else web_discover.strong_count([*apply_legal(list(history)), *apply_legal(list(current))])
     fb = web_discover.lot_leads(query.query_id, query.text, classes[0], strong, okpd2=codes, cache=cache,
                                 offline=offline, deadline=deadline, force=force, client=client,
                                 site_client=site_client)

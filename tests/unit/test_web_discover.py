@@ -128,8 +128,8 @@ def test_strong_candidates_are_distinct_companies_with_fit_from_0_8():
 
 
 def test_off_without_the_human_ceilings_and_not_needed_with_enough_strong(monkeypatch):
-    assert W.needed(2) == (True, "нужен: сильных кандидатов из бесплатных источников 2 < 3")
-    assert W.needed(3)[0] is False and "не нужен" in W.needed(3)[1]
+    assert W.needed(4) == (True, "нужен: сильных кандидатов из бесплатных источников 4 < 5")
+    assert W.needed(5)[0] is False and "не нужен" in W.needed(5)[1]
     monkeypatch.delenv("YANDEX_MAX_PER_RUN")
     assert not W.enabled()
     api = Api()
@@ -216,16 +216,16 @@ def test_found_company_enters_new_through_the_lead_road(cache, tmp_path):
     assert sources == {pb_nalog.SOURCE, site.SOURCE} and check_counterparty(m.counterparty, cache.page_text) == []
     assert m.counterparty.contacts == {"phone": "+7 (812) 555-12-34", "email": "info@privivka.spb.ru"}
     (line,) = res.leads
-    assert line.startswith("Яндекс (запасной путь): нужен: сильных кандидатов из бесплатных источников 0 < 3")
+    assert line.startswith("Яндекс (запасной путь): нужен: сильных кандидатов из бесплатных источников 0 < 5")
     assert "уже в данных 1" in line and "ОКВЭД не подтвердил класс 1" in line and "в блок 1" in line
 
 
 def test_enough_strong_candidates_skip_yandex(cache, tmp_path):
     _warm(cache)
-    strong = [_fit(1.0, i) for i in ("7810400592", "7811777270", "7805336905")]
+    strong = [_fit(1.0, i) for i in ("7810400592", "7811777270", "7805336905", "7806602902", "7707049388")]
     res = _discover(cache, _processed(tmp_path, []), history=strong)
     assert res.matches == [] and res.leads == ["Яндекс (запасной путь): не нужен: сильных кандидатов из "
-                                                "бесплатных источников 3 ≥ 3"]
+                                                "бесплатных источников 5 ≥ 5"]
 
 
 def test_a_company_of_a_lead_file_is_not_repeated(cache, tmp_path, monkeypatch):
@@ -332,3 +332,21 @@ def test_live_search_without_the_client_says_it_is_not_configured(tmp_path, monk
 def test_live_search_without_a_class_is_refused(tmp_path):
     with pytest.raises(D.LiveOff, match="без кода ОКПД2"):
         D.live_search(Query(query_id="q", text="вакцины"), cache=SourceCache(tmp_path / "c.sqlite"), weights=WEIGHTS)
+
+
+def test_yandex_tops_up_to_min_strong_and_stops_paying(cache):
+    """#558: 4 strong of 5 → one site with an INN is enough: no further paid query once topped up to min_strong."""
+    api = Api()
+    fb = W.lot_leads("lot-1", LOT_TEXT, "21.20", 4, cache=cache, client=api.client(), site_client=_sites())
+    assert fb.used and fb.leads and len(api.queries) == 1
+    assert W.load_config()["min_strong"] == 5
+
+
+def test_history_strong_beyond_ten_counts_for_the_trigger(cache, tmp_path):
+    """#558: strong candidates of the whole history count, not only its first ten."""
+    _warm(cache)
+    weak = [_fit(0.3, i) for i in ("7801000012", "7801000020", "7801000037", "7801000044", "7801000051",
+                                   "4701000038", "7804428656", "7807032363", "7810400592", "4703173460")]
+    strong = [_fit(1.0, i) for i in ("7810400592", "7811777270", "7805336905", "7806602902", "7707049388")]
+    res = _discover(cache, _processed(tmp_path, []), history=[*weak, *strong])
+    assert res.leads == ["Яндекс (запасной путь): не нужен: сильных кандидатов из бесплатных источников 5 ≥ 5"]

@@ -843,7 +843,7 @@ def test_block_beyond_ten_keeps_every_candidate_above_min_score(tmp_path):
 
 def test_block_config_has_the_api_limits():
     cfg = D.block_config()
-    assert cfg["min_score"] == 0.45 and cfg["max_shown"] >= D.MAX_SHOWN
+    assert cfg["min_score"] == 0.0 and cfg["max_shown"] >= D.MAX_SHOWN  # #558: every found company is shown
     assert cfg["budget_s"] is None and cfg["max_requests"] is None and cfg["pages"] > 1
 
 
