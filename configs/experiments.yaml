@@ -125,8 +125,10 @@ S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — луч�
   ranker: null
 S-282-spell:     # #282: исправление раскладки и опечаток в запросе (с D-109 — дефолт продукта)
   spell: true
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}   # снят при дефолте D-103; с D-170 дефолт — R-long
 S-282-nospell:   # #282: запрос как введён — база замера S-282 (прогоны S-282-off-* сняты при spell: false в search.yaml)
   spell: false
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}   # снят при дефолте D-103; с D-170 дефолт — R-long
 # #361: абляция признака win_rate в обученном ранжировщике (без переобучения) — у 59 % поставщиков (только АИС ГЗ) он 1.0 по построению
 A361-no-winrate:
   ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate]}
