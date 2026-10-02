@@ -1,0 +1,355 @@
+{
+  "checked_at": "2026-10-02T12:03:12.507Z",
+  "browser": "153.0.8010.12",
+  "checks": [
+    {
+      "name": "7 main slides",
+      "passed": true
+    },
+    {
+      "name": "5 backup slides",
+      "passed": true
+    },
+    {
+      "name": "300 seconds of content",
+      "passed": true
+    },
+    {
+      "name": "No time outside the 300-second script",
+      "passed": true
+    },
+    {
+      "name": "No on-screen buttons or modes",
+      "passed": true
+    },
+    {
+      "name": "No internal source footers",
+      "passed": true
+    },
+    {
+      "name": "No bitmap UI screenshots in the deck",
+      "passed": true
+    },
+    {
+      "name": "s1/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s2/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s2/1: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s2/2: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s2/3: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s3/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s3/1: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s3/2: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s3/3: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s4/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s5/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s5/1: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s5/2: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s5/3: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s6/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s7/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "b1/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "b2/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "b3/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "b4/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "b5/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "S2 introduces supplier candidate pipeline",
+      "passed": true
+    },
+    {
+      "name": "s2: step 1",
+      "passed": true
+    },
+    {
+      "name": "s2: step 2",
+      "passed": true
+    },
+    {
+      "name": "s2: step 3",
+      "passed": true
+    },
+    {
+      "name": "s2: refresh preserves emphasis",
+      "passed": true
+    },
+    {
+      "name": "s3: step 1",
+      "passed": true
+    },
+    {
+      "name": "s3: step 2",
+      "passed": true
+    },
+    {
+      "name": "s3: step 3",
+      "passed": true
+    },
+    {
+      "name": "s3: refresh preserves emphasis",
+      "passed": true
+    },
+    {
+      "name": "Architecture step 1",
+      "passed": true
+    },
+    {
+      "name": "Architecture step 2",
+      "passed": true
+    },
+    {
+      "name": "Architecture step 3",
+      "passed": true
+    },
+    {
+      "name": "Architecture step 4",
+      "passed": true
+    },
+    {
+      "name": "Architecture step 5",
+      "passed": true
+    },
+    {
+      "name": "Filter step 1",
+      "passed": true
+    },
+    {
+      "name": "Filter step 2",
+      "passed": true
+    },
+    {
+      "name": "Filter step 3",
+      "passed": true
+    },
+    {
+      "name": "Old UI walkthrough removed",
+      "passed": true
+    },
+    {
+      "name": "Main route stops at final",
+      "passed": true
+    },
+    {
+      "name": "Down explicitly opens Q&A",
+      "passed": true
+    },
+    {
+      "name": "Arrow navigation to backup 2",
+      "passed": true
+    },
+    {
+      "name": "Arrow navigation to backup 3",
+      "passed": true
+    },
+    {
+      "name": "Arrow navigation to backup 4",
+      "passed": true
+    },
+    {
+      "name": "Arrow navigation to backup 5",
+      "passed": true
+    },
+    {
+      "name": "Up returns from Q&A after refresh",
+      "passed": true
+    },
+    {
+      "name": "Removed mode shortcuts have no UI",
+      "passed": true
+    },
+    {
+      "name": "Keyboard fullscreen",
+      "passed": true
+    },
+    {
+      "name": "1280×720: fits viewport",
+      "passed": true
+    },
+    {
+      "name": "1024×768: fits viewport",
+      "passed": true
+    },
+    {
+      "name": "2048×1180: fits viewport",
+      "passed": true
+    },
+    {
+      "name": "No JS errors",
+      "passed": true
+    },
+    {
+      "name": "No external requests",
+      "passed": true
+    }
+  ],
+  "layouts": [
+    {
+      "id": "s1",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s2",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s2",
+      "step": 1,
+      "issues": []
+    },
+    {
+      "id": "s2",
+      "step": 2,
+      "issues": []
+    },
+    {
+      "id": "s2",
+      "step": 3,
+      "issues": []
+    },
+    {
+      "id": "s3",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s3",
+      "step": 1,
+      "issues": []
+    },
+    {
+      "id": "s3",
+      "step": 2,
+      "issues": []
+    },
+    {
+      "id": "s3",
+      "step": 3,
+      "issues": []
+    },
+    {
+      "id": "s4",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s5",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s5",
+      "step": 1,
+      "issues": []
+    },
+    {
+      "id": "s5",
+      "step": 2,
+      "issues": []
+    },
+    {
+      "id": "s5",
+      "step": 3,
+      "issues": []
+    },
+    {
+      "id": "s6",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s7",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "b1",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "b2",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "b3",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "b4",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "b5",
+      "step": 0,
+      "issues": []
+    }
+  ],
+  "errors": [],
+  "network": []
+}

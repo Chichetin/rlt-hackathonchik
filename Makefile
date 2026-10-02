@@ -18,13 +18,13 @@ help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
 
 setup:             ## окружение строго по lockfile'ам + git-хуки
-	uv sync --frozen --extra pg
+	uv sync --frozen --extra pg --extra captcha
 	cd $(UI) && npm ci --no-fund --no-audit
 	cd $(UI) && npx playwright install chromium
 	git config core.hooksPath .githooks
 
 setup-ml:          ## + sentence-transformers/torch (CPU) для эмбеддингов
-	uv sync --frozen --extra pg --extra ml
+	uv sync --frozen --extra pg --extra ml --extra captcha
 
 models:            ## скачать эмбеддинг-модели в кеш HF (до площадки!)
 	bash scripts/download-models.sh

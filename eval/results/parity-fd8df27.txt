@@ -1,0 +1,4 @@
+uv run --frozen python -m src.eval.parity "parity-a-fd8df27" "parity-b-fd8df27"
+parity A=parity-a-fd8df27 (commit fd8df270) vs B=parity-b-fd8df27 (commit fd8df270) | part=dev | кейсов сравнено: 2000
+расхождений: 0 из 2000 (0.00%)
+PARITY: OK — выдачи совпали побитово (состав и порядок ИНН у каждого кейса)
