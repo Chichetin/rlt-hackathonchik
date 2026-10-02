@@ -56,7 +56,7 @@ CHECK_FACTOR = 4  # at most TOP × CHECK_FACTOR candidates of a block are checke
 # decisions 19–20 (IR630): «Новые» by the step of their basis (src.enrich.discover.STEP) — 1.0 / 0.8 up to TOP,
 # 0.6 (and 0.5, an additional OKVED of the class, decision 22) only while strong < MIN_STRONG, 0.4 never
 STRONG_FIT, WEAK_FIT, MIN_STRONG = 0.8, 0.5, 5
-NOT_CONNECTED = ("крупные компании вне МСП (#219)", "Yandex Search (#186)")
+NOT_CONNECTED = ("крупные компании вне МСП (#219)",)  # Yandex is connected: discover() → its fallback (#194, D-161)
 POOL_SOURCE = "пул МСП (выгрузка ФНС, #185)"
 BLOCKS = {"history": "История", "discovered": "Новые"}
 FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
@@ -444,7 +444,8 @@ def run(csv_dir: Path, out: Path, top: int = 10, offline: bool | None = None, mo
     from src.enrich import web_discover  # L3 from a tool (L4), lazily: `make predict` only
 
     lots = ts.lots
-    if not offline and web_discover.enabled():  # the paid fallback is on: its ceiling per run goes to thin lots first
+    # the paid fallback can go live: its ceiling per run goes to thin lots first (D-162); otherwise the order is kept
+    if not offline and web_discover.enabled() and not web_discover.yandex_search.offline():
         lots, line = web_discover.thin_first(ts.lots, lambda lot: lot.query.okpd2)
         log.info("predict: Яндекс (запасной путь) — %s", line)
     try:
