@@ -20,6 +20,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -38,14 +39,44 @@ TABLE = "names_e5_small"  # one table per model: vectors of different models are
 PASSAGE, QUERY = "passage: ", "query: "
 MAX_SEQ = 128  # tokens; p99 of a normalized name is 276 characters
 
+
+@dataclass(frozen=True)
+class Spec:
+    dim: int
+    table: str  # one table per model: vectors of different models are not comparable
+    query: str
+    passage: str
+
+
+# Models compared in #115 (src/eval/emb_bench.py); `embedding_model` in configs picks one (#98).
+SPECS = {
+    MODEL: Spec(DIM, TABLE, QUERY, PASSAGE),
+    "deepvk/USER-base": Spec(768, "names_user_base", QUERY, PASSAGE),
+    "intfloat/multilingual-e5-base": Spec(768, "names_e5_base", QUERY, PASSAGE),
+    "cointegrated/rubert-tiny2": Spec(312, "names_rubert_tiny2", "", ""),
+}
+
+
+def spec(model: str | None) -> Spec:
+    if (model or MODEL) not in SPECS:
+        raise ValueError(f"embedding_model {model!r} не поддерживается (есть: {', '.join(SPECS)})")
+    return SPECS[model or MODEL]
+
 Encoder = Callable[[list[str]], np.ndarray]
 
 
 def model_encoder(prefix: str = PASSAGE, name: str = MODEL) -> Encoder:
     # heavy (torch), optional extra: `make setup-ml`
-    from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
+    from sentence_transformers import SentenceTransformer, models  # pyright: ignore[reportMissingImports]
 
-    model = SentenceTransformer(name)  # CUDA if torch sees a GPU, else CPU
+    try:
+        model = SentenceTransformer(name)  # CUDA if torch sees a GPU, else CPU
+    except TypeError:
+        # USER-base keeps Normalize at the model root: sentence-transformers 6 reads the HF config.json into it
+        # and fails. The same pipeline by hand: Transformer -> mean pooling -> Normalize (#115).
+        tr = models.Transformer(name, max_seq_length=MAX_SEQ)
+        model = SentenceTransformer(modules=[tr, models.Pooling(tr.get_word_embedding_dimension(), "mean"),
+                                             models.Normalize()])
     model.max_seq_length = MAX_SEQ
     bs = 256 if model.device.type == "cuda" else 32  # CPU: small batches are faster (measured, D-033)
     log.info("модель %s на %s, batch %d", name, model.device, bs)
@@ -62,12 +93,14 @@ def _rate(done: int, started: float) -> float:
     return done / max(time.monotonic() - started, 1e-3)
 
 
-def ensure_table(conn: psycopg.Connection, data_schema: str = "data", vec_schema: str = "vec") -> None:
-    """Create `vec_schema.TABLE` if needed and add the new distinct texts of `data_schema.items`."""
-    t = sql.Identifier(vec_schema, TABLE)
+def ensure_table(conn: psycopg.Connection, data_schema: str = "data", vec_schema: str = "vec",
+                 model: str | None = None) -> None:
+    """Create the model's table in `vec_schema` if needed and add the new distinct texts of `data_schema.items`."""
+    sp = spec(model)
+    t = sql.Identifier(vec_schema, sp.table)
     conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(vec_schema)))
-    conn.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} (norm text PRIMARY KEY, emb vector({}))").format(t, DIM))
+    conn.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} (norm text PRIMARY KEY, emb vector({}))").format(t, sp.dim))
     norm = norm_sql(sql.Identifier("product_name"))
     conn.execute(sql.SQL("INSERT INTO {} (norm) SELECT DISTINCT {} FROM {} WHERE {} <> '' "  # '' never passes keyset
                          "ON CONFLICT DO NOTHING").format(t, norm, sql.Identifier(data_schema, "items"), norm))
@@ -100,39 +133,45 @@ def embed(conn: psycopg.Connection, encode: Encoder, data_schema: str = "data", 
     return {"total": total, "done": total - left}
 
 
-def ensure_hnsw(conn: psycopg.Connection, vec_schema: str = "vec") -> None:
+def ensure_hnsw(conn: psycopg.Connection, vec_schema: str = "vec", model: str | None = None) -> None:
+    table = spec(model).table
     conn.execute("SET maintenance_work_mem = '1GB'")
     conn.execute(sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} USING hnsw (emb vector_cosine_ops)")
-                 .format(sql.Identifier(f"{TABLE}_hnsw"), sql.Identifier(vec_schema, TABLE)))
+                 .format(sql.Identifier(f"{table}_hnsw"), sql.Identifier(vec_schema, table)))
 
 
-def nearest(vec_schema: str, q: np.ndarray, k: int, explain: bool = False) -> tuple[sql.Composed, list]:
+def nearest(vec_schema: str, q: np.ndarray, k: int, explain: bool = False,
+            table: str = TABLE) -> tuple[sql.Composed, list]:
     """(query, params): k nearest texts by cosine, with similarity; the HNSW index serves ORDER BY <=>."""
     v = _vec(q)
     query = sql.SQL("{}SELECT norm, 1 - (emb <=> %s::vector) AS sim FROM {} "
                     "ORDER BY emb <=> %s::vector LIMIT %s").format(sql.SQL("EXPLAIN " if explain else ""),
-                                                                   sql.Identifier(vec_schema, TABLE))
+                                                                   sql.Identifier(vec_schema, table))
     return query, [v, v, k]
 
 
-def export_missing(conn: psycopg.Connection, path: Path, vec_schema: str = "vec") -> int:
+def export_missing(conn: psycopg.Connection, path: Path, vec_schema: str = "vec", model: str | None = None,
+                   data_schema: str = "data") -> int:
+    ensure_table(conn, data_schema, vec_schema, model)  # a new model's table is filled from data.items first
     rows = conn.execute(sql.SQL("SELECT norm FROM {} WHERE emb IS NULL ORDER BY norm")
-                        .format(sql.Identifier(vec_schema, TABLE))).fetchall()
+                        .format(sql.Identifier(vec_schema, spec(model).table))).fetchall()
     pq.write_table(pa.table({"norm": [r[0] for r in rows]}), path)
     return len(rows)
 
 
-def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000) -> int:
-    """texts.parquet → vecs.parquet (norm, emb float16[DIM]); no database needed."""
+def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000, model: str | None = None) -> int:
+    """texts.parquet → vecs.parquet (norm, emb float16[dim of the model]); no database needed."""
     texts = pq.read_table(src, columns=["norm"]).column("norm").to_pylist()
-    schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), DIM))],
-                       metadata={"model": MODEL, "prefix": PASSAGE})
+    sp = spec(model)
+    schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), sp.dim))],
+                       metadata={"model": model or MODEL, "prefix": sp.passage})
     started = time.monotonic()
     with pq.ParquetWriter(dst, schema) as w:
         for i in range(0, len(texts), chunk):
             part = texts[i:i + chunk]
             emb = np.asarray(encode(part), dtype=np.float16).reshape(-1)
-            w.write_table(pa.table({"norm": part, "emb": pa.FixedSizeListArray.from_arrays(emb, DIM)}, schema=schema))
+            arr = pa.FixedSizeListArray.from_arrays(emb, sp.dim)
+            w.write_table(pa.table({"norm": part, "emb": arr}, schema=schema))
             done = i + len(part)
             rate = _rate(done, started)
             left = (len(texts) - done) / rate / 60
@@ -141,17 +180,19 @@ def encode_file(src: Path, dst: Path, encode: Encoder, chunk: int = 20_000) -> i
 
 
 def import_file(conn: psycopg.Connection, path: Path, data_schema: str = "data", vec_schema: str = "vec",
-                batch_size: int = 20_000) -> int:
+                batch_size: int = 20_000, model: str | None = None) -> int:
     """Fill rows still without a vector from vecs.parquet; returns the number of rows updated.
     Works on a fresh database too: the table is created from `data_schema.items` first."""
     meta = pq.read_schema(path).metadata or {}
     got = {k.decode(): v.decode() for k, v in meta.items() if k in (b"model", b"prefix")}
-    if got != {"model": MODEL, "prefix": PASSAGE}:
-        raise ValueError(f"{path}: векторы другой модели или префикса {got}, нужно {MODEL!r} и {PASSAGE!r}")
-    ensure_table(conn, data_schema, vec_schema)
-    conn.execute(sql.SQL("CREATE TEMP TABLE IF NOT EXISTS import_vecs (norm text, emb vector({}))").format(DIM))
+    name, sp = model or MODEL, spec(model)
+    if got != {"model": name, "prefix": sp.passage}:
+        raise ValueError(f"{path}: векторы другой модели или префикса {got}, нужно {name!r} и {sp.passage!r}")
+    ensure_table(conn, data_schema, vec_schema, model)
+    conn.execute("DROP TABLE IF EXISTS import_vecs")  # its dim is the model's
+    conn.execute(sql.SQL("CREATE TEMP TABLE import_vecs (norm text, emb vector({}))").format(sp.dim))
     update = sql.SQL("UPDATE {} t SET emb = i.emb FROM import_vecs i WHERE t.norm = i.norm AND t.emb IS NULL").format(
-        sql.Identifier(vec_schema, TABLE))
+        sql.Identifier(vec_schema, sp.table))
     pf = pq.ParquetFile(path)
     updated, seen, started = 0, 0, time.monotonic()
     with conn.cursor() as cur:
@@ -159,7 +200,7 @@ def import_file(conn: psycopg.Connection, path: Path, data_schema: str = "data",
         # a rerun keeps what is done: it reads the whole file again but changes only rows with emb IS NULL.
         for batch in pf.iter_batches(batch_size=batch_size):
             cur.execute("TRUNCATE import_vecs")
-            emb = batch.column("emb").flatten().to_numpy().reshape(-1, DIM).astype(np.float32)
+            emb = batch.column("emb").flatten().to_numpy().reshape(-1, sp.dim).astype(np.float32)
             with cur.copy("COPY import_vecs (norm, emb) FROM STDIN") as cp:
                 for norm, v in zip(batch.column("norm").to_pylist(), emb, strict=True):
                     cp.write_row((norm, _vec(v)))
@@ -181,11 +222,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--encode", type=Path, help="encode this texts parquet (no database) into --out")
     ap.add_argument("--out", type=Path, default=Path("vecs.parquet"))
     ap.add_argument("--import", dest="import_", type=Path, help="fill missing vectors from this parquet")
+    ap.add_argument("--model", default=MODEL, choices=sorted(SPECS),
+                    help="model of --export / --encode / --import / --index (its own table)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # HF Hub HEAD requests on model load
     if args.encode:
-        print({"encoded": encode_file(args.encode, args.out, model_encoder()), "out": str(args.out)})
+        enc = model_encoder(prefix=spec(args.model).passage, name=args.model)
+        print({"encoded": encode_file(args.encode, args.out, enc, model=args.model), "out": str(args.out)})
         return 0
     url = os.environ.get("DATABASE_URL", "")
     if not url.startswith("postgres"):
@@ -193,13 +237,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     with psycopg.connect(pg_dsn(url), autocommit=True) as conn:
         if args.export:
-            print({"exported": export_missing(conn, args.export), "path": str(args.export)})
+            print({"exported": export_missing(conn, args.export, model=args.model), "path": str(args.export)})
             return 0
         if args.import_:
-            print({"imported": import_file(conn, args.import_)})
+            print({"imported": import_file(conn, args.import_, model=args.model)})
             if args.index:
-                ensure_hnsw(conn)
+                ensure_hnsw(conn, model=args.model)
             return 0
+        if args.model != MODEL:
+            print(f"{args.model}: в базе кодируется только {MODEL}; другая модель — --export → --encode → --import",
+                  file=sys.stderr)
+            return 2
         print(embed(conn, model_encoder(), batch=args.batch, limit=args.limit))
         if args.index:
             ensure_hnsw(conn)

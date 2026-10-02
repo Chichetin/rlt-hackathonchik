@@ -7,56 +7,87 @@
 # (проверка: tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs).
 # #218 (D-083): «География» с тех пор считается от региона заказчика — записи с geography > 0 сняты до #218 и
 # воспроизводятся на commit из файла результата; на HEAD различие ≤ 9 из 2000 dev-кейсов (ИНН заказчика 47…).
+# #198 (D-103): с 02.10 дефолт продукта — v2 + ранжировщик LightGBM (`ranker:` в search.yaml); записи, снятые
+# до него, выключают его явно (`ranker: null`), `v2` — формула D-077 без ранжировщика (eval/results/v2.json).
+v2:              # формула v2 (H-15f, D-077) без ранжировщика — база для R-198-*
+  ranker: null
 v1:              # прежний дефолт продукта (D-004, D-029) — воспроизводит E-002 / bm25-dev-v1
   weights: &v1_weights {product_fit: 0.35, experience: 0.2, reliability: 0.2, activity: 0.1, geography: 0.1, price: 0.05}
   options: &v1_options {fit_bm25_share: 0.6, experience_by: class, tie_break: inn}
+  ranker: null
 H-15a-03:        # инкумбент-сигнал в experience, доля 0.3
   weights: *v1_weights
   options: *v1_options
   signals: {incumbent: 0.3}
+  ranker: null
 H-15a-06:
   weights: *v1_weights
   options: *v1_options
   signals: {incumbent: 0.6}
+  ranker: null
 H-15b:           # веса H-15b (сумма доступных компонент 1.0)
   weights: {product_fit: 0.5, experience: 0.25, reliability: 0.0, activity: 0.15, geography: 0.1, price: 0.0}
   options: *v1_options
+  ranker: null
 H-15c:           # регион ИП без КПП или с КПП из нулей — по ИНН (signals.inn_region, #95)
   weights: *v1_weights
   options: *v1_options
   signals: {inn_region: 1.0}
+  ranker: null
 H-15d-tie:       # равные баллы — по BM25, а не по ИНН
   weights: *v1_weights
   options: {fit_bm25_share: 0.6, experience_by: class, tie_break: bm25}
+  ranker: null
 H-15e:           # experience по лотам с похожими позициями вместо группы ОКПД2
   weights: *v1_weights
   options: {fit_bm25_share: 0.6, experience_by: similar, tie_break: inn}
+  ranker: null
 H-15f:           # v2-кандидат: текст важнее, опыт — по похожим позициям, география не штрафует
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+  ranker: null
 H-15g:           # H-15f + инкумбент-сигнал 0.3
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
   signals: {incumbent: 0.3}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+  ranker: null
 H-15f-geo:       # проверка: H-15f с ненулевым весом географии и регионом ИП по ИНН
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+  ranker: null
+R-198-lr:        # обученный ранжировщик (#198): логистическая регрессия поверх кандидатов и компонент v2 (E-003)
+  ranker: {kind: logreg, model: models/ranker/R-198-lr.json}
+R-198-gbm:       # обученный ранжировщик (#198): LightGBM LambdaMART, объяснение — pred_contrib
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}
 H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (география от заказчика); не прогоняется — см. EXPERIMENTS
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+  ranker: null
 # Профили весов по типу закупки (#104, src/match/profiles.py, weights_by_type). Сравнение — по срезам type=.
 H-104b:          # H-15f + профиль: для товаров география 0.05 и регион ИП по ИНН, для услуг 0 (как в H-15f)
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
   weights_by_type: {goods: {geography: 0.05}}
+  ranker: null
 H-104g:          # дефолт D-077 + профиль: для товаров география 0.048 (= 0.05 / 1.05) и регион ИП по ИНН, для услуг 0
   signals: {inn_region: 1.0}
   weights_by_type: {goods: {geography: 0.048}}
+  ranker: null
 # #196: потолки насыщения experience поверх дефолта H-15f (в дефолте 20 лотов / 10 побед).
 H-196-sat100:
   options: {sat_lots: 100, sat_wins: 50}
+  ranker: null
 H-196-sat500:
   options: {sat_lots: 500, sat_wins: 250}
+  ranker: null
+# Ступень 2 сравнения моделей (#98, ступень 1 — #115): гибрид BM25 + векторы (RRF), остальное — продукт.
+S2-hyb-e5s:      # pg_hybrid, intfloat/multilingual-e5-small (vec.names_e5_small)
+  retriever: pg_hybrid
+  ranker: null
+S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — лучший гибрид ступени 1 на коротких запросах
+  retriever: pg_hybrid
+  embedding_model: deepvk/USER-base
+  ranker: null
