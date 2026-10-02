@@ -31,7 +31,7 @@ test("демо: запрос → два блока → карточка → фи
   await page.getByRole("button", { name: /^Новые/ }).click();
   await expect(discovered.locator(".item").first()).toBeVisible();
   await expect(discovered.locator(".why").first()).toContainText("Основной ОКВЭД");
-  await expect(discovered.locator(".hint")).toContainText("первые 10 действующих записей реестра МСП");
+  await expect(discovered.locator("p.hint")).toHaveCount(0); // #583: no caption under the block title
   await page.getByRole("button", { name: /^С опытом/ }).click();
   await expect(history.locator(".score").first()).toHaveText(/\d\.\d\d/);
   await expect(history.locator(".why").first()).not.toBeEmpty();
