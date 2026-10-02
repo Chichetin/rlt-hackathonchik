@@ -158,13 +158,15 @@ def test_defense_export_names_are_accepted(client, root):
     # the organizers' defense files (#596): «Предзащита_Извещения_N» + «Предзащита_Потоварка_N» (ТРУ)
     files = [{"name": "Предзащита_Извещения_4.csv", "text": _text(NOTICES)},
              {"name": "Предзащита_Потоварка_4.csv", "text": _text(ITEMS)},
-             {"name": "Предзащита_Поставщики_4.csv", "text": "lot_id;supplier_inn\n9001;7801000012\n"}]
+             {"name": "Предзащита_Поставщики_4.csv", "text": "lot_id;supplier_inn\n9001;7801000012\n"},
+             {"name": "Поставщики_по_извещениям_4.csv", "text": "lot_id;supplier_inn\n9001;7801000012\n"}]
     r = _upload(client, files)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["files"] == ["Предзащита_Извещения_4.csv", "Предзащита_Потоварка_4.csv"] and body["lots"] == 3
     assert body["items"][0]["okpd2"] == ["17.12.14.110"]
-    assert any("Предзащита_Поставщики_4.csv" in w and "не используется" in w for w in body["warnings"])
+    for name in ("Предзащита_Поставщики_4.csv", "Поставщики_по_извещениям_4.csv"):  # «Поставщики» first (D-065)
+        assert any(name in w and "не используется" in w for w in body["warnings"])
     assert sorted(p.name for p in (root / body["id"]).glob("*.csv")) == ["Извещения.csv", "ТРУ.csv"]
     assert _upload(client, [{"name": "Структура.csv", "text": "x"}]).status_code == 422  # «тру» inside a word
     assert _upload(client, [{"name": "Извещения1.csv", "text": _text(NOTICES)}]).status_code == 200  # a word's start
