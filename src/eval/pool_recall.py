@@ -13,7 +13,9 @@ the case: we pretend their history is unknown (leave-one-out). Then:
 - `winner@10`: in the top-10 of the block's rule (product_fit by channel — class 1.0, wholesale 0.6, an
   additional OKVED × `extra_okved`; ties by INN; producers and distributors in turn, as discover._mix);
 - `random_okved@10`: expectation for 10 random candidates of the same region and OKVED (exact, no sampling);
-- `random_region@10`: expectation for 10 random pool companies of the same region, any OKVED.
+- `random_region@10`: expectation for 10 random pool companies of the same region, any OKVED;
+- `random_cover`: expectation that as many random companies of the region as there are candidates contain the
+  winner — the baseline of `covered`: what the OKVED plan adds over a random set of the same size.
 
 The metric checks COMPLETENESS (does the pool contain the companies that really win procurements), not the
 precision of new companies: it complements the labelling #21 and the judge #82, it does not replace them.
@@ -22,7 +24,6 @@ precision of new companies: it complements the labelling #21 and the judge #82, 
 from __future__ import annotations
 
 import logging
-import math
 import os
 import time
 from collections.abc import Sequence
@@ -44,7 +45,7 @@ from src.match.store import processed_dir
 
 log = logging.getLogger(__name__)
 K = 10
-METRICS = ("in_pool", "in_region", "covered", "winner@10", "random_okved@10", "random_region@10")
+METRICS = ("in_pool", "in_region", "covered", "random_cover", "winner@10", "random_okved@10", "random_region@10")
 
 
 def pool_dir(cfg: dict) -> Path:
@@ -58,7 +59,10 @@ def hit_probability(population: int, winners: int, k: int = K) -> float:
         return 0.0
     if population - winners < k:
         return 1.0
-    return 1.0 - math.comb(population - winners, k) / math.comb(population, k)
+    none = 1.0  # C(N - w, k) / C(N, k) as a product over the w winners: exact, cheap for k in the thousands
+    for i in range(winners):
+        none *= (population - k - i) / (population - i)
+    return 1.0 - none
 
 
 @dataclass(frozen=True)
@@ -137,8 +141,8 @@ def _summary(rows: list[dict]) -> dict:
         vals = [r[name] for r in rows]
         lo, hi = bootstrap_ci(vals)
         out[name] = {"value": sum(vals) / len(vals) if vals else 0.0, "ci95": [lo, hi]}
-    rand = out["random_region@10"]["value"]
-    out["lift_vs_random_region"] = {"value": out["winner@10"]["value"] / rand if rand else None}
+    rand = out["random_cover"]["value"]
+    out["cover_lift"] = {"value": out["covered"]["value"] / rand if rand else None}  # OKVED plan vs random set
     return out
 
 
@@ -189,6 +193,7 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date) -> dict:
             "winner@10": float(bool(winners & set(top))),
             "random_okved@10": hit_probability(len(cands), n_cov),
             "random_region@10": hit_probability(in_region, n_reg),
+            "random_cover": hit_probability(in_region, n_reg, len(cands)),
         })
     groups: dict[str, list[dict]] = {}
     for r in rows:
