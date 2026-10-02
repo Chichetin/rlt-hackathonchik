@@ -40,6 +40,7 @@ try {
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await history.locator(".item").first().waitFor();
   await expect(page.locator("#results")).toHaveAttribute("aria-busy", "false");
+  await page.waitForTimeout(2500); // the menu animation of the route change must end before the frame
   await page.screenshot({ path: `${out}/02-results.png`, animations: "disabled" });
   await history.locator(".item").first().click();
   await page.getByRole("button", { name: /Открыть полную карточку/ }).click();

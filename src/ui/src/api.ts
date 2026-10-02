@@ -258,7 +258,7 @@ export function yesNo(v: boolean | null | undefined): string {
 
 // РНП ЕИС: «нет» не говорит, когда и как это проверено — показываем дату и источник из Evidence
 // (field="rnp", src/sources/eis_rnp.py), а не голое да/нет. Без Evidence in_rnp есть только как
-// None (strip_unverified, D-152): "не проверено".
+// None (strip_unverified, D-154): "не проверено".
 export function rnpLabel(cp: Pick<Counterparty, "in_rnp" | "evidence">): string {
   const ev = (cp.evidence ?? []).find((e) => e.field === "rnp");
   if (ev) return ev.fact;

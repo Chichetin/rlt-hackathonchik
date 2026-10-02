@@ -417,7 +417,7 @@ def test_rmsp_quick_search_has_its_own_longer_timeout_and_no_deadline(fake_time)
 
 
 def test_rnp_refusal_is_remembered_for_the_cooldown(fake_time):
-    # policy changed by #111 (D-152): enrich() asks РНП inside the worker's batch, so a refusal now pauses the host
+    # policy changed by #111 (D-154): enrich() asks РНП inside the worker's batch, so a refusal now pauses the host
     for status in (403, 429):
         eis_rnp.PACER.reset()
         with pytest.raises(eis_rnp.Blocked):

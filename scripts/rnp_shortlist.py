@@ -1,4 +1,4 @@
-"""РНП ЕИС on the demo lots (D-152): the shortlist for the РНП pass and the coverage of the cache.
+"""РНП ЕИС on the demo lots (D-154): the shortlist for the РНП pass and the coverage of the cache.
 
     uv run python scripts/rnp_shortlist.py 5903085 5875992 6050858 > shortlist.txt     # top-10 of each lot
     uv run python -m src.worker.prefetch --rnp --inns-file shortlist.txt                 # live, 1 INN/min

@@ -8,7 +8,7 @@ cache serves the rest. A pb captcha is never bypassed: enrich() falls back to rm
 stops, returning the task to the queue, only when no source answered (D-056).
 The suppliers come from the store search() reads (#293): Postgres in `make up`, ingest parquet in `make demo`.
 
-`--rnp` (D-152): РНП ЕИС for a shortlist (`--inns-file`, one INN per line, or the top-N). enrich() reads the РНП
+`--rnp` (D-154): РНП ЕИС for a shortlist (`--inns-file`, one INN per line, or the top-N). enrich() reads the РНП
 from the cache only — a live РНП request costs the 60 s Crawl-delay of zakupki.gov.ru, at most 1 INN/min — so this
 pass is the only place the worker side asks it live. It does not look at the enrich queue: an INN whose card task
 is already `done` is checked too.
@@ -114,7 +114,7 @@ def rnp_pass(inns: list[str], cache: SourceCache | None = None,
              check_fn: Callable[..., eis_rnp.RnpResult] | None = None,
              sleep: Callable[[float], None] = time.sleep, max_down: int = 3,
              progress_every: int = 10) -> dict[str, object]:
-    """Ask РНП ЕИС live for every INN of the shortlist (D-152), paced by eis_rnp (Crawl-delay 60 s).
+    """Ask РНП ЕИС live for every INN of the shortlist (D-154), paced by eis_rnp (Crawl-delay 60 s).
 
     Idempotent through the cache: an answer younger than eis_rnp.MAX_AGE_S is read, not asked again, so a rerun
     goes on where the last one stopped. A refusal (`Blocked`: 403/429, a page that is not the РНП search) stops the
@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--top", type=int, default=200)
     ap.add_argument("--pause", type=float, default=1.0, help="seconds between live source calls")
     ap.add_argument("--rnp", action="store_true",
-                    help="РНП ЕИС for the shortlist instead of the cards (1 INN/min, D-152)")
+                    help="РНП ЕИС for the shortlist instead of the cards (1 INN/min, D-154)")
     ap.add_argument("--inns-file", type=Path, default=None, help="the shortlist: one INN per line (default: top-N)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

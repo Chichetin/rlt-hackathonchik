@@ -9,7 +9,7 @@ literally occurs in the cached card text (src/enrich/evidence.py checks it; the 
 Organizers' data stats (`Counterparty.stats`) come from search(), not from here.
 
 After the ФНС card, `_merge_rnp` adds РНП ЕИС (`Counterparty.in_rnp`, src/sources/eis_rnp.py),
-D-152 (#111): a failure or a captcha never turns into a guessed fact, only a logged warning.
+D-154 (#111): a failure or a captcha never turns into a guessed fact, only a logged warning.
 The Электронный магазин СПб registry is NOT a source of enrich() or discover() (D-061: an expert's
 feedback after checkpoint 1 — АИС ГЗ is the primary source, "обогащение вашими данными" reads as
 circular to the jury); the estore.py client was removed (D-067).
@@ -224,7 +224,7 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
 
 
 def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) -> Counterparty:
-    """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-152, #111). `offline` is passed through
+    """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-154, #111). `offline` is passed through
     explicitly (never the `ENRICH_OFFLINE` environment variable) so the caller — not a process-wide
     flag — decides whether a live request (paced, Crawl-delay 60 s) may happen at all.
     `KeyError` (offline, nothing cached yet) is the normal state of a not-yet-checked INN — quiet.
@@ -261,13 +261,13 @@ def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counter
 
 def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
            open_data: bool = True, rnp_offline: bool = True) -> Counterparty:
-    """The base card (below), then РНП ЕИС merged in (D-152, #111), plus add_open_data(); `open_data=False` —
+    """The base card (below), then РНП ЕИС merged in (D-154, #111), plus add_open_data(); `open_data=False` —
     no ФНС open-data facts (the search loop over 200 candidates needs none: the page and the export add them to
     what they show). Электронный магазин СПб (its client was removed, D-067) is NOT a source here (D-061).
     `rnp_offline` governs the РНП step only and defaults to True — the cached РНП answer only, for every caller:
     API, search, worker, prefetch, discover, web leads. A live РНП request costs the 60 s Crawl-delay of
     zakupki.gov.ru (+ up to TIMEOUT_S), i.e. at most 1 INN/min, so it never rides along with the card:
-    the РНП pass of the shortlist (`python -m src.worker.prefetch --rnp`, D-152) fills the cache, or a caller
+    the РНП pass of the shortlist (`python -m src.worker.prefetch --rnp`, D-154) fills the cache, or a caller
     asks for it explicitly with `rnp_offline=False`."""
     cache = cache or SourceCache()
     cp = _enrich(inn, cache, offline, rnp_offline)
@@ -300,7 +300,8 @@ def _primary(inn: str, cache: SourceCache, offline: bool) -> Counterparty:
             return from_card(inn, fresh)
         try:
             return from_card(inn, pb_nalog.fetch_card(inn, cache))
-        except (pb_nalog.CaptchaRequired, pb_nalog.NotFound, TimeoutError, httpx.HTTPError) as e:
+        # ValueError: an answer pb.nalog.ru gives that we cannot read (a JSON `null`, #357) — the fallbacks, not a 500
+        except (pb_nalog.CaptchaRequired, pb_nalog.NotFound, TimeoutError, httpx.HTTPError, ValueError) as e:
             err = e
             log.warning("enrich %s: pb.nalog.ru не ответил (%s) — запасные источники", inn, e)
     fallback = _fallback(inn, cache, offline)

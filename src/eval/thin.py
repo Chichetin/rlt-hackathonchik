@@ -29,7 +29,7 @@ from pathlib import Path
 
 import duckdb
 
-from src.eval.run import RESULTS, git
+from src.eval.run import RESULTS, git, tree_dirty
 from src.eval.split import ROOT, split_config
 from src.match.index import processed_dir
 
@@ -160,7 +160,7 @@ def build_record(exp_id: str, groups: list[Group], t: Thresholds, cutoff: str, c
         "kind": "thin-categories",
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": git("rev-parse", "HEAD"),
-        "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
+        "dirty": tree_dirty(),
         "config": {"channel": channel, "period": f"publish_date < {cutoff} (cutoff of configs/split.yaml)",
                    "unit": "items.okpd2_l4 (XX.XX)", **asdict(t), "top_n": top_n},
         "data": source or {},

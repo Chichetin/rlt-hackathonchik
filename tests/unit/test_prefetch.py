@@ -113,7 +113,7 @@ def test_exit_code_nonzero_when_incomplete(eng, suppliers, monkeypatch):
         clear_stores()
 
 
-# --- РНП pass of the shortlist (D-152): enrich() reads РНП from the cache only, this pass fills it -------------
+# --- РНП pass of the shortlist (D-154): enrich() reads РНП from the cache only, this pass fills it -------------
 
 RNP_NEG = (Path(__file__).resolve().parents[1] / "fixtures" / "eis_rnp" / "inn_7804428656_no_results.html").read_text(
     encoding="utf-8")
