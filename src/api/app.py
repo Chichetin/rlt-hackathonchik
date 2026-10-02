@@ -16,6 +16,9 @@ remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_n
 worked | near | any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
+What the speller changed in the query (#282, layout or typos) is the X-Query-Corrected header: percent-encoded
+UTF-8 JSON `[[typed, searched], …]`, at most MAX_CORRECTIONS pairs — never the whole text (a notice is up to 20 000
+characters); `filters.spell = "off"` searches the query as typed.
 Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error header: the exception type when
 discover() failed (no message, no path), `source_unavailable` when a registry request was refused or failed and
 discover() went on with the rest, or `history_unchecked` when the companies were found but could not be checked
@@ -74,6 +77,7 @@ KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "
 ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or a natural person (DATA_DICTIONARY)
 # The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
 MAX_TEXT_CHARS = 20_000
+MAX_CORRECTIONS = 10  # X-Query-Corrected: pairs (typed, searched) shown to the user (#282)
 HISTORY_UNCHECKED = "history_unchecked"  # X-Discovery-Error: found, but novelty not checked (#287)
 SOURCE_UNAVAILABLE = "source_unavailable"  # X-Discovery-Error: a registry request was refused or failed (#287)
 
@@ -191,10 +195,9 @@ def _discovery_error(res: pipeline.Picked) -> str | None:
     return None
 
 
-def _found(query: Query, uncached: set[str] | None = None
-           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]], str | None]:
-    """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets;
-    X-Discovery-Error.
+def _found(query: Query, uncached: set[str] | None = None) -> pipeline.Picked:
+    """Every candidate of the query after the filters, best first (`matches`); why history is empty (#113,
+    `note`); X-Facets (`facets`); X-Discovery-Error and X-Query-Corrected come from it as well.
 
     The selection itself is src/match/pipeline.py — the same for make eval and make predict (#220).
     """
@@ -207,7 +210,7 @@ def _found(query: Query, uncached: set[str] | None = None
                                  "или база не отвечает") from e
     if uncached is not None:
         uncached.update(res.uncached)
-    return res.matches, res.note, res.facets, _discovery_error(res)
+    return res
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -236,11 +239,15 @@ def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
     uncached: set[str] = set()
-    matches, note, chips, discovery_error = _found(query, uncached)
+    res = _found(query, uncached)
+    matches, note, chips, discovery_error = res.matches, res.note, res.facets, _discovery_error(res)
     if note:
         response.headers["X-Search-Note"] = quote(note)
     if discovery_error:
         response.headers["X-Discovery-Error"] = discovery_error
+    if res.correction is not None:  # searched as corrected: the UI says so and offers the query as typed (#282)
+        pairs = [list(p) for p in res.correction.changes[:MAX_CORRECTIONS]]
+        response.headers["X-Query-Corrected"] = quote(json.dumps(pairs, ensure_ascii=False, separators=(",", ":")))
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
     response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
     if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
@@ -346,7 +353,7 @@ def api_enqueue(inn: str) -> EnqueueResult:
 
 @app.post("/api/export")
 def api_export(query: Query) -> StreamingResponse:
-    matches = _verified(_found(query)[0])
+    matches = _verified(_found(query).matches)
     res = SearchResponse(query=query, history=[m for m in matches if m.origin == "history"],
                          discovered=[m for m in matches if m.origin == "discovered"], stub=_is_stub())
     wb = Workbook()

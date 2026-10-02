@@ -1,4 +1,4 @@
-"""Reviews of a supplier from 2GIS, on demand (#234, D-109): `GET /api/reviews/{inn}`.
+"""Reviews of a supplier from 2GIS, on demand (#234, D-110): `GET /api/reviews/{inn}`.
 
 Called when the user asks for them in the card — never for a results page, never in the background: one
 supplier, at most a search and three reviews tabs of 2gis.ru (src/sources/gis2.py paces and caches them).

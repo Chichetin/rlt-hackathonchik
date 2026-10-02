@@ -121,17 +121,30 @@ export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
 // excludedLot: the loaded notice is in the data and was left out of its own results — X-Excluded-Lot (#249, F-13)
 // discoveryError: why «Новые» may be incomplete — X-Discovery-Error: an exception type or "history_unchecked" (#287)
+// corrections: what the server fixed in the query (layout / typos), [typed, searched] — X-Query-Corrected (#282)
 export type SearchPage = SearchResponse & {
   total: Totals; note?: string; facets?: Facets; context?: SearchContext; excludedLot?: string; discoveryError?: string;
+  corrections?: Array<[string, string]>;
 };
 
-function searchNote(r: Response): string | undefined {
-  const raw = r.headers.get("X-Search-Note");
+function searchNote(r: Response, header = "X-Search-Note"): string | undefined {
+  const raw = r.headers.get(header);
   if (!raw) return undefined;
   try {
     return decodeURIComponent(raw);
   } catch {
     return undefined; // malformed encoding: fall back to the general empty text
+  }
+}
+
+function corrections(r: Response): Array<[string, string]> | undefined {
+  const raw = searchNote(r, "X-Query-Corrected");
+  if (!raw) return undefined;
+  try {
+    const pairs = JSON.parse(raw);
+    return Array.isArray(pairs) && pairs.length ? (pairs as Array<[string, string]>) : undefined;
+  } catch {
+    return undefined; // malformed header: no note, the answer itself is fine
   }
 }
 
@@ -151,6 +164,7 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
     context: searchContext(r),
     excludedLot: r.headers.get("X-Excluded-Lot") ?? undefined,
     discoveryError: r.headers.get("X-Discovery-Error") ?? undefined,
+    corrections: corrections(r),
   };
 }
 

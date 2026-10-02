@@ -5,6 +5,7 @@ eval ranked bare search() (no enrichment, no hard filters — the slide was not 
 sees), predict wrote facts that never passed the Evidence check. Now all three call `pick()` and differ
 only in options:
 
+    spelling of the query                        layout and typos, config `spell` (src/match/speller.py, #282)
     search(k = CANDIDATES)                       organizers' history, scored (src/match/search.py)
       → enrichment from the cache                status, МСП, role, name — never the network here
       → block «Новые» (discover)                 optional: eval has no use for it (never relevant)
@@ -29,9 +30,10 @@ from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
-from src.match import fallback
+from src.match import fallback, speller
 from src.match import search as search_mod
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
+from src.match.index import get_index
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ class Picked:
     uncached: set[str] = field(default_factory=set)  # history INNs without a cached card (queue them)
     discovery: discover_mod.Discovery | None = None  # None — the block was not asked for or failed
     discovery_error: str | None = None  # the exception type when discover() failed
+    correction: speller.Correction | None = None  # the query was searched as corrected (#282)
 
     @property
     def history(self) -> list[CounterpartyMatch]:
@@ -76,10 +79,13 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
         uf = parse_filters(query.filters)
         if uf.only_msp or uf.kinds is not None:
             raise ValueError(f"{query.query_id}: фильтр МСП / роли в backtest — это факты кеша на сегодня (D-097)")
+    correction = _spelled(query, config)
+    if correction is not None:
+        query = query.model_copy(update={"text": correction.text})
     # `config` only when given: the product reads configs/search.yaml on every call (and tests stub search())
     kw = {"config": config, "weights": config.get("weights")} if config is not None else {}
     found = search_mod.search(query, k=search_mod.CANDIDATES, **kw)
-    out = Picked(matches=[], note=fallback.search_note())
+    out = Picked(matches=[], note=fallback.search_note(), correction=correction)
     candidates: list[CounterpartyMatch] | None = None  # «Новые» before the user filters, None — no discovery
     if not is_stub() and not backtest:
         discovered: list[CounterpartyMatch] = []
@@ -100,6 +106,25 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
     out.matches = shown
     out.facets = {"history": chip_facets((m for m in legal if m.origin == "history"), query), "discovered": new}
     return out
+
+
+def _spelled(query: Query, config: dict | None) -> speller.Correction | None:
+    """The query with its layout and typos fixed by the dictionary of the index it is searched in (#282).
+
+    On when the configuration says `spell: true` and the user did not ask for the query as typed
+    (`filters.spell = "off"`); None — nothing changed, off, or the speller failed (the search goes on as typed).
+    """
+    if is_stub() or str(query.filters.get("spell", "")).lower() == "off":
+        return None
+    try:
+        cfg = config if config is not None else search_mod.load_config()
+        if not cfg.get("spell", False):
+            return None
+        fixed = speller.for_index(get_index(None, query.as_of).path).correct(query.text)
+    except Exception:  # noqa: BLE001 — no index / a broken dictionary never breaks the search (data absent: search says so)
+        log.exception("speller: запрос %s ищется как введён", query.query_id)
+        return None
+    return fixed if fixed.changed else None
 
 
 def verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
