@@ -76,3 +76,28 @@ def test_backfill_adds_winner_metrics_without_touching_the_ranking(monkeypatch):
         W.add_winner_metrics(rec)
     with pytest.raises(ValueError, match="ranked"):
         W.add_winner_metrics({**rec, "per_query": [{"query_id": "q1"}]})
+
+
+def test_backfill_refuses_a_subset_of_cases_and_other_parts_and_keeps_slices(monkeypatch):
+    from src.eval import winner_backfill as W
+
+    cases = [_case("q1", {"A": 2}), _case("q2", {"A": 2})]
+    monkeypatch.setattr(W, "load_cases", lambda part, cfg: cases)
+    row = {"query_id": "q1", "recall@10": 1.0, "mrr": 1.0, "ndcg@10": 1.0, "channel": "ЭМ", "ranked": ["A"]}
+    rec = {"exp_id": "X", "part": "dev", "metrics": {}, "slices": {}, "per_query": [row]}  # q2 is missing
+    with pytest.raises(ValueError, match="не совпадают"):
+        W.add_winner_metrics(rec)
+    with pytest.raises(ValueError, match="только для dev и real"):
+        W.add_winner_metrics({**rec, "part": "holdout"})
+    full = {**rec, "per_query": [row, {**row, "query_id": "q2"}]}
+    out = W.add_winner_metrics(full)
+    assert out["slices"]["channel=ЭМ"]["metrics"]["winner@10"]["n"] == 2
+
+
+def test_summary_bootstrap_runs_over_cases_with_a_winner_only(monkeypatch):
+    base = {"recall@10": 0.0, "mrr": 0.0, "ndcg@10": 0.0}
+    rows = [{**base, "winner@10": 1.0}, {**base, "winner@10": None}, {**base, "winner@10": None}]
+    seen: list[list[float]] = []
+    monkeypatch.setattr(R, "bootstrap_ci", lambda vals, *a, **k: seen.append(list(vals)) or (0.0, 1.0))
+    m = R._summary(rows)["winner@10"]
+    assert m["value"] == 1.0 and m["n"] == 1 and [1.0] in seen  # None is skipped, not counted as 0
