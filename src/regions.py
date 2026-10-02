@@ -1,7 +1,8 @@
 """Regions of the product — one table instead of copies in match, enrich and sources (#292). Layer L0.
 
 A region is compared by strings everywhere (Query.region, Counterparty.region, the KPP / INN prefix): a copy
-that drifts silently changes «География» and the region filter. match, enrich and msp_dump read this table; the remaining "78"/"47" literals elsewhere are a follow-up of #292.
+that drifts silently changes «География» and the region filter. match, enrich and msp_dump read this table;
+the remaining "78"/"47" literals elsewhere are a follow-up of #292.
 Only СПб and ЛО are named (the customers of АИС ГЗ); any other code stays a code («регион 77»).
 """
 
