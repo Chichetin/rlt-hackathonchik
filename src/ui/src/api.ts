@@ -195,6 +195,15 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
   };
 }
 
+// #550: «Искать в реальном времени» — живой Яндекс-поиск новых поставщиков по закупке (POST /api/live-search).
+// 503 — живой поиск не настроен (нет ключа или потолков) или у закупки нет класса ОКПД2; текст причины — в detail.
+export type LiveResult = { matches: CounterpartyMatch[]; note: string };
+export async function liveSearch(q: Query): Promise<LiveResult> {
+  const r = await fetch("/api/live-search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(q) });
+  if (!r.ok) throw new Error(await detail(r));
+  return { matches: await r.json(), note: decodeURIComponent(r.headers.get("X-Live-Note") ?? "") };
+}
+
 // #242: who the customer is and what is bought, as the server decided it (X-Search-Context)
 export type SearchContext = {
   customer_region: string;

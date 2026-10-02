@@ -778,3 +778,23 @@ def test_facets_near_of_new_count_the_candidates(search_client, monkeypatch):
         matches=pool, candidates=pool, history_checked=True))
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
     assert json.loads(r.headers["X-Facets"])["discovered"]["near"] == {"worked": 1, "near": 2, "any": 4}
+
+
+def test_live_search_not_configured_is_a_503_with_the_reason(client, monkeypatch):
+    """#550: without the Yandex key or the human's ceilings the button says so instead of failing."""
+    monkeypatch.delenv("YANDEX_SEARCH_API_KEY", raising=False)
+    r = client.post("/api/live-search", json={"query_id": "q", "text": "вакцины", "okpd2": ["21.20.10.110"]})
+    assert r.status_code == 503 and r.json()["detail"].startswith("живой поиск не настроен")
+
+
+def test_live_search_returns_the_found_companies_and_the_note(client, monkeypatch):
+    from urllib.parse import unquote
+
+    from src.enrich import discover as discover_mod
+    found = CounterpartyMatch(counterparty=Counterparty(inn="7805772436", name="ООО"), score=0.5,
+                              origin="discovered", components=[])
+    monkeypatch.setattr(discover_mod, "live_search", lambda q: discover_mod.Live(matches=[found], note="Яндекс: ok"))
+    monkeypatch.setattr(app_mod, "_verified", lambda ms: ms)  # the Evidence check has its own tests
+    r = client.post("/api/live-search", json={"query_id": "q", "text": "вакцины", "okpd2": ["21.20.10.110"]})
+    assert r.status_code == 200 and [m["counterparty"]["inn"] for m in r.json()] == ["7805772436"]
+    assert unquote(r.headers["X-Live-Note"]) == "Яндекс: ok"

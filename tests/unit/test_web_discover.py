@@ -290,3 +290,45 @@ def test_min_strong_and_the_trigger_are_unchanged(monkeypatch):
     cfg = W.load_config()
     k = int(cfg["min_strong"])
     assert W.needed(k - 1, cfg)[0] is True and W.needed(k, cfg)[0] is False
+
+
+# --- #550: the button «Искать в реальном времени» ---------------------------------------------------------------
+
+
+def test_live_search_asks_whatever_the_strong_count_and_gets_a_missing_card(tmp_path, monkeypatch):
+    c = SourceCache(tmp_path / "sources.sqlite")  # no card of MAKER yet: the live search fetches it
+    c.put(pb_nalog.card_url(OTHER), _card(OTHER, "62.01", "Разработка компьютерного программного обеспечения"))
+    real = D.enrich
+    fetched: list[str] = []
+
+    def fake_enrich(inn, cache, **kw):  # the live ФНС request, as the cache would have it after it
+        if kw.get("offline") is False:
+            fetched.append(inn)
+            cache.put(pb_nalog.card_url(inn), _card(inn, "21.20", "Производство лекарственных препаратов"))
+        return real(inn, cache, **{**kw, "offline": True})
+
+    monkeypatch.setattr(D, "enrich", fake_enrich)
+    api = Api()
+    live = D.live_search(QUERY, cache=c, processed=_processed(tmp_path, [KNOWN]), weights=WEIGHTS,
+                         client=api.client(), site_client=_sites(), offline=False)
+    assert api.queries  # asked with no history at all: no trigger «< 3 strong»
+    assert MAKER in fetched
+    assert [m.counterparty.inn for m in live.matches] == [MAKER]
+    m = live.matches[0]
+    assert m.origin == "discovered"
+    assert m.components[0].explanation.startswith("Найдена в реальном времени в Яндекс Поиске по запросу")
+    assert site.SOURCE in {e.source for e in m.counterparty.evidence}
+    assert check_counterparty(m.counterparty, c.page_text) == []
+    assert live.note.startswith("Яндекс (в реальном времени): по кнопке «Искать в реальном времени»")
+
+
+def test_live_search_without_the_client_says_it_is_not_configured(tmp_path, monkeypatch):
+    monkeypatch.delenv("YANDEX_MAX_PER_RUN")
+    with pytest.raises(D.LiveOff, match="живой поиск не настроен"):
+        D.live_search(QUERY, cache=SourceCache(tmp_path / "c.sqlite"), weights=WEIGHTS,
+                      client=Api().client(), site_client=_sites())
+
+
+def test_live_search_without_a_class_is_refused(tmp_path):
+    with pytest.raises(D.LiveOff, match="без кода ОКПД2"):
+        D.live_search(Query(query_id="q", text="вакцины"), cache=SourceCache(tmp_path / "c.sqlite"), weights=WEIGHTS)

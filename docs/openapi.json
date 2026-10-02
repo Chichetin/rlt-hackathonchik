@@ -499,6 +499,55 @@
         }
       }
     },
+    "/api/live-search": {
+      "post": {
+        "summary": "Api Live Search",
+        "description": "The button «Искать в реальном времени» (#550): new suppliers of this purchase found by Yandex now\n(discover.live_search), without the trigger «< 3 strong» and without a deadline. The UI sends the query with the\nOKPD2 class «Новые» searched by. What happened — the X-Live-Note header, percent-encoded UTF-8.",
+        "operationId": "api_live_search_api_live_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Query"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CounterpartyMatch"
+                  },
+                  "type": "array",
+                  "title": "Response Api Live Search Api Live Search Post"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "живой поиск уже идёт — повторите позже"
+          },
+          "503": {
+            "description": "живой поиск не настроен (нет ключа или потолков Яндекса) или у закупки нет класса ОКПД2"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/lot/{ident}": {
       "get": {
         "summary": "Api Lot",

@@ -193,6 +193,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/live-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Api Live Search
+         * @description The button «Искать в реальном времени» (#550): new suppliers of this purchase found by Yandex now
+         *     (discover.live_search), without the trigger «< 3 strong» and without a deadline. The UI sends the query with the
+         *     OKPD2 class «Новые» searched by. What happened — the X-Live-Note header, percent-encoded UTF-8.
+         */
+        post: operations["api_live_search_api_live_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lot/{ident}": {
         parameters: {
             query?: never;
@@ -1195,6 +1217,53 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    api_live_search_api_live_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Query"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterpartyMatch"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description живой поиск уже идёт — повторите позже */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description живой поиск не настроен (нет ключа или потолков Яндекса) или у закупки нет класса ОКПД2 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -64,14 +64,14 @@ from src.match.index import processed_dir
 from src.match.store import Store, get_store, store_for
 from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_NAME
 from src.settings import get_settings
-from src.sources import bo_nalog, gisp, msp_dump, pb_nalog, rmsp, role, web_leads
+from src.sources import bo_nalog, gisp, msp_dump, pb_nalog, rmsp, role, web_leads, yandex_search
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 
-MAX_SHOWN = 10  # producers / distributors mixed at the top of the block; INNs sent to enrichment per query
+MAX_SHOWN = 10  # producers / distributors mixed at the top of the block; the strong count of the Yandex fallback
 MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wholesale codes × 2 regions
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
@@ -521,6 +521,8 @@ def yandex_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], history: Sequence[CounterpartyMatch],
     current: Sequence[CounterpartyMatch], cache: SourceCache, weights: dict[str, float], predicted: bool,
     store: Store, region: str, region_note: str | None, *, offline: bool, deadline: float | None,
+    force: bool = False, fetch_card: Callable[[str], object] | None = None, client: httpx.Client | None = None,
+    site_client: httpx.Client | None = None,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """The paid fallback (#194, src/enrich/web_discover.py): Yandex → company site → INN → the road of a web lead.
 
@@ -528,14 +530,29 @@ def yandex_matches(
     hold fewer strong candidates than `min_strong`. The lot of the per-lot ceiling is `query.query_id`. `deadline` —
     the one of the whole discover(): after it Yandex and the sites are read from their caches only. Leads answer the
     first class of the query. A company already in `skip` (found by the registry or a lead file) is not repeated.
-    Returns what `lead_matches` returns.
+    Returns what `lead_matches` returns. `force` (#550, the button «Искать в реальном времени») — asked whatever the
+    strong count is, the explanation says «найдена в реальном времени»; `fetch_card(inn)` — gets the ФНС card of a
+    found INN that has none in the cache before the lead road, which shows only a company with a cached card.
     """
-    strong = web_discover.strong_count([*history[:MAX_SHOWN], *apply_legal(list(current))])
+    strong = 0 if force else web_discover.strong_count([*history[:MAX_SHOWN], *apply_legal(list(current))])
     fb = web_discover.lot_leads(query.query_id, query.text, classes[0], strong, okpd2=codes, cache=cache,
-                                offline=offline, deadline=deadline)
+                                offline=offline, deadline=deadline, force=force, client=client,
+                                site_client=site_client)
+    head = f"Яндекс ({'в реальном времени' if force else 'запасной путь'}): {fb.reason}"
     if not fb.used:
-        return [], {}, [], f"Яндекс (запасной путь): {fb.reason}"
+        return [], {}, [], head
     leads = {lead.inn: lead for lead in fb.leads if lead.inn and lead.inn not in skip}
+    if fetch_card is not None:  # only a company the lead road could show: not in organizers' data, an allowed type
+        known = known_inns(list(leads), query.as_of, store) or set()
+        np_types = _np_types()
+        for inn in leads:
+            if inn in known or ("UL" if len(inn) == 10 else "IP") not in np_types:
+                continue
+            if cache.get(pb_nalog.card_url(inn)) is None:
+                try:
+                    fetch_card(inn)
+                except Exception:  # noqa: BLE001 — a card that fails stays «без карточки», the rest go on
+                    log.exception("живой поиск: карточка ФНС %s не получена", inn)
     found, relation, no_card, line = lead_matches(query, codes, classes, skip, cache, weights, predicted, store,
                                                   region, region_note, leads=leads)
     out: list[CounterpartyMatch] = []
@@ -543,13 +560,57 @@ def yandex_matches(
         s = fb.check(m.counterparty.inn or "")
         if s is None:
             continue
+        found_as = "Найдена в реальном времени в Яндекс Поиске" if force else "Найдена в Яндекс Поиске"
         comps = [c.model_copy(update={"explanation": c.explanation.replace(
-            "Найдена веб-поиском по товару", f"Найдена в Яндекс Поиске по запросу «{s.query}», ИНН указан на сайте "
+            "Найдена веб-поиском по товару", f"{found_as} по запросу «{s.query}», ИНН указан на сайте "
             f"{s.domain}")}) if c.name == "product_fit" else c for c in m.components]
         out.append(m.model_copy(update={"counterparty": web_discover.with_site(m.counterparty, s, cache),
                                         "components": comps}))
-    head = f"Яндекс (запасной путь): {fb.reason}"
     return out, relation, no_card, head + (f"; {line.removeprefix('веб-лиды: ')}" if line else "")
+
+
+class LiveOff(Exception):
+    """The live search cannot run: the Yandex client is off (no key or no ceilings) or the query has no class."""
+
+
+@dataclass
+class Live:
+    matches: list[CounterpartyMatch]
+    note: str  # what happened: the requests, the sites, the funnel of the lead road
+
+
+def live_search(query: Query, *, cache: SourceCache | None = None, processed: Path | None = None,
+                weights: dict[str, float] | None = None, client: httpx.Client | None = None,
+                site_client: httpx.Client | None = None, offline: bool | None = None) -> Live:
+    """The button «Искать в реальном времени» (#550): Yandex → company site → INN → the road of a web lead for this
+    purchase now, without the trigger «< min_strong strong» and without a deadline; a found INN without a cached
+    ФНС card gets it live. The class — the first OKPD2 class of the query (the UI sends the class «Новые» searched
+    by). Only the page of the site that states the INN and the ФНС card are facts; the result snippet never is.
+    LiveOff — the client is off or the query has no OKPD2 class."""
+    why = yandex_search.disabled_reason()
+    if why is not None:
+        raise LiveOff(f"живой поиск не настроен: {why}")
+    classes = okpd_classes(query.okpd2)
+    if not classes:
+        raise LiveOff("живой поиск по закупке без кода ОКПД2 невозможен: класс не определён")
+    cache = cache or SourceCache()
+    offline = offline_mode() if offline is None else offline
+    weights = weights if weights is not None else search_mod.load_config()["weights"]
+    store = store_for(processed)
+    target, target_note = search_mod.customer_region(query)
+    codes = [c.strip() for c in query.okpd2]
+
+    def card(inn: str) -> object:
+        return enrich(inn, cache, offline=offline, open_data=False)
+
+    found, _, no_card, line = yandex_matches(
+        query, codes, classes[:MAX_CLASSES], set(), (), (), cache, weights, False, store, target, target_note,
+        offline=offline, deadline=None, force=True, fetch_card=card, client=client, site_client=site_client)
+    note = line or ""
+    if no_card:
+        note += f"; без карточки ФНС не показаны {len(no_card)}"
+    log.info("живой поиск %s: %d компаний; %s", query.query_id, len(found), note)
+    return Live(matches=sorted(apply_filters(found, query), key=_order(set())), note=note)
 
 
 GISP_MARK = "реестру Минпромторга (ГИСП)"  # in product_fit of a product confirmed by the registry (#74)
@@ -1017,10 +1078,10 @@ def discover(
                  "; ".join(f"{m.counterparty.inn} {res.fit_new[m.counterparty.inn or ''].value:.2f}"
                            for m in res.matches if (m.counterparty.inn or "") in res.fit_new))
     if enqueue is not None:
-        for m in res.matches[:MAX_SHOWN]:  # the first screen only: rows 11+ are not queued (no flood of the registries)
+        for m in res.matches:  # every shown row gets its card (human decision 02.10: no cap of 10)
             if m.counterparty.inn in no_card:
                 enqueue(m.counterparty.inn)
-        for inn in lead_no_card[:MAX_SHOWN]:  # a lead is shown only with a card: get it for the next search
+        for inn in lead_no_card:  # a lead is shown only with a card: get it for the next search
             try:
                 enqueue(inn)
             except Exception:  # noqa: BLE001 — a dead queue does not empty the block

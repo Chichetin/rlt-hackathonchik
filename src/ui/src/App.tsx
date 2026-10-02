@@ -34,6 +34,7 @@ import {
   regionLabel,
   rnpLabel,
   search,
+  liveSearch,
   type SearchPage,
   STAT_LABEL,
   type Extra,
@@ -481,6 +482,9 @@ export function App() {
   const weightsRef = useRef(weights);
   weightsRef.current = weights;
   const [shown, setShown] = useState(PAGE);
+  // #550: the live Yandex search of this purchase — its state and the INNs it added to «Новые»
+  const [live, setLive] = useState<{ state: "idle" | "loading" | "done" | "error"; text: string; inns: Set<string> }>(
+    { state: "idle", text: "", inns: new Set() });
 
   // with local weights the whole candidate set (≤ ALL) is re-ranked here: load it once for the shown query
   const loadingAll = useRef(false);
@@ -535,6 +539,7 @@ export function App() {
       if (seq !== runSeq.current) return;
       setRes(r);
       setShown(PAGE);
+      setLive({ state: "idle", text: "", inns: new Set() });
       setShownQuery(q);
       setBase(b ?? r);
       setState("idle");
@@ -560,7 +565,29 @@ export function App() {
     }
   }
 
-  // the next page of the history block from the server, for the same query and filters
+  // #550: the live Yandex search of this purchase; the found companies go to the top of «Новые»
+  async function runLive() {
+    if (!res || !shownQuery) return;
+    const seq = runSeq.current;
+    const okpd2 = shownQuery.okpd2?.length ? shownQuery.okpd2 : res.discoveryClass?.classes ?? [];
+    setLive({ state: "loading", text: "", inns: live.inns });
+    try {
+      const found = await liveSearch({ ...shownQuery, okpd2 });
+      if (seq !== runSeq.current) return;
+      const known = new Set(res.discovered.map((m) => m.counterparty.inn));
+      const added = found.matches.filter((m) => m.counterparty.inn && !known.has(m.counterparty.inn));
+      const inns = new Set([...live.inns, ...added.map((m) => m.counterparty.inn as string)]);
+      setRes({ ...res, discovered: [...added, ...res.discovered], total: { ...res.total, discovered: res.total.discovered + added.length } });
+      setLive({ state: "done", inns, text: added.length
+        ? `Найдено в реальном времени: ${added.length}. ${found.note}`
+        : `Новых компаний не найдено. ${found.note}` });
+    } catch (e) {
+      if (seq !== runSeq.current) return;
+      setLive({ state: "error", text: e instanceof Error ? e.message : String(e), inns: live.inns });
+    }
+  }
+
+  // the next page of a block from the server, for the same query and filters
   async function showMore(group: "history" | "discovered" = "history") {
     if (!res || !shownQuery) return;
     const seq = runSeq.current;
@@ -1002,6 +1029,16 @@ export function App() {
             chip={res.discoveryClass?.predicted ? `ОКПД2 определён по тексту: ${okpd2Text(res.discoveryClass.classes, discoveryLabels)}` : undefined}
             rows={newRows}
             total={newTotal}
+            liveInns={live.inns}
+            action={
+              <div className="live-search" data-testid="live-search">
+                <button type="button" className="secondary" disabled={live.state === "loading"} onClick={() => void runLive()}
+                  title="Яндекс Поиск → сайт компании → ИНН на сайте → карточка ФНС; сниппет выдачи фактом не становится">
+                  {live.state === "loading" ? "Ищем в реальном времени…" : "Искать в реальном времени"}
+                </button>
+                {live.text && <p className={live.state === "error" ? "stub block-alert" : "hint"} role="status">{live.text}</p>}
+              </div>
+            }
             onMore={weights ? undefined : () => void showMore("discovered")}
             loadingMore={more}
             onOpen={selectResult}
@@ -1054,6 +1091,8 @@ function Block(props: {
   tag: string;
   customerRegion?: string;
   selectedKey?: string;
+  action?: React.ReactNode; // «Новые»: the button «Искать в реальном времени» (#550)
+  liveInns?: Set<string>; // «Новые»: companies the live search added (#550)
 }) {
   const reduced = useReducedMotion();
   return (
@@ -1065,6 +1104,7 @@ function Block(props: {
       <p className="hint">{props.hint}</p>
       {props.chip && <div className="chips block-chips"><span className="chip" data-testid="discovery-class">{props.chip}</span></div>}
       {props.alert && <p className="stub block-alert" role="status" data-testid={props.variant === "new" ? "discovery-error" : "weak-match"}>{props.alert}</p>}
+      {props.action}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
@@ -1086,6 +1126,7 @@ function Block(props: {
                   </span>
                   <span className="supplier-meta">
                     <RoleBadge kind={cp.kind} />
+                    {cp.inn && props.liveInns?.has(cp.inn) && <span className="chip live-found">найдено в реальном времени</span>}
                     <span>{regionLabel(cp)}{relationToCustomer(cp, props.customerRegion) && <> — {relationToCustomer(cp, props.customerRegion)}</>}</span>
                     <span className="supplier-inn"><SupplierId cp={cp} /></span>
                   </span>
