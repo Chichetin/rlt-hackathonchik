@@ -5,7 +5,7 @@ without key or captcha (research/SOURCES.md, #59). Commands:
 
     python -m src.sources.fns_opendata download   # 4 archives → data/external/fns_opendata/
     python -m src.sources.fns_opendata build      # streaming parse → data/processed/fns_opendata.parquet
-    python -m src.sources.fns_opendata lookup <inn>
+    python -m src.enrich.fns_lookup <inn>         # facts of an INN with the evidence check (moved, #294)
 
 XML (checked on the 25.09.2026 archives): `Файл/Документ[@ДатаСост]` → `СведНП[@НаимОрг, @ИННЮЛ]` +
 one dataset element: `СведССЧР[@КолРаб]` (sshr2019), `СведДохРасх[@СумДоход, @СумРасход]`
@@ -333,15 +333,9 @@ def main(argv: list[str]) -> int:
     if cmd == "build":
         build(force="--force" in argv)
         return 0
-    if cmd == "lookup" and len(argv) == 2:
-        from src.enrich.evidence import check_evidence
-
-        cache = SourceCache()
-        for e in lookup(argv[1], cache):
-            errors = check_evidence(e, cache.page_text)
-            print(f"{e.fact}\n  {e.source} | {e.url} | {e.fetched_at:%Y-%m-%d %H:%M} UTC | {e.field} = {e.value!r}"
-                  f" | проверка: {'OK' if not errors else errors}")
-        return 0
+    if cmd == "lookup":  # moved with its evidence check (a source does not import enrich, #294)
+        print("факты ИНН с проверкой: python -m src.enrich.fns_lookup <inn>", file=sys.stderr)
+        return 2
     print(__doc__)
     return 2
 
