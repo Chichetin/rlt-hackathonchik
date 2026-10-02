@@ -1,11 +1,11 @@
-"""enrich(inn): РНП ЕИС merged in (D-150, #111).
+"""enrich(inn): РНП ЕИС merged in (D-152, #111).
 
 Электронный магазин СПб is explicitly NOT a source of enrich() (D-061): nothing here touches
 its removed client (D-067).
 
 A live РНП request costs the 60 s Crawl-delay of zakupki.gov.ru, so enrich() reads the РНП from the cache only
 unless asked with `rnp_offline=False`: the worker, prefetch, the API and the search all get the cached answer, and
-the РНП pass of the shortlist (`python -m src.worker.prefetch --rnp`, D-150) fills that cache."""
+the РНП pass of the shortlist (`python -m src.worker.prefetch --rnp`, D-152) fills that cache."""
 
 from __future__ import annotations
 
@@ -158,7 +158,7 @@ def _zakupki_guard(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def test_enrich_of_the_worker_never_asks_rnp_live(pb_cache, monkeypatch):
-    """The worker and prefetch call `enrich(inn)`: the card may go live, РНП may not (60 s per INN, D-150)."""
+    """The worker and prefetch call `enrich(inn)`: the card may go live, РНП may not (60 s per INN, D-152)."""
     monkeypatch.delenv("ENRICH_OFFLINE", raising=False)
     asked = _zakupki_guard(monkeypatch)
     cp = enrich(UL, pb_cache)
@@ -215,7 +215,7 @@ def test_api_counterparty_never_reaches_zakupki(pb_cache, tmp_path, monkeypatch)
 
     def guard(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
         if "dishonestsupplier" in str(request.url):
-            pytest.fail("GET /api/counterparty must not reach zakupki.gov.ru (D-150, #111)")
+            pytest.fail("GET /api/counterparty must not reach zakupki.gov.ru (D-152, #111)")
         raise httpx.ConnectError("no other network expected in this test")
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guard)

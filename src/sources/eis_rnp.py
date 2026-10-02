@@ -19,7 +19,7 @@ the answer is None («not checked»), never False:
 Error, captcha, 403/429 and a page that is not a РНП search page never reach the answer: `_get`
 raises `Blocked` (or an HTTP error), and nothing is cached or turned into «not in РНП». A refusal
 (`Blocked`) also leaves the host alone for BLOCK_COOLDOWN_S (15 min): no request until then, a stale
-cached answer is still served (D-150, #111 — the РНП pass of a shortlist asks one INN after another).
+cached answer is still served (D-152, #111 — the РНП pass of a shortlist asks one INN after another).
 A network error or a timeout pauses the host for DOWN_COOLDOWN_S (90 s), so a dead host does not cost
 TIMEOUT_S on every next INN.
 
@@ -27,7 +27,7 @@ robots.txt: `Crawl-delay: 60` → at most one request per MIN_INTERVAL_S (60 s, 
 only raise it, never lower), blocking; for the
 final shortlist only. Pages go to SourceCache as is (Evidence values literally occur there);
 a cached answer older than MAX_AGE_S is refetched. `ENRICH_OFFLINE=1` — cache only; `enrich()`
-(D-150, #111) passes `offline` explicitly instead so the API (always offline for РНП) and the
+(D-152, #111) passes `offline` explicitly instead so the API (always offline for РНП) and the
 РНП pass (live) do not depend on process-wide environment state.
 """
 
@@ -60,7 +60,7 @@ NO_RESULTS = "Поиск не дал результатов"
 MSK = ZoneInfo("Europe/Moscow")  # the date in the fact is the one the user sees on site
 
 # A refusal (403/429, a page that is not a РНП search) raises Blocked and leaves the host alone for
-# BLOCK_COOLDOWN_S: the РНП pass (`prefetch --rnp`, D-150, #111) asks one INN after another, the next must not knock
+# BLOCK_COOLDOWN_S: the РНП pass (`prefetch --rnp`, D-152, #111) asks one INN after another, the next must not knock
 # again a minute later. The refusal is never cached. A network error or a timeout is not a refusal but the host is
 # down: DOWN_COOLDOWN_S (as rmsp), so a dead host does not cost TIMEOUT_S on every next INN. A 5xx is paced by the
 # Crawl-delay only. MIN_INTERVAL_S is read at every request (a test may override the module value).
@@ -170,7 +170,7 @@ def _get(client: httpx.Client, url: str) -> tuple[int, str]:
 def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None, *,
           offline: bool | None = None) -> CachedPage:
     """Cached RNP page. `offline=True` (None — by ENRICH_OFFLINE) — cache only, KeyError when not cached;
-    enrich() passes it explicitly (D-150) so no caller depends on process-wide state."""
+    enrich() passes it explicitly (D-152) so no caller depends on process-wide state."""
     cache = cache or SourceCache()
     url = search_url(inn)
     hit = cache.get(url, allow_stale=True)

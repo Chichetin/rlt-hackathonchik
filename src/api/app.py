@@ -337,7 +337,7 @@ def api_counterparty(inn: str) -> Counterparty:
     try:
         with nullcontext() if _answers_from_cache(inn) else guard.live_slots.take():
             # rnp_offline=True: a direct card lookup must not wait on the 60 s РНП Crawl-delay pause
-            # (research/SOURCES.md, D-150) — only the РНП pass `prefetch --rnp` asks it live.
+            # (research/SOURCES.md, D-152) — only the РНП pass `prefetch --rnp` asks it live.
             cp = enrich_mod.enrich(inn, rnp_offline=True)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e

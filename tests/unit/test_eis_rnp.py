@@ -371,7 +371,7 @@ def test_server_error_does_not_start_the_cooldown(live):
 
 
 def test_a_network_failure_pauses_the_host_briefly(live):
-    """D-150: a timeout or a dead connection is not a refusal, but a dead host must not cost TIMEOUT_S on every next
+    """D-152: a timeout or a dead connection is not a refusal, but a dead host must not cost TIMEOUT_S on every next
     INN: no request for DOWN_COOLDOWN_S (much shorter than the refusal pause), then the host is asked again."""
     calls: list[str] = []
 

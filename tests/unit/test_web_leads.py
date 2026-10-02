@@ -174,7 +174,7 @@ def test_warm_asks_only_new_leads_without_a_card_and_stops_on_a_refusal(leads_di
 
     monkeypatch.setattr(W, "enrich", card_only)
     assert W.warm(web_leads.load(), 10, 0) == 1 and asked == [NO_CARD]  # known and cached ones are not asked
-    assert rnp_flags == [True]  # a card warm-up never waits on the 60 s РНП Crawl-delay (D-150)
+    assert rnp_flags == [True]  # a card warm-up never waits on the 60 s РНП Crawl-delay (D-152)
 
 
 def test_warm_stops_at_the_first_refusal_but_skips_a_company_without_a_card(leads_dir, tmp_path, monkeypatch):
