@@ -20,3 +20,7 @@ B-bm25:          # порядок ретривера BM25 без компоне�
 N-pool-recall:   # #187: полнота пула «Новых» — история победителя скрыта, находит ли его пул МСП (src/eval/pool_recall.py)
   method: pool_recall
   extra_okved: 0.5        # product_fit за совпадение по дополнительному ОКВЭД — доля от основного (#77)
+N-pool-recall-ul: # #187: тот же замер на канале продукта сегодня — только основной ОКВЭД и только ЮЛ (как rmsp в discover)
+  method: pool_recall
+  main_only: true
+  entities: [ЮЛ]

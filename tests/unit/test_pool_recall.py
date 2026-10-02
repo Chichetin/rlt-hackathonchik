@@ -85,3 +85,19 @@ def test_missing_pool_is_an_error(env: Path, monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setenv("POOL_DIR", str(tmp_path / "nowhere"))
     with pytest.raises(FileNotFoundError, match="make pool-load"):
         pool_recall.evaluate([_case("x", "7800000001", ["17.12"])], {}, CUTOFF)
+
+
+def test_product_channel_main_okved_and_ul_only(env: Path) -> None:
+    """N-pool-recall-ul: the additional-OKVED company is not a candidate; the region holds ЮЛ only."""
+    res = pool_recall.evaluate([_case("found", "7800000001", ["17.12.14.110"])],
+                               {"weights": {"product_fit": 1.0}, "main_only": True, "entities": ["ЮЛ"]}, CUTOFF)
+    (row,) = res["per_query"]
+    assert row["n_candidates"] == 2 and row["covered"] == 1.0  # the winner and the wholesaler; not 7800000004
+    res = pool_recall.evaluate([_case("found", "7800000001", ["17.12.14.110"])], {"entities": ["ИП"]}, CUTOFF)
+    assert res["per_query"][0]["n_region"] == 0 and res["per_query"][0]["covered"] == 0.0
+
+
+def test_lift_has_a_bootstrap_interval() -> None:
+    rows = [{"covered": c, "random_cover": 0.1} for c in (1.0, 0.0, 1.0, 1.0)]
+    out = pool_recall.lift(rows)
+    assert out["value"] == pytest.approx(7.5) and out["ci95"][0] <= 7.5 <= out["ci95"][1]

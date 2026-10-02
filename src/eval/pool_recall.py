@@ -10,12 +10,18 @@ Companies already in organizers' data before as_of are dropped as in the product
 the case: we pretend their history is unknown (leave-one-out). Then:
 
 - `in_pool` / `in_region` / `covered`: the winner is in the registry at all / in СПб+ЛО / among the candidates;
-- `winner@10`: in the top-10 of the block's rule (product_fit by channel — class 1.0, wholesale 0.6, an
-  additional OKVED × `extra_okved`; ties by INN; producers and distributors in turn, as discover._mix);
+- `winner@10`: in the top-10 of a MODEL of the block's rule (product_fit by channel — class 1.0, wholesale 0.6,
+  an additional OKVED × `extra_okved`; ties by INN; producers and distributors in turn, as discover._mix);
 - `random_okved@10`: expectation for 10 random candidates of the same region and OKVED (exact, no sampling);
 - `random_region@10`: expectation for 10 random pool companies of the same region, any OKVED;
 - `random_cover`: expectation that as many random companies of the region as there are candidates contain the
   winner — the baseline of `covered`: what the OKVED plan adds over a random set of the same size.
+
+How this differs from the product today (src/enrich/discover.py, rmsp.nalog.ru): the product asks the registry
+by the MAIN OKVED only, for ЮЛ only (DISCOVERY_NP_TYPES=UL), and shows the first page of the answer in the
+registry's order. `main_only: true` + `entities: [ЮЛ]` (N-pool-recall-ul) is the same channel on the pool; the
+default (N-pool-recall) is the pool as #77 plans to use it — additional OKVED and ИП included. The order of the
+registry page cannot be reproduced offline: `winner@10` is the modelled order, not the product's output.
 
 The metric checks COMPLETENESS (does the pool contain the companies that really win procurements), not the
 precision of new companies: it complements the labelling #21 and the judge #82, it does not replace them.
@@ -32,10 +38,11 @@ from datetime import date
 from pathlib import Path
 
 import duckdb
+import numpy as np
 
 from src.db.pool import POOL
 from src.enrich import discover
-from src.eval.metrics import bootstrap_ci
+from src.eval.metrics import BOOTSTRAP_N, BOOTSTRAP_SEED, bootstrap_ci
 from src.eval.split import EvalCase
 from src.ingest.load import suppliers_path
 from src.match import search as search_mod
@@ -51,6 +58,12 @@ METRICS = ("in_pool", "in_region", "covered", "random_cover", "winner@10", "rand
 def pool_dir(cfg: dict) -> Path:
     raw = os.environ.get("POOL_DIR") or cfg.get("pool_dir")
     return Path(raw) if raw else POOL
+
+
+def _shown(path: Path) -> str:
+    """The pool directory for the result file: relative to the checkout, never a home path."""
+    parts = path.as_posix().split("/")
+    return "/".join(parts[parts.index("data"):]) if "data" in parts else path.name
 
 
 def hit_probability(population: int, winners: int, k: int = K) -> float:
@@ -94,21 +107,25 @@ def rank(cands: Sequence[Candidate], target: str, weights: dict[str, float], ext
 class Pool:
     """The pool rows of the needed regions in memory: one scan of okved.parquet, then cheap lookups."""
 
-    def __init__(self, directory: Path, regions: Sequence[str]) -> None:
+    def __init__(self, directory: Path, regions: Sequence[str], *, entities: Sequence[str] | None = None,
+                 main_only: bool = False) -> None:
         for name in ("companies", "okved"):
             if not (directory / f"{name}.parquet").exists():
                 raise FileNotFoundError(f"нет {directory / name}.parquet — make pool-load (или POOL_DIR=…)")
         self.con = duckdb.connect()
         regs = ",".join(f"'{r}'" for r in regions if r.isdigit())
         c, o = (directory / "companies.parquet").as_posix(), (directory / "okved.parquet").as_posix()
+        listed = ",".join("'" + e.replace("'", "") + "'" for e in entities or ())
+        kinds = f" AND entity IN ({listed})" if listed else ""
         self.con.execute(f"CREATE TABLE co AS SELECT inn, entity, region_code FROM read_parquet('{c}')")
+        # candidates and the region population: only the entities and OKVED kinds the channel can return
         self.con.execute(f"CREATE TABLE ok AS SELECT code, inn, main, region_code FROM read_parquet('{o}') "
-                         f"WHERE region_code IN ({regs})")
+                         f"WHERE region_code IN ({regs}){' AND main' if main_only else ''} "
+                         f"AND inn IN (SELECT inn FROM co WHERE true{kinds})")
         self.entity = dict(self.con.execute("SELECT inn, entity FROM co").fetchall())
-        self.region = dict(self.con.execute(f"SELECT inn, region_code FROM co WHERE region_code IN ({regs})")
+        self.region = dict(self.con.execute(f"SELECT inn, region_code FROM co WHERE region_code IN ({regs}){kinds}")
                            .fetchall())
         self._plans: dict[tuple[tuple[str, str], ...], list[Candidate]] = {}
-
 
     def candidates(self, plan: Sequence[discover.Channel]) -> list[Candidate]:
         """Companies under the plan's OKVED prefixes, one per INN: main before additional, class before wholesale."""
@@ -141,9 +158,20 @@ def _summary(rows: list[dict]) -> dict:
         vals = [r[name] for r in rows]
         lo, hi = bootstrap_ci(vals)
         out[name] = {"value": sum(vals) / len(vals) if vals else 0.0, "ci95": [lo, hi]}
-    rand = out["random_cover"]["value"]
-    out["cover_lift"] = {"value": out["covered"]["value"] / rand if rand else None}  # OKVED plan vs random set
+    out["cover_lift"] = lift(rows)  # OKVED plan vs a random set of the same size
     return out
+
+
+def lift(rows: list[dict], n: int = BOOTSTRAP_N, seed: int = BOOTSTRAP_SEED) -> dict:
+    """mean(covered) / mean(random_cover) with a percentile bootstrap over cases (the same resamples for both)."""
+    cov = np.array([r["covered"] for r in rows], dtype=float)
+    rnd = np.array([r["random_cover"] for r in rows], dtype=float)
+    if not rows or rnd.sum() == 0:
+        return {"value": None, "ci95": [None, None]}
+    idx = np.random.default_rng(seed).integers(0, len(rows), size=(n, len(rows)))
+    boot = cov[idx].mean(axis=1) / np.maximum(rnd[idx].mean(axis=1), 1e-12)
+    return {"value": float(cov.mean() / rnd.mean()),
+            "ci95": [float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))]}
 
 
 def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date) -> dict:
@@ -153,7 +181,8 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date) -> dict:
     weights = cfg.get("weights") or search_mod.load_config()["weights"]  # the product weights, as discover()
     extra = float(cfg.get("extra_okved", 0.5))
     regions = sorted(set(REGION_CODE.values()))
-    pool = Pool(pool_dir(cfg), regions)
+    entities = cfg.get("entities")
+    pool = Pool(pool_dir(cfg), regions, entities=entities, main_only=bool(cfg.get("main_only")))
     known: dict[date | None, frozenset[str]] = {}
     known_in_region: dict[date | None, int] = {}
     skipped = {"no_winner": 0, "no_okpd2": 0}
@@ -203,7 +232,7 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date) -> dict:
     sizes = sorted(r["n_candidates"] for r in rows)
     return {
         "n_queries": len(rows), "skipped": skipped, "elapsed_s": round(time.monotonic() - started, 1),
-        "pool_dir": pool_dir(cfg).as_posix(), "regions": regions,
+        "pool_dir": _shown(pool_dir(cfg)), "regions": regions,
         "n_candidates_median": sizes[len(sizes) // 2] if sizes else 0,
         "metrics": _summary(rows),
         "slices": {n: {"n_queries": len(g), "metrics": _summary(g)} for n, g in sorted(groups.items())},
