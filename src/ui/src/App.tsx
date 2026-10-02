@@ -55,7 +55,7 @@ import { STATIC_DEMO } from "./staticApi";
 
 // #242: the filter is by the CUSTOMER's region (where the goods go, where the work is done), not the supplier's
 const CUSTOMER_REGIONS = ["Санкт-Петербург", "Ленинградская область"];
-const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Компьютерное оборудование"];
+const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Ноутбуки"]; // each predicts its own class from the text (D-141): no general category names
 
 function SearchIcon({ className = "" }: { className?: string }) {
   return (
@@ -391,6 +391,7 @@ export function App() {
   const [lotId, setLotId] = useState(saved.lotId ?? "");
   const [lot, setLot] = useState<Extra["lot"]>(saved.lot ?? null);
   const lotLabels = useOkpd2Labels(lot?.okpd2 ?? []);
+  const discoveryLabels = useOkpd2Labels(res?.discoveryClass?.predicted ? res.discoveryClass.classes : []);
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
@@ -981,14 +982,17 @@ export function App() {
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             alert={discoveryAlert(res.discoveryError)}
+            chip={res.discoveryClass?.predicted ? `ОКПД2 определён по тексту: ${okpd2Text(res.discoveryClass.classes, discoveryLabels)}` : undefined}
             rows={newRows}
             total={newTotal}
             onOpen={selectResult}
             empty={
               hiddenNew(res, base, shownQuery) ??
-              (res.query.okpd2?.length
+              (res.query.okpd2?.length || res.discoveryClass
                 ? "В открытых источниках новых компаний по этому запросу не найдено: реестр МСП ФНС не ответил, в нём нет компаний с подходящим ОКВЭД в СПб и области, либо все найденные уже есть в данных АИС ГЗ."
-                : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
+                : res.discoveryError // discover() failed before a class was resolved (#394): the code is not «unknown»
+                  ? "Поиск в открытых источниках не выполнен из-за ошибки — повторите запрос."
+                  : "Код ОКПД2 не указан и по тексту не определён — уточните запрос или загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
           </div>
@@ -1026,6 +1030,7 @@ function Block(props: {
   loadingMore?: boolean;
   empty?: string;
   alert?: string; // «Новые»: the block may be incomplete and why (#287); history: weak match with past lots (#281)
+  chip?: string; // «Новые»: the OKPD2 class was determined from the text, not given (#394)
   variant: "history" | "new";
   tag: string;
   customerRegion?: string;
@@ -1039,6 +1044,7 @@ function Block(props: {
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
+      {props.chip && <div className="chips block-chips"><span className="chip" data-testid="discovery-class">{props.chip}</span></div>}
       {props.alert && <p className="stub block-alert" role="status" data-testid={props.variant === "new" ? "discovery-error" : "weak-match"}>{props.alert}</p>}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>

@@ -73,6 +73,8 @@
 /* Group names/counts are already in the persistent group buttons. */
 .result-list-scroll .block > .block-tag, .result-list-scroll .block > h2 { display: none; }
 .result-list-scroll .block > .hint { margin: 0 0 18px; }
+/* «Новые»: the OKPD2 class was determined from the text (#394) — said right under the hint. */
+.result-list-scroll .block > .block-chips { margin: -10px 0 16px; }
 /* Relevance is a sequential blue-to-white scale, independent of supplier origin. */
 .relevance { background: var(--lc); color: #172338; padding: 5px 9px; border-radius: 7px; font-size: 12px; line-height: 1.25; }
 .relevance-high { color: #f5f8ff; }

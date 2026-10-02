@@ -87,6 +87,10 @@ class Settings:
     bm25_tokenizer = _Var("BM25_TOKENIZER", lambda v: v)  # overrides `tokenizer:` of configs/search.yaml
     # block «Новые» (src/match/new_fit.py, #77): off | shadow | on, overrides `mode:` of configs/discover.yaml
     discovery_new_fit = _Var("DISCOVERY_NEW_FIT", lambda v: (v or "").strip() or None)
+    # block «Новые» for a query WITHOUT OKPD2, by the class search() predicts from the text (P-02, D-141);
+    # on by default, 0 / false / off (any case, spaces around) — off
+    discovery_predicted_class = _Var("DISCOVERY_PREDICTED_CLASS",
+                                     lambda v: (v or "").strip().lower() not in {"0", "false", "off"})
     # EIS contract history (src/sources/eis_contracts.py, #244): cache ages, s; cards opened per check
     eis_contracts_search_max_age_s = _Var("EIS_CONTRACTS_SEARCH_MAX_AGE_S", lambda v: float(v or 7 * 24 * 3600))
     eis_contracts_card_max_age_s = _Var("EIS_CONTRACTS_CARD_MAX_AGE_S", lambda v: float(v or 30 * 24 * 3600))
@@ -97,6 +101,29 @@ class Settings:
     gis2_down_cooldown_s = _Var("GIS2_DOWN_COOLDOWN_S", lambda v: float(v or 90.0))  # pause after a timeout
     gis2_disabled = _Var("GIS2_DISABLED", lambda v: (v or "").strip().lower() in {"1", "true", "yes"})
     reviews_live_max = _Var("REVIEWS_LIVE_MAX", _limit(REVIEWS_LIVE_MAX_DEFAULT))  # reads of 2gis.ru at once, ≥ 1
+    # open sources (src/sources): pauses and timeouts, s — read once, at import of the source module
+    source_cache = _Var("SOURCE_CACHE", lambda v: Path(v or "cache/sources.sqlite"))  # as given: relative to the cwd
+    source_cache_ttl_s = _Var("SOURCE_CACHE_TTL_S", lambda v: int(v or 7 * 24 * 3600))
+    pb_min_interval_s = _Var("PB_MIN_INTERVAL_S", lambda v: float(v or 1.0))
+    pb_disabled = _Var("PB_DISABLED", lambda v: v == "1")  # 1 — pb.nalog.ru is not asked (captcha, D-052)
+    bo_min_interval_s = _Var("BO_MIN_INTERVAL_S", lambda v: float(v or 1.0))
+    bo_timeout_s = _Var("BO_TIMEOUT_S", lambda v: float(v or 5.0))
+    rmsp_min_interval_s = _Var("RMSP_MIN_INTERVAL_S", lambda v: float(v or 1.0))
+    rmsp_timeout_s = _Var("RMSP_TIMEOUT_S", lambda v: float(v or 3.0))
+    rmsp_quick_timeout_s = _Var("RMSP_QUICK_TIMEOUT_S", lambda v: float(v or 10.0))
+    rmsp_down_cooldown_s = _Var("RMSP_DOWN_COOLDOWN_S", lambda v: float(v or 90))
+    rnp_min_interval_s = _Var("RNP_MIN_INTERVAL_S", lambda v: float(v) if v else None)  # None — robots crawl-delay
+    rnp_max_age_s = _Var("RNP_MAX_AGE_S", lambda v: float(v or 24 * 3600))
+    fns_opendata_dir = _Var("FNS_OPENDATA_DIR", lambda v: Path(v or "data/external/fns_opendata"))  # as given
+    fns_opendata_parquet = _Var("FNS_OPENDATA_PARQUET", lambda v: Path(v) if v else None)  # None — DATA_PROCESSED_DIR
+    yandex_search_api_key = _Var("YANDEX_SEARCH_API_KEY", lambda v: (v or "").strip())
+    yandex_search_folder_id = _Var("YANDEX_SEARCH_FOLDER_ID", lambda v: (v or "").strip())
+    yandex_search_ttl_s = _Var("YANDEX_SEARCH_TTL_S", lambda v: int(float(v or 30 * 24 * 3600)))
+    yandex_search_daily_max = _Var("YANDEX_SEARCH_DAILY_MAX", lambda v: int(float(v or 100)))
+    yandex_search_min_interval_s = _Var("YANDEX_SEARCH_MIN_INTERVAL_S", lambda v: float(v or 1.0))
+    yandex_search_offline = _Var("YANDEX_SEARCH_OFFLINE", lambda v: v == "1")
+    yandex_search_cache = _Var("YANDEX_SEARCH_CACHE", lambda v: Path(v) if v else None)  # None — the main checkout's
+    yandex_search_region = _Var("YANDEX_SEARCH_REGION", lambda v: v)
     # worker (src/worker): unlike the two limits above this one always raised on garbage, a typo is not a default
     queue_stale_running_s = _Var("QUEUE_STALE_RUNNING_S", lambda v: int(v or QUEUE_STALE_RUNNING_DEFAULT_S))
 
@@ -111,6 +138,16 @@ class Settings:
 def env_names() -> tuple[str, ...]:
     """Every variable `Settings` reads, in declaration order."""
     return tuple(v.env_name for v in vars(Settings).values() if isinstance(v, _Var))
+
+
+def load_dotenv(path: Path) -> None:
+    """KEY=VALUE lines of a .env file into the environment; a variable already set wins. For CLIs only."""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        name, sep, value = line.strip().partition("=")
+        if sep and name and not name.startswith("#"):
+            os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
 
 
 def get_settings(environ: Mapping[str, str] | None = None) -> Settings:

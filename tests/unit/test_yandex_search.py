@@ -156,7 +156,7 @@ def test_dotenv_does_not_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     env = tmp_path / ".env"
     env.write_text('# comment\nYANDEX_SEARCH_API_KEY=from-file\nYANDEX_SEARCH_REGION="2"\n', encoding="utf-8")
     monkeypatch.delenv("YANDEX_SEARCH_REGION", raising=False)
-    ys._load_dotenv(env)
+    ys.load_dotenv(env)  # src/settings.py since #297; the CLI calls it
     assert ys.api_key() == "test-key"
     assert os.environ["YANDEX_SEARCH_REGION"] == "2"
 
