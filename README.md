@@ -36,7 +36,7 @@ make demo            # ставит зависимости по lockfile, соб
 | `make up` / `make down` | docker-compose: `api`, `worker`, `db` (Postgres) |
 | `make openapi` | `docs/openapi.json` и TS-типы UI из `src/contracts.py` |
 | `make setup-ml`, `make models` | эмбеддинги (torch CPU) и скачивание моделей |
-| `make data` | датасет организаторов из релиза `data-2026-10-01` этого репозитория: `data/processed` (parquet) и `data/raw` (CSV), со сверкой SHA256; `make data PART=processed` — только parquet |
+| `make data` | датасет организаторов из релиза `data-2026-10-02` этого репозитория: `data/processed` (parquet) и `data/raw` (CSV), со сверкой SHA256; `make data PART=processed` — только parquet |
 
 ## Как устроено
 
