@@ -84,6 +84,16 @@ UNAVAILABLE = {
     "reliability": "Нет данных: статус, РНП и расторжения ещё не подключены — в score не входит",
     "price": "Нет данных: в выгрузке нет цены контракта, только НМЦК — в score не входит",
 }
+# options.price scale, but nothing to compare (#585): the weight goes to the other criteria
+NO_PRICE = "Нет данных: НМЦК закупки не указана или у поставщика нет лотов с НМЦК — вес отдан другим критериям"
+
+
+def _without_price(w: dict[str, float]) -> dict[str, float]:
+    """Weights with the price share spread over the other criteria in proportion, so the score keeps its scale."""
+    total, wp = sum(w.values()), w.get("price", 0.0)
+    if wp <= 0 or total <= wp:
+        return w
+    return {k: 0.0 if k == "price" else round(v * total / (total - wp), 4) for k, v in w.items()}
 
 
 # Scoring options of experiments (#22, `options:` in configs/search.yaml or configs/experiments.yaml).
@@ -610,6 +620,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     store = get_store()
     as_of = query.as_of
     idx = get_index(store, as_of)
+    lot_date = as_of  # activity is counted up to the lot's date (#589)
+    if as_of is not None and idx.data_end is not None and as_of > idx.data_end:
+        as_of = None  # a lot after the data (defense export): its history is all of it — the prebuilt snapshot
     if idx.n_docs == 0:
         fallback.set_note(fallback.no_history(as_of))
         return []
@@ -661,7 +674,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     pool_wins = max((c.class_wins if by_class else c.n_wins) for c in cands)
     _fit_signals.set({"top_bm25": top_bm25, "tokens": len(set(tokens)), "retriever": cfg["retriever"],
                       "ladder": any(c.found_by for c in cands)})
-    ref = as_of or idx.data_end
+    ref = lot_date or idx.data_end
     last_day = as_of - timedelta(days=1) if as_of else idx.data_end  # history is strictly before as_of
     # on: every candidate needs its history (the score depends on it); shadow: nothing here — the weight is 0, the
     # order does not depend on it; shadow_reliability() fills only what the user sees (the page, the export rows)
@@ -688,23 +701,25 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             exp_rank = mix_incumbent(exp_rank, "", incumbent.get(c.inn, 0), shares["incumbent"])[0]
         exp_why += _profile_note(cp)
         if opts["activity_by"] == "similar" and c.last_similar is not None:
-            act, act_why = _recency(c.last_similar, ref, as_of, "Последнее участие в закупке с похожими позициями")
+            act, act_why = _recency(c.last_similar, ref, lot_date, "Последнее участие в закупке с похожими позициями")
         else:
-            act, act_why = _activity(cp, ref, as_of)
+            act, act_why = _activity(cp, ref, lot_date)
         price = _price(cp, query.budget, as_of, opts["price_decades"]) if opts["price"] == "scale" else None
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
         if profile_note:
             geo_why = f"{geo_why}; {profile_note}"
+        wc = _without_price(w) if price is None else w
+        no_price = NO_PRICE if opts["price"] == "scale" else UNAVAILABLE["price"]
         comps = [
-            _component("product_fit", fit, w, fit_why),
-            _component("experience", exp, w, exp_why),
-            _reliability("off" if rel_mode == "shadow" else rel_mode, history.get(c.inn), prior, last_day, w),
-            _component("price", price[0], w, price[1]) if price is not None else ScoreComponent(
-                name="price", value=0.0, weight=0.0, explanation=UNAVAILABLE["price"]),
-            _component("activity", act, w, act_why),
-            _component("geography", geo, w, geo_why),
+            _component("product_fit", fit, wc, fit_why),
+            _component("experience", exp, wc, exp_why),
+            _reliability("off" if rel_mode == "shadow" else rel_mode, history.get(c.inn), prior, last_day, wc),
+            _component("price", price[0], wc, price[1]) if price is not None else ScoreComponent(
+                name="price", value=0.0, weight=0.0, explanation=no_price),
+            _component("activity", act, wc, act_why),
+            _component("geography", geo, wc, geo_why),
         ]
         comps.sort(key=lambda x: list(w).index(x.name) if x.name in w else len(w))
         cp = cp.model_copy(update={"evidence": [*cp.evidence, Evidence(
