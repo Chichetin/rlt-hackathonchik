@@ -1,6 +1,6 @@
 # CI (#285, D-105): the same checks as `make check` and `make e2e`, in a clean environment.
-# Organizers' data is not needed: pytest skips tests without data/Postgres, e2e runs on fixtures
-# (tests/fixtures, src/ui/playwright.config.ts). Postgres service — #291.
+# Organizers' data is not needed: pytest skips tests without data, e2e runs on fixtures
+# (tests/fixtures, src/ui/playwright.config.ts). check-pg (#291) runs pytest against a live Postgres + pgvector.
 name: CI
 
 on:
@@ -46,6 +46,49 @@ jobs:
       # The target itself, not a copy of its list: a check added to `make check` lands here too.
       # -k: run every prerequisite and show all failures, not only the first.
       - run: make -k check
+
+  check-pg:
+    name: check-pg (pytest on Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16 # as docker-compose.yml (D-054)
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app # secret-scan: allow — throwaway service container of the job
+          POSTGRES_DB: app
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U app" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql://app:app@127.0.0.1:5432/app # secret-scan: allow
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false # the same key is saved by the check job
+      - run: uv sync --frozen --extra pg
+      # src/db/load.py does `INSTALL postgres` in DuckDB: the extension comes from extensions.duckdb.org once per lockfile.
+      - name: Cache DuckDB extensions
+        uses: actions/cache@v6
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-ext-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+      # The whole suite: a new Postgres test needs no change here.
+      - name: pytest with TEST_DATABASE_URL
+        run: uv run --frozen pytest -rs | tee pytest.log
+        shell: bash -o pipefail {0}
+        env:
+          PY_COLORS: "0" # plain text in pytest.log: the next step greps it
+      - name: No test skipped for a missing database
+        run: |
+          if grep -E 'SKIPPED.*TEST_DATABASE_URL' pytest.log; then
+            echo "::error::Postgres tests were skipped although TEST_DATABASE_URL is set"
+            exit 1
+          fi
 
   e2e:
     name: e2e (make e2e)
