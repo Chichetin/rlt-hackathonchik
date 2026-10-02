@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T10:21:29.322Z",
+  "checked_at": "2026-10-02T10:50:19.358Z",
   "checks": [
     {
       "name": "Opening contains case, solution, team; supplier belongs to the example",
@@ -10,15 +10,11 @@
       "passed": true
     },
     {
-      "name": "Main percentages agree with both saved reports",
+      "name": "Backup Recall values agree with reports",
       "passed": true
     },
     {
-      "name": "Percentage point delta agrees with pitch/facts.md (current R-long, one decimal)",
-      "passed": true
-    },
-    {
-      "name": "Displayed evaluation sample size agrees",
+      "name": "Backup evaluation sample size agrees",
       "passed": true
     },
     {
@@ -63,6 +59,10 @@
     },
     {
       "name": "No mouse-only controls",
+      "passed": true
+    },
+    {
+      "name": "User supplied winner rates are attributed and marked unverified",
       "passed": true
     },
     {

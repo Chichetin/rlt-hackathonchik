@@ -233,3 +233,21 @@
 #s5 .slide-deck{font-size:25px}
 #s6 .eval-boundary{font-size:20px}
 #s6 .eval-ci-note{font-size:17px}
+
+/* Winner comparison supplied by the team; provenance remains visible. */
+#s6 h1{font-size:66px}
+#s6 .winner-evaluation{display:block;max-width:1250px;margin-top:32px}
+#s6 .winner-evaluation .chart{width:100%}
+
+#s6 .winner-hill{margin:22px 0 0;width:100%;height:390px}
+.winner-hill svg{display:block;width:100%;height:100%;overflow:visible}
+.hill-grid{stroke:#ffffff18;stroke-width:1;fill:none}
+.hill-grid,.hill-guide{vector-effect:non-scaling-stroke}
+.hill-guide{stroke:#b6cff94a;stroke-dasharray:3 7;fill:none}
+.hill-zero{fill:#727a89;font:18px Mono}
+.hill-value{fill:#b1b9c8;font:48px Tektur}
+.hill-value-high{fill:#e4eeff;font-size:58px}
+.hill-label{fill:#c0c4ce;font:25px Arial,sans-serif}
+.hill-gain{fill:#c1d6ff;font:62px Tektur}
+.hill-unit{font-size:32px}.hill-gain-caption{fill:#939daf;font:21px Arial,sans-serif}
+#s6 .eval-boundary{margin-top:16px;padding-top:16px}

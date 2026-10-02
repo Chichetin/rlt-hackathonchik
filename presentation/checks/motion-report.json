@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T10:21:49.595Z",
+  "checked_at": "2026-10-02T10:49:30.547Z",
   "checks": [
     {
       "name": "Scenario animates on arrow",
@@ -58,7 +58,11 @@
       "passed": true
     },
     {
-      "name": "Metric labels remain measured values",
+      "name": "Uphill curve is drawn on entry",
+      "passed": true
+    },
+    {
+      "name": "Metric labels remain the attributed team values",
       "passed": true
     },
     {
