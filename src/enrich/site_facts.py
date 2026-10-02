@@ -6,8 +6,8 @@ of phrases — the phrase found is the basis shown to the user. The input is the
 
 Every fact is an Evidence with the page `url` and `fetched_at`, and it is returned only if
 src/enrich/evidence.py finds its value on that very page (`value_in_page`) — a value the page does not hold
-is never produced. Evidence has no field of its own for a phrase of the site, so a role phrase and a product
-name use `field="site"` (a text fact of the company's site: normalized substring, at least 6 characters).
+is never produced. Evidence has no field of its own for a phrase of the site, so a role phrase uses
+`field="site"` (a text fact of the company's site: normalized substring, at least 6 characters).
 
 Organisations only (152-ФЗ, CLAUDE.md): no names of people are extracted; a phone or an email on a line (or
 right under a line) that names a person or a position — «менеджер Иванов», «директор», «Петров П. П.» — is
