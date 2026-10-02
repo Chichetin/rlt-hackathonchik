@@ -66,5 +66,7 @@ S2-hyb-e5s:      # pg_hybrid, intfloat/multilingual-e5-small (vec.names_e5_small
 S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — лучший гибрид ступени 1 на коротких запросах
   retriever: pg_hybrid
   embedding_model: deepvk/USER-base
-S-282-spell:     # #282: исправление раскладки и опечаток в запросе поверх дефолта продукта
+S-282-spell:     # #282: исправление раскладки и опечаток в запросе (с D-107 — дефолт продукта)
   spell: true
+S-282-nospell:   # #282: запрос как введён — база замера S-282 (прогоны S-282-off-* сняты при spell: false в search.yaml)
+  spell: false

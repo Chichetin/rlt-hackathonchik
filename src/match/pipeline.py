@@ -30,11 +30,10 @@ from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
-from src.match import fallback
+from src.match import fallback, speller
 from src.match import search as search_mod
-from src.match import speller
-from src.match.index import get_index
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
+from src.match.index import get_index
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -122,9 +121,7 @@ def _spelled(query: Query, config: dict | None) -> speller.Correction | None:
         if not cfg.get("spell", False):
             return None
         fixed = speller.for_index(get_index(None, query.as_of).path).correct(query.text)
-    except FileNotFoundError:
-        raise  # organizers' data absent: the search itself says so
-    except Exception:  # noqa: BLE001 — a broken dictionary never breaks the search
+    except Exception:  # noqa: BLE001 — no index / a broken dictionary never breaks the search (data absent: search says so)
         log.exception("speller: запрос %s ищется как введён", query.query_id)
         return None
     return fixed if fixed.changed else None

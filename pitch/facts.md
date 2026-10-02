@@ -87,6 +87,15 @@ python по `eval/results/bm25-dev-v1.json`, поле `per_query`):
 Команда пересчёта F-19: `python3 -c "import json,collections as C;r=json.load(open('eval/results/bm25-dev-v1.json'));ch={(q:=json.loads(l)['query'])['query_id']:q['channel'] for l in open('eval/cases/dev.jsonl')};a=C.defaultdict(list);[a[ch[p['query_id']]].append(p) for p in r['per_query']];[print(c,len(v),round(sum(x['recall@10'] for x in v)/len(v),3),round(sum(x['mrr'] for x in v)/len(v),3),sum(x['recall@10']==0 for x in v)) for c,v in a.items()]"`
 
 
+**Запрос с ошибками ввода (#282, D-107).** Исправление раскладки и опечаток включено: на 2 000 чистых dev-кейсах метрики не
+меняются (recall@10 0.491 → 0.491, `eval/results/S-282-off-dev.json` → `S-282-on-dev.json`); запрос, набранный в латинской
+раскладке (300 dev-кейсов), — recall@10
+0.131 → 0.439, Δ +0.308 [+0.254, +0.361] (`S-282-off-layout.json` → `S-282-on-layout.json`). **Чего говорить нельзя:** что
+исправление опечаток подняло качество — на испорченных опечатками dev-запросах Δ +0.009 [−0.009, +0.028], в шуме.
+Воспроизведение: `uv run python -m src.eval.run --exp S-282-<off|on>-<layout|typo> --config-of S-282-<nospell|spell>
+--sample 300 --corrupt <layout|typo>`; чистые — `--exp S-282-<off|on>-dev --config-of S-282-<nospell|spell>`; разница —
+`uv run python -m src.eval.compare S-282-on-<m> S-282-off-<m>`.
+
 ## Тонкие категории и источники (задача #122, фидбек ЧП1)
 
 Данные организаторов (`data/processed`), Электронный магазин, лоты до cutoff 2025-07-01; определение и порог — D-095.
