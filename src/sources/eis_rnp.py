@@ -17,7 +17,9 @@ the answer is None («not checked»), never False:
   «Поиск не дал результатов», a contradictory page (that text next to entry blocks or a total),
   the INN inside an entry block but no recognised own entry, or an own entry of unknown status → None.
 Error, captcha, 403/429 and a page that is not a РНП search page never reach the answer: `_get`
-raises `Blocked` (or an HTTP error), and nothing is cached or turned into «not in РНП».
+raises `Blocked` (or an HTTP error), and nothing is cached or turned into «not in РНП». A refusal
+(`Blocked`) also leaves the host alone for BLOCK_COOLDOWN_S (15 min): no request until then, a stale
+cached answer is still served (D-141, #111 — enrich() asks РНП inside the worker's batch).
 
 robots.txt: `Crawl-delay: 60` → at most one request per MIN_INTERVAL_S (60 s, the environment can
 only raise it, never lower), blocking; for the
@@ -55,9 +57,12 @@ TIMEOUT_S = 40.0
 NO_RESULTS = "Поиск не дал результатов"
 MSK = ZoneInfo("Europe/Moscow")  # the date in the fact is the one the user sees on site
 
-# No block state here: a refusal raises Blocked for this request only (the answer is never cached).
+# A refusal (403/429, a page that is not a РНП search) raises Blocked and leaves the host alone for
+# BLOCK_COOLDOWN_S: since enrich() asks РНП inside the worker's batch (D-141, #111), the next INN must not knock
+# again a minute later. The refusal is never cached; a 5xx or a timeout is not a refusal (the Crawl-delay paces it).
 # MIN_INTERVAL_S is read at every request (a test may override the module value).
-PACER = HostPacer(lambda: MIN_INTERVAL_S)
+BLOCK_COOLDOWN_S = 900.0
+PACER = HostPacer(lambda: MIN_INTERVAL_S, BLOCK_COOLDOWN_S)
 
 _ENTRY = re.compile(r"search-registry-entry-block.*?(?=search-registry-entry-block|$)", re.S)
 _BLOCK = re.compile(r"(?:registry-entry__body-title|data-block__title)\"?>\s*(.*?)\s*</div>\s*"
@@ -145,9 +150,11 @@ def _get(client: httpx.Client, url: str) -> tuple[int, str]:
     with PACER.slot():
         r = client.get(url)
     if r.status_code in (403, 429):
+        PACER.block()
         raise Blocked(f"zakupki.gov.ru ответил {r.status_code} — останавливаемся")
     r.raise_for_status()
     if "search-registry-entrys-block" not in r.text and NO_RESULTS not in r.text:
+        PACER.block()
         raise Blocked("zakupki.gov.ru вернул не страницу поиска РНП — останавливаемся")
     return r.status_code, r.text
 
@@ -165,6 +172,10 @@ def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | Non
         return hit
     if hit is not None and time.time() - hit.fetched_at <= MAX_AGE_S:
         return hit
+    if PACER.blocked():  # a recent refusal: no request at all until the cooldown is over
+        if hit is not None:
+            return hit  # stale answer beats none; its fetched_at is shown with the fact
+        raise Blocked(f"zakupki.gov.ru недавно отказал — пауза {BLOCK_COOLDOWN_S:.0f} с, запрос не отправлен")
     own = client is None
     client = client or httpx.Client(timeout=TIMEOUT_S, verify=gov_ssl_context(), headers={"User-Agent": UA})
     try:

@@ -336,6 +336,40 @@ def test_blocked_or_foreign_page_raises_and_is_not_cached(live, response):
     assert live.get(eis_rnp.search_url(NOT_IN_RNP), allow_stale=True) is None
 
 
+def test_a_refusal_leaves_the_host_alone_for_the_cooldown(live):
+    """#111: enrich() asks РНП inside the worker's batch, so after a refusal (403/429, a page that is not a РНП
+    search) the next INN must not knock again a minute later: no request for BLOCK_COOLDOWN_S, a stale cached
+    answer is still served (with its own date), and after the cooldown the host is asked again."""
+    calls: list[str] = []
+    client = _client(lambda r: httpx.Response(429, text="Too Many Requests"), calls)
+    with pytest.raises(eis_rnp.Blocked):
+        eis_rnp.check(NOT_IN_RNP, live, client)
+    with pytest.raises(eis_rnp.Blocked):
+        eis_rnp.check(IN_RNP, live, client)
+    assert len(calls) == 1  # the second INN was not asked
+    live.put(eis_rnp.search_url(IN_RNP), POS_PAGE, fetched_at=time.time() - 2 * 24 * 3600)  # stale
+    assert eis_rnp.check(IN_RNP, live, client).in_rnp is True and len(calls) == 1  # stale beats none, no request
+    eis_rnp.PACER.reset()  # the cooldown is over
+    ok = _client(lambda r: httpx.Response(200, text=NEG_PAGE), calls)
+    assert eis_rnp.check(NOT_IN_RNP, live, ok).in_rnp is False and len(calls) == 2
+
+
+@pytest.mark.parametrize("response", [
+    httpx.Response(403, text="Forbidden"),
+    httpx.Response(200, text="<html><head><title>Подождите…</title></head></html>"),
+])
+def test_every_kind_of_refusal_starts_the_cooldown(live, response):
+    with pytest.raises(eis_rnp.Blocked):
+        eis_rnp.check(NOT_IN_RNP, live, _client(lambda r: response))
+    assert eis_rnp.PACER.blocked()
+
+
+def test_server_error_does_not_start_the_cooldown(live):
+    with pytest.raises(httpx.HTTPStatusError):
+        eis_rnp.check(NOT_IN_RNP, live, _client(lambda r: httpx.Response(503, text="unavailable")))
+    assert not eis_rnp.PACER.blocked()
+
+
 def test_server_error_raises_and_is_not_cached(live):
     client = _client(lambda r: httpx.Response(503, text="unavailable"))
     with pytest.raises(httpx.HTTPStatusError):

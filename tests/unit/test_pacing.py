@@ -416,8 +416,14 @@ def test_rmsp_quick_search_has_its_own_longer_timeout_and_no_deadline(fake_time)
     assert rmsp.QUICK_TIMEOUT_S > rmsp.TIMEOUT_S  # enrich is not on the 4 s search budget
 
 
-def test_rnp_refusal_is_not_remembered_between_requests(fake_time):
+def test_rnp_refusal_is_remembered_for_the_cooldown(fake_time):
+    # policy changed by #111 (D-141): enrich() asks РНП inside the worker's batch, so a refusal now pauses the host
     for status in (403, 429):
+        eis_rnp.PACER.reset()
         with pytest.raises(eis_rnp.Blocked):
             eis_rnp._get(_client(lambda r, s=status: httpx.Response(s)), "https://zakupki.gov.ru/x")
-    assert not eis_rnp.PACER.blocked()  # this source's policy is unchanged: a refusal raises, only the pause remains
+        assert eis_rnp.PACER.blocked()
+        fake_time.now += eis_rnp.BLOCK_COOLDOWN_S - 1
+        assert eis_rnp.PACER.blocked()
+        fake_time.now += 1
+        assert not eis_rnp.PACER.blocked()
