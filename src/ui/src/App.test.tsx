@@ -568,15 +568,27 @@ test("works: the line over the results names the customer, the type, what «ав
   await waitFor(() => expect(sent.at(-1)).toBe("any"));
 });
 
-test("подпись «Новых» называет ГИСП, только когда в блоке есть изготовитель из ГИСП (#477)", () => {
+test("подпись «Новых» называет ГИСП, только когда ГИСП подтвердил товар кандидата (#477)", () => {
+  const MSP = "ФНС: единый реестр субъектов МСП";
+  const GISP = "Минпромторг: реестр российской промышленной продукции (ГИСП)";
   const ev = (source: string) => ({ source, url: "https://example.org/x", fetched_at: "2026-10-02T00:00:00Z", fact: "факт" });
-  const row = (source: string) => ({ counterparty: { inn: "7801000012", name: "ООО «А»", evidence: [ev(source)] } }) as never;
-  const msp = newBlockHint([row("ФНС: единый реестр субъектов МСП")]);
+  const row = (sources: string[], fit: string) => ({
+    counterparty: { inn: "7801000012", name: "ООО «А»", evidence: sources.map(ev) },
+    components: [{ name: "product_fit", value: 1, weight: 1, contribution: 1, explanation: fit }],
+  }) as never;
+  const byOkved = "Основной ОКВЭД 31.01 совпадает с классом";
+  const byProduct = "Производит этот товар по реестру Минпромторга (ГИСП): «Шкафы», ОКПД2 31.01.11.150";
+  const msp = newBlockHint([row([MSP], byOkved)]);
   expect(msp).toContain("первые 10 действующих записей реестра МСП по ОКВЭД и региону");
   expect(msp).not.toContain("ГИСП");
   expect(newBlockHint([])).toBe(msp);
-  const both = newBlockHint([row("ФНС: единый реестр субъектов МСП"), row("Минпромторг: реестр российской промышленной продукции (ГИСП)")]);
+  // ГИСП evidence that only backs the role of a registry row: the product is not confirmed — no ГИСП in the caption
+  expect(newBlockHint([row([MSP, GISP], byOkved)])).toBe(msp);
+  const both = newBlockHint([row([MSP], byOkved), row([MSP, GISP], byProduct)]);
   expect(both).toContain("Минпромторга (ГИСП) — по товару закупки");
-  expect(both).toContain("реестра МСП по ОКВЭД и региону");
+  expect(both).toContain("и действующие записи реестра МСП по ОКВЭД и региону");
   expect(both).not.toContain("первые 10");
+  const gispOnly = newBlockHint([row([GISP], byProduct)]);
+  expect(gispOnly).toContain("(ГИСП) — по товару закупки");
+  expect(gispOnly).not.toContain("МСП");
 });
