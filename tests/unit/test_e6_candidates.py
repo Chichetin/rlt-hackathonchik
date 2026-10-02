@@ -9,8 +9,9 @@ from datetime import date
 import pytest
 
 from src.contracts import Query
-from src.match import ranker
-from src.match.search import load_config, search
+from src.match import confidence, ranker
+from src.match import search as search_mod
+from src.match.search import fit_signals, load_config, search
 from src.match.store import ParquetStore
 
 pytestmark = pytest.mark.usefixtures("v2_formula")
@@ -70,6 +71,32 @@ def test_customer_union_does_not_inject_suppliers_without_a_retrieval_source(sea
     # Neither supplies a matching customer+group lot, so knowing its INN cannot insert it.
     assert GROUP_EXTRA not in trace
     assert UNRELATED not in trace
+
+
+def test_customer_extras_preserve_text_confidence_and_weak_match_warning(search_data):
+    weak_query = query().model_copy(update={"text": "Вода неизвестная необычная другая"})
+    cfg = config(okpd2=0)
+    baseline = search(weak_query, k=50, config={**cfg, "candidates": {}})
+    signals = fit_signals()
+    assert {m.counterparty.inn for m in baseline} == {TEXT}
+    assert signals is not None and signals["ladder"] is False
+    assert confidence.weak_match(signals, has_code=True) == confidence.WEAK_TEXT_WITH_CODE
+
+    matches = search(weak_query, k=50, config=cfg)
+    assert {m.counterparty.inn for m in matches} == {TEXT, *CUSTOMER_EXTRA}
+    assert fit_signals() == signals
+    assert confidence.weak_match(fit_signals(), has_code=True) == confidence.WEAK_TEXT_WITH_CODE
+
+
+def test_customer_extras_preserve_actual_fallback_signal(search_data, monkeypatch):
+    monkeypatch.setattr(search_mod, "STRICT_RETRIEVER", True)
+    no_text_match = query().model_copy(update={"text": "абракадабракса"})
+    matches = search(no_text_match, k=50, config=config(okpd2=0))
+    signals = fit_signals()
+    assert matches
+    assert signals is not None and signals["ladder"] is True
+    assert signals["top_bm25"] == 0
+    assert confidence.weak_match(signals, has_code=True) is None
 
 
 def test_own_lot_is_excluded_from_customer_and_group_candidate_sources(search_data):

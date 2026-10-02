@@ -101,6 +101,7 @@ def test_repository_experiments_are_valid_configs():
     ("v1", "E-002"), ("H-15a-03", "H-15a-03"), ("H-15a-06", "H-15a-06"), ("H-15b", "H-15b"), ("H-15c", "H-15c"),
     ("H-15d-tie", "H-15d-tie"), ("H-15e", "H-15e"), ("H-15f", "H-15f"), ("H-15g", "H-15g"), ("H-15f-geo", "H-15f-geo"),
     ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"), ("v2", "v2"), ("R-198-gbm", "R-198-gbm"),
+    ("S-282-spell", "S-282-on-dev"), ("S-282-nospell", "S-282-off-dev"),
 ])
 def test_experiment_entries_reproduce_recorded_configs(exp, result):
     """The product default moved to H-15f (#174): every entry of configs/experiments.yaml still gives the
@@ -114,6 +115,7 @@ def test_experiment_entries_reproduce_recorded_configs(exp, result):
     assert (cfg["retriever"], cfg["k"]) == (rec["retriever"], rec["k"])
     from src.match import ranker
     assert ranker.spec(cfg) == ranker.spec(rec)  # the default has the ranker on (#198): older entries turn it off
+    assert cfg.get("spell", False) == rec.get("spell", False)  # the speller is on (#282): older entries turn it off
 
 
 def test_saturation_summary_counts_distinct_scores():
@@ -158,8 +160,9 @@ def test_candidate_audit_sees_unranked_winners_without_adding_them(search_data, 
     assert "candidate_inns" not in plain and "candidate_ids" not in plain["per_query"][0]
 
 
-def test_candidate_audit_keeps_full_union_beyond_pipeline_limit(monkeypatch):
-    """The pipeline requests 200 displayed candidates; its trace must retain the whole expanded pool."""
+@pytest.mark.parametrize("weak", [False, True])
+def test_candidate_audit_keeps_full_union_and_weak_flag_from_one_pipeline_call(monkeypatch, weak):
+    """A single pipeline call must retain the full pool and its user-visible weak-match warning."""
     from src.contracts import Counterparty, CounterpartyMatch
 
     full_pool = [f"supplier-{i}" for i in range(search_mod.CANDIDATES)] + ["extra-winner"]
@@ -173,6 +176,9 @@ def test_candidate_audit_keeps_full_union_beyond_pipeline_limit(monkeypatch):
                                   score=0, components=[], origin="history")]
 
     monkeypatch.setattr(search_mod, "search", search)
+    monkeypatch.setattr(search_mod, "fit_signals", lambda: {
+        "top_bm25": 0.5 if weak else 10.0, "tokens": 1, "retriever": "bm25", "ladder": False,
+    })
     monkeypatch.setattr(R.pipeline, "verified", lambda matches: matches)
     monkeypatch.setattr(R.pipeline.TodayAudit, "add", lambda *args: None)
     c = case("union", ["extra-winner"]).model_copy(update={"grades": {"extra-winner": 2}})
@@ -182,9 +188,13 @@ def test_candidate_audit_keeps_full_union_beyond_pipeline_limit(monkeypatch):
     assert row["n_candidates"] == search_mod.CANDIDATES + 1
     assert row["candidate_winner_hit"] == 1.0 and row["winner@20"] == 0.0
     assert [body["candidate_inns"][i] for i in row["candidate_ids"]] == full_pool
+    assert row["weak"] is weak
+    assert body["slices"]["weak=yes" if weak else "weak=no"]["n_queries"] == 1
     limited = R.evaluate([c], {"k": 20}, candidate_audit=True, ranked_limit=0)
     assert "candidate_inns" not in limited and "candidate_ids" not in limited["per_query"][0]
     assert limited["metrics"]["candidate_winner_hit"]["value"] == 1.0
+    assert limited["per_query"][0]["weak"] is weak
+    assert seen == [search_mod.CANDIDATES, search_mod.CANDIDATES]
 
 
 def test_candidate_audit_requires_search():
@@ -201,7 +211,7 @@ def test_eval_refuses_unavailable_ranker_before_retrieval(monkeypatch, tmp_path,
     def no_search(*args, **kwargs):
         raise AssertionError("an unavailable model must fail before retrieval, not run the formula fallback")
 
-    monkeypatch.setattr(R, "_rank_search", no_search)
+    monkeypatch.setattr(R, "_picked_search", no_search)
     cfg = {"k": 20, "ranker": {"kind": "logreg", "model": str(model)}}
     with pytest.raises(ValueError if stale else FileNotFoundError):
         R.evaluate([case("бумага", ["7801000012"])], cfg)

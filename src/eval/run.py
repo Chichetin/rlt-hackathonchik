@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from src.contracts import Query
-from src.eval import baselines, input_audit
+from src.eval import baselines, corrupt, input_audit
 from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import pipeline, ranker
@@ -91,14 +91,21 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
     return query
 
 
-def _rank_search(query: Query, cfg: dict, candidate_inns_out: list[str] | None = None) -> list[str]:
+def _picked_search(query: Query, cfg: dict,
+                   candidate_inns_out: list[str] | None = None) -> tuple[list[str], bool]:
     """What the user sees: the history block of /api/search — the same pipeline (src/match/pipeline.py, #220)
     in its backtest mode: user filters on organizers' data and the Evidence check, top-k as on screen; no
     «Новые» (never relevant) and nothing from the cache — status, РНП, МСП, role there are today's facts,
-    a leak in a backtest (D-097)."""
-    picked = pipeline.pick(query, config=cfg, backtest=True, candidate_inns_out=candidate_inns_out)
+    a leak in a backtest (D-097). Also: whether the user would see the weak-match warning (#281)."""
+    picked = (pipeline.pick(query, config=cfg, backtest=True, candidate_inns_out=candidate_inns_out)
+              if candidate_inns_out is not None else pipeline.pick(query, config=cfg, backtest=True))
     shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
-    return [m.counterparty.inn for m in shown if m.counterparty.inn]
+    return [m.counterparty.inn for m in shown if m.counterparty.inn], picked.weak_match is not None
+
+
+def _rank_search(query: Query, cfg: dict, candidate_inns_out: list[str] | None = None) -> list[str]:
+    return (_picked_search(query, cfg, candidate_inns_out) if candidate_inns_out is not None
+            else _picked_search(query, cfg))[0]
 
 
 def _summary(rows: list[dict]) -> dict:
@@ -144,7 +151,8 @@ def slice_names(q: dict) -> list[str]:
     ch = f"channel={q['channel']}" if q.get("channel") else None
     nov = {True: "winner=new", False: "winner=known"}.get(q.get("winner_new"))  # type: ignore[arg-type]
     kind = f"type={q['type']}" if q.get("type") else None
-    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind) if name]
+    weak = {True: "weak=yes", False: "weak=no"}.get(q.get("weak"))  # type: ignore[arg-type]  # #281
+    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind, weak) if name]
 
 
 def slices(per_query: list[dict]) -> dict:
@@ -184,8 +192,10 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
         for i, case in enumerate(cases):
             query = with_cutoff(case.query, cutoff)
             candidate_inns: list[str] | None = [] if candidate_audit else None
+            weak: bool | None = None
             if method == "search":
-                ranked = (_rank_search(query, cfg, candidate_inns) if candidate_audit else _rank_search(query, cfg))
+                ranked, weak = (_picked_search(query, cfg, candidate_inns) if candidate_audit
+                                else _picked_search(query, cfg))
             else:
                 ranked = baselines.rank(query, cfg)
             rel = set(case.relevant_inns)
@@ -201,6 +211,8 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
                 if len(cases) <= ranked_limit:
                     row["candidate_ids"] = [candidate_index.setdefault(inn, len(candidate_index))
                                             for inn in candidate_inns]
+            if weak is not None:  # the weak-match warning the user would see (#281): measured, not assumed
+                row["weak"] = weak
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:
@@ -219,6 +231,12 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     if candidate_audit and len(cases) <= ranked_limit:
         out["candidate_inns"] = list(candidate_index)
     return {**out, "per_query": per_query}
+
+
+def first_words(cases: list[EvalCase], n: int) -> list[EvalCase]:
+    """The same cases with the query text cut to its first `n` words: a short query as a user types it (#281)."""
+    return [c.model_copy(update={"query": c.query.model_copy(update={"text": " ".join(c.query.text.split()[:n])})})
+            for c in cases]
 
 
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
@@ -360,6 +378,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
+    ap.add_argument("--words", type=int, default=None,
+                    help="cut every query text to its first N words — short queries as users type them (#281)")
     ap.add_argument("--sample", type=int, default=None,
                     help="first screen on N cases of the part (fixed seed): winners only go to the full run")
     ap.add_argument("--fresh-sample", type=int, default=None,
@@ -368,6 +388,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="explicit seed for --fresh-sample only; ordinary --sample keeps its fixed seed")
     ap.add_argument("--candidate-audit", action="store_true",
                     help="record winner ceiling, sizes and compact INN lists of the full scored candidate pool")
+    ap.add_argument("--corrupt", default=None, choices=corrupt.MODES,
+                    help="spoil the query texts (typos / Latin layout) to measure the speller (#282)")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
@@ -411,6 +433,14 @@ def main(argv: list[str] | None = None) -> int:
         keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
         cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
         part = f"{args.part}-s{args.sample}"
+    if args.words is not None:
+        if args.words < 1:
+            print("--words: ожидается целое число ≥ 1", file=sys.stderr)
+            return 2
+        cases, part = first_words(cases, args.words), f"{part}-w{args.words}"
+    if args.corrupt:  # the text only, deterministic per query: every experiment sees the same spoiled queries
+        cases = [c.model_copy(update={"query": corrupt.spoil(c.query, args.corrupt)}) for c in cases]
+        part = f"{part}-{args.corrupt}"
     if args.candidate_audit and cfg.get("method", "search") != "search":
         print("--candidate-audit доступен только для search", file=sys.stderr)
         return 2

@@ -38,7 +38,7 @@ def test_learned_eval_rejects_stale_profile_schema_before_search(tmp_path, monke
     monkeypatch.setattr(R.ranker, "load", lambda spec: None)
     monkeypatch.setattr(store_mod, "get_store", lambda: store_mod.ParquetStore(tmp_path))
     called = []
-    monkeypatch.setattr(R, "_rank_search", lambda q, cfg: called.append(q) or [])
+    monkeypatch.setattr(R, "_picked_search", lambda q, cfg: (called.append(q) or [], False))
     case = EvalCase(query=Query(query_id="q", text="paper"), relevant_inns=[], date=date(2025, 7, 10))
     with pytest.raises(ValueError, match="okpd2_classes") as error:
         R.evaluate([case], {"ranker": {"kind": "lgbm", "model": str(model)}}, cutoff=CUTOFF)
