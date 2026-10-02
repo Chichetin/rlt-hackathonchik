@@ -125,8 +125,10 @@ S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — луч�
   ranker: null
 S-282-spell:     # #282: исправление раскладки и опечаток в запросе (с D-109 — дефолт продукта)
   spell: true
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}   # снят при дефолте D-103; с D-171 дефолт — R-long
 S-282-nospell:   # #282: запрос как введён — база замера S-282 (прогоны S-282-off-* сняты при spell: false в search.yaml)
   spell: false
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}   # снят при дефолте D-103; с D-171 дефолт — R-long
 # #361: абляция признака win_rate в обученном ранжировщике (без переобучения) — у 59 % поставщиков (только АИС ГЗ) он 1.0 по построению
 A361-no-winrate:
   ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate]}
@@ -208,3 +210,11 @@ rel-on-f:        # на H-15f: + reliability 0.2 поверх нормирова
   weights: {reliability: 0.2}
   reliability: {mode: "on"}
   ranker: null
+# #486: ранжировщик на 4 квартальных окнах [2024-07-01, 2025-07-01), признаки каждого окна до его начала (R-long);
+# R-w4 — то же только на последнем окне [2025-04-01, 2025-07-01) на этом коде (как R-198)
+R-long-gbm:
+  ranker: {kind: lgbm, model: models/ranker/R-long-gbm.txt}
+R-long-lr:
+  ranker: {kind: logreg, model: models/ranker/R-long-lr.json}
+R-w4-gbm:
+  ranker: {kind: lgbm, model: models/ranker/R-w4-gbm.txt}
