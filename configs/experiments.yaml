@@ -71,3 +71,6 @@ H-105-winrate:
 H-105-price05-d1:   # price обнуляется при 10× (как в предложении METHODOLOGY), вес 0.05
   weights: {price: 0.05}
   options: {price: scale, price_decades: 1.0}
+H-105-combo:     # price 0.05 (масштаб НМЦК) + свежесть по похожим позициям — две компоненты, что не ухудшили dev
+  weights: {price: 0.05}
+  options: {price: scale, activity_by: similar}
