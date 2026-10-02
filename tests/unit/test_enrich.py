@@ -163,6 +163,24 @@ def test_card_answer_null_means_not_ready_and_is_polled_again(tmp_path, monkeypa
     assert len(seen) == 5 and "sulst_name_ex: Действующая организация" in page.body
 
 
+def test_card_never_ready_stops_after_poll_tries(tmp_path, monkeypatch):
+    monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
+    monkeypatch.setattr(pb_nalog.time, "sleep", lambda s: None)
+    ok, _ = _transport()
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        if len(seen) >= 4:  # every card get-response: not ready
+            return httpx.Response(200, text="null", headers={"Content-Type": "application/json"})
+        return ok.post(str(req.url), content=req.content, headers={"Content-Type": req.headers["Content-Type"]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=pb_nalog.BASE)
+    with pytest.raises(TimeoutError):
+        pb_nalog.fetch_card(UL, SourceCache(tmp_path / "c.sqlite"), client)
+    assert len(seen) == 3 + pb_nalog.POLL_TRIES
+
+
 def test_unreadable_json_is_a_value_error_not_a_crash(tmp_path, monkeypatch):
     monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
     null = httpx.MockTransport(lambda r: httpx.Response(200, text="null", headers={"Content-Type": "application/json"}))

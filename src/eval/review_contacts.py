@@ -33,6 +33,15 @@ log = logging.getLogger(__name__)
 CONTACT_BASIS = ("phone", "email", "site")
 
 
+def registry_rows(inn: str, cache: SourceCache) -> int | None:
+    """`answer.inn_rows` of the cached quick answer: did the registry answer for this INN (None — no page)."""
+    page = cache.get(rmsp.quick_url(inn), allow_stale=True)
+    for line in (page.body if page else "").splitlines():
+        if line.startswith("answer.inn_rows: "):
+            return int(line.split(": ", 1)[1])
+    return None
+
+
 def registry_contacts(inn: str, cache: SourceCache) -> dict[str, str]:
     """Phone and email of the МСП registry quick search (the `row.<inn>.phone|email` lines of the cached page)."""
     page = rmsp.fetch_quick(inn, cache)
@@ -45,33 +54,37 @@ def registry_contacts(inn: str, cache: SourceCache) -> dict[str, str]:
     return out
 
 
-def sample(limit: int) -> list[str]:
-    """Distinct 10-digit INNs of the top-10 of both blocks, query by query, until `limit`."""
+def sample(limit: int) -> list[dict]:
+    """Distinct 10-digit INNs of the top-10 of both blocks, query by query, until `limit` — with the query and
+    the block each came from. The blocks are read offline, so the sample depends on SOURCE_CACHE (region,
+    «Новые»): reproduce with the same cache."""
     from src.match import pipeline
 
-    seen: list[str] = []
+    seen: dict[str, dict] = {}
     for q in queries():
         res = pipeline.pick(q, offline=True)
         for block in BLOCKS:
             for m in [m for m in res.matches if m.origin == block][:10]:
                 inn = m.counterparty.inn
                 if inn and len(inn) == 10 and inn not in seen:
-                    seen.append(inn)
-    return seen[:limit]
+                    seen[inn] = {"inn": inn, "query_id": q.query_id, "block": block}
+    return list(seen.values())[:limit]
 
 
-def check(inn: str, cache: SourceCache) -> dict:
+def check(picked: dict, cache: SourceCache) -> dict:
     from src.enrich import reviews
     from src.enrich.enrich import enrich
 
-    row: dict = {"inn": inn}
+    inn = picked["inn"]
+    row: dict = dict(picked)
     try:
         card = enrich(inn, cache, offline=False, open_data=False)
         contacts = registry_contacts(inn, cache)
     except (KeyError, ValueError, TimeoutError, httpx.HTTPError, RuntimeError) as e:
         row["outcome"] = f"no_card: {type(e).__name__}"
         return row
-    row |= {"name": card.name, "region": card.region, "contacts": sorted(contacts)}
+    row |= {"name": card.name, "region": card.region, "contacts": sorted(contacts),
+            "registry_rows": registry_rows(inn, cache)}
     cp = Counterparty(inn=inn, name=card.name, region=card.region, kpp=card.kpp, contacts=contacts)
     res = reviews.find_reviews(cp, cache)
     row["status"] = res.status
@@ -83,7 +96,7 @@ def check(inn: str, cache: SourceCache) -> dict:
 
 
 def measure(limit: int, cache: SourceCache) -> dict:
-    rows = [check(inn, cache) for inn in sample(limit)]
+    rows = [check(p, cache) for p in sample(limit)]
     for r in rows:
         log.info("%s %-12s %-40s %s", r["inn"], r["outcome"], (r.get("name") or "")[:40],
                  ",".join(r.get("contacts", [])))
@@ -93,6 +106,9 @@ def measure(limit: int, cache: SourceCache) -> dict:
     outcomes = Counter(r["outcome"] for r in rows)
     return {
         "n": n,
+        "registry_answered": sum(1 for r in rows if r.get("registry_rows")),
+        "by_query": dict(Counter(r["query_id"] for r in rows)),
+        "by_block": dict(Counter(r["block"] for r in rows)),
         "with_registry_contact": len(with_contact),
         "card_found": len(found),
         "card_found_with_contact": sum(1 for r in with_contact if r.get("bases")),
