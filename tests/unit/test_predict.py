@@ -130,7 +130,7 @@ def test_extra_and_absent_columns_are_warnings(tmp_path):
     assert any("пустой предмет" in n for n in ts.lots[1].notes)
 
 
-def test_glued_header_cell_is_split(tmp_path):
+def test_testset_glued_header_cell_is_split(tmp_path):
     # the organizers' test export of 02.10: "reqnum;procedure_name" in one quoted header cell (#590)
     d = _copy(tmp_path)
     (d / "Извещения_24-25.csv").write_text(
@@ -147,6 +147,10 @@ def test_glued_header_cell_is_split(tmp_path):
     assert second.reqnum == "0372200075025000162" and first.query.budget == 63600.0
     text = " ".join(ts.warnings)
     assert "склеены" in text and "ячеек больше" not in text and "лишние колонки" not in text
+    # the same header over rows as narrow as it: a real column named "reqnum;procedure_name", not split
+    (d / "Извещения_24-25.csv").write_text('lot_id;"a;b";subject\n1;x;Бумага\n', encoding="utf-8")
+    ts = load_testset(d)
+    assert ts.lots[0].query.text == "Бумага" and "склеены" not in " ".join(ts.warnings)
 
 
 def test_bad_price_is_a_note(tmp_path):
