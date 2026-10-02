@@ -42,6 +42,11 @@ export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "bud
 // customer_region: the customer's region when there is no customer INN (#242) — goes to Query.region
 export type Extra = { budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
 
+export function enteredOkpd2(text: string): string | undefined {
+  const code = text.trim().replace(/^ОКПД2\s*[:—-]?\s*/i, "");
+  return /^\d{2}(?:\.\d|\.\d{2}(?:\.\d|\.\d{2}(?:\.\d{1,3})?)?)?$/.test(code) ? code : undefined;
+}
+
 export function buildQuery(text: string, filters: Filters, extra?: Extra): Query {
   const f: Record<string, string | boolean | number> = {};
   if (filters.only_msp) f.only_msp = true;
@@ -60,8 +65,8 @@ export function buildQuery(text: string, filters: Filters, extra?: Extra): Query
   };
   // A code-only query goes through the existing OKPD2 search path. Product
   // dimensions/model numbers inside prose must not become category filters.
-  const enteredCode = text.trim().replace(/^ОКПД2\s*[:—-]?\s*/i, "");
-  if (/^\d{2}(?:\.\d|\.\d{2}(?:\.\d|\.\d{2}(?:\.\d{1,3})?)?)?$/.test(enteredCode)) q.okpd2 = [enteredCode];
+  const enteredCode = enteredOkpd2(text);
+  if (enteredCode) q.okpd2 = [enteredCode];
   else if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
   if (extra?.lot?.channel) q.channel = extra.lot.channel;
   const budget = Number(extra?.budget.replace(/\s/g, "").replace(",", "."));
@@ -120,7 +125,7 @@ async function post(path: string, body: unknown): Promise<Response> {
 
 // Пагинация и фильтры — на сервере (D-024): страница каждого блока, размер блока после фильтров —
 // в заголовках X-Total-History / X-Total-Discovered (в замороженном SearchResponse поля total нет).
-export const PAGE = 20;
+export const PAGE = 10;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)

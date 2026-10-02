@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 async function results(page: import('@playwright/test').Page) {
   await page.goto('/search');
-  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
+  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel('Номер закупки (необязательно)').fill('6');
   await page.getByRole('button', { name: /Заполнить по номеру|Заполнить по номеру/ }).click();
   await expect(page.getByLabel('Что нужно закупить')).toHaveValue(/Бумага/);
@@ -38,6 +38,7 @@ test('раскрытие и вся длина сохраняют компани�
   await expect(pane.locator('h2')).toHaveText(name);
   expect(await list.evaluate(e => e.scrollTop)).toBe(120);
   expect(await pane.evaluate(e => e.scrollTop)).toBe(150);
+  await pane.locator('h2').click(); // Escape also works after clicking non-focusable text
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'На весь экран', exact: true })).toBeFocused();
   expect(await list.evaluate(e => e.scrollTop)).toBe(120);
@@ -60,8 +61,8 @@ test('основной сценарий — название товара или
     const request = page.waitForRequest(r => new URL(r.url()).pathname === '/api/search' && r.method() === 'POST');
     await page.getByRole('button', { name: 'Найти поставщиков', exact: true }).click();
     const body = (await request).postDataJSON();
-    expect(body.text).toBe(text);
-    if (text === '17.12') expect(body.okpd2).toEqual(['17.12']);
+    if (text === '17.12') { expect(body.okpd2).toEqual(['17.12']); expect(body.text).toMatch(/Бумага/); }
+    else expect(body.text).toBe(text);
     await expect(page.locator('.result-list-scroll:not([hidden]) .item').first()).toBeVisible();
     await expect(input).toBeVisible(); // edit and search again directly above the results
   }
@@ -94,11 +95,12 @@ test('на телефоне раскрытие, карточка и возвра
   await page.setViewportSize({ width: 390, height: 844 });
   await results(page);
   await page.getByRole('button', { name: 'На весь экран', exact: true }).click();
-  const row = page.locator('.result-list-scroll:not([hidden]) .item').nth(1);
+  const row = page.locator('.result-list-scroll:not([hidden]) .item').last();
   await row.click();
   await page.getByRole('button', { name: '← К списку поставщиков' }).click();
   await expect(row).toBeFocused();
   await expect(row).toHaveAttribute('aria-pressed', 'true');
+  await expect(row).toBeInViewport();
   await page.getByRole('button', { name: 'Свернуть', exact: true }).click();
   await expect(page.getByLabel('Что нужно закупить')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -117,4 +119,14 @@ test('подбор — единственная вкладка поиска, с�
   await page.reload();
   await expect(page.getByLabel('Что нужно закупить')).toHaveValue('17.12');
   await expect(page.locator('.result-list-scroll:not([hidden]) .item').first()).toBeVisible();
+});
+
+test('неизвестный ОКПД2 не превращается в поиск по случайным цифрам', async ({ page }) => {
+  await page.goto('/search');
+  const queries: string[] = [];
+  page.on('request', r => { if (new URL(r.url()).pathname === '/api/search') queries.push(r.url()); });
+  await page.getByLabel('Что нужно закупить').fill('99.99');
+  await page.getByRole('button', { name: 'Найти поставщиков', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('не найден в справочнике');
+  expect(queries).toHaveLength(0);
 });

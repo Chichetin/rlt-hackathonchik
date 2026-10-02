@@ -14,7 +14,7 @@ test("демо: запрос → два блока → карточка → фи
   await expect(page).toHaveURL(/\/search$/);
 
   // 1. Ввёл номер закупки → запрос заполнен из извещения (предмет, НМЦК, заказчик)
-  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
+  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
   await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага офисная А4/);
@@ -148,7 +148,7 @@ test("демо: запрос → два блока → карточка → фи
 // Отдельная регрессия #232: расширенная проверка ролей не меняет состав и бюджет основного демо.
 test("фильтр роли: счётчик дистрибьюторов совпадает с выдачей и бейджами", async ({ page }) => {
   await page.goto("/search");
-  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
+  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
   await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага офисная А4/);
@@ -190,7 +190,7 @@ test("фильтр роли: счётчик дистрибьюторов сов�
 
 test("номер закупки не найден → понятное сообщение, свободный текст работает", async ({ page }) => {
   await page.goto("/search");
-  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
+  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill("999999");
   await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByRole("alert")).toContainText("не найдена");
@@ -253,7 +253,7 @@ test("deep link: /search?q=текст ищет по тексту; неизвес
 // #395, ревью: F5 на /results?lot=N повторяет сохранённый запрос вкладки с фильтрами и НМЦК — не сбрасывает их
 test("deep link: обновление страницы сохраняет фильтр и НМЦК", async ({ page }) => {
   await page.goto("/search");
-  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
+  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
   await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
@@ -280,7 +280,7 @@ test("deep link: обновление страницы сохраняет фил
 test("deep link: ссылка на уже искомый лот в той же вкладке ищет заново; назад/вперёд и возврат из фильтров держат адрес", async ({ page }) => {
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await page.goto("/search");
-  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
+  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
   await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await page.getByRole("button", { name: "Найти поставщиков" }).click();

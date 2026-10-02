@@ -105,3 +105,4 @@
 @media (forced-colors: active) {
   .page-workspace :is(.result-list-scroll,.result-inspector,.results-reader) { scrollbar-color: auto; }
 }
+.page-workspace .query:has(.query-options:not([open])) > :is(.notice-import,.testset) { display: none; }

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 async function search(page: import("@playwright/test").Page) {
   await page.goto("/search");
-  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
+  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill("6");
   await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага/);

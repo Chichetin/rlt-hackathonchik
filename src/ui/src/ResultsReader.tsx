@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 /** Change only the reading layout: the result list, selection and detail body stay mounted. */
 export function ResultsReader({ children }: { children: ReactNode }) {
@@ -40,8 +40,18 @@ export function ResultsReader({ children }: { children: ReactNode }) {
     }
   }, [expanded, fullLength]);
 
-  return <div ref={reader} className="results-reader" data-expanded={expanded} data-full-length={fullLength}
-    onKeyDown={e => { if (expanded && e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); toggleExpanded(); } }}>
+  useEffect(() => {
+    if (!expanded) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || document.querySelector('[role="dialog"]')) return;
+      event.preventDefault();
+      toggleExpanded();
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  });
+
+  return <div ref={reader} className="results-reader" data-expanded={expanded} data-full-length={fullLength}>
     <div className="results-reader-tools" role="group" aria-label="Вид результатов">
       <span className="reader-caption">Просмотр поставщиков</span>
       <button type="button" className="secondary" aria-pressed={fullLength} onClick={toggleLength}

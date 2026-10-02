@@ -13,11 +13,12 @@ import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
-import { okpd2Text, useOkpd2Labels } from "./okpd2";
+import { lookupOkpd2Name, okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
   PAGE,
   buildQuery,
+  enteredOkpd2,
   COMPONENT_LABEL,
   exportXlsx,
   fetchLot,
@@ -510,13 +511,18 @@ export function App() {
     setState("loading");
     setOpen(null);
     try {
+      const code = enteredOkpd2(qText);
+      const categoryName = code ? await lookupOkpd2Name(code) : undefined;
+      if (seq !== runSeq.current) return;
       const active = filtersActive(nextFilters);
       const none: Filters = NO_FILTERS;
       // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
       const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
-      const spellOff = asTypedFor.current === q.text;
+      if (categoryName) q.text = categoryName;
+      const spellOff = !!code || asTypedFor.current === q.text;
       if (spellOff) q.filters = { ...q.filters, spell: "off" };
       const baseQuery = buildQuery(qText, none, qExtra());
+      if (categoryName) baseQuery.text = categoryName;
       if (spellOff) baseQuery.filters = { ...baseQuery.filters, spell: "off" }; // counts by the same text as the answer
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
@@ -690,12 +696,15 @@ export function App() {
   const selectedIndex = selectedResult ? activeRows.indexOf(selectedResult) : -1;
   const revealSelection = useRef(false);
   const mobileListY = useRef(0);
+  const mobileReaderPosition = useRef<{ element: HTMLElement; top: number } | null>(null);
   const selectResult = (m: CounterpartyMatch, reveal = false) => {
     revealSelection.current = reveal;
     setSelectedSuppliers(prev => ({ ...prev, [resultGroup]: supplierKey(m) }));
     if (window.matchMedia("(max-width: 900px)").matches) {
       if (mobileDetails) return;
       mobileListY.current = window.scrollY;
+      const reader = document.querySelector<HTMLElement>('.results-reader[data-expanded="true"]');
+      mobileReaderPosition.current = reader ? { element: reader, top: reader.scrollTop } : null;
       setMobileDetails(true);
       requestAnimationFrame(() => {
       const pane = document.getElementById("supplier-preview");
@@ -722,7 +731,9 @@ export function App() {
     requestAnimationFrame(() => {
     const row = document.querySelector<HTMLElement>('.result-list-scroll:not([hidden]) .item[aria-pressed="true"]');
     row?.focus({ preventScroll: true });
-    window.scrollTo({ top: mobileListY.current, behavior: "instant" });
+    const position = mobileReaderPosition.current;
+    if (position?.element.isConnected) position.element.scrollTop = position.top;
+    else window.scrollTo({ top: mobileListY.current, behavior: "instant" });
     });
   }
 
@@ -841,7 +852,7 @@ export function App() {
           <div className="query-refinements">
             <a className="filter-link" {...link("/settings")}>Фильтры {filtersActive(filters) && <span className="filter-applied">применены</span>}<span aria-hidden="true">↗</span></a>
             {!res && <label className="query-region">Может работать у заказчика
-              <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} facets={res?.facets} />
+              <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} />
             </label>}
           </div>
 
@@ -872,7 +883,7 @@ export function App() {
               {lotBusy ? "Загружаем…" : "Заполнить по номеру"}
             </button>
           </div>
-          <p id="lot-help" className="hint">Номер конкретного объявления в АИС ГЗ или Электронном магазине, а не код ОКПД2. ОКПД2 обозначает категорию товара — например, 31.01 «Мебель для офисов и предприятий торговли». Если номера нет, оставьте поле пустым и опишите покупку ниже.</p>
+          <p id="lot-help" className="hint">Номер конкретного объявления в АИС ГЗ или Электронном магазине, а не код ОКПД2. ОКПД2 обозначает категорию товара — например, 31.01 «Мебель для офисов и предприятий торговли». Если номера нет, оставьте поле пустым и введите название товара в основное поле.</p>
           {lotMsg && (
             <p className={lotMsg.kind === "ok" ? "lotmsg" : "lotmsg lotmsg-err"} role={lotMsg.kind === "ok" ? "status" : "alert"}>
               {lotMsg.text}

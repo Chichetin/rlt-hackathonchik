@@ -35,6 +35,7 @@ test("тестовая выгрузка: загрузка CSV → процеду
   expect(csv.headers()["content-disposition"]).toContain("attachment");
   expect(await csv.text()).toContain("lot_id;reqnum;query_text");
 
+  await page.locator(".query-options > summary").click();
   // a broken file: a readable message, not a stack trace
   await page.getByRole("region", { name: "Тестовая выгрузка" }).getByRole("button", { name: "Убрать" }).click();
   await page.getByLabel("Файлы тестовой выгрузки").setInputFiles({ name: "Извещения.csv", mimeType: "text/csv", buffer: Buffer.from("a,b\n1,2\n") });
