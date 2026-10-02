@@ -80,6 +80,10 @@ VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
 FIT = {"class": 0.7, "wholesale": 0.42}  # product_fit of a discovered company (D-036); ×0.7 (#614, human decision
 # 02.10): an OKVED match is a class, not the product — 1.0 only for a product confirmed by ГИСП or the site
 RETAIL_OKVED, RETAIL_FIT = "47", 0.4  # the live button only (#583): a retailer of goods found by the product
+# the live button only, goods (#634, human decision 02.10, №3): a wholesaler of any class, a maker of the same OKPD2
+# division (2 digits) — found by the product with the INN on its own site, kept with a lower product_fit
+WHOLESALE_OKVED = "46"
+LOOSE_FIT = {"retail": RETAIL_FIT, "wholesale": 0.4, "division": 0.5}
 COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geography", "price")
 
 # OKPD2 prefix (longest wins) → OKVED2 wholesale codes for these goods, the main one first. A hand-made
@@ -523,9 +527,14 @@ def lead_matches(
             continue
         code = cp.okved[0] if cp.okved else ""
         ch = next((c for c in plan if c.okpd_class == lead.okpd2_class and code.startswith(c.okved)), None)
-        retail = ch is None and live and any_region and code.startswith(RETAIL_OKVED)
-        if retail:  # #583: the button takes a retailer of goods (47.x) found by the product, with a lower fit
-            ch = Channel(okved=RETAIL_OKVED, okpd_class=lead.okpd2_class, relation="wholesale")
+        cls = lead.okpd2_class or ""
+        loose = ""  # #583, #634: what the button takes beyond the plan — retail, wholesale, a maker of the division
+        if ch is None and live and any_region:
+            loose = ("retail" if code.startswith(RETAIL_OKVED) else "wholesale" if code.startswith(WHOLESALE_OKVED)
+                     else "division" if code[:2] and code[:2] == cls[:2] else "")
+        if loose:
+            ch = Channel(okved={"retail": RETAIL_OKVED, "wholesale": WHOLESALE_OKVED}.get(loose, code[:2]),
+                         okpd_class=cls, relation="class" if loose == "division" else "wholesale")
         if ch is None:  # the registry does not confirm the category the search found it for
             other_okved += 1
             continue
@@ -545,10 +554,13 @@ def lead_matches(
         comps = []
         for c in _components(cp, row, ch, predicted, True, region, weights, region_note):
             why = c.explanation
-            if c.name == "product_fit" and retail:
-                c = c.model_copy(update={"value": RETAIL_FIT})
-                why = (f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: основной ОКВЭД {code} — "
-                       "розничная торговля, производство и опт по реестру не подтверждены")
+            if c.name == "product_fit" and loose:
+                c = c.model_copy(update={"value": LOOSE_FIT[loose]})
+                why = "Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: основной ОКВЭД " + code + {
+                    "retail": " — розничная торговля, производство и опт по реестру не подтверждены",
+                    "wholesale": f" — оптовая торговля; опт товаров класса {cls} по реестру не подтверждён",
+                    "division": f" — производство того же раздела ОКПД2 {code[:2]}, но не класса {cls}",
+                }[loose]
             elif c.name == "product_fit":
                 why = f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: {why}"
             elif c.name == "geography":  # the region comes from the card, not from a registry row
