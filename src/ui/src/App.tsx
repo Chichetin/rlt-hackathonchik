@@ -44,6 +44,7 @@ import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleB
 import "./filters.css";
 import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
+import { componentText, formulaScore, rankerReason, rankerShort } from "./ranker";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
@@ -989,7 +990,8 @@ function Block(props: {
                     <WorkedWith cp={cp} customerRegion={props.customerRegion} />
                   </span>
                   <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
-                  {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
+                  {rankerShort(m) ? <span className="why" title={rankerReason(m) ?? ""}><span className="why-label">Почему на этом месте</span>{rankerShort(m)}</span>
+                    : top && <span className="why" title={componentText(top)}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{componentText(top)}</span>}
                 </motion.button>
               </motion.li>
             );
@@ -1090,7 +1092,12 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
       <Breakdown m={m} />
       <h3>Почему в списке</h3>
       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
-      <p className="hint">Оценка по каждому критерию × его вес в подборе.</p>
+      {rankerReason(m) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(m)}</p>}
+      <p className="hint">{rankerReason(m)
+        ? (Math.abs(formulaScore(m) - m.score) < 0.005
+          ? "Порядок задаёт модель, критерии ниже — её входы; число — соответствие по формуле «критерий × вес»."
+          : `Порядок задаёт модель, критерии ниже — её входы. По формуле «критерий × вес» — ${formulaScore(m).toFixed(2)}; в списке число не выше, чем у стоящего выше.`)
+        : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
         {m.components.map((c) => (
           <li key={c.name}>
@@ -1101,7 +1108,7 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
             <span className="cval">
               {c.value.toFixed(2)} × {c.weight.toFixed(2)}
             </span>
-            <span className="cexp">{c.explanation}</span>
+            <span className="cexp">{componentText(c)}</span>
           </li>
         ))}
       </ul>
@@ -1178,7 +1185,7 @@ const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa
 function Breakdown({ m }: { m: CounterpartyMatch }) {
   const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }));
   return (
-    <figure className="breakdown" aria-label="Из чего сложилась оценка">
+    <figure className="breakdown" aria-label={rankerReason(m) ? "Критерии — входы модели" : "Из чего сложилась оценка"}>
       <div className="stack" aria-hidden="true">
         {parts.map(({ c, v, color }) =>
           v > 0 ? <span key={c.name} style={{ width: `${v * 100}%`, background: color }} title={`${COMPONENT_LABEL[c.name]}: +${v.toFixed(2)}`} /> : null,
@@ -1214,7 +1221,7 @@ function AboutPage({ onStart }: { onStart: () => void }) {
         </li>
         <li>
           <h3>Объяснимая оценка</h3>
-          <p>Итог — сумма критериев с весами. В карточке видно вклад каждого:</p>
+          <p>Порядок задаёт модель, обученная на истории закупок СПб 2024–2025; её входы — критерии ниже. В карточке видно, что подняло поставщика и что опустило, с цифрами; со своими весами порядок — по формуле «критерий × вес»:</p>
           <ul className="crit">
             {Object.values(COMPONENT_LABEL).map((l) => (
               <li key={l}>{l}</li>
