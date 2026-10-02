@@ -10,20 +10,24 @@ RLT.Hack (Росэлторг), 1–2 октября 2026. Сервис подб�
 > организаторов (`make demo` на чистом клоне, D-050). Что измерено и чем — `docs/tz-compliance.md`,
 > цифры — `pitch/facts.md`; технический аудит кода и решений (самопроверка агентом) — `docs/REVIEW.md`.
 
-## Запуск с чистого клона
+## Для жюри: 3 команды
 
-Нужны: Python 3.12, [uv](https://docs.astral.sh/uv/), Node ≥ 22, `jq`; для `make up` — Docker.
+Нужны: Python 3.12, [uv](https://docs.astral.sh/uv/), Node ≥ 22, `jq`, Docker (только для `make up`), GitHub CLI `gh` с доступом к репозиторию
+(`gh auth login`; репозиторий приватный — данные и снимок кеша лежат в его релизе `data-2026-10-02`).
 
 ```bash
-git clone https://github.com/Chichetin/rlt-hackathonchik.git
-cd rlt-hackathonchik
-make demo            # ставит зависимости по lockfile, собирает UI, поднимает API + воркер
-# → http://127.0.0.1:8000
+git clone https://github.com/Chichetin/rlt-hackathonchik.git && cd rlt-hackathonchik
+make data PART=processed && make data PART=cache   # parquet (216 МБ) и снимок кеша источников, со сверкой SHA256
+# быстрее для жюри: без `PART=processed` `make data` скачает ещё сырые CSV (+680 МБ), для демо они не нужны
+make demo                           # зависимости по lockfile, UI, API + воркер → http://127.0.0.1:8000
 ```
 
-`make demo` отвечает без интернета на закешированных ответах внешних источников, если рядом лежит каталог `cache/` — его нет в git и в релизе, на чистом клоне кеша нет. Без данных
-организаторов в `data/raw/` поднимается на синтетической фикстуре с плашкой «демонстрационные данные»;
-данные организаторов — `make data` (нужен `gh` с доступом к репозиторию), подробнее и про кеш — `docs/demo-clean-clone.md`.
+С данными и снимком кеша на демо-лотах (**5903085**, 5875992, 6050858) видны названия компаний, роли с основанием,
+источник и дата каждого факта и блок «Новые». Без `make data` `make demo` поднимается на синтетической фикстуре с плашкой
+«демонстрационные данные» (проверка запуска, не для показа); без снимка кеша вместо названий будет «ИНН …», «Новые» пусты
+(если нет сети) — подробности и что не работает без интернета: `docs/demo-clean-clone.md`. Снимок кеша — публичные ответы
+реестров на 02.10.2026; записи устаревают 09.10.2026 (7 суток, `SOURCE_CACHE_TTL_S`), после этого `make demo` с сетью обновляет их сам.
+Точное воспроизведение снимка: `ENRICH_OFFLINE=1 DISCOVERY_OFFLINE=1 make demo`.
 
 | Команда | Что делает |
 |---|---|
@@ -36,7 +40,7 @@ make demo            # ставит зависимости по lockfile, соб
 | `make up` / `make down` | docker-compose: `api`, `worker`, `db` (Postgres) |
 | `make openapi` | `docs/openapi.json` и TS-типы UI из `src/contracts.py` |
 | `make setup-ml`, `make models` | эмбеддинги (torch CPU) и скачивание моделей |
-| `make data` | датасет организаторов из релиза `data-2026-10-02` этого репозитория: `data/processed` (parquet) и `data/raw` (CSV), со сверкой SHA256; `make data PART=processed` — только parquet |
+| `make data` | датасет организаторов из релиза `data-2026-10-02` этого репозитория: `data/processed` (parquet) и `data/raw` (CSV), со сверкой SHA256; `make data PART=processed` — только parquet; `make data PART=cache` — снимок кеша источников в `cache/sources.sqlite` (влился в локальный кеш: его записи не затираются; `CACHE_FORCE=1` заменит целиком) |
 
 ## Как устроено
 
