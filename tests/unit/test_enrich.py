@@ -144,6 +144,33 @@ def test_live_fetch_four_posts_then_cache(tmp_path, monkeypatch):
     assert len(calls) == 4
 
 
+def test_card_answer_null_means_not_ready_and_is_polled_again(tmp_path, monkeypatch):
+    """pb.nalog.ru answers the card get-response with 200 and a JSON `null` while the card is being built
+    (seen live 02.10, #357): poll again instead of crashing with AttributeError."""
+    monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
+    monkeypatch.setattr(pb_nalog.time, "sleep", lambda s: None)
+    ok, _ = _transport()
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        if len(seen) == 4:  # the first card get-response: not ready
+            return httpx.Response(200, text="null", headers={"Content-Type": "application/json"})
+        return ok.post(str(req.url), content=req.content, headers={"Content-Type": req.headers["Content-Type"]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=pb_nalog.BASE)
+    page = pb_nalog.fetch_card(UL, SourceCache(tmp_path / "c.sqlite"), client)
+    assert len(seen) == 5 and "sulst_name_ex: Действующая организация" in page.body
+
+
+def test_unreadable_json_is_a_value_error_not_a_crash(tmp_path, monkeypatch):
+    monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
+    null = httpx.MockTransport(lambda r: httpx.Response(200, text="null", headers={"Content-Type": "application/json"}))
+    client = httpx.Client(transport=null, base_url=pb_nalog.BASE)
+    with pytest.raises(ValueError, match="неожиданный ответ"):
+        pb_nalog.fetch_card(UL, SourceCache(tmp_path / "c.sqlite"), client)
+
+
 def test_captcha_stops(tmp_path, monkeypatch):
     monkeypatch.setattr(pb_nalog, "MIN_INTERVAL_S", 0.0)
     client, calls = _transport(captcha=True)

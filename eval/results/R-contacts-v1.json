@@ -1,0 +1,424 @@
+{
+  "exp_id": "R-contacts-v1",
+  "kind": "review_contacts",
+  "created_at": "2026-10-02T07:04:19+00:00",
+  "commit": "e10be71",
+  "limit": 40,
+  "n": 40,
+  "with_registry_contact": 1,
+  "card_found": 16,
+  "card_found_with_contact": 1,
+  "confirmed_by_contact": 0,
+  "confirmed_share": 0.0,
+  "outcomes": {
+    "name_only": 11,
+    "unsupported": 4,
+    "not_found": 20,
+    "legal_name": 5
+  },
+  "rows": [
+    {
+      "inn": "7805820841",
+      "name": "ООО \"СКАЙ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [
+        "email",
+        "phone"
+      ],
+      "status": "ok",
+      "bases": [
+        "name",
+        "name",
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7820324037",
+      "name": "ООО \"ОФИСМАГ СПБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "1001058990",
+      "name": "ООО \"СТРЕЛКОВ И СЫН\"",
+      "region": null,
+      "contacts": [],
+      "status": "unsupported",
+      "bases": [],
+      "outcome": "unsupported"
+    },
+    {
+      "inn": "7811756312",
+      "name": "ООО \"ПРО100СНАБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7842387810",
+      "name": "ООО \"КАНЦПЛАСТ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7802924730",
+      "name": "ООО \"ЭЙПИДЖИ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7816279649",
+      "name": "ООО \"НИНЕВИЯ ГРАНД\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7811662431",
+      "name": "ООО \"ПРОФ-СНАБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4704052806",
+      "name": "ООО \"ВЦ-ПЕРЕРАБОТКА\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4705084470",
+      "name": "ООО \"ЦБП ТС\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4706042352",
+      "name": "ООО \"ОТРАДНЕНСКАЯ БКФ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "legal_name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "4706083983",
+      "name": "ООО \"ПКЛ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "legal_name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "6679148914",
+      "name": "ООО \"РОЛПАК\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "1101160235",
+      "name": "ООО \"ЛИКОР\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "4702019352",
+      "name": "ООО \"ЛЕСБУМТОРГ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4703083199",
+      "name": "ООО \"КАРЕЛЬСКИЙ ПЕРЕШЕЕК\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "legal_name",
+        "name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "4703165420",
+      "name": "ООО \"ПК \"ТЕРМОСФЕРА\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "unsupported",
+      "bases": [],
+      "outcome": "unsupported"
+    },
+    {
+      "inn": "4703184246",
+      "name": "ООО \"НПК\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7801575469",
+      "name": "ООО \"ЛАБСТАР\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "legal_name",
+        "name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "7801695773",
+      "name": "ООО \"АЗБУКАЛАБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7801332931",
+      "name": "ООО \"ОПЦИЯ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7810639197",
+      "name": "ООО \"НПФ \"АБРИС+\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7810410350",
+      "name": "ООО \"ЛАБСТРИМ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7811553672",
+      "name": "ООО \"МИНСЕПТИКА\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7810118490",
+      "name": "АО \"ВЕКТОР-БЕСТ-БАЛТИКА\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7820046277",
+      "name": "ООО \"ЛСР\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "9701292189",
+      "name": "АО \"ВИП ЛАБ\"",
+      "region": null,
+      "contacts": [],
+      "status": "unsupported",
+      "bases": [],
+      "outcome": "unsupported"
+    },
+    {
+      "inn": "7813219553",
+      "name": "ООО \"ТРАНСБИОСИСТЕМС\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4703008794",
+      "name": "ЗАО \"ФП \"МЕЛИГЕН\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "unsupported",
+      "bases": [],
+      "outcome": "unsupported"
+    },
+    {
+      "inn": "4703148463",
+      "name": "ООО \"МИРУМЕД\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4706062743",
+      "name": "ООО \"МАПО \"КОСМЕДИА\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4706088893",
+      "name": "ООО \"ДОЛ ЖИЗНЬ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4706089375",
+      "name": "ООО \"ЭСКОФАРМ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4703093006",
+      "name": "ООО \"СТЕЛЛИТ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "4703117627",
+      "name": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"МЕДИЦИНСКИЕ РАСХОДНЫЕ МАТЕРИАЛЫ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4703147759",
+      "name": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"НИКА\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "legal_name",
+        "name",
+        "name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "4703157595",
+      "name": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"МОЛОДОСТЬ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name",
+        "name",
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "4703167096",
+      "name": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"НН СТАР ТАЙМ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7814108542",
+      "name": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ЛИЗОФОРМ - СПБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7806514090",
+      "name": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"АЛЬФА-МЕД\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    }
+  ]
+}
