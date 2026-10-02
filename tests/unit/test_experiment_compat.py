@@ -104,7 +104,7 @@ def test_order_weights_explain_a_row_above_a_higher_score(search_data):
                                                                          "activity": 0.5}, dict.fromkeys(w, 0.0)]
     ranker.set_order(got, [0.9, 0.5, 0.1], vals, [3.0, 2.0, 1.0], w)
     shown = ranker.reasons(got)
-    assert shown[0].rank_reason == "выше следующего: компонента «опыт» — 0.90 против 0.40"
+    assert shown[0].rank_reason == "выше следующего: компонента «опыт» по шкале порядка — 0.90 против 0.40"
     assert shown[-1].rank_reason is None
     ranker.forget()
     assert ranker.reasons(got) == got
@@ -118,7 +118,8 @@ def test_order_reason_names_the_tie_break_and_values_that_differ_as_shown():
         "ключ порядка равен — порядок условный")
     near = ranker.Ordered(0.9512, {"product_fit": 0.9301, "experience": 1.0, "activity": 0.6}, 1.0)
     far = ranker.Ordered(0.9480, {"product_fit": 0.9298, "experience": 1.0, "activity": 0.5}, 1.0)
-    assert ranker.order_reason(near, far, w) == "выше следующего: компонента «активность» — 0.60 против 0.50"
+    assert ranker.order_reason(near, far, w) == (
+        "выше следующего: компонента «активность» по шкале порядка — 0.60 против 0.50")
     tiny = ranker.Ordered(0.9481, {"product_fit": 0.9299, "experience": 1.0, "activity": 0.5}, 1.0)
     assert ranker.order_reason(tiny, far, w) == "по совокупности компонент порядка — 0.9481 против 0.9480"
 

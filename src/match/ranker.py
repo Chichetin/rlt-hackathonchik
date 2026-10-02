@@ -495,7 +495,8 @@ def order_reason(a: Ordered, b: Ordered, weights: dict[str, float]) -> str:
         if weights[name] * (va - vb) <= 0:
             break
         if f"{va:.2f}" != f"{vb:.2f}":
-            return f"выше следующего: {ORDER_NAMES[name]} — {va:.2f} против {vb:.2f}"
+            # the order's scale (fit without the name match, experience saturated at sat100), not the card's value
+            return f"выше следующего: {ORDER_NAMES[name]} по шкале порядка — {va:.2f} против {vb:.2f}"
     return f"по совокупности компонент порядка — {a.key:.4f} против {b.key:.4f}"
 
 
