@@ -33,7 +33,7 @@ from src.match import search as search_mod
 from src.settings import get_settings
 
 CONFIRM_ENV = "EVAL_FINAL_CONFIRM"
-FROZEN_PATHS = ("src", "configs", "models/ranker", "pyproject.toml", "uv.lock")  # models/ranker: #451
+FROZEN_PATHS = R.FROZEN_PATHS  # one list with the `dirty` of dev results (#455)
 FINAL_LOG = ROOT / "eval" / "final-log.md"
 
 
