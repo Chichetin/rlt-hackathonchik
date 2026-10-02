@@ -1,8 +1,7 @@
 """The environment is read only in src/settings.py (make settings-check, #290).
 
 AST, not grep: a mention in a docstring or a comment does not count, a lazy import inside a function does.
-Files that still read it are on scripts/settings_allowlist.txt (one path per line, `#` comments); the list only
-shrinks — an entry whose file no longer reads the environment is reported too, so it gets deleted.
+No exceptions: the allowlist of files not migrated yet emptied out and was deleted in #297.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ALLOWLIST = Path("scripts") / "settings_allowlist.txt"
 HOME = "src/settings.py"
 SKIP = ("node_modules", "dist", "__pycache__", ".venv")
 
@@ -47,32 +45,16 @@ def readers(root: Path) -> list[str]:
     return found
 
 
-def allowed(root: Path) -> set[str]:
-    path = root / ALLOWLIST
-    if not path.exists():
-        return set()
-    lines = (ln.strip() for ln in path.read_text(encoding="utf-8").splitlines())
-    return {ln for ln in lines if ln and not ln.startswith("#")}
-
-
-def check(root: Path) -> tuple[list[str], list[str]]:
-    """(files that read the environment and are not allowed, allowlist entries that read nothing)."""
-    found, allow = readers(root), allowed(root)
-    return [f for f in found if f not in allow], sorted(allow - set(found))
-
-
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="the environment is read only in src/settings.py")
     ap.add_argument("--root", type=Path, default=ROOT)
     args = ap.parse_args(argv)
-    violations, stale = check(args.root)
+    violations = readers(args.root)
     for f in violations:
         print(f"settings: {f} читает окружение — добавьте переменную в src/settings.py (и .env.example)")
-    for f in stale:
-        print(f"settings: {f} в {ALLOWLIST.as_posix()}, но окружение не читает — удалите строку")
-    if violations or stale:
+    if violations:
         return 1
-    print(f"settings: окружение читается в src/settings.py и в {len(allowed(args.root))} файлах из allowlist")
+    print("settings: окружение читается только в src/settings.py")
     return 0
 
 

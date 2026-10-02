@@ -11,20 +11,20 @@ Cache (src/sources/cache.py): the answer as flat lines `row.<inn>.<field>: <valu
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
 from src.contracts import inn_is_valid
+from src.settings import get_settings
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.pacing import HostPacer
 
 BASE = "https://bo.nalog.gov.ru"
 SOURCE = "ФНС: ГИР БО (бухгалтерская отчётность)"
 UA = "Mozilla/5.0 (compatible; RLTHack-Enrich/0.1; hackathon, cached, paced)"
-MIN_INTERVAL_S = float(os.environ.get("BO_MIN_INTERVAL_S", "1.0"))
-TIMEOUT_S = float(os.environ.get("BO_TIMEOUT_S", "5.0"))
+MIN_INTERVAL_S = get_settings().bo_min_interval_s
+TIMEOUT_S = get_settings().bo_timeout_s
 BLOCK_COOLDOWN_S = 900.0
 FIELDS = ("shortName", "ogrn", "statusCode", "statusDate", "okved2", "region")
 

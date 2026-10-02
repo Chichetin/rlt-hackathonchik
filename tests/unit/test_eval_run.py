@@ -140,6 +140,27 @@ def test_drop_okpd2_keeps_text_and_everything_else():
     assert c.query.okpd2 == ["17.12.14.110", "17.12"]  # the input is not mutated
 
 
+def test_result_records_the_data_snapshot(search_data, monkeypatch):
+    """A metric level compares only between runs on the same data (#421): the result names the ingest snapshot
+    and how many queries the ranker scored without the supplier profile."""
+    from src.match import ranker
+
+    monkeypatch.setattr(ranker, "without_profile", 3)
+    manifest = json.loads((search_data / "manifest.json").read_text(encoding="utf-8"))
+    rec = R.result_record("x", "dev", {}, {})
+    assert rec["data"] == {"built_at": manifest["built_at"], "rows": manifest["rows"], "queries_without_profile": 3}
+
+
+def test_each_eval_run_counts_its_own_queries(search_data, monkeypatch, tmp_path):
+    """Several evaluate() in one process (new_fit_compare, parity tests) do not add up the count (D-144)."""
+    from src.match import ranker
+
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "c.sqlite"))
+    monkeypatch.setattr(ranker, "without_profile", 5)  # left over from an earlier run
+    R.evaluate([case("бумага офисная", ["7801000012"])], {**search_mod.load_config(), "k": 20})
+    assert ranker.without_profile == 0  # the fixture has the profile
+
+
 def test_every_must_be_positive():
     from src.eval.run import main
 

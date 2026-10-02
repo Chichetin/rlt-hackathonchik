@@ -37,7 +37,9 @@ import {
   type SearchResponse,
   type Counterparty,
 } from "./api";
+import { deepLinkSearch, parseDeepLink, type DeepLink } from "./deeplink";
 import { reviewLinks } from "./reviews";
+import { ExternalReviews } from "./ExternalReviews";
 import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
 import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
@@ -53,7 +55,7 @@ import { STATIC_DEMO } from "./staticApi";
 
 // #242: the filter is by the CUSTOMER's region (where the goods go, where the work is done), not the supplier's
 const CUSTOMER_REGIONS = ["Санкт-Петербург", "Ленинградская область"];
-const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Компьютерное оборудование"];
+const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Ноутбуки"]; // each predicts its own class from the text (D-141): no general category names
 
 function SearchIcon({ className = "" }: { className?: string }) {
   return (
@@ -270,8 +272,9 @@ function usePath(): [Path, (next: Path) => void] {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const go = (next: Path) => {
-    if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, "", next);
-    setPath(next);
+    // the same page keeps its address: /results?lot=N is not replaced by /results (#395)
+    if (next !== window.location.pathname && next !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, "", next);
+    setPath(next.replace(/[?#].*$/, ""));
     window.scrollTo?.({ top: 0, behavior: "instant" });
   };
   return [path, go];
@@ -388,6 +391,7 @@ export function App() {
   const [lotId, setLotId] = useState(saved.lotId ?? "");
   const [lot, setLot] = useState<Extra["lot"]>(saved.lot ?? null);
   const lotLabels = useOkpd2Labels(lot?.okpd2 ?? []);
+  const discoveryLabels = useOkpd2Labels(res?.discoveryClass?.predicted ? res.discoveryClass.classes : []);
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
@@ -404,7 +408,7 @@ export function App() {
   // the query of a loaded lot, for a search that must not wait for the form state to update
   type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
 
-  async function loadLot(id: string = lotId): Promise<Ready | null> {
+  async function loadLot(id: string = lotId, auto = false): Promise<Ready | null> {
     if (!id.trim()) return null;
     setLotBusy(true);
     setLotMsg(null);
@@ -415,7 +419,7 @@ export function App() {
       setCustomerInn(q.customer_inn ?? "");
       setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
       setLotQueryId(q.query_id);
-      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}: запрос заполнен из извещения.${auto ? "" : " Проверьте и нажмите «Найти поставщиков»."}` });
       const budgetText = q.budget ? String(q.budget) : "";
       const lotCtx = { okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget };
       return {
@@ -450,7 +454,7 @@ export function App() {
     setPickedLot(id);
     setLotId(id);
     try {
-      const ready = await loadLot(id);
+      const ready = await loadLot(id, true);
       if (ready) await run(filters, ready);
     } finally {
       setPickedLot(null);
@@ -521,6 +525,12 @@ export function App() {
         ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
         : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
       if (window.location.pathname === "/search") go("/results");
+      // the address bar keeps a link that repeats this search (#395): a copied URL opens the same query
+      if (window.location.pathname === "/results") {
+        const loaded = ready ? ready.extra.lot != null : lot != null;
+        const link = deepLinkSearch(ready ? ready.lotId : lotId, loaded, qText);
+        window.history.replaceState(null, "", `/results${link}${window.location.hash}`);
+      }
     } catch (e) {
       if (seq !== runSeq.current) return;
       setError(String(e));
@@ -546,9 +556,51 @@ export function App() {
     }
   }
 
+  // a deep link /search?lot=N or ?q=text (#395) — from a button in a procurement card of АИС ГЗ:
+  // the lot is loaded by the same /api/lot path as by hand, the search starts at once
+  // a reload (F5) or back/forward of this tab's last search is not a new link: the saved query with its filters repeats;
+  // a link followed in the same tab (navigation type "navigate") always searches
+  const deepAtMount = useRef<DeepLink>(
+    (() => {
+      if (path !== "/search" && path !== "/results") return {};
+      const d = parseDeepLink(window.location.search);
+      const nav = (window.performance?.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
+      if (nav !== "reload" && nav !== "back_forward") return d;
+      if (d.lot && saved.lotId === d.lot && saved.lot) return {};
+      if (d.q && !d.lot && saved.text === d.q && !saved.lot) return {};
+      return d;
+    })(),
+  );
+  const deepDone = useRef(false);
+  useEffect(() => {
+    const d = deepAtMount.current;
+    if ((!d.lot && !d.q) || deepDone.current) return;
+    deepDone.current = true;
+    setState("loading");
+    setFilters(NO_FILTERS); // a shared link is a plain search, not the filters left in this browser
+    void (async () => {
+      if (d.lot) {
+        setLotId(d.lot);
+        const ready = await loadLot(d.lot, true);
+        if (ready) await run(NO_FILTERS, ready);
+        else {
+          setState("idle");
+          go("/search"); // not found: the form with the reason
+        }
+      } else if (d.q) {
+        resetLot();
+        setBudget("");
+        setCustomerInn("");
+        setText(d.q);
+        await run(NO_FILTERS, { text: d.q, lotId: "", budget: "", customerInn: "", extra: { budget: "", customer_inn: "", lot: null, query_id: undefined, customer_region: customerRegion } });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // a reload of /results repeats the saved query
   useEffect(() => {
-    if (path === "/results" && !res && state === "idle" && text.trim()) void run();
+    if (path === "/results" && !deepAtMount.current.lot && !deepAtMount.current.q && !res && state === "idle" && text.trim()) void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
@@ -681,7 +733,11 @@ export function App() {
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
       {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
       : path === "/about" ? <AboutPage onStart={() => go("/search")} />
-      : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => go(filterReturn.current)} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
+      : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => {
+        // back to the results keeps the link of their search (#395)
+        const s = loadSaved();
+        go(filterReturn.current === "/results" && s.text ? `/results${deepLinkSearch(s.lotId ?? "", !!s.lot, s.text)}` : filterReturn.current);
+      }} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
       <div className="top">
@@ -926,14 +982,17 @@ export function App() {
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             alert={discoveryAlert(res.discoveryError)}
+            chip={res.discoveryClass?.predicted ? `ОКПД2 определён по тексту: ${okpd2Text(res.discoveryClass.classes, discoveryLabels)}` : undefined}
             rows={newRows}
             total={newTotal}
             onOpen={selectResult}
             empty={
               hiddenNew(res, base, shownQuery) ??
-              (res.query.okpd2?.length
+              (res.query.okpd2?.length || res.discoveryClass
                 ? "В открытых источниках новых компаний по этому запросу не найдено: реестр МСП ФНС не ответил, в нём нет компаний с подходящим ОКВЭД в СПб и области, либо все найденные уже есть в данных АИС ГЗ."
-                : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
+                : res.discoveryError // discover() failed before a class was resolved (#394): the code is not «unknown»
+                  ? "Поиск в открытых источниках не выполнен из-за ошибки — повторите запрос."
+                  : "Код ОКПД2 не указан и по тексту не определён — уточните запрос или загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
           </div>
@@ -971,6 +1030,7 @@ function Block(props: {
   loadingMore?: boolean;
   empty?: string;
   alert?: string; // «Новые»: the block may be incomplete and why (#287); history: weak match with past lots (#281)
+  chip?: string; // «Новые»: the OKPD2 class was determined from the text, not given (#394)
   variant: "history" | "new";
   tag: string;
   customerRegion?: string;
@@ -984,6 +1044,7 @@ function Block(props: {
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
+      {props.chip && <div className="chips block-chips"><span className="chip" data-testid="discovery-class">{props.chip}</span></div>}
       {props.alert && <p className="stub block-alert" role="status" data-testid={props.variant === "new" ? "discovery-error" : "weak-match"}>{props.alert}</p>}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
@@ -1046,6 +1107,7 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
     <section aria-label="Отзывы">
       <h3>Отзывы в открытых источниках</h3>
       <p className="hint">Внешние отзывы можно проверить по ссылкам. Их рейтинг не переносится в Митрандир и не влияет на подбор.</p>
+      <ExternalReviews key={cp.inn ?? "no-inn"} inn={cp.inn} />
       {links.length > 0 ? (
         <p className="review-links">
           Искать отзывы самостоятельно:{" "}
