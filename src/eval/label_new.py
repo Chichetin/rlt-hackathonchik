@@ -205,14 +205,14 @@ def precision_body(rows: Sequence[dict[str, str]], shown: dict[str, int] | None 
     """precision@10 per query = labeled 1 / labeled (the table has <= 10 rows per query), mean over queries.
 
     `shown` = rows per selected query from `prepare` (empty blocks included): n_selected, empty_blocks, shown.
-    Human labels only by default (D-132: a third-party LLM judge is not part of the solution, its labels do not
+    Human labels only by default (D-133: a third-party LLM judge is not part of the solution, its labels do not
     go to slides); `allow_llm` adds `llm:*` labels once they agree with the human (EVAL.md B).
     """
     has_llm = any(_kind(r) == LLM and (r.get("label") or "").strip() in ("0", "1") for r in rows)
     use_llm = allow_llm and llm_trusted(rows)
     if has_llm and not use_llm:
         why = (f"согласие с человеком не подтверждено (нужно >= {MIN_OVERLAP} пар, >= {MIN_AGREEMENT * 100:.0f}%)"
-               if allow_llm else "только метки человека (D-132)")
+               if allow_llm else "только метки человека (D-133)")
         log.warning("метки LLM исключены из метрики: %s", why)
     resolved = resolve(rows, use_llm)
     per: dict[str, list[int]] = {}
@@ -265,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--exp", default="N-new-p10")
     s.add_argument("--labels", type=Path, default=LABELS_PATH)
     s.add_argument("--with-llm", action="store_true",
-                   help="add llm:* labels after >= 20 pairs agree >= 80 %% with the human; not for slides (D-132)")
+                   help="add llm:* labels after >= 20 pairs agree >= 80 %% with the human; not for slides (D-133)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     if args.cmd == "prepare":

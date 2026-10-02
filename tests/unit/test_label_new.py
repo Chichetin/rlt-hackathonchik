@@ -88,7 +88,7 @@ def test_llm_used_after_agreement():
 
 
 def test_llm_labels_are_not_used_by_default_even_after_agreement():
-    """D-132: the slide number comes from human labels only; --with-llm is the explicit opt-in."""
+    """D-133: the slide number comes from human labels only; --with-llm is the explicit opt-in."""
     rows = []
     for i in range(20):
         rows += [lab("a", f"h{i}", "1"), lab("a", f"h{i}", "1", "llm:m")]
