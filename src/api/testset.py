@@ -45,7 +45,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.api import template as template_mod
 from src.ingest import predict as predict_mod
-from src.ingest.testset import TestDataError, TestSet, load_testset
+from src.ingest.testset import ITEM_NAMES, NOTICE_NAMES, TestDataError, TestSet, load_testset
 from src.match import search as search_mod
 from src.settings import get_settings
 
@@ -134,6 +134,11 @@ def _base(name: str) -> str:
     return unicodedata.normalize("NFC", PurePosixPath(name.replace("\\", "/")).name).strip()
 
 
+def _named(low: str, names: tuple[str, ...]) -> bool:
+    """A word of the file name starts with one of `names`: «Предзащита_Потоварка_4.csv» is ТРУ (#596, #589)."""
+    return any(w.startswith(n.casefold()) for w in re.split(r"[\W_]+", low) for n in names)
+
+
 def _sort(files: list[UploadedCsv]) -> tuple[dict[str, tuple[str, str]], list[str]]:
     """Stored name -> (user's name, text) for Извещения and ТРУ; warnings for the ignored files."""
     kept: dict[str, tuple[str, str]] = {}
@@ -141,10 +146,10 @@ def _sort(files: list[UploadedCsv]) -> tuple[dict[str, tuple[str, str]], list[st
     for f in files:
         name = _base(f.name)
         low = name.casefold()
-        if low.startswith(SUPPLIERS.casefold()):
+        if _named(low, (SUPPLIERS,)):
             warnings.append(f"{name}: Поставщики*.csv не используется — ответ системы из него не берётся")
             continue
-        kind = next((k for k in (NOTICES, ITEMS) if low.startswith(k.casefold())), None)
+        kind = next((k for k, names in ((NOTICES, NOTICE_NAMES), (ITEMS, ITEM_NAMES)) if _named(low, names)), None)
         if kind is None:
             raise HTTPException(422, f"{name}: неизвестный файл — нужны Извещения*.csv и ТРУ*.csv "
                                      "из выгрузки организаторов (Поставщики*.csv не нужен)")
