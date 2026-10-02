@@ -4,6 +4,9 @@
     GET    /api/testset              the active set, 404 when none
     DELETE /api/testset              unset the active set (the files stay in the cache)
     GET    /api/testset/predict.csv  src.ingest.predict.run over the active set, cache only -> the CSV file
+    GET    /api/testset/template.xlsx  the customer's list of purchases to fill in (#501, src/api/template.py)
+    POST   /api/testset/template     {name, data: base64} the filled list -> the active set, like the CSV
+    GET    /api/testset/predict.xlsx the same prediction as an Excel book: «Рекомендации» and «Ошибки» (#501)
 
 By file name: `Извещения*.csv` -> Извещения.csv (required), `ТРУ*.csv` -> ТРУ.csv (optional),
 `Поставщики*.csv` is neither stored nor read (the answer must not come from it, D-065) — a warning.
@@ -17,7 +20,11 @@ needs the human's confirmation (CLAUDE.md, №4): only `make predict`, never thi
 
 from __future__ import annotations
 
+import base64
+import binascii
+import csv
 import hashlib
+import io
 import json
 import logging
 import os
@@ -31,9 +38,11 @@ from pathlib import Path, PurePosixPath
 from fastapi import APIRouter, HTTPException, Response
 from fastapi import Query as Param
 from fastapi.responses import JSONResponse
+from openpyxl import Workbook
 from pydantic import BaseModel, Field
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from src.api import template as template_mod
 from src.ingest import predict as predict_mod
 from src.ingest.testset import TestDataError, TestSet, load_testset
 from src.match import search as search_mod
@@ -43,6 +52,8 @@ log = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # file contents together, UTF-8
 NOTICES, ITEMS, SUPPLIERS = "Извещения", "ТРУ", "Поставщики"
 ACTIVE = "active"
+UPLOAD_PATHS = ("/api/testset", "/api/testset/template")
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 PREDICT_GLOB = "predict-*.csv"
 META = "meta.json"
 _ID = re.compile(r"[0-9a-f]{12}")
@@ -61,6 +72,11 @@ class UploadedCsv(BaseModel):
 
 class UploadTestsetRequest(BaseModel):
     files: list[UploadedCsv]
+
+
+class UploadTemplateRequest(BaseModel):
+    name: str = Field(max_length=255, description="имя файла (.xlsx или .csv по шаблону)")
+    data: str = Field(description="содержимое файла, base64")
 
 
 class UploadedLot(BaseModel):
@@ -100,7 +116,7 @@ class UploadLimit:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == "/api/testset":
+        if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] in UPLOAD_PATHS:
             length = dict(scope["headers"]).get(b"content-length", b"")
             if length.isdigit() and int(length) > max_body_bytes():
                 await JSONResponse({"detail": _too_big()}, status_code=413)(scope, receive, send)
@@ -170,7 +186,8 @@ def _info(set_id: str, folder: Path, ts: TestSet) -> UploadedTestset:
         meta = {}
     names: dict[str, str] = meta.get("names") or {p.name: p.name for p in sorted(folder.glob("*.csv"))
                                                   if not p.name.startswith("predict")}
-    files = [names[k] for k in (f"{NOTICES}.csv", f"{ITEMS}.csv") if k in names]
+    # dict: a template is one user's file behind both Извещения and ТРУ
+    files = list(dict.fromkeys(names[k] for k in (f"{NOTICES}.csv", f"{ITEMS}.csv") if k in names))
     warnings = [*meta.get("warnings", []), *(_rename(w, names) for w in ts.warnings)]
     items = [UploadedLot(lot_id=lt.lot_id, reqnum=lt.reqnum, text=lt.query.text, okpd2=list(lt.query.okpd2),
                          notes=list(lt.notes)) for lt in ts.lots]
@@ -212,6 +229,12 @@ def upload_testset(body: UploadTestsetRequest) -> UploadedTestset:
     if sum(len(f.text.encode("utf-8")) for f in body.files) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, _too_big())
     kept, upload_warnings = _sort(body.files)
+    return _store(kept, upload_warnings, None)
+
+
+def _store(kept: dict[str, tuple[str, str]], upload_warnings: list[str],
+           errors: list[template_mod.RowError] | None) -> UploadedTestset:
+    """Stored name -> (user's name, text) becomes the active set; a template's `errors` go to meta.json."""
     set_id = _content_id(kept)
     names = {stored: user for stored, (user, _) in kept.items()}
     root = _root()
@@ -232,7 +255,10 @@ def upload_testset(body: UploadTestsetRequest) -> UploadedTestset:
                         old.unlink()
             else:
                 tmp.rename(folder)
-            _write(folder / META, json.dumps({"names": names, "warnings": upload_warnings}, ensure_ascii=False))
+            meta: dict = {"names": names, "warnings": upload_warnings}
+            if errors is not None:  # a template: its lot_id is the row of the user's file
+                meta["errors"] = [vars(e) for e in errors]
+            _write(folder / META, json.dumps(meta, ensure_ascii=False))
             _write(root / f"{ACTIVE}.tmp", set_id)
             os.replace(root / f"{ACTIVE}.tmp", root / ACTIVE)
         finally:
@@ -242,6 +268,35 @@ def upload_testset(body: UploadTestsetRequest) -> UploadedTestset:
     log.info("тестовая выгрузка %s: лотов %d, предупреждений %d", set_id, len(ts.lots),
              len(upload_warnings) + len(ts.warnings))
     return _info(set_id, folder, ts)
+
+
+@router.get("/api/testset/template.xlsx", response_class=Response,
+            responses={200: {"content": {XLSX: {}}, "description": "шаблон списка закупок"}})
+def get_template() -> Response:
+    return Response(template_mod.template(), media_type=XLSX,
+                    headers={"Content-Disposition": 'attachment; filename="mitrandir-template.xlsx"'})
+
+
+@router.post("/api/testset/template", response_model=UploadedTestset)
+def upload_template(body: UploadTemplateRequest) -> UploadedTestset:
+    """The filled template -> the active set (Извещения + ТРУ of the organizers' format); 422 when unusable."""
+    try:
+        data = base64.b64decode(body.data, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise HTTPException(422, "файл не передан (ожидается base64)") from e
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, _too_big())
+    name = _base(body.name)
+    try:
+        parsed = template_mod.parse(name, data)
+    except template_mod.TemplateError as e:
+        raise HTTPException(422, str(e)) from e
+    kept = {f"{NOTICES}.csv": (name, parsed.notices), f"{ITEMS}.csv": (name, parsed.items)}
+    dropped = sum(not e.kept for e in parsed.errors)
+    warnings = [f"{name}, строка {e.row}: {e.reason}" for e in parsed.errors]
+    if dropped:
+        warnings.insert(0, f"{name}: не принято строк — {dropped}; они на листе «Ошибки» выгрузки Excel")
+    return _store(kept, warnings, parsed.errors)
 
 
 @router.get("/api/testset", response_model=UploadedTestset, responses={404: {"description": "набор не загружен"}})
@@ -275,10 +330,16 @@ def predict_testset(top: int = Param(10, ge=1, le=50, description="кандид�
     if not offline:
         raise HTTPException(422, "живой прогон по всем лотам — массовый сбор, нужно подтверждение человека; "
                                  "здесь только offline=1 (кеш), живой прогон — make predict")
+    set_id, _, _, data = _predict(top)
+    return Response(data, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="mitrandir-predict-{set_id}.csv"'})
+
+
+def _predict(top: int) -> tuple[str, Path, TestSet, bytes]:
     found = _active()
     if found is None:
         raise HTTPException(404, "тестовая выгрузка не загружена")
-    set_id, folder, _ = found
+    set_id, folder, ts = found
     # one file per (config, top): a resume must not mix a top-3 file with a top-10 run or old weights with new ones
     out = folder / f"predict-{config_tag()}-top{top}.csv"
     with _predict_lock:
@@ -293,5 +354,38 @@ def predict_testset(top: int = Param(10, ge=1, le=50, description="кандид�
                                      "make db-load) или база не отвечает") from e
         data = out.read_bytes()  # read under the lock: a new upload may drop the file right after
     log.info("predict.csv %s: %s", set_id, stats)
-    return Response(data, media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="mitrandir-predict-{set_id}.csv"'})
+    return set_id, folder, ts, data
+
+
+ERROR_HEADERS = ("Строка файла", "Номер закупки", "Что не так", "Итог")
+
+
+@router.get("/api/testset/predict.xlsx", response_class=Response,
+            responses={200: {"content": {XLSX: {}}, "description": "листы «Рекомендации» и «Ошибки»"},
+                       404: {"description": "набор не загружен"}})
+def predict_xlsx(top: int = Param(10, ge=1, le=50, description="кандидатов в каждом блоке")) -> Response:
+    """predict.csv as an Excel book (offline) + «Ошибки»: rows not taken from the template and notes on lots."""
+    set_id, folder, ts, data = _predict(top)
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Рекомендации"
+    for row in csv.reader(io.StringIO(data.decode("utf-8-sig")), delimiter=";"):
+        ws.append(row)  # the cells are csv_cell'ed: «=…» already has the «'» prefix, no formula
+    err = wb.create_sheet("Ошибки")
+    err.append(list(ERROR_HEADERS))
+    try:
+        meta = json.loads((folder / META).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        meta = {}
+    for e in meta.get("errors", []):
+        err.append([e["row"], e["reqnum"], e["reason"], "подобрано без этого значения" if e["kept"] else
+                    "строка не принята"])
+    for lot in ts.lots:
+        row = int(lot.lot_id) if "errors" in meta and lot.lot_id.isdigit() else ""
+        for n in lot.notes:
+            err.append([row, lot.reqnum or lot.lot_id, n, "подобрано с ограничением"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(buf.getvalue(), media_type=XLSX,
+                    headers={"Content-Disposition": f'attachment; filename="mitrandir-predict-{set_id}.xlsx"'})

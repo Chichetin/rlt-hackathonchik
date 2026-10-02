@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { dropTestset, getTestset, PREDICT_CSV_URL, type Testset, uploadTestset } from "./api";
+import { dropTestset, getTestset, PREDICT_CSV_URL, PREDICT_XLSX_URL, TEMPLATE_URL, type Testset, uploadTemplate, uploadTestset } from "./api";
 
 // The organizers' test export (#207): upload the CSV files, pick a procedure, see the recommendations.
 // Same format as the training data: «Извещения*.csv» (required), «ТРУ*.csv» (optional);
@@ -8,6 +8,9 @@ import { dropTestset, getTestset, PREDICT_CSV_URL, type Testset, uploadTestset }
 // The server predicts offline ≈ 0.6 s per procedure (review #216): the wait shown before the download.
 const TENTHS_PER_LOT = 6;
 const isSuppliers = (f: File) => f.name.normalize("NFC").toLowerCase().startsWith("поставщики");
+// the organizers' export is named Извещения*/ТРУ*; any other .xlsx / .csv is a list of purchases by the template (#501)
+const isExport = (f: File) => /^(извещения|тру)/.test(f.name.normalize("NFC").toLowerCase());
+export const isTemplate = (f: File) => /\.xlsx$/i.test(f.name) || (/\.csv$/i.test(f.name) && !isExport(f) && !isSuppliers(f));
 
 function plural(n: number, one: string, few: string, many: string): string {
   const d = n % 10;
@@ -40,17 +43,17 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
   const [preparing, setPreparing] = useState(false);
 
   // a button, not <a download>: the server counts for minutes — show that it is working, then save the file
-  async function download() {
+  async function download(url: string) {
     setPreparing(true);
     setError("");
     try {
-      const r = await fetch(PREDICT_CSV_URL);
+      const r = await fetch(url);
       if (!r.ok) throw new Error((await r.text()) || `${r.status}`);
-      const url = URL.createObjectURL(await r.blob());
+      const href = URL.createObjectURL(await r.blob());
       const name = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") ?? "")?.[1] ?? "mitrandir-predict.csv";
-      const a = Object.assign(document.createElement("a"), { href: url, download: name });
+      const a = Object.assign(document.createElement("a"), { href, download: name });
       a.click();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(href);
     } catch (e) {
       setState("error");
       setError(`Прогноз не собран: ${e instanceof Error ? e.message : String(e)}`);
@@ -71,16 +74,21 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
 
   async function upload(files: File[]) {
     setSkipped(files.some(isSuppliers));
-    const csv = files.filter((f) => !isSuppliers(f) && f.name.toLowerCase().endsWith(".csv"));
-    if (!csv.length) {
+    const template = files.filter(isTemplate);
+    const csv = files.filter((f) => !isSuppliers(f) && !isTemplate(f) && f.name.toLowerCase().endsWith(".csv"));
+    if (!csv.length && template.length !== 1) {
       setState("error");
-      setError("Нужны файлы .csv из выгрузки: «Извещения…csv» и, если есть, «ТРУ…csv».");
+      setError(
+        template.length > 1
+          ? "Список закупок — один файл по шаблону."
+          : "Нужны файлы .csv из выгрузки: «Извещения…csv» и, если есть, «ТРУ…csv», — или список закупок по шаблону (.xlsx).",
+      );
       return;
     }
     setState("uploading");
     setError("");
     try {
-      setSet(await uploadTestset(csv));
+      setSet(csv.length ? await uploadTestset(csv) : await uploadTemplate(template[0]));
       setState("idle");
       setFilter("");
     } catch (e) {
@@ -144,13 +152,17 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
             <p>
               CSV в формате организаторов: <strong>Извещения</strong> и, если есть, <strong>ТРУ</strong>. Файл «Поставщики» не нужен.
             </p>
+            <p>
+              Или свой список закупок: <a href={TEMPLATE_URL} download>скачайте шаблон</a>, заполните предмет, ОКПД2, ИНН заказчика
+              и НМЦК и загрузите .xlsx.
+            </p>
             <button type="button" className="secondary" disabled={state === "uploading"} onClick={() => input.current?.click()}>
               {state === "uploading" ? "Загружаем…" : "Выбрать файлы"}
             </button>
             <input
               ref={input}
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,text/csv,.xlsx"
               multiple
               hidden
               aria-label="Файлы тестовой выгрузки"
@@ -213,8 +225,11 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
               {shown.length === 0 && <li className="testset-empty">Ничего не найдено</li>}
             </ul>
             <p className="testset-estimate">{predictEstimate(set.lots)}</p>
-            <button type="button" className="testset-download" disabled={preparing} onClick={() => void download()}>
+            <button type="button" className="testset-download" disabled={preparing} onClick={() => void download(PREDICT_CSV_URL)}>
               {preparing ? "Готовим файл…" : "Скачать прогноз по всем процедурам (CSV)"}
+            </button>
+            <button type="button" className="testset-link" disabled={preparing} onClick={() => void download(PREDICT_XLSX_URL)}>
+              То же в Excel — с листом «Ошибки»
             </button>
             <p className="testset-hint">
               Файл собирается на сервере: на каждую процедуру — блоки «История» и «Новые», оценка и её компоненты. Чтобы
