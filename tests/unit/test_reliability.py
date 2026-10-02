@@ -211,7 +211,7 @@ def mode(monkeypatch):
 
 
 def test_default_mode_is_shadow_and_invalid_is_an_error():
-    assert reliability_mode(search_mod.load_config()) == "shadow"
+    assert reliability_mode(search_mod.load_config()) == "on"  # #585
     assert reliability_mode({}) == "off"
     # YAML 1.1 reads bare on / off as booleans
     assert reliability_mode(yaml.safe_load("reliability: {mode: on}")) == "on"
@@ -319,7 +319,7 @@ def test_rel_on_experiment_is_reproducible_from_the_repository():
     assert v1["options"]["experience_by"] == "class" and f["options"] == load_method_config("H-15f")["options"]
     for exp in ("rel-off-s500", "rel-off-f"):
         assert reliability_mode(load_method_config(exp)) == "shadow"
-    assert reliability_mode(search_mod.load_config()) == "shadow"  # the product stays in shadow
+    assert reliability_mode(search_mod.load_config()) == "on"  # #585: in the score
 
 
 def test_plural_forms():

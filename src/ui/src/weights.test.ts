@@ -28,14 +28,14 @@ test("default weights mirror configs/search.yaml", () => {
 
 test("score is Σ value × weight; the server's weight mass is kept, no-data components stay at 0", () => {
   // product 0.5 : geography 0.5 of the scored mass 1.0 → 0.5 each; geography (0 by H-15f) can be raised
-  const m = reweight(match("A", { product_fit: 1, geography: 0.5, reliability: 1 }), { ...DEFAULT_WEIGHTS, product_fit: 1, experience: 0, activity: 0, geography: 1 });
+  const m = reweight(match("A", { product_fit: 1, geography: 0.5, reliability: 1 }), { ...DEFAULT_WEIGHTS, product_fit: 1, experience: 0, activity: 0, geography: 1, reliability: 0, price: 0 });
   expect(m.components.find((c) => c.name === "product_fit")?.weight).toBe(0.5);
   expect(m.components.find((c) => c.name === "geography")?.weight).toBe(0.5);
   expect(m.components.find((c) => c.name === "reliability")?.weight).toBe(0);
   expect(m.score).toBe(0.75);
   // the standard weights reproduce the server score
   const std = reweight(match("B", { product_fit: 1, experience: 0.5, activity: 1, geography: 1 }), DEFAULT_WEIGHTS);
-  expect(std.score).toBeCloseTo(0.5 + 0.125 + 0.15 + 0.1, 4);
+  expect(std.score).toBeCloseTo(0.4 + 0.1 + 0.1 + 0.07, 4);
 });
 
 test("the no-data list mirrors UNAVAILABLE in src/match/search.py", () => {
