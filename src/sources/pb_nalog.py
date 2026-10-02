@@ -79,7 +79,7 @@ def _post(client: httpx.Client, path: str, data: dict[str, str]) -> httpx.Respon
     # not `captchaRequired` in a 200 body. Without this the worker would count it as a failed
     # task and keep knocking.
     if r.status_code == 400 and "captcha" in r.text.lower():
-        token = pb_captcha.solve(client, BASE, PACER.slot) if _solving() else None
+        token = pb_captcha.solve(client, BASE, PACER.slot) if _solving() else None  # secret-scan: allow (a solved captcha token, not a key)
         if token is None:
             raise _captcha("pb.nalog.ru требует капчу (HTTP 400) — стоп (решатель выключен или не справился)")
         with PACER.slot():
