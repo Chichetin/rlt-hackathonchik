@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import csv
 import io
 import re
@@ -9,8 +10,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from src.api import app as app_mod
+from src.api import template as template_mod
 from src.api import testset as T
 from src.ingest.predict import COLUMNS
 
@@ -272,3 +275,74 @@ def test_predict_csv_makes_no_request_even_with_discovery_online(client, search_
     _upload(client, _files())
     assert client.get("/api/testset/predict.csv?top=3&offline=1").status_code == 200
     assert calls == []
+
+
+# --- the customer's list of purchases by the template (#501) ---
+
+def _template_body(name: str, data: bytes) -> dict[str, str]:
+    return {"name": name, "data": base64.b64encode(data).decode("ascii")}
+
+
+def test_template_download(client):
+    r = client.get("/api/testset/template.xlsx")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == 'attachment; filename="mitrandir-template.xlsx"'
+    wb = load_workbook(io.BytesIO(r.content))
+    assert [c.value for c in wb["Закупки"][1]] == list(template_mod.HEADERS) and "Инструкция" in wb.sheetnames
+
+
+def test_template_upload_then_excel_with_the_errors_sheet(client, search_data, root):
+    text = ("Номер закупки;Предмет закупки;ОКПД2;ИНН заказчика;НМЦК, руб.\n"
+            "A-1;Поставка бумаги офисной А4;17.12.14.110;;\n"
+            "A-2;Ремонт кровли;;;\n"
+            "A-3;;;;\n")
+    r = client.post("/api/testset/template", json=_template_body("Мои закупки.csv", text.encode("cp1251")))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["lots"] == 2 and body["files"] == ["Мои закупки.csv"]
+    assert [(it["lot_id"], it["reqnum"]) for it in body["items"]] == [("2", "A-1"), ("3", "A-2")]
+    assert any("не принято строк — 1" in w for w in body["warnings"])
+    assert any("строка 4" in w and "искать не по чему" in w for w in body["warnings"])
+    assert client.get("/api/lot/3").json()["text"] == "Ремонт кровли"  # the UI picks by lot_id: the row
+
+    x = client.get("/api/testset/predict.xlsx?top=3")
+    assert x.status_code == 200, x.text
+    assert x.headers["content-disposition"] == f'attachment; filename="mitrandir-predict-{body["id"]}.xlsx"'
+    wb = load_workbook(io.BytesIO(x.content))
+    assert wb.sheetnames == ["Рекомендации", "Ошибки"]
+    rec = list(wb["Рекомендации"].iter_rows(values_only=True))
+    assert tuple(rec[0]) == COLUMNS
+    assert len(rec) > 1 and {str(row[COLUMNS.index("lot_id")]) for row in rec[1:]} <= {"2", "3"}
+    errors = [tuple("" if v is None else str(v) for v in row) for row in wb["Ошибки"].iter_rows(values_only=True)]
+    assert errors[0] == T.ERROR_HEADERS
+    assert ("4", "A-3") in {(e[0], e[1]) for e in errors[1:] if e[3] == "строка не принята"}
+    # the lot without OKPD2 is searched, with its note
+    assert any(e[0] == "3" and "ОКПД2 не указан" in e[2] and e[3] == "подобрано с ограничением" for e in errors[1:])
+
+
+def test_template_upload_errors(client):
+    assert client.post("/api/testset/template", json={"name": "x.xlsx", "data": "@@@"}).status_code == 422
+    r = client.post("/api/testset/template", json=_template_body("x.csv", "Цвет\nсиний\n".encode()))
+    assert r.status_code == 422 and "Предмет закупки" in r.json()["detail"]
+    assert client.get("/api/testset").status_code == 404  # nothing became active
+
+
+def test_predict_xlsx_needs_a_set(client):
+    assert client.get("/api/testset/predict.xlsx").status_code == 404
+
+
+def test_template_row_number_wins_over_a_users_number(client):
+    # the user's «Номер закупки» 3 is row 2; row 3 has its own subject: a pick by lot_id must open row 3
+    text = "Номер закупки;Предмет закупки\n3;Бумага\n7;Ремонт кровли\n"
+    assert client.post("/api/testset/template", json=_template_body("l.csv", text.encode())).status_code == 200
+    assert client.get("/api/lot/3").json()["text"] == "Ремонт кровли"
+    assert client.get("/api/lot/7").json()["text"] == "Ремонт кровли"  # the user's number still finds its row
+
+
+def test_errors_sheet_is_text_not_formulas(client, search_data):
+    text = "Номер закупки;Предмет закупки;ИНН заказчика\n=1+1;Бумага\x02 офисная;123\n"
+    assert client.post("/api/testset/template", json=_template_body("l.csv", text.encode())).status_code == 200
+    x = client.get("/api/testset/predict.xlsx?top=3")
+    assert x.status_code == 200, x.text  # a control character from the data does not break the book
+    err = load_workbook(io.BytesIO(x.content))["Ошибки"]
+    assert all(c.data_type != "f" for row in err.iter_rows() for c in row)

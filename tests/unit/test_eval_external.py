@@ -87,3 +87,25 @@ def test_read_lots_does_not_load_lots_on_or_after_end(tmp_path: Path) -> None:
     assert [x.lot_id for x in got] == [1, 2]  # the lot of 2025-10-01 itself is the sealed period
     assert [x.lot_id for x in BC.read_lots(tmp_path, date(2025, 1, 2), date(2025, 10, 1))] == [2]
     assert [x.lot_id for x in BC.read_lots(tmp_path, date(2025, 1, 1))] == [1, 2, 3, 4]
+
+
+def test_name_only_keeps_the_subject_and_drops_the_card() -> None:
+    """#491: the query as the jury types it — the lot subject only, no OKPD2, customer, budget, channel."""
+    case = BC.to_case(_lot(1, date(2025, 3, 1)), CUTOFF)
+    got = EX.name_only(case, _lot(1, date(2025, 3, 1)))
+    assert got is not None
+    q = got.query
+    assert q.text == "Поставка товара 1"
+    assert (q.okpd2, q.customer_inn, q.budget, q.channel) == ([], None, None, None)
+    assert (q.query_id, q.as_of, got.relevant_inns, got.grades) == (
+        case.query.query_id, CUTOFF, case.relevant_inns, case.grades)
+
+
+def test_name_only_falls_back_to_the_procedure_name_and_drops_a_lot_without_either() -> None:
+    lot = _lot(1, date(2025, 3, 1))
+    case = BC.to_case(lot, CUTOFF)
+    lot.subject, lot.procedure_name = "  ", " Закупка бумаги "
+    got = EX.name_only(case, lot)
+    assert got is not None and got.query.text == "Закупка бумаги"
+    lot.procedure_name = None
+    assert EX.name_only(case, lot) is None

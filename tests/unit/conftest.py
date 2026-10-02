@@ -44,6 +44,10 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     from src.sources import web_leads
 
     monkeypatch.setattr(web_leads, "LEADS_DIR", tmp_path / "leads-default")
+    # EAEU leads (#200): no test depends on the real configs/eaeu; tests/unit/test_eaeu.py sets it back
+    from src.enrich import eaeu
+
+    monkeypatch.setattr(eaeu, "LEADS", tmp_path / "eaeu-leads-default.csv")
     # the registry export of industrial products (#74): not the dev machine's; tests/unit/test_gisp.py builds its own
     from src.sources import gisp
 
