@@ -1247,7 +1247,7 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
         ? "Порядок задаёт модель, обученная на истории закупок; оценка — сумма критериев × вес ниже, как и без модели."
         : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
-        {m.components.map((c) => (
+        {m.components.filter((c) => c.weight > 0).map((c) => (
           <li key={c.name}>
             <span className="cname">{COMPONENT_LABEL[c.name]}</span>
             <span className="bar" aria-hidden>
@@ -1331,7 +1331,9 @@ const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa
 
 /** Score as a stacked bar: each segment is value × weight of one component, so their sum is the total. */
 function Breakdown({ m }: { m: CounterpartyMatch }) {
-  const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }));
+  // a criterion with weight 0 is out of the score (#576): not in the bar, not in the legend
+  const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }))
+    .filter(({ c }) => c.weight > 0);
   return (
     <figure className="breakdown" aria-label={rankerReason(m) ? "Из чего сложилась оценка (порядок задаёт модель)" : "Из чего сложилась оценка"}>
       <div className="stack" aria-hidden="true">
