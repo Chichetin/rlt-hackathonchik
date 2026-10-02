@@ -17,8 +17,8 @@ for(const id of ['s1','s2','s3','s4','s5','s6','s7','b1','b2','b3','b4','b5']){
 }
 await page.keyboard.press('Home');await page.keyboard.press('ArrowRight');check(await page.locator('#s2').isVisible(),'S2 introduces supplier candidate pipeline');
 for(const id of ['s2','s3']){
- for(let i=1;i<=3;i++){await page.keyboard.press('ArrowRight');check(await page.locator(`#${id} .emphasis`).getAttribute('data-step')===String(i),`${id}: step ${i}`)}
- await page.reload();check(await page.locator(`#${id} .emphasis`).getAttribute('data-step')==='3',`${id}: refresh preserves emphasis`);await page.keyboard.press('ArrowRight');
+ for(let i=1;i<=3;i++){await page.keyboard.press('ArrowRight');check(await page.locator(`#${id} .emphasis`).first().getAttribute('data-step')===String(i),`${id}: step ${i}`)}
+ await page.reload();check(await page.locator(`#${id} .emphasis`).first().getAttribute('data-step')==='3',`${id}: refresh preserves emphasis`);await page.keyboard.press('ArrowRight');
 }
 for(let i=1;i<=5;i++){await page.keyboard.press('ArrowRight');check(await page.locator('#s4 .emphasis').getAttribute('data-step')===String(i),`Architecture step ${i}`)}
 await page.keyboard.press('ArrowRight');for(let i=1;i<=3;i++){await page.keyboard.press('ArrowRight');check(await page.locator('#s5 .emphasis').getAttribute('data-step')===String(i),`Filter step ${i}`)}

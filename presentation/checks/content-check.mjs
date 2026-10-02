@@ -16,9 +16,10 @@ check(text('s1').includes('Митрандир')&&text('s1').includes('ИИ бл�
 check(baseline.n_queries===current.n_queries&&JSON.stringify(baseline.per_query.map(q=>q.query_id))===JSON.stringify(current.per_query.map(q=>q.query_id)),'Comparison uses identical query IDs');
 check(text('b2').includes(baseline.metrics['recall@10'].value.toFixed(3).replace('.',','))&&text('b2').includes(current.metrics['recall@10'].value.toFixed(3).replace('.',',')),'Backup Recall values agree with reports');
 check(text('b2').includes('2 000')&&current.n_queries===2000,'Backup evaluation sample size agrees');
-check(text('s2').includes('500')&&text('s2').includes('≤ 200')&&text('s2').includes('лимиты'),'Candidate ceilings explicitly labelled as limits');
-const search=fs.readFileSync(path.join(repo,'src/match/search.py'),'utf8');
-check(/TOP_DOCS = 500/.test(search)&&/CANDIDATES = 200/.test(search),'Candidate ceilings match source constants');
+check(['Данные жюри','Очистка и связи','Хранилище','Кандидаты','Оценка и порядок','Факты и отбор','Наш сайт'].every(x=>text('s2').includes(x)),'S2 covers CSV preparation through site output');
+check(text('s2').includes('Названия → модель → векторы')&&text('s2').includes('ветка выключена')&&text('s2').includes('BM25'),'Vector preparation is distinct from active text retrieval');
+const cfg=fs.readFileSync(path.join(repo,'configs/search.yaml'),'utf8'),embed=fs.readFileSync(path.join(repo,'src/db/embed.py'),'utf8');
+check(/^retriever: bm25/m.test(cfg)&&embed.includes('SELECT DISTINCT')&&embed.includes('normalize_embeddings=True'),'Index and vector status checked against actual source');
 check(text('s5').includes('РНП')&&text('s5').includes('Банкротство')&&text('s5').includes('Ликвидация')&&text('s5').includes('МСП')&&text('s5').includes('ЮЛ / ИП')&&text('s5').includes('Мин. score'),'Concrete legal and user filters are displayed');
 check(text('s5').includes('Неизвестный статус')&&text('s5').includes('сам по себе не исключает')&&text('s5').includes('подтверждения'),'Unknown legal status is distinguished from positive user-filter confirmation');
 const off=read('eval/results/G-490L-free-off.json'),on=read('eval/results/G-490L-free.json');
