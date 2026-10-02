@@ -1,8 +1,8 @@
 {
  "exp_id": "X-code-text-mix",
  "part": "dev",
- "created_at": "2026-10-01T22:32:49+00:00",
- "commit": "5cc14b6f961ed12be64d1b1b8632187c7cefa55e",
+ "created_at": "2026-10-02T00:16:32+00:00",
+ "commit": "7651a161fd1fa30ca8869a3d2fefe3371452ce6e",
  "dirty": false,
  "config": {
   "method": "code_text",
@@ -15,12 +15,12 @@
   "tokenizer": "prefix5"
  },
  "tokenizer_version": "prefix5-v1",
- "config_sha256": "50e893c9c8a9cccceb3aae172594f0e3f1f84e279b958a210581235bf4d533bf",
+ "config_sha256": "2eb02bb4c9b7e34cad047197a34545657d1e87e9a373048efa1e122cb5f80826",
  "stub": false,
  "vectors": null,
  "store": "parquet",
  "n_queries": 400,
- "elapsed_s": 394.8,
+ "elapsed_s": 559.1,
  "metrics": {
   "real": {
    "code": {
