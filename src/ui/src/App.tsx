@@ -267,7 +267,7 @@ export function discoveryAlert(code: string | undefined): string | undefined {
   if (code === "history_unchecked") {
     return "Данные организаторов не загружены — сверка с историей закупок не выполнена, поэтому новых компаний не показываем.";
   }
-  return "Источники не ответили — список может быть неполным.";
+  return undefined; // a source that failed is not shown as a warning (#595, decision of the human)
 }
 
 type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
@@ -976,7 +976,7 @@ export function App() {
               <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>
                 {resultGroup === "new" && <motion.span className="result-group-indicator" layoutId="result-group-current" transition={reduced ? { duration: 0 } : glide} aria-hidden="true" />}
                 <span className="result-group-label">Новые <span>{newTotal}</span>
-                  {res.discoveryError && <span className="group-alert" title={discoveryAlert(res.discoveryError)}>
+                  {discoveryAlert(res.discoveryError) && <span className="group-alert" title={discoveryAlert(res.discoveryError)}>
                     <span aria-hidden="true">!</span><span className="sr-only">список может быть неполным</span></span>}
                 </span>
               </button>
@@ -1223,7 +1223,7 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
         ? "Порядок задаёт модель, обученная на истории закупок; оценка — сумма критериев × вес ниже, как и без модели."
         : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
-        {m.components.filter((c) => c.weight > 0).map((c) => (
+        {m.components.filter((c) => c.weight > 0 && c.value * c.weight >= 0.005).map((c) => (
           <li key={c.name}>
             <span className="cname">{COMPONENT_LABEL[c.name]}</span>
             <span className="bar" aria-hidden>
@@ -1309,7 +1309,7 @@ const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa
 function Breakdown({ m }: { m: CounterpartyMatch }) {
   // a criterion with weight 0 is out of the score (#576): not in the bar, not in the legend
   const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }))
-    .filter(({ c }) => c.weight > 0);
+    .filter(({ c }) => c.weight > 0 && c.value * c.weight >= 0.005); // no «+0.00» rows (#595)
   return (
     <figure className="breakdown" aria-label={rankerReason(m) ? "Из чего сложилась оценка (порядок задаёт модель)" : "Из чего сложилась оценка"}>
       <div className="stack" aria-hidden="true">
