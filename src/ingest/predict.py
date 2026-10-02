@@ -269,8 +269,10 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
     from src.enrich import verify as verify_mod
     from src.match import search as search_mod
     from src.match.index import processed_dir
+    from src.match.store import store_for
     from src.sources.cache import SourceCache
 
+    organizers = store_for(processed)  # the store search() reads, unless a parquet dir is given (#293)
     processed = processed or processed_dir()
     if verify_fn is None:
         cache = SourceCache()
@@ -289,7 +291,7 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
     try:
         text_query = query.model_copy(update={"okpd2": []})
         by_text = search_mod.search(text_query, k=pool_k)
-        text_class = discover_mod.predict_class(by_text, processed)
+        text_class = discover_mod.predict_class(by_text, organizers)
         rep.text_class = text_class or ""
         why = code_disagrees(query.okpd2, section_shares(by_text, processed), text_class, known_classes(processed))
         if why:  # decision 18: by the text too; interleaved — the text alone loses on real lots (X-code-text-mix)

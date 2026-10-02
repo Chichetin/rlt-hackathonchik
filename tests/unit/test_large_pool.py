@@ -56,13 +56,13 @@ def test_inns_of_the_fixture_pass_the_checksum():
 
 
 def test_large_row_says_only_what_the_page_says():
-    bo = pool.large_row(BO_INN, "bo", page(bo_nalog.search_url(BO_INN), bo_body(BO_INN)), DUMP_AT)
+    bo = pool.large_row(BO_INN, "bo", page(bo_nalog.search_url(BO_INN), bo_body(BO_INN)), DUMP_AT, "candidates")
     assert bo is not None and (bo["name"], bo["okved_main"], bo["region_code"]) == ('АО "БУМАГА"', "17.12", "78")
     assert bo["msp_checked_at"] == DUMP_AT and bo["url"] == bo_nalog.search_url(BO_INN)
     pb = pool.large_row(PB_INN, "pb", page(pb_nalog.card_url(PB_INN), pb_body(PB_INN)))
     assert pb is not None and (pb["name"], pb["okved_main"], pb["region_code"]) == ('ПАО "КАРТОН"', "17.12", "47")
     assert bo["list"] == "candidates" and pool.large_active(bo) and pool.large_active(pb)
-    lo = pool.large_row(FAR_INN, "bo", page("u", bo_body(FAR_INN, region="ЛЕНИНГРАДСКАЯ")), None, "gap")
+    lo = pool.large_row(FAR_INN, "bo", page("u", bo_body(FAR_INN, region="ЛЕНИНГРАДСКАЯ")))  # not offerable by default
     assert lo is not None and (lo["region_code"], lo["list"], lo["msp_checked_at"]) == ("47", "gap", None)
     far = pool.large_row(FAR_INN, "bo", page(bo_nalog.search_url(FAR_INN), bo_body(FAR_INN, region="МОСКВА")))
     assert far is not None and far["region_code"] is None  # not a region of src/regions.py: no code is guessed
@@ -160,7 +160,8 @@ def test_large_pages_keep_a_newer_answer_and_a_dump_record(pool_dir, tmp_path):
         {"inn": PB_INN, "code": "17.12", "main": True}]
     assert pool.large_candidates(["46"], pool_dir=pool_dir) == []
     assert WON_INN not in {r["inn"] for r in pool.large_candidates(["17"], pool_dir=pool_dir)}  # the `gap` list
-    gone = pool.large_row(BO_INN, "bo", page("u", bo_body(BO_INN).replace("ACTIVE", "LIQUIDATION_STAGE")))
+    gone = pool.large_row(BO_INN, "bo", page("u", bo_body(BO_INN).replace("ACTIVE", "LIQUIDATION_STAGE")), None,
+                          "candidates")
     pq.write_table(pa.Table.from_pylist([gone], schema=pool.LARGE_SCHEMA), tmp_path / "large.parquet")
     assert pool.large_candidates(["17"], pool_dir=tmp_path) == []  # in liquidation: in the table, not offered
     assert pool.large_candidates(["17"], pool_dir=tmp_path / "none") == []  # no table: the pool is the dump alone

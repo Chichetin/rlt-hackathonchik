@@ -36,8 +36,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -276,7 +278,11 @@ def main(argv: list[str] | None = None) -> int:
         if not large.exists():
             print(f"нет {large}: сначала scripts/large_pool.py build", file=sys.stderr)
             return 2
-        result: dict = {"top": args.top, **coverage(con, large)}
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True)
+        built = datetime.fromtimestamp(large.stat().st_mtime, UTC).isoformat(timespec="seconds")
+        # the table grows while `collect` goes on: the numbers are those of this snapshot
+        result: dict = {"commit": commit.stdout.strip() or None, "large_built_at": built, "top": args.top,
+                        **coverage(con, large)}
         if args.out:
             args.out.write_text(json.dumps(result, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False, indent=1))

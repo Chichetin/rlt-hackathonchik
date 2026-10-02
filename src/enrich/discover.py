@@ -55,11 +55,11 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, Scor
 from src.enrich import web_discover
 from src.enrich.enrich import enrich, from_bo, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
-from src.ingest.load import suppliers_path
 from src.match import new_fit
 from src.match import search as search_mod
 from src.match.filters import apply_filters, apply_legal
 from src.match.index import processed_dir
+from src.match.store import Store, get_store, store_for
 from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_NAME
 from src.settings import get_settings
 from src.sources import bo_nalog, gisp, msp_dump, pb_nalog, rmsp, role, web_leads
@@ -211,74 +211,60 @@ def stated_class(history: Sequence[CounterpartyMatch]) -> str | None:
     return max(votes, key=lambda c: votes[c]) if votes else None  # ties: the higher-ranked match wins
 
 
-def predict_class(history: Sequence[CounterpartyMatch], processed: Path) -> str | None:
+def _store_errors() -> tuple[type[Exception], ...]:
+    """What a failed read of organizers' data raises on either store: the same «not checked» note on both."""
+    try:
+        import psycopg
+    except ImportError:  # no pg extra: parquet only
+        return (OSError, duckdb.Error)
+    return (OSError, duckdb.Error, psycopg.Error)
+
+
+_STORE_ERRORS = _store_errors()
+
+
+def predict_class(history: Sequence[CounterpartyMatch], store: Store | None = None) -> str | None:
     """OKPD2 class of a query without codes: stated by search(), else voted by the lots behind the
-    top history matches; None when neither can be read."""
-    return stated_class(history) or _lots_class(history, processed)
+    top history matches (their positions from `store`, default — the store search() read); None when
+    neither can be read."""
+    return stated_class(history) or _lots_class(history, store)
 
 
-def _lots_class(history: Sequence[CounterpartyMatch], processed: Path) -> str | None:
+def _lots_class(history: Sequence[CounterpartyMatch], store: Store | None = None) -> str | None:
     lots: dict[int, float] = {}
     for m in history[:VOTE_MATCHES]:
         for e in m.counterparty.evidence:
             if e.url.startswith(_LOT_URL) and e.url[len(_LOT_URL):].isdigit():
                 lot = int(e.url[len(_LOT_URL):])
                 lots[lot] = max(lots.get(lot, 0.0), m.score)
-    items = processed / "items.parquet"
-    if not lots or not items.exists():
+    if not lots:
         return None
-    con = duckdb.connect()
     try:
-        rows = con.execute(
-            "SELECT DISTINCT lot_id, okpd2_l4 FROM read_parquet(?) "
-            "WHERE lot_id IN (SELECT unnest(?)) AND okpd2_l4 IS NOT NULL",
-            [str(items), list(lots)],
-        ).fetchall()
-    except duckdb.Error as e:
-        log.warning("discovery: items.parquet не прочитан: %s", e)
+        rows = (store or get_store()).lot_codes(sorted(lots))
+    except _STORE_ERRORS as e:  # StoreUnavailable is an OSError: no data, Postgres down
+        log.warning("discovery: позиции лотов не прочитаны: %s", e)
         return None
-    finally:
-        con.close()
-    by_lot: dict[int, list[str]] = {}
-    for lot, cls in rows:
-        if _OKPD_CLASS.fullmatch(cls):
-            by_lot.setdefault(lot, []).append(cls)
+    by_lot: dict[int, set[str]] = {}
+    for lot, code in rows:
+        cls = code[:5]  # okpd2_l4 of the ingest: the first 5 characters of a code at least that long
+        if len(code) >= 5 and _OKPD_CLASS.fullmatch(cls):
+            by_lot.setdefault(lot, set()).add(cls)
     votes: dict[str, float] = {}
-    for lot, classes in by_lot.items():
-        for cls in classes:  # a lot with several classes splits its vote
+    for lot, classes in sorted(by_lot.items()):
+        for cls in sorted(classes):  # a lot with several classes splits its vote
             votes[cls] = votes.get(cls, 0.0) + lots[lot] / len(classes)
     return min(votes, key=lambda c: (-votes[c], c)) if votes else None
 
 
-_SUPPLIERS: dict[tuple[str, int], frozenset[str]] = {}  # (file, mtime) → all INNs of organizers' data
-
-
-def _all_inns(path: Path) -> frozenset[str] | None:
-    """Every INN of a suppliers parquet, read once per file version (a rebuilt file is read again)."""
-    key = (str(path), path.stat().st_mtime_ns)
-    if key not in _SUPPLIERS:
-        con = duckdb.connect()
-        try:
-            rows = con.execute("SELECT DISTINCT inn FROM read_parquet(?) WHERE inn IS NOT NULL", [str(path)]).fetchall()
-        except duckdb.Error as e:
-            log.warning("discovery: %s не прочитан: %s", path.name, e)
-            return None
-        finally:
-            con.close()
-        for old in [k for k in _SUPPLIERS if k[0] == key[0]]:
-            del _SUPPLIERS[old]
-        _SUPPLIERS[key] = frozenset(r[0] for r in rows)
-    return _SUPPLIERS[key]
-
-
-def known_inns(inns: Sequence[str], as_of: date | None, processed: Path) -> set[str] | None:
-    """INNs present in organizers' data (before as_of); None — the data is absent, nothing checked."""
+def known_inns(inns: Sequence[str], as_of: date | None, store: Store | None = None) -> set[str] | None:
+    """INNs present in organizers' data (before as_of) — the suppliers table of `store` (default: the store
+    search() reads, Postgres in `make up`); None — the data is absent, nothing checked."""
     try:
-        path = suppliers_path(as_of, processed)
-        everyone = _all_inns(path)
-    except OSError:  # FileNotFoundError from suppliers_path or a file removed meanwhile
+        everyone = (store or get_store()).supplier_inns(as_of)
+    except _STORE_ERRORS as e:  # StoreUnavailable (no table for as_of, Postgres down) is an OSError
+        log.warning("discovery: ИНН данных организаторов не прочитаны: %s", e)
         return None
-    return None if everyone is None else set(inns) & everyone
+    return set(inns) & everyone
 
 
 def display_name(row: dict[str, str]) -> str | None:
@@ -442,7 +428,7 @@ def leads_enabled() -> bool:
 
 def lead_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], cache: SourceCache,
-    weights: dict[str, float], predicted: bool, processed: Path, region: str, region_note: str | None,
+    weights: dict[str, float], predicted: bool, store: Store, region: str, region_note: str | None,
     leads: dict[str, web_leads.Lead] | None = None,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """Web leads of the query's classes (#108, src/sources/web_leads.py): companies outside the МСП registry.
@@ -461,7 +447,7 @@ def lead_matches(
         leads.pop(inn, None)
     if not leads:
         return [], {}, [], None
-    known = known_inns(list(leads), query.as_of, processed) or set()
+    known = known_inns(list(leads), query.as_of, store) or set()
     plan = okved_plan(codes)
     regions = _regions(query)
     np_types = _np_types()
@@ -516,7 +502,7 @@ def lead_matches(
 def yandex_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], history: Sequence[CounterpartyMatch],
     current: Sequence[CounterpartyMatch], cache: SourceCache, weights: dict[str, float], predicted: bool,
-    processed: Path, region: str, region_note: str | None, *, offline: bool, deadline: float,
+    store: Store, region: str, region_note: str | None, *, offline: bool, deadline: float,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """The paid fallback (#194, src/enrich/web_discover.py): Yandex → company site → INN → the road of a web lead.
 
@@ -532,7 +518,7 @@ def yandex_matches(
     if not fb.used:
         return [], {}, [], f"Яндекс (запасной путь): {fb.reason}"
     leads = {lead.inn: lead for lead in fb.leads if lead.inn and lead.inn not in skip}
-    found, relation, no_card, line = lead_matches(query, codes, classes, skip, cache, weights, predicted, processed,
+    found, relation, no_card, line = lead_matches(query, codes, classes, skip, cache, weights, predicted, store,
                                                   region, region_note, leads=leads)
     out: list[CounterpartyMatch] = []
     for m in found:
@@ -675,7 +661,7 @@ def gisp_confirm(m: CounterpartyMatch, hit: GispHit | None, other: Sequence[gisp
 
 def gisp_matches(
     query: Query, codes: Sequence[str], hits: dict[str, GispHit], skip: set[str], cache: SourceCache,
-    weights: dict[str, float], predicted: bool, processed: Path, region: str, region_note: str | None,
+    weights: dict[str, float], predicted: bool, store: Store, region: str, region_note: str | None,
     okpd_class: str, stems: Sequence[str] = (),
 ) -> tuple[list[CounterpartyMatch], list[str], str]:
     """Registry makers of the query's product that no other channel found (#74). Shown when absent from
@@ -683,7 +669,7 @@ def gisp_matches(
     KPP of a cached ФНС card, else by the INN's tax office code (said to be unconfirmed; the card is queued).
     Returns the matches, the INNs without a cached card and one line for `Discovery.gisp`."""
     fresh = {inn: hit for inn, hit in hits.items() if inn not in skip}
-    known = known_inns(list(fresh), query.as_of, processed) or set()
+    known = known_inns(list(fresh), query.as_of, store) or set()
     regions, np_types = _regions(query), _np_types()
     out: list[CounterpartyMatch] = []
     no_card: list[str] = []
@@ -785,7 +771,8 @@ def discover(
     used only when the query has no OKPD2 of its own, and then its full code picks the wholesale row.
     """
     cache = cache or SourceCache()
-    processed = processed or processed_dir()
+    store = store_for(processed)  # organizers' data: the store search() read unless a parquet dir is given
+    processed = processed or processed_dir()  # the OKPD2 profile of new_fit still reads the parquet
     offline = offline_mode() if offline is None else offline
     if weights is None:
         weights = search_mod.load_config()["weights"]  # validated, as search() reads it (#220 №7)
@@ -802,7 +789,7 @@ def discover(
             return res
         # the code search() predicted from the text (P-02); without it — what its explanations / lots say
         code = predicted_code.strip() if predicted_code and okpd_classes([predicted_code]) else None
-        guess = okpd_classes([code])[0] if code else predict_class(history, processed)
+        guess = okpd_classes([code])[0] if code else predict_class(history, store)
         if guess is None:
             res.notes.append("ОКПД2 запроса не указан и по тексту не определён — поиск по ОКВЭД невозможен")
             return res
@@ -869,7 +856,7 @@ def discover(
             res.profile_gap = new_fit.profile_gap(processed, fit_cfg)
             log.warning("discovery %s: профиль ОКПД2 не посчитан — %s", query.query_id, res.profile_gap)
 
-    known = known_inns(list(found), query.as_of, processed)
+    known = known_inns(list(found), query.as_of, store)
     res.history_checked = known is not None
     if known is None:
         res.notes.append("данные организаторов не загружены — сверка с историей закупок не выполнена")
@@ -900,7 +887,7 @@ def discover(
     if res.history_checked and leads_enabled():  # web leads (#108): «новые» only after the history check
         try:
             found_leads, lead_relation, lead_no_card, line = lead_matches(
-                query, codes, res.okpd_classes, set(found), cache, weights, res.predicted, processed, target,
+                query, codes, res.okpd_classes, set(found), cache, weights, res.predicted, store, target,
                 target_note)
         except Exception:  # noqa: BLE001 — a broken leads file never takes the registry channel down
             log.exception("discovery: веб-лиды пропущены из-за ошибки")
@@ -926,7 +913,7 @@ def discover(
             extra: list[CounterpartyMatch] = []
             if res.history_checked:  # «новые» only after the history check, as the web leads
                 extra, gisp_no_card, line = gisp_matches(
-                    query, codes, hits, set(shown), cache, weights, res.predicted, processed, target, target_note,
+                    query, codes, hits, set(shown), cache, weights, res.predicted, store, target, target_note,
                     res.okpd_classes[0], stems)
                 res.gisp.append(line)
             else:
@@ -948,7 +935,7 @@ def discover(
         try:
             found_web, web_relation, web_no_card, line = yandex_matches(
                 query, codes, res.okpd_classes, {m.counterparty.inn or "" for m in matches}, history, matches, cache,
-                weights, res.predicted, processed, target, target_note, offline=offline, deadline=deadline)
+                weights, res.predicted, store, target, target_note, offline=offline, deadline=deadline)
         except Exception:  # noqa: BLE001 — the paid fallback never takes the free channels down
             log.exception("discovery: запасной путь Яндекс пропущен из-за ошибки")
             found_web, web_relation, web_no_card, line = [], {}, [], None
@@ -1060,7 +1047,7 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
             if r["inn"] not in rows:
                 rows[r["inn"]] = r
                 large.add(r["inn"])
-    known = known_inns(list(rows), query.as_of, processed)
+    known = known_inns(list(rows), query.as_of, store_for(processed))
     if known is None:
         return [], {}, False
     fresh = [inn for inn in rows if inn not in known]

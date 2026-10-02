@@ -7,6 +7,7 @@
 
 import json
 import time
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -18,6 +19,8 @@ from src.api import app as app_mod
 from src.contracts import Query, inn_is_valid
 from src.enrich import discover as D
 from src.enrich.evidence import check_counterparty
+from src.match import store as store_mod
+from src.match.store import ParquetStore
 from src.sources import pb_nalog, rmsp, role
 from src.sources.cache import SourceCache
 
@@ -318,20 +321,37 @@ def test_discovery_takes_the_code_search_predicted(cache, tmp_path):
 
 def test_known_inns_are_cached_per_file_version(tmp_path):
     processed = _processed(tmp_path, ["7805772436"])
-    assert D.known_inns(["7805772436", "4703173460"], None, processed) == {"7805772436"}
-    assert D.known_inns([], None, processed) == set()
+    store = ParquetStore(processed)
+    assert D.known_inns(["7805772436", "4703173460"], None, store) == {"7805772436"}
+    assert D.known_inns([], None, store) == set()
     path = processed / "suppliers.parquet"
-    before = dict(D._SUPPLIERS)
-    assert D.known_inns(["4703173460"], None, processed) == set() and D._SUPPLIERS == before  # no re-read
+    before = dict(store_mod._INNS)
+    assert D.known_inns(["4703173460"], None, store) == set() and store_mod._INNS == before  # no re-read
     con = duckdb.connect()  # the data is rebuilt: the new file is read, the old entry is dropped
     con.execute(f"COPY (SELECT '4703173460' AS inn) TO '{path}' (FORMAT parquet)")
     con.close()
     import os
     os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1_000_000))
-    assert D.known_inns(["7805772436", "4703173460"], None, processed) == {"4703173460"}
-    assert sum(k[0] == str(path) for k in D._SUPPLIERS) == 1
+    assert D.known_inns(["7805772436", "4703173460"], None, ParquetStore(processed)) == {"4703173460"}
+    assert sum(k[1] == path.as_posix() for k in store_mod._INNS) == 1
     path.unlink()
-    assert D.known_inns(["4703173460"], None, processed) is None
+    assert D.known_inns(["4703173460"], None, store) is None
+    assert D.known_inns(["4703173460"], date(2025, 7, 1), ParquetStore(processed)) is None  # no suppliers_<as_of>
+
+
+def test_discover_reads_organizers_data_from_the_store_of_the_environment(search_data, monkeypatch):
+    """#220 №4, #293: without an explicit parquet dir the known INNs come from get_store() — in `make up` Postgres,
+    so a Postgres-only install checks the novelty of «Новые» (history_checked) instead of needing the parquet."""
+    seen: list[object] = []
+    plain = store_mod.ParquetStore.supplier_inns
+
+    def supplier_inns(self, as_of):
+        seen.append(self)
+        return plain(self, as_of)
+
+    monkeypatch.setattr(store_mod.ParquetStore, "supplier_inns", supplier_inns)
+    assert D.known_inns(["7801000012", "0000000000"], None) == {"7801000012"}
+    assert seen == [store_mod.get_store()]
 
 
 def test_live_requests_respect_plan_budget_and_block(tmp_path):
@@ -616,17 +636,18 @@ def test_fabricated_row_value_fails_the_evidence_check(cache, tmp_path):
 def test_class_is_predicted_from_history_lots(search_data):
     from src.match.search import search
     history = search(Query(query_id="q", text="бумага А4"))
-    assert D.stated_class(history) == "17.12" == D._lots_class(history, search_data)
-    assert D.predict_class([], search_data) is None and D._lots_class(history, search_data / "nope") is None
+    assert D.stated_class(history) == "17.12" == D._lots_class(history)
+    assert D._lots_class(history, ParquetStore(search_data)) == "17.12"  # an explicit store
+    assert D.predict_class([]) is None and D._lots_class(history, ParquetStore(search_data / "nope")) is None
     # lot 2 holds a cartridge (26.20) and a toner (20.59): lots alone cannot choose, search() can
     cartridge = search(Query(query_id="q", text="Картридж лазерный"))
-    assert D.stated_class(cartridge) == "26.20" == D.predict_class(cartridge, search_data)
-    assert D._lots_class(cartridge, search_data) == "20.59"
+    assert D.stated_class(cartridge) == "26.20" == D.predict_class(cartridge)
+    assert D._lots_class(cartridge) == "20.59"
     # a query WITH codes states nothing; a reworded explanation falls back to the lots
     assert D.stated_class(search(Query(query_id="q", text="бумага А4", okpd2=["17.12.14.110"]))) is None
     reworded = [m.model_copy(update={"components": [c.model_copy(update={"explanation": "иначе"})
                                                     for c in m.components]}) for m in history]
-    assert D.stated_class(reworded) is None and D.predict_class(reworded, search_data) == "17.12"
+    assert D.stated_class(reworded) is None and D.predict_class(reworded) == "17.12"
 
 
 def _stated(explanations: list[str]) -> list:

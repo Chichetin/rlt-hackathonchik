@@ -279,8 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     known: set[str] | None = None
     try:
         from src.enrich.discover import known_inns
-        from src.match.index import processed_dir
-        known = known_inns(sorted(rmsp_inns(pages)), None, processed_dir())
+        known = known_inns(sorted(rmsp_inns(pages)), None)
     except Exception as e:  # data absent: «new» is not computed, never guessed
         print(f"! данные организаторов не прочитаны, «новых» не считаем: {e}", file=sys.stderr)
     rows = build_table(pages, known)

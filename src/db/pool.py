@@ -272,10 +272,11 @@ def counterparties(inns: Iterable[str], cache: SourceCache, *, url: str | None =
 
 
 def large_row(inn: str, source: str, page: CachedPage, msp_checked_at: float | None = None,
-              listed: str = "candidates") -> dict[str, Any] | None:
+              listed: str = "gap") -> dict[str, Any] | None:
     """A row of `large` from the cached answer of ГИР БО ('bo') or the registry card ('pb'): only what the
     page says. None when the INN fails the checksum or the page does not name the company.
-    `msp_checked_at`: the caller looked the INN up in the registry dump downloaded then and found no record."""
+    `msp_checked_at`: the caller looked the INN up in the registry dump downloaded then and found no record.
+    `listed`: 'candidates' makes the company offerable as new — never the default."""
     if not inn_is_valid(inn) or source not in ("bo", "pb"):
         return None
     if source == "bo":
