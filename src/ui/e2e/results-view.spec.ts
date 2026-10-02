@@ -254,12 +254,17 @@ test("клавиатурный выбор и reduced motion сохраняют �
 
 test("локальная загрузка и ошибка отзывов не смешивают сведения разных компаний", async ({ page }) => {
   let firstInn: string | undefined;
+  // The first company's reviews are held until the test lets them go, not for a fixed time: a lot link starts the
+  // search by itself (#528), so a fixed delay may run out before search() returns (#561).
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
   await page.route(/\/api\/ratings\/\d+$/, async route => {
     const inn = route.request().url().split('/').at(-1)!;
     firstInn ??= inn;
     if (inn === firstInn) {
-      await new Promise(resolve => setTimeout(resolve, 600));
-      await route.fulfill({ json: { inn, count: 3, average: 5, min_shown: 3, disclaimer: '', reviews: [{ stars: 5, text: 'Отзыв первой компании', created_at: '2026-01-01' }] } });
+      await held;
+      await route.fulfill({ json: { inn, count: 3, average: 5, min_shown: 3, disclaimer: '', reviews: [{ stars: 5, text: 'Отзыв первой компании', created_at: '2026-01-01' }] } })
+        .catch(() => {}); // the request may have been aborted when another company was chosen
     } else await route.fulfill({ status: 503, json: { detail: 'Unavailable' } });
   });
   await search(page);
@@ -268,7 +273,8 @@ test("локальная загрузка и ошибка отзывов не с
   await rows.nth(1).click();
   await expect(page.locator('#supplier-preview h2')).toHaveText(await rows.nth(1).locator('.name').innerText());
   await expect(page.getByText('Не удалось загрузить отзывы.')).toBeAttached();
-  await page.waitForTimeout(700); // the old request has now completed or been aborted
+  release();
+  await page.waitForTimeout(300); // the old request has now completed or been aborted
   await expect(page.getByText('Отзыв первой компании')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Повторить загрузку' })).toBeAttached();
   await expect(rows.nth(1)).toHaveAttribute('aria-pressed', 'true');

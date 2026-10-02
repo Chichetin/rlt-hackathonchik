@@ -1,52 +1,56 @@
 {
-  "checked_at": "2026-10-02T12:33:23.258Z",
+  "checked_at": "2026-10-02T13:04:57.377Z",
   "checks": [
     {
       "name": "Opening contains case, solution, team; supplier belongs to the example",
       "passed": true
     },
     {
-      "name": "Comparison uses identical query IDs",
+      "name": "Vector preparation checked against implementation; BM25 remains active",
       "passed": true
     },
     {
-      "name": "Backup Recall values agree with reports",
+      "name": "Data stage distinguishes optional embeddings from default index",
       "passed": true
     },
     {
-      "name": "Backup evaluation sample size agrees",
+      "name": "Collection stage names sources, extraction, provenance and live-mode boundary",
       "passed": true
     },
     {
-      "name": "S2 covers CSV preparation through site output",
+      "name": "Legal and user filters displayed",
       "passed": true
     },
     {
-      "name": "Vector preparation is distinct from active text retrieval",
+      "name": "Unknown status is not a legal exclusion",
       "passed": true
     },
     {
-      "name": "Index and vector status checked against actual source",
+      "name": "Old incremental comparison removed",
       "passed": true
     },
     {
-      "name": "Concrete legal and user filters are displayed",
+      "name": "81% has explicit selected slice and denominator, verified against L-long",
       "passed": true
     },
     {
-      "name": "Unknown legal status is distinguished from positive user-filter confirmation",
+      "name": "Threefold growth verified on the separate new-winner slice",
       "passed": true
     },
     {
-      "name": "Routing decision is grounded in paired reports, with winner denominator",
+      "name": "Comparison uses same query IDs",
       "passed": true
     },
     {
-      "name": "Both active ranking paths are explicit",
+      "name": "Measured version and metric definition documented",
       "passed": true
     },
     {
-      "name": "Backup metrics agree with saved reports",
+      "name": "Five supplied team portraits and names present",
+      "passed": true
+    },
+    {
+      "name": "Team photos load offline",
       "passed": true
     },
     {
@@ -78,19 +82,7 @@
       "passed": true
     },
     {
-      "name": "S6 numbers come from pitch/facts.md F-33/F-34 and name the eval runs",
-      "passed": true
-    },
-    {
-      "name": "Additional sample compares identical queries between models",
-      "passed": true
-    },
-    {
-      "name": "Additional sample overlap disclosed",
-      "passed": true
-    },
-    {
-      "name": "Additional sample values agree with reports",
+      "name": "Chart labels use normalized new-winner comparison",
       "passed": true
     }
   ],

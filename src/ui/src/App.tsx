@@ -579,7 +579,7 @@ export function App() {
       const inns = new Set([...live.inns, ...added.map((m) => m.counterparty.inn as string)]);
       setRes({ ...res, discovered: [...added, ...res.discovered], total: { ...res.total, discovered: res.total.discovered + added.length } });
       setLive({ state: "done", inns, text: added.length
-        ? `Найдено в реальном времени: ${added.length}. ${found.note}`
+        ? `Живые данные — найдено: ${added.length}. ${found.note}`
         : `Новых компаний не найдено. ${found.note}` });
     } catch (e) {
       if (seq !== runSeq.current) return;
@@ -1126,7 +1126,7 @@ function Block(props: {
                   </span>
                   <span className="supplier-meta">
                     <RoleBadge kind={cp.kind} />
-                    {cp.inn && props.liveInns?.has(cp.inn) && <span className="chip live-found">найдено в реальном времени</span>}
+                    {cp.inn && props.liveInns?.has(cp.inn) && <span className="chip live-found">живые данные</span>}
                     <span>{regionLabel(cp)}{relationToCustomer(cp, props.customerRegion) && <> — {relationToCustomer(cp, props.customerRegion)}</>}</span>
                     <span className="supplier-inn"><SupplierId cp={cp} /></span>
                   </span>

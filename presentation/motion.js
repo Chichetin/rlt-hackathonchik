@@ -131,10 +131,11 @@
   const objects = {
     s1:'.brand-title, .hero .lead, .hero-result',
     s3:'.decision-track article, .decision-measure',
-    s2:'.overview-prep .overview-node, .overview-request .overview-node',
+    s2:'.prep-chain article, .index-split article',
     s4:'.lane-label, .prep .node, .query-flow .node, .architecture-foot',
     s5:'.filter-track article, .pipeline-conclusion',
     s6:'.chart, .eval-context, .eval-boundary',
+    s8:'.team-card',
     s7:'.final-route > div, .next-step, .qa-links',
     b1:'.formula-main, .backup-grid .node, .backup-note',
     b2:'.timeline > div, .eval-detail > *',

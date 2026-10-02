@@ -516,7 +516,7 @@ def test_search_facets_on_fixture(search_client):
 
 
 def test_facets_of_new_are_capped_at_the_block_size(search_client, monkeypatch):
-    """«Новые» shows at most MAX_SHOWN: a chip count is the block size when only that chip is chosen."""
+    """A chip count is the block size when only that chip is chosen: «Новые» shows every candidate (#558)."""
     import json
 
     from src.enrich import discover as discover_mod
@@ -530,9 +530,9 @@ def test_facets_of_new_are_capped_at_the_block_size(search_client, monkeypatch):
         matches=pool[:discover_mod.MAX_SHOWN], candidates=pool, history_checked=True))
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
     assert json.loads(r.headers["X-Facets"])["discovered"] == {
-        "kind": {"manufacturer": discover_mod.MAX_SHOWN, "distributor": 1, "dealer": 0, "unknown": 0},
-        "entity": {"ul": discover_mod.MAX_SHOWN, "ip": 0, "unknown": 0},
-        "near": {"worked": 0, "near": 0, "any": discover_mod.MAX_SHOWN}}  # no registry region, no KPP: not guessed
+        "kind": {"manufacturer": len(makers), "distributor": 1, "dealer": 0, "unknown": 0},
+        "entity": {"ul": len(makers) + 1, "ip": 0, "unknown": 0},
+        "near": {"worked": 0, "near": 0, "any": len(makers) + 1}}  # no registry region, no KPP: not guessed
 
 
 def test_facets_of_new_without_history_check_are_zero(search_client, monkeypatch):
