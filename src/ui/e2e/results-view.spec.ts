@@ -143,19 +143,24 @@ test("группы плавно переключаются без перемон
     document.querySelector<HTMLButtonElement>('.group-new')!.click();
     const frames = [];
     const start = performance.now();
-    while (performance.now() - start < 450) {
+    // until the new group has settled, not a fixed window: under parallel workers frames come late (#524)
+    while (performance.now() - start < 3000) {
       await new Promise(requestAnimationFrame);
       const style = getComputedStyle(body);
       frames.push({ group: body.dataset.displayedGroup, opacity: Number(style.opacity), y: new DOMMatrix(style.transform).m42,
         inert: body.inert, hiddenFromAT: body.getAttribute('aria-hidden'), selected: document.querySelector('.group-new')!.getAttribute('aria-pressed'),
         same: document.querySelector('.result-list-transition') === body && lists.every(el => el.isConnected),
         height: body.getBoundingClientRect().height - before.height });
+      const last = frames.at(-1)!;
+      if (last.group === 'new' && last.opacity === 1 && !last.inert) break;
     }
     return { frames, top };
   });
   expect(samples.frames.every(f => f.selected === 'true' && f.same && Math.abs(f.height) < 1)).toBe(true);
   expect(samples.frames.filter(f => f.group === 'history').every(f => f.inert && f.hiddenFromAT === 'true')).toBe(true);
-  expect(samples.frames.some(f => f.opacity > .04 && f.opacity < .95)).toBe(true);
+  // a fade out and a fade in; under load a frame comes every ~50 ms and easeOut may jump .04 → .93 in one (#524)
+  expect(samples.frames.some(f => f.group === 'history' && f.opacity < 1)).toBe(true);
+  expect(samples.frames.some(f => f.group === 'new' && f.opacity < 1)).toBe(true);
   expect(samples.frames.some(f => f.group === 'new' && f.y > 0 && f.y <= 8)).toBe(true);
   expect(samples.frames.at(-1)).toMatchObject({ group: 'new', opacity: 1, inert: false });
   await page.evaluate(async () => {
