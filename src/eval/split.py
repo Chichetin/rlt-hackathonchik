@@ -22,7 +22,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.contracts import Query
-from src.split_config import split_config  # L0 since #294; the eval tools keep importing it from here
+from src.ingest.split_config import split_config  # src/ingest since #294; the eval tools keep importing it from here
 
 ROOT = Path(__file__).resolve().parents[2]
 

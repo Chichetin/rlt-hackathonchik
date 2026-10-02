@@ -198,9 +198,9 @@ def main(argv: list[str] | None = None) -> int:
 
     import duckdb
 
+    from src.ingest.split_config import split_config
     from src.match import speller
     from src.match.search import prebuild_doc_codes
-    from src.split_config import split_config
 
     for as_of in (None, date.fromisoformat(str(split_config()["cutoff"]))):
         t0 = time.time()
