@@ -414,3 +414,45 @@ def test_known_classes_before_a_date(search_data):
     every = P.known_classes(search_data)
     early = P.known_classes(search_data, date(2000, 1, 1))
     assert every and early == frozenset() and P.known_classes(search_data, date(2100, 1, 1)) == every
+
+
+# --- #565: no cap of 10, every row written the moment it is verified ----------------------------------------------
+
+
+def test_full_mode_without_top_shows_every_verified(search_data, tmp_path):
+    capped, every = tmp_path / "capped.csv", tmp_path / "every.csv"
+    P.run(TESTSET, capped, top=1, offline=True, mode="full", verify_fn=_ok)
+    P.run(TESTSET, every, top=0, offline=True, mode="full", verify_fn=_ok)
+    one = [r for r in _rows(capped) if r["block"] == "История"]
+    allr = [r for r in _rows(every) if r["block"] == "История"]
+    assert len(one) == 3 and len(allr) > len(one)  # one per lot vs every candidate of the lot
+
+
+def test_full_mode_writes_each_row_as_it_is_verified(search_data, tmp_path):
+    out = tmp_path / "o.csv"
+    seen: list[int] = []
+
+    def ok_and_look(cp: Counterparty) -> V.Verdict:
+        if out.exists():  # how many data rows the file holds while the lot is still being checked
+            seen.append(len(out.read_text(encoding="utf-8-sig").splitlines()) - 1)
+        return _ok(cp)
+
+    P.run(TESTSET, out, top=0, offline=True, mode="full", verify_fn=ok_and_look)
+    assert seen and max(seen) > 0 and seen == sorted(seen)  # rows appeared before the run ended, one by one
+
+
+def test_a_lot_cut_off_midway_is_answered_again(search_data, tmp_path):
+    out = tmp_path / "o.csv"
+    P.run(TESTSET, out, top=0, offline=True, mode="full", verify_fn=_ok)
+    full = _rows(out)
+    report = P.report_path(out)
+    lines = report.read_text(encoding="utf-8-sig").splitlines()
+    report.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8-sig")  # the last lot has no report row: cut off
+    cut = _rows(report)
+    last = next(r["lot_id"] for r in full if r["lot_id"] not in {c["lot_id"] for c in cut})
+    with out.open("a", encoding="utf-8", newline="") as f:  # a stray half of the lot, as after a crash
+        f.write(f"{last};;x;;История;99;7707049388;мусор;;;;0.1;;;\n")
+    stats = P.run(TESTSET, out, top=0, offline=True, mode="full", verify_fn=_ok)
+    again = _rows(out)
+    assert stats["skipped"] == 2 and not any(r["name"] == "мусор" for r in again)
+    assert sorted((r["lot_id"], r["inn"]) for r in again) == sorted((r["lot_id"], r["inn"]) for r in full)

@@ -1,6 +1,6 @@
 """Test export -> recommendations per lot (#121, #229): `make predict CSV_DIR=<folder>`.
 
-    uv run python -m src.ingest.predict --csv-dir DIR [--out eval/predict/<name>.csv] [--top 10] [--offline]
+    uv run python -m src.ingest.predict --csv-dir DIR [--out eval/predict/<name>.csv] [--top 0] [--offline]
         [--mode full|demo] [--no-rnp]
 
 Mode `full` (default, #229 — the organizers judge the file, time is not limited): discovery without
@@ -108,7 +108,7 @@ class LotReport:
                 " / ".join(self.requests), ", ".join(sorted(self.unavailable)), "; ".join(self.notes)]
 
 
-def recommend(lot: TestLot, top: int, offline: bool | None = None) -> tuple[list[CounterpartyMatch], list[str]]:
+def recommend(lot: TestLot, top: int | None, offline: bool | None = None) -> tuple[list[CounterpartyMatch], list[str]]:
     """Demo mode: history top-N + «Новые» for one lot — the /api/search pipeline (src/match/pipeline.py, #220): cached
     enrichment, hard filters (liquidated, РНП), the Evidence check; notes explain an empty block."""
     from src.match import pipeline
@@ -246,25 +246,32 @@ def code_disagrees(codes: Sequence[str], shares: dict[str, float], text_class: s
     return None
 
 
-def _pick(cands: Sequence[CounterpartyMatch], want: int, limit: int, verify_fn: Callable[[Counterparty], Verdict],
-          rep: LotReport, block: str) -> list[Checked]:
-    """The first `want` verified candidates, checking at most `limit`; the verdicts go to the report."""
+def _pick(cands: Sequence[CounterpartyMatch], want: int | None, limit: int | None,
+          verify_fn: Callable[[Counterparty], Verdict], rep: LotReport, block: str,
+          emit: Callable[[Checked], Checked] | None = None) -> list[Checked]:
+    """The first `want` verified candidates, checking at most `limit` (None — no cap, #565); the verdicts go to the
+    report. `emit` — each verified one the moment it passes (the row is written at once), its result is kept."""
     shown: list[Checked] = []
     for m in cands:
-        if len(shown) >= want or rep.counts[f"{block}_checked"] >= limit:
+        if (want is not None and len(shown) >= want) or (limit is not None and rep.counts[f"{block}_checked"] >= limit):
             break
         rep.counts[f"{block}_checked"] += 1
         v = verify_fn(m.counterparty)
         rep.unavailable.update(v.down)
         if v.ok:
-            shown.append(Checked(m.model_copy(update={"counterparty": v.counterparty}), v.why))
+            c = Checked(m.model_copy(update={"counterparty": v.counterparty}), v.why)
+            shown.append(emit(c) if emit is not None else c)
     return shown
 
 
-def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool = True,
+def full_recommend(lot: TestLot, top: int | None, *, offline: bool = False, rnp: bool = True,
                    verify_fn: Callable[[Counterparty], Verdict] | None = None,
-                   processed: Path | None = None) -> tuple[list[Checked], list[str], LotReport]:
-    """Full mode for one lot: search by code or by text, discovery without budgets, synchronous check."""
+                   processed: Path | None = None,
+                   emit: Callable[[Checked, list[str]], None] | None = None,
+                   ) -> tuple[list[Checked], list[str], LotReport]:
+    """Full mode for one lot: search by code or by text, discovery without budgets, synchronous check.
+    `top` None or 0 — every candidate is checked and every verified one shown (#565, decision of IR630 02.10).
+    `emit(row, notes so far)` — each shown row the moment it is verified, so the caller writes it at once."""
     from src.enrich import discover as discover_mod
     from src.enrich import verify as verify_mod
     from src.match import search as search_mod
@@ -285,22 +292,32 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
     rep = LotReport(lot.lot_id, "full", ",".join(lot.query.okpd2))
     text_class: str | None = None
     notes = list(lot.notes)
-    pool_k = top * CHECK_FACTOR
+    top = top or None  # 0 / None — no cap (#565)
+    pool_k = top * CHECK_FACTOR if top else None
+    search_k = pool_k or search_mod.CANDIDATES  # every candidate the search scores
     query: Query = lot.query
+
+    def out(c: Checked) -> Checked:
+        if c.match.origin == "history":  # the reliability of an exported row (#72), one row at a time
+            c = replace(c, match=search_mod.shadow_reliability([c.match], lot.query.as_of)[0])
+        if emit is not None:
+            emit(c, notes)
+        return c
+
     for_new: list[CounterpartyMatch] | None = None
     try:
         text_query = query.model_copy(update={"okpd2": []})
-        by_text = search_mod.search(text_query, k=pool_k)
+        by_text = search_mod.search(text_query, k=search_k)
         text_class = discover_mod.predict_class(by_text, organizers)
         rep.text_class = text_class or ""
         why = code_disagrees(query.okpd2, section_shares(by_text, processed), text_class, known_classes(processed))
         if why:  # decision 18: by the text too; interleaved — the text alone loses on real lots (X-code-text-mix)
             notes.append(f"{why}; «История» — по коду и по тексту поочерёдно, «Новые» — по классу текста")
             rep.searched_by = "код и текст поочерёдно"
-            history = interleave(search_mod.search(query, k=pool_k), by_text)
+            history = interleave(search_mod.search(query, k=search_k), by_text)
             query, for_new = text_query, by_text  # «Новые» by the class of the text, not voted by the code's lots
         elif query.okpd2:
-            history = search_mod.search(query, k=pool_k)
+            history = search_mod.search(query, k=search_k)
         else:
             history, rep.searched_by = by_text, "текст (кода нет)"
     except FileNotFoundError:
@@ -313,15 +330,13 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
     if not history:
         notes.append("в истории нет поставщиков по этому предмету")
     try:
-        shown = _pick(history, top, pool_k, verify_fn, rep, "history")
+        shown = _pick(history, top, pool_k, verify_fn, rep, "history", out)
     except Exception as e:  # noqa: BLE001 — one bad lot must not stop the whole export
         log.exception("проверка «Истории», лот %s", lot.lot_id)
         notes.append(f"ошибка проверки «Истории»: {type(e).__name__}")
         shown = []
     if history and not shown:
         notes.append(f"в истории {len(history)} кандидатов, ни один не прошёл проверку (статус, РНП)")
-    rows = search_mod.shadow_reliability([c.match for c in shown], lot.query.as_of)  # the exported rows only (#72)
-    shown = [replace(c, match=m) for c, m in zip(shown, rows, strict=True)]
 
     try:
         res = discover_mod.discover(query, history if for_new is None else for_new, offline=offline,
@@ -344,9 +359,9 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
 
         strong = [m for m in pool if step(m) >= STRONG_FIT]
         weak = sorted((m for m in pool if WEAK_FIT <= step(m) < STRONG_FIT), key=lambda m: -step(m))
-        new = _pick(strong, top, pool_k, verify_fn, rep, "new")
+        new = _pick(strong, top, pool_k, verify_fn, rep, "new", out)
         if len(new) < MIN_STRONG:  # 0.6 only when strong ones are few; below 0.6 never
-            new += _pick(weak, top - len(new), pool_k, verify_fn, rep, "new")
+            new += _pick(weak, top - len(new) if top else None, pool_k, verify_fn, rep, "new", out)
         if not new:
             notes.extend(res.notes or ["открытые источники не дали проверенных новых компаний"])
     except Exception as e:  # noqa: BLE001 — an open source failing never breaks the history block
@@ -399,6 +414,26 @@ def _done(out: Path) -> set[str]:
         return {r["lot_id"] for r in csv.DictReader(f, delimiter=";")}
 
 
+def _drop_unfinished(out: Path, finished: set[str]) -> None:
+    """Full mode writes a row the moment it is verified (#565), and the report row only when the lot is over: a lot
+    with rows but without a report row was cut off — its rows are removed, the lot is answered again from the top."""
+    if not out.exists():
+        return
+    with out.open(encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.reader(f, delimiter=";"))
+    if not rows or rows[0] != list(COLUMNS):
+        return  # another format: _Csv moves it aside
+    keep = [rows[0], *(r for r in rows[1:] if r and r[0] in finished)]
+    if len(keep) == len(rows):
+        return
+    log.warning("predict: недописанные лоты %s — переписываются заново",
+                ", ".join(sorted({r[0] for r in rows[1:] if r and r[0] not in finished})))
+    tmp = out.with_name(out.name + ".tmp")
+    with tmp.open("w", encoding="utf-8-sig", newline="") as f:
+        csv.writer(f, delimiter=";").writerows(keep)
+    tmp.replace(out)
+
+
 class _Csv:
     """Append-only `;` CSV with the header written once; every cell escaped (F-08). A file with another
     header (an older format) is moved aside to `<name>.old-<time>.csv`, never appended to."""
@@ -428,11 +463,14 @@ def report_path(out: Path) -> Path:
     return out.with_name(f"{out.stem}.report.csv")
 
 
-def run(csv_dir: Path, out: Path, top: int = 10, offline: bool | None = None, mode: str = "demo",
+def run(csv_dir: Path, out: Path, top: int | None = 10, offline: bool | None = None, mode: str = "demo",
         rnp: bool = True, verify_fn: Callable[[Counterparty], Verdict] | None = None) -> dict[str, int]:
-    """Write the answer for every lot not yet in `out`. `mode="full"` — #229 (the CLI default)."""
+    """Write the answer for every lot not yet in `out`. `mode="full"` — #229 (the CLI default): every row is written
+    the moment it is verified (#565); `top` None or 0 — no cap. A lot cut off midway is answered again."""
     ts = load_testset(csv_dir)
     out.parent.mkdir(parents=True, exist_ok=True)
+    if mode == "full" and report_path(out).exists():  # the report row marks a finished lot
+        _drop_unfinished(out, _done(report_path(out)))
     w = _Csv(out, COLUMNS)  # first: a file of an older format is moved aside before resuming
     done = _done(out)
     stats = {"lots": len(ts.lots), "skipped": 0, "with_history": 0, "with_discovered": 0, "empty": 0,
@@ -440,8 +478,12 @@ def run(csv_dir: Path, out: Path, top: int = 10, offline: bool | None = None, mo
     if mode == "full":
         log.info("predict full: источники, ещё не подключённые к этому режиму: %s", "; ".join(NOT_CONNECTED))
         if rnp and not offline:
-            log.info("predict full: РНП ЕИС — crawl-delay 60 с на запрос, до %d проверок на лот: ≈ %d–%d мин на лот "
-                     "без кеша (NO_RNP=1 — без РНП)", 2 * top * CHECK_FACTOR, 2 * top, 2 * top * CHECK_FACTOR)
+            if top:
+                log.info("predict full: РНП ЕИС — crawl-delay 60 с на запрос, до %d проверок на лот: ≈ %d–%d мин на "
+                         "лот без кеша (NO_RNP=1 — без РНП)", 2 * top * CHECK_FACTOR, 2 * top, 2 * top * CHECK_FACTOR)
+            else:
+                log.info("predict full: без потолка — проверяются все кандидаты, РНП ЕИС — 60 с на ИНН без кеша, "
+                         "строки пишутся по мере проверки (NO_RNP=1 — без РНП)")
     rw = _Csv(report_path(out), REPORT_COLUMNS) if mode == "full" else None
     from src.enrich import web_discover  # L3 from a tool (L4), lazily: `make predict` only
 
@@ -455,26 +497,31 @@ def run(csv_dir: Path, out: Path, top: int = 10, offline: bool | None = None, mo
             if csv_cell(lot.lot_id) in done:  # the file holds the escaped id
                 stats["skipped"] += 1
                 continue
-            if mode == "full":
-                rows, notes, rep = full_recommend(lot, top, offline=bool(offline), rnp=rnp, verify_fn=verify_fn)
-            else:
-                matches, notes = recommend(lot, top, offline)
-                rows, rep = [Checked(m) for m in matches], None
             base = [lot.lot_id, lot.reqnum or "", lot.query.text, ",".join(lot.query.okpd2)]
-            note = "; ".join(notes)
-            if not rows:
-                stats["empty"] += 1
-                w.row([*base, "", "", "", "", "", "", "", "", "", "", note or "кандидатов нет"])
             ranks = {"history": 0, "discovered": 0}
-            for r in rows:
+
+            def write(r: Checked, notes: list[str], base: list[str] = base, ranks: dict[str, int] = ranks) -> None:
                 m = r.match
                 ranks[m.origin] += 1
                 cp = m.counterparty
                 w.row([*base, BLOCKS[m.origin], ranks[m.origin], cp.inn or "", cp.name, cp.status or "",
                        RNP_TEXT[cp.in_rnp], ROLE_LABEL[cp.kind] if cp.kind else "", f"{m.score:.4f}",
-                       _components(m), r.check, note])
+                       _components(m), r.check, "; ".join(notes)])
+                w.f.flush()  # the file grows while the lot is checked (#565)
                 stats["rows"] += 1
                 stats["rows_checked"] += bool(r.check)
+
+            if mode == "full":  # rows are written by `write` the moment they are verified
+                rows, notes, rep = full_recommend(lot, top, offline=bool(offline), rnp=rnp, verify_fn=verify_fn,
+                                                  emit=write)
+            else:
+                matches, notes = recommend(lot, top or None, offline)
+                rows, rep = [Checked(m) for m in matches], None
+                for r in rows:
+                    write(r, notes)
+            if not rows:
+                stats["empty"] += 1
+                w.row([*base, "", "", "", "", "", "", "", "", "", "", "; ".join(notes) or "кандидатов нет"])
             stats["with_history"] += ranks["history"] > 0
             stats["with_discovered"] += ranks["discovered"] > 0
             w.f.flush()  # a crash keeps every finished lot: the next run resumes after it
@@ -494,7 +541,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("--csv-dir", type=Path, required=True, help="папка тестовой выгрузки (Извещения*.csv, ТРУ*.csv)")
     ap.add_argument("--out", type=Path, help="CSV результата (по умолчанию eval/predict/<имя папки>.csv)")
-    ap.add_argument("--top", type=int, default=10, help="кандидатов в каждом блоке")
+    ap.add_argument("--top", type=int, default=0,
+                    help="кандидатов в каждом блоке; 0 — без потолка, все проверенные (#565, по умолчанию)")
     ap.add_argument("--offline", action="store_true", help="только кеш, без сети")
     ap.add_argument("--mode", choices=("full", "demo"), default="full",
                     help="full — без бюджетов, синхронная проверка, только проверенные (#229); demo — как /api/search")
