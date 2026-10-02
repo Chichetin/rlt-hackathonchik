@@ -91,7 +91,7 @@ def load_model(model: str, device: str | None = None):
         m = SentenceTransformer(modules=[tr, pool, models.Normalize()], device=device)
     m.max_seq_length = MAX_SEQ
     if m.device.type == "cuda" and model in BF16:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         m.to(torch.bfloat16)
     elif m.device.type == "cuda":
@@ -137,7 +137,7 @@ class Corpus:
     """Vectors of the names that are documents of the cutoff index, on GPU; name row -> doc_ids."""
 
     def __init__(self, model: str, idx, gpu_dir: Path = GPU_DIR):
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         m = norm_map(idx)
         norms: list[str] = []
@@ -159,7 +159,7 @@ class Corpus:
 
     def search(self, q: np.ndarray, k: int = KNN) -> list[list[int]]:
         """doc_ids nearest by cosine for each query vector, best first (as pg_retriever.vector_docs)."""
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         out: list[list[int]] = []
         qs = torch.from_numpy(np.asarray(q, dtype=np.float16)).cuda()
@@ -283,7 +283,7 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
 
     save(bm25_key)
     for model in models:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         corpus = Corpus(model, idx)
         m = load_model(model)

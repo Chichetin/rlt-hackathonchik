@@ -44,6 +44,7 @@ import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleB
 import "./filters.css";
 import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
+import { componentText, formulaScore, rankerReason, rankerShort } from "./ranker";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
@@ -456,6 +457,8 @@ export function App() {
   }
 
   const runSeq = useRef(0);
+  // «искать как введено» (#282): the text for which the user turned the correction off; another text — on again
+  const asTypedFor = useRef<string | null>(null);
   // local scoring weights (#179): only in this browser; the server and the export keep the standard ones
   const [weightSet, setWeightSet] = useState<WeightSettings>(loadWeights);
   const weights = activeWeights(weightSet);
@@ -480,9 +483,11 @@ export function App() {
     }
   }
 
-  async function run(nextFilters: Filters = filters, ready?: Ready) {
-    // the query of this run: a picked test lot (#207) or the form
-    const qText = ready?.text ?? text;
+  // asTyped: «искать как введено» (#282) — this exact text, the server's correction off
+  async function run(nextFilters: Filters = filters, ready?: Ready, asTyped?: string) {
+    // the query of this run: a picked test lot (#207), the shown query as typed, or the form
+    const qText = asTyped ?? ready?.text ?? text;
+    if (asTyped !== undefined) asTypedFor.current = asTyped.trim();
     const qExtra = ready ? () => ready.extra : extra;
     if (!qText.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
@@ -493,11 +498,15 @@ export function App() {
       const none: Filters = NO_FILTERS;
       // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
       const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
+      const spellOff = asTypedFor.current === q.text;
+      if (spellOff) q.filters = { ...q.filters, spell: "off" };
+      const baseQuery = buildQuery(qText, none, qExtra());
+      if (spellOff) baseQuery.filters = { ...baseQuery.filters, spell: "off" }; // counts by the same text as the answer
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
-        active ? search(buildQuery(qText, none, qExtra()), { limit: ALL }) : Promise.resolve(null),
+        active ? search(baseQuery, { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
@@ -846,6 +855,17 @@ export function App() {
         </p>
       ))}
 
+      {path === "/results" && res?.corrections && shownQuery && state !== "loading" && (
+        <p className="lotmsg spell-note" role="note" data-testid="query-corrected">
+          Запрос исправлен (раскладка или опечатки):{" "}
+          {res.corrections.map(([typed, searched], i) => <span key={i}>{i > 0 && ", "}«{typed}» → «{searched}»</span>)}.{" "}
+          <button type="button" className="spell-undo" title={shownQuery.text}
+            onClick={() => void run(filters, undefined, shownQuery.text)}>
+            Искать как введено
+          </button>
+        </p>
+      )}
+
       {path === "/results" && res?.excludedLot && state !== "loading" && (
         <p className="lotmsg own-lot-note" role="note">
           Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
@@ -876,6 +896,7 @@ export function App() {
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
+            alert={res.weakMatch}
             rows={historyRows}
             total={historyTotal}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
@@ -942,7 +963,7 @@ function Block(props: {
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
-  alert?: string; // the block may be incomplete and why (#287)
+  alert?: string; // «Новые»: the block may be incomplete and why (#287); history: weak match with past lots (#281)
   variant: "history" | "new";
   tag: string;
   customerRegion?: string;
@@ -956,7 +977,7 @@ function Block(props: {
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
-      {props.alert && <p className="stub block-alert" role="status" data-testid="discovery-error">{props.alert}</p>}
+      {props.alert && <p className="stub block-alert" role="status" data-testid={props.variant === "new" ? "discovery-error" : "weak-match"}>{props.alert}</p>}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
@@ -988,7 +1009,8 @@ function Block(props: {
                     <WorkedWith cp={cp} customerRegion={props.customerRegion} />
                   </span>
                   <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
-                  {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
+                  {rankerShort(m) ? <span className="why" title={rankerReason(m) ?? ""}><span className="why-label">Почему на этом месте</span>{rankerShort(m)}</span>
+                    : top && <span className="why" title={componentText(top)}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{componentText(top)}</span>}
                 </motion.button>
               </motion.li>
             );
@@ -1089,7 +1111,12 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
       <Breakdown m={m} />
       <h3>Почему в списке</h3>
       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
-      <p className="hint">Оценка по каждому критерию × его вес в подборе.</p>
+      {rankerReason(m) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(m)}</p>}
+      <p className="hint">{rankerReason(m)
+        ? (Math.abs(formulaScore(m) - m.score) < 0.005
+          ? "Порядок задаёт модель, критерии ниже — её входы; число — соответствие по формуле «критерий × вес»."
+          : `Порядок задаёт модель, критерии ниже — её входы. По формуле «критерий × вес» — ${formulaScore(m).toFixed(2)}; в списке число не выше, чем у стоящего выше.`)
+        : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
         {m.components.map((c) => (
           <li key={c.name}>
@@ -1100,7 +1127,7 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
             <span className="cval">
               {c.value.toFixed(2)} × {c.weight.toFixed(2)}
             </span>
-            <span className="cexp">{c.explanation}</span>
+            <span className="cexp">{componentText(c)}</span>
           </li>
         ))}
       </ul>
@@ -1177,7 +1204,7 @@ const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa
 function Breakdown({ m }: { m: CounterpartyMatch }) {
   const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }));
   return (
-    <figure className="breakdown" aria-label="Из чего сложилась оценка">
+    <figure className="breakdown" aria-label={rankerReason(m) ? "Критерии — входы модели" : "Из чего сложилась оценка"}>
       <div className="stack" aria-hidden="true">
         {parts.map(({ c, v, color }) =>
           v > 0 ? <span key={c.name} style={{ width: `${v * 100}%`, background: color }} title={`${COMPONENT_LABEL[c.name]}: +${v.toFixed(2)}`} /> : null,
@@ -1213,7 +1240,7 @@ function AboutPage({ onStart }: { onStart: () => void }) {
         </li>
         <li>
           <h3>Объяснимая оценка</h3>
-          <p>Итог — сумма критериев с весами. В карточке видно вклад каждого:</p>
+          <p>Порядок задаёт модель, обученная на истории закупок СПб 2024–2025; её входы — критерии ниже. В карточке видно, что подняло поставщика и что опустило, с цифрами; со своими весами порядок — по формуле «критерий × вес»:</p>
           <ul className="crit">
             {Object.values(COMPONENT_LABEL).map((l) => (
               <li key={l}>{l}</li>

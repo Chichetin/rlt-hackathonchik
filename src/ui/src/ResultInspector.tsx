@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Ratings } from "./Ratings";
 import { levelOf, RelevanceTag } from "./roles";
+import { componentText, rankerReason } from "./ranker";
 import { COMPONENT_LABEL, KIND_LABEL, regionLabel, relationToCustomer, type CounterpartyMatch } from "./api";
 
 /** A persistent reading pane. Full provenance and reviews remain in the full card. */
@@ -41,10 +42,11 @@ export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext
     </div>
     <h3>Почему подходит</h3>
     {weightsNote && <p className="inspector-note">Оценка с вашими весами: «{weightsNote}».</p>}
+    {rankerReason(match) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(match)}</p>}
     <ul className="inspector-reasons">
       {components.map(c => <li key={c.name}>
         <div><strong>{COMPONENT_LABEL[c.name] ?? c.name}</strong><span>+{(c.value*c.weight).toFixed(2)}</span></div>
-        <p>{c.explanation}</p>
+        <p>{componentText(c)}</p>
       </li>)}
     </ul>
     <h3>Подтверждённые сведения</h3>

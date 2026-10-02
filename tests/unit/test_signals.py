@@ -11,6 +11,8 @@ from src.match import search as search_mod
 from src.match.search import search
 from src.match.signals import incumbent_value, mix_incumbent, signal_shares
 
+pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py
+
 CUTOFF = date(2025, 7, 1)
 CUST = "7701000040"  # customer of paper lot 3 (2024-11-05) and lot 7 (2025-10-15, after cutoff)
 
