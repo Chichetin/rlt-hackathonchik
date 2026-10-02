@@ -11,8 +11,11 @@ Rules (CLAUDE.md, «Проверки кодом»):
 5. the counterparty INN and every contact are backed by an Evidence with the same field/value;
    the role (`kind`) by an `okved` Evidence whose value is a WHOLE line of the page with the main OKVED
    of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/sources/role.py
-   (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; `unknown` also by such a line
-   whose fact is the service basis of #188 (`role.is_service_basis`: roles do not apply to services and works);
+   (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; or by a `product` Evidence
+   whose value is the WHOLE line `gisp.<inn>.product: <name>` of a registry record of this INN (ГИСП, #74);
+   `unknown` also by a main-OKVED line whose fact is the service basis of #188 (`role.is_service_basis`: roles do
+   not apply to services and works);
+   `in_rnp` (True or False) by at least one passing `field="rnp"` Evidence (D-154, #111) — an unbacked flag is None;
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
 
@@ -36,6 +39,8 @@ FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "ok
 FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/sources/fns_opendata.py
 FIELDS |= {"review"}  # a quote of a public review (src/enrich/reviews.py), a normalized substring of the page
 FIELDS |= {"licence"}  # src/sources/msp_dump.py: licences of the МСП dump (#188)
+FIELDS |= {"product"}  # src/sources/gisp.py: a product of the company in the registry of industrial products
+ROLE_FIELDS = ("okved", "product")  # Evidence that may hold the basis of the role (src/sources/role.py)
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
@@ -177,14 +182,23 @@ def _backed(cp: Counterparty, field: str, value: str, page_text: PageText) -> bo
 def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
     pages = cached_pages(page_text)
     for e in cp.evidence:
-        if e.field != "okved" or e.value is None or (rule := basis_kind(e.value, cp.inn)) is None:
+        if e.field not in ROLE_FIELDS or e.value is None or (rule := basis_kind(e.value, cp.inn)) is None:
             continue
-        if rule != cp.kind and not (cp.kind == "unknown" and is_service_basis(e.fact, e.value)):
+        if rule != cp.kind and not (cp.kind == "unknown" and e.field == "okved"
+                                    and is_service_basis(e.fact, e.value)):
             continue
         page = pages.page(e.url)
         if page is not None and e.value.strip() in page.lines and not check_evidence(e, pages):
             return True
     return False
+
+
+def _rnp_backed(cp: Counterparty, page_text: PageText) -> bool:
+    """True/False `in_rnp` needs at least one passing `field="rnp"` Evidence (D-154, #111): an
+    unbacked flag (forged, or its page evicted from the cache) is stripped to None («не проверено»),
+    never shown as a guessed «да»/«нет»."""
+    page_text = cached_pages(page_text)
+    return any(e.field == "rnp" and not check_evidence(e, page_text) for e in cp.evidence)
 
 
 def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
@@ -198,7 +212,10 @@ def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
         if not any(e.field == field and e.value == value for e in cp.evidence):
             errors.append(f"контакт {field}={value!r} без Evidence")
     if cp.kind is not None and not _kind_backed(cp, page_text):
-        errors.append(f"роль {cp.kind} без подтверждённого основного ОКВЭД с этой ролью по правилу")
+        errors.append(f"роль {cp.kind} без подтверждённого основания: ни основного ОКВЭД с этой ролью по правилу, "
+                      "ни продукции в реестре Минпромторга")
+    if cp.in_rnp is not None and not _rnp_backed(cp, page_text):
+        errors.append(f"in_rnp={cp.in_rnp} без подтверждённого Evidence field='rnp'")
     return errors
 
 
@@ -209,4 +226,6 @@ def strip_unverified(cp: Counterparty, page_text: PageText) -> Counterparty:
     contacts = {k: v for k, v in cp.contacts.items() if _backed(cp, k, v, page_text)}
     inn = cp.inn if cp.inn is None or _backed(cp, "inn", cp.inn, page_text) else None
     kind = cp.kind if cp.kind is None or _kind_backed(cp, page_text) else None
-    return cp.model_copy(update={"evidence": good, "contacts": contacts, "inn": inn, "kind": kind})
+    in_rnp = cp.in_rnp if cp.in_rnp is None or _rnp_backed(cp, page_text) else None
+    return cp.model_copy(update={"evidence": good, "contacts": contacts, "inn": inn, "kind": kind,
+                                 "in_rnp": in_rnp})

@@ -4,9 +4,17 @@ Main source: ФНС «Прозрачный бизнес» (src/sources/pb_nalog.
 works on cache without internet. While pb asks for a captcha (#58, D-052) the fallback is the registry
 of МСП by INN (src/sources/rmsp.py), then ГИР БО (src/sources/bo_nalog.py): fewer facts, each with its
 own source and url. On top of any of them: offline facts from ФНС open data (src/sources/fns_opendata.py:
-headcount, income, tax regime, tax debt) when its parquet is built. Every fact is an Evidence whose `value`
+headcount, income, tax regime, tax debt) when its parquet is built, and the registry of Russian industrial
+products (src/sources/gisp.py, #74): a product of the INN there makes it a manufacturer with the state registry as
+the basis (the OKVED basis stays). Every fact is an Evidence whose `value`
 literally occurs in the cached card text (src/enrich/evidence.py checks it; the API shows only what passes).
 Organizers' data stats (`Counterparty.stats`) come from search(), not from here.
+
+After the ФНС card, `_merge_rnp` adds РНП ЕИС (`Counterparty.in_rnp`, src/sources/eis_rnp.py),
+D-154 (#111): a failure or a captcha never turns into a guessed fact, only a logged warning.
+The Электронный магазин СПб registry is NOT a source of enrich() or discover() (D-061: an expert's
+feedback after checkpoint 1 — АИС ГЗ is the primary source, "обогащение вашими данными" reads as
+circular to the jury); the estore.py client was removed (D-067).
 
 `ENRICH_OFFLINE=1` — cache only, no network (KeyError for an INN that is not cached).
 """
@@ -21,7 +29,7 @@ import httpx
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
 from src.regions import label_by_code, name_by_code
 from src.settings import get_settings
-from src.sources import bo_nalog, fns_opendata, pb_nalog, rmsp, role
+from src.sources import bo_nalog, eis_rnp, fns_opendata, gisp, pb_nalog, rmsp, role
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
 
@@ -217,34 +225,79 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
     return None
 
 
+def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) -> Counterparty:
+    """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-154, #111). `offline` is passed through
+    explicitly (never the `ENRICH_OFFLINE` environment variable) so the caller — not a process-wide
+    flag — decides whether a live request (paced, Crawl-delay 60 s) may happen at all.
+    `KeyError` (offline, nothing cached yet) is the normal state of a not-yet-checked INN — quiet.
+    Any other failure (`Blocked`, HTTP, a bad INN, a page that breaks the parser) leaves `in_rnp` as is
+    (None, "не проверено"), never guesses `False` and never fails the card: a logged warning is the only effect."""
+    try:
+        res = eis_rnp.check(inn, cache, offline=offline)
+    except KeyError:
+        return cp
+    except (eis_rnp.Blocked, httpx.HTTPError, ValueError) as e:
+        log.warning("enrich %s: РНП ЕИС недоступен: %s", inn, e)
+        return cp
+    except Exception:  # noqa: BLE001 — a broken cached page must not turn the card into a 500
+        log.exception("enrich %s: страница РНП ЕИС не разобрана", inn)
+        return cp
+    update: dict[str, object] = {}
+    if res.evidence:
+        update["evidence"] = [*cp.evidence, *res.evidence]
+    if res.in_rnp is not None:
+        update["in_rnp"] = res.in_rnp
+    return cp.model_copy(update=update) if update else cp
+
+
 def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counterparty]:
-    """The cards plus the offline facts of ФНС open data, each with its own url (one query for all, no network)."""
-    facts = fns_opendata.lookup_many([c.inn for c in cards if c.inn and inn_is_valid(c.inn)], cache)
+    """The cards plus the offline facts of ФНС open data, each with its own url, and the role «производитель» by the
+    registry of industrial products (ГИСП) — one query per source for all, no network."""
+    inns = [c.inn for c in cards if c.inn and inn_is_valid(c.inn)]
+    facts = fns_opendata.lookup_many(inns, cache)
+    try:
+        products = gisp.by_inn(inns)
+    except Exception:  # noqa: BLE001 — a broken registry export never takes the card down
+        log.exception("ГИСП: выгрузка не прочитана — роль по реестру не добавлена")
+        products = {}
 
     def merged(c: Counterparty) -> Counterparty:
         have = {(e.url, e.field, e.value) for e in c.evidence}  # a card that already has them gets them once
         new = [e for e in facts.get(c.inn or "", []) if (e.url, e.field, e.value) not in have]
-        return c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
+        c = c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
+        return gisp.with_role(c, products.get(c.inn or "", [])[:1], cache)  # facts already there are not repeated
     return [merged(c) for c in cards]
 
 
 def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
-           open_data: bool = True) -> Counterparty:
-    """The base card (below) plus add_open_data(); `open_data=False` — the base card only (the search
-    loop over 200 candidates needs no ФНС facts: the page and the export add them to what they show)."""
+           open_data: bool = True, rnp_offline: bool = True) -> Counterparty:
+    """The base card (below), then РНП ЕИС merged in (D-154, #111), plus add_open_data(); `open_data=False` —
+    no ФНС open-data facts (the search loop over 200 candidates needs none: the page and the export add them to
+    what they show). Электронный магазин СПб (its client was removed, D-067) is NOT a source here (D-061).
+    `rnp_offline` governs the РНП step only and defaults to True — the cached РНП answer only, for every caller:
+    API, search, worker, prefetch, discover, web leads. A live РНП request costs the 60 s Crawl-delay of
+    zakupki.gov.ru (+ up to TIMEOUT_S), i.e. at most 1 INN/min, so it never rides along with the card:
+    the РНП pass of the shortlist (`python -m src.worker.prefetch --rnp`, D-154) fills the cache, or a caller
+    asks for it explicitly with `rnp_offline=False`."""
     cache = cache or SourceCache()
-    cp = _enrich(inn, cache, offline)
+    cp = _enrich(inn, cache, offline, rnp_offline)
     return add_open_data([cp], cache)[0] if open_data else cp
 
 
-def _enrich(inn: str, cache: SourceCache, offline: bool | None) -> Counterparty:
-    """pb card from cache → pb live (unless blocked) → rmsp by INN → bo. The error of pb is raised
-    only if no fallback source answered; otherwise the source of every fact is in its Evidence.
-    `offline=True` — cache only (KeyError when nothing is cached); None — by `ENRICH_OFFLINE`."""
+def _enrich(inn: str, cache: SourceCache, offline: bool | None, rnp_offline: bool) -> Counterparty:
+    """The base card, then РНП ЕИС. `offline=True` — cache only (KeyError when nothing is cached); None — by
+    `ENRICH_OFFLINE`."""
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
     if offline is None:
         offline = get_settings().enrich_offline
+    result = _primary(inn, cache, offline)
+    return _merge_rnp(inn, result, cache, rnp_offline)
+
+
+def _primary(inn: str, cache: SourceCache, offline: bool) -> Counterparty:
+    """pb card from cache → pb live (unless blocked) → rmsp by INN → bo (unchanged from before #111:
+    the error of pb is raised only if no fallback source answered)."""
     err: Exception
     if offline:
         page = cache.get(pb_nalog.card_url(inn), allow_stale=True)
@@ -257,7 +310,8 @@ def _enrich(inn: str, cache: SourceCache, offline: bool | None) -> Counterparty:
             return from_card(inn, fresh)
         try:
             return from_card(inn, pb_nalog.fetch_card(inn, cache))
-        except (pb_nalog.CaptchaRequired, pb_nalog.NotFound, TimeoutError, httpx.HTTPError) as e:
+        # ValueError: an answer pb.nalog.ru gives that we cannot read (a JSON `null`, #357) — the fallbacks, not a 500
+        except (pb_nalog.CaptchaRequired, pb_nalog.NotFound, TimeoutError, httpx.HTTPError, ValueError) as e:
             err = e
             log.warning("enrich %s: pb.nalog.ru не ответил (%s) — запасные источники", inn, e)
     fallback = _fallback(inn, cache, offline)

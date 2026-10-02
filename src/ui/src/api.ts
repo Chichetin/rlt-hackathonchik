@@ -256,6 +256,15 @@ export function yesNo(v: boolean | null | undefined): string {
   return v === true ? "да" : v === false ? "нет" : "не проверено";
 }
 
+// РНП ЕИС: «нет» не говорит, когда и как это проверено — показываем дату и источник из Evidence
+// (field="rnp", src/sources/eis_rnp.py), а не голое да/нет. Без Evidence in_rnp есть только как
+// None (strip_unverified, D-154): "не проверено".
+export function rnpLabel(cp: Pick<Counterparty, "in_rnp" | "evidence">): string {
+  const ev = (cp.evidence ?? []).find((e) => e.field === "rnp");
+  if (ev) return ev.fact;
+  return cp.in_rnp === true ? "да" : cp.in_rnp === false ? "нет" : "не проверено";
+}
+
 // Регион: из реестра (enrich, с Evidence), иначе — по коду КПП из данных АИС ГЗ (78 / 47), как фильтр
 // «Регион» на сервере (src/match/filters.py, D-030).
 // The names come from geo/regions.ts (the single client copy of «code → name»); only 78 / 47 are named by KPP.

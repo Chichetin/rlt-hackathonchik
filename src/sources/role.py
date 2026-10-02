@@ -11,11 +11,13 @@ this INN — only the keys of BASIS_KEYS (`vyp.КодОКВЭД: 33.12`, `row.<i
 src/enrich/evidence.py keeps `kind` only when that line is on the cached page as a whole line and the rule
 applied to its code gives the same kind.
 
-Priority of the bases, v0 (#186) — `decide()`: the state registry of manufacturers (ГИСП / `СвПрод`; the branch
-exists, there is no source of such records yet) → the company's site (a phrase of the dictionary of
-src/enrich/site_facts.py, literally on the page) → the main OKVED (the rule above). When two bases name different
-roles, both are returned. `Counterparty.kind` and its Evidence check still follow the OKVED rule only:
-`decide()` is a pure function, its result is not written into the card yet.
+Priority of the bases, v0 (#186) — `decide()`: the state registry of manufacturers (ГИСП, #74; `СвПрод` — no source
+yet) → the company's site (a phrase of the dictionary of src/enrich/site_facts.py, literally on the page) → the main
+OKVED (the rule above). When two bases name different roles, both are returned. The registry branch: a product of this
+INN in the registry of Russian industrial products (src/sources/gisp.py) makes it a manufacturer; its basis is an
+Evidence with `field="product"` and `value` = the line `gisp.<inn>.product: <name>` of that INN's registry record page
+(`basis_kind` below; src/enrich/evidence.py accepts it); gisp.with_role() writes the role and the text of `decide()`
+into the card. Without a registry record `Counterparty.kind` follows the OKVED rule.
 
 A service or works purchase (#188, the type of src/match/purchase_type.py): the roles manufacturer / distributor /
 dealer do not apply, `for_purchase()` makes the kind `unknown` and rewrites the fact of the same basis line —
@@ -43,6 +45,7 @@ ROW_KEYS = ("okved1", "okved2")
 SERVICE_DATIVE = {"services": "услугам", "remote": "услугам", "works": "работам"}
 SERVICE_HEAD = "Роль не определена: роли производитель / дистрибьютор / дилер к "
 _NAMED = re.compile(r"«(.*)» — ")  # the OKVED name in the fact of assign()
+GISP_KEY = "product"  # `gisp.<inn>.product: <name>` — a product of this INN in the registry of industrial products
 
 
 def classify(okved: str | None) -> tuple[Kind, str] | None:
@@ -74,9 +77,12 @@ def basis_keys(inn: str | None) -> set[str]:
 
 
 def basis_kind(value: str | None, inn: str | None) -> Kind | None:
-    """Kind backed by a basis value `<key>: <code>` with a key of the main OKVED of this INN; else None.
+    """Kind backed by a basis value `<key>: <code>` with a key of the main OKVED of this INN, or by a registry
+    product line `gisp.<inn>.product: <name>` of this INN (manufacturer); else None.
     Whether the line is on the page is checked by src/enrich/evidence.py."""
     key, sep, code = (value or "").strip().partition(": ")
+    if sep and inn and key == f"gisp.{inn}.{GISP_KEY}":
+        return "manufacturer" if code.strip() else None
     role = classify(code) if sep and key in basis_keys(inn) else None
     return role[0] if role else None
 
