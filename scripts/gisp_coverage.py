@@ -45,7 +45,7 @@ def _run(query: Query, cache: SourceCache, gisp_dir: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     ap.add_argument("--cases", type=Path, default=ROOT / "eval" / "cases" / "dev.jsonl")
     ap.add_argument("--gisp-dir", type=Path, required=True)
     ap.add_argument("--limit", type=int, default=0, help="first N lots (0 — all)")
