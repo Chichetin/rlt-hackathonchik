@@ -1,10 +1,10 @@
 """Tests added by the mutation audit of the core (#302, research/TEST_AUDIT.md).
 
 Every test below is red on the surviving mutants named in its docstring (`cosmic-ray` operator, line of the
-code at audit commit 0b7a6c1) and green on the code. They pin behaviour the older tests executed but did
-not assert: the exact digits of the INN checksum, what counts as a phone, which Evidence backs which fact,
-the boundaries of the scoring components. Style and fixtures follow the neighbours (test_evidence.py,
-test_filters.py, test_search.py).
+code at audit commit 0b7a6c1) and green on the code: the product already behaved correctly, the audit found
+gaps in the tests, not bugs. They pin behaviour the older tests executed but did not assert: the exact digits
+of the INN checksum, what counts as a phone, which Evidence backs which fact, the boundaries of the scoring
+components. Style and fixtures follow the neighbours (test_evidence.py, test_filters.py, test_search.py).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def ev(field, value, fact="x", url=URL, source="сайт компании") -> E
 ])
 def test_exactly_one_set_of_control_digits_completes_an_inn(head, tail):
     """Kills `==` -> `<=` / `>=` on both 12-digit control digits (inn_is_valid, line 46): a checksum that only
-    rejects a control digit on one side of the right value passes the wrong digits on the other side."""
+    rejects a control digit on one side of the right value would pass the wrong digits on the other side."""
     ok = ["".join(t) for t in product(DIGITS, repeat=len(tail[0])) if inn_is_valid(head + "".join(t))]
     assert ok == tail
 
@@ -72,20 +72,21 @@ def test_text_fact_needs_min_text_characters_exactly():
     assert not value_in_page("name", "Томск", page)  # 5 < MIN_TEXT
 
 
-@pytest.mark.parametrize(("field", "value", "source"), [
-    (None, EMAIL, "сайт компании"),  # no field: what is it?
-    ("email", None, "сайт компании"),  # no value: nothing to look for (used to crash on `None.isascii()`)
-    ("inn", SITE_INN, "data:contracts"),  # a web url with an organizers' source: the scheme says data:
+@pytest.mark.parametrize(("field", "value", "source", "error"), [
+    (None, EMAIL, "сайт компании", "без field/value"),  # no field: what is it?
+    # no value: nothing to look for (a mutant that skips this check would crash on `None.isascii()`)
+    ("email", None, "сайт компании", "без field/value"),
+    ("inn", SITE_INN, "data:contracts", "не соответствует схеме"),  # a web url with an organizers' source
 ])
-def test_malformed_evidence_is_an_error_not_a_pass_or_a_crash(field, value, source):
+def test_malformed_evidence_is_an_error_not_a_pass_or_a_crash(field, value, source, error):
     """Kills `or` -> `and` (check_evidence, line 147) and `!=` -> `>` of the url/source scheme check (line 140)."""
     errors = check_evidence(ev(field, value, source=source), page_text)
-    assert any(("без field/value" in e or "не соответствует схеме" in e) for e in errors), errors
+    assert any(error in e for e in errors), errors
 
 
 def test_mentions_in_the_fact_text_must_be_on_the_page_too():
     """Kills ZeroIterationForLoop on the e-mail loop and on the INN-like number loop (check_evidence, lines 161,
-    163): a phone in the fact was checked, an e-mail and a 10-digit number were not."""
+    163): the older tests checked only a phone in the fact, not an e-mail or a 10-digit number."""
     address = "Санкт-Петербург, ул. Тестовая, д. 1"
     assert check_evidence(ev("address", address, fact=f"{EMAIL}, ИНН {SITE_INN}"), page_text) == []  # all on the page
     errors = check_evidence(ev("address", address, fact="Пишите на nobody@example.net"), page_text)
@@ -97,7 +98,8 @@ def test_mentions_in_the_fact_text_must_be_on_the_page_too():
 @pytest.mark.parametrize("other", ["a@example.org", "z@example.org"])  # below and above the verified e-mail
 def test_contact_is_backed_by_evidence_of_its_own_value_not_a_neighbouring_one(other):
     """Kills `==` -> `<=` / `>=` on e.value in `_backed` (line 170) and in the contacts rule of
-    check_counterparty (line 192): an e-mail that is on the page backed any contact on one side of it."""
+    check_counterparty (line 192): a mutant would let an e-mail that is on the page back any contact on one side
+    of it."""
     cp = Counterparty(inn=None, name="x", contacts={"email": other}, evidence=[ev("email", EMAIL)])
     assert strip_unverified(cp, page_text).contacts == {}
     assert any(f"контакт email={other!r} без Evidence" in e for e in check_counterparty(cp, page_text))
@@ -125,8 +127,8 @@ def test_inn_is_backed_by_an_inn_evidence_of_its_own_value(field, value):
 
 
 def test_strip_unverified_hides_an_inn_the_page_does_not_have():
-    """Kills AddNot on `cp.inn is None` in strip_unverified (line 204): a made-up INN (valid checksum, not on
-    the page) used to survive the strip and was shown — the blocker of the whole Evidence layer."""
+    """Kills AddNot on `cp.inn is None` in strip_unverified (line 204): a mutant that kept a made-up INN (valid
+    checksum, not on the page) survived the old tests — it would be shown, the blocker of the Evidence layer."""
     fabricated = Counterparty(**json.loads((FIX / "fabricated_inn.json").read_text(encoding="utf-8")))
     assert fabricated.inn == "0000100020"
     assert strip_unverified(fabricated, page_text).inn is None
@@ -167,6 +169,16 @@ def test_kpp_region_is_its_two_first_digits_and_a_shorter_kpp_is_unknown():
     spb = "Санкт-Петербург"
     assert F.in_region(_cp(kpp="78"), spb) is True and F.in_region(_cp(kpp="47"), spb) is False
     assert F.in_region(_cp(kpp="7"), spb) is None and F.in_region(_cp(kpp=None), spb) is None
+
+
+@pytest.mark.parametrize(("kpp", "region"), [
+    ("7A0101001", None),  # the second character is not a digit: not a region (`[:1]`)
+    ("78A101001", "78"),  # the region is the first TWO digits, the third character is not looked at (`[:3]`)
+])
+def test_supplier_region_reads_exactly_two_kpp_characters(kpp, region):
+    """Kills `kpp[:2].isdigit()` -> `kpp[:1]` / `kpp[:3]` in `supplier_region` (line 116): the contract puts no
+    format on a KPP (`str | None`), so the rule «the region is its first two digits» is pinned on both sides."""
+    assert F.supplier_region(_cp(inn="7801000012", kpp=kpp)) == region
 
 
 def test_filters_without_a_customer_region_code_mark_nobody_and_a_choice_of_any_is_not_an_error():
@@ -212,7 +224,7 @@ def test_best_text_is_cut_to_sixty_characters_in_the_product_fit_line():
 @pytest.mark.parametrize(("level", "code"), [(4, "17.12.14.110"), (3, "17.12.14"), (2, "17.12"), (1, "17")])
 def test_product_fit_names_every_depth_of_the_okpd2_match(level, code):
     """Kills `okpd_level == 0` -> `== 1` in `_product_fit` (line 276): a supplier that matched the query's class
-    only was told that the class does not occur in its history."""
+    only would be told that the class does not occur in its history."""
     value, why = S._product_fit(_cand(okpd_level=level, okpd_code=code), 1.0, ["17.12.14.110"], False)
     assert S.OKPD_LEVEL_TEXT[level] in why and "не встречается" not in why
     assert value == pytest.approx(S.FIT_BM25_SHARE + (1 - S.FIT_BM25_SHARE) * S.OKPD_DEPTH[level])
@@ -294,13 +306,13 @@ def test_geography_of_a_query_region_without_a_kpp_code_is_zero_not_negative():
 ])
 def test_inn_region_signal_is_full_in_the_region_part_in_the_neighbour_and_zero_elsewhere(inn, value):
     """Kills `==` -> `<=` / `>=` and `and` -> `or` in `_inn_geography` (lines 329, 331) and `return 0.0` -> `1.0` /
-    `-1.0` (line 333): every INN prefix on one side of the neighbour's code counted as the neighbour region."""
+    `-1.0` (line 333): a mutant would count every INN prefix on one side of the neighbour's code as the neighbour."""
     got, why = S._geography(Counterparty(inn=inn, name="x"), "Санкт-Петербург", 1.0)
     assert got == pytest.approx(value) and "ИНН выдан" in why and ("соседний" in why) is (value > 0), why
 
 
 def test_inn_region_signal_without_an_inn_is_no_region():
-    """Kills `or` -> `and` in `_inn_geography` (line 324): a company with neither KPP nor INN raised on `None[:2]`."""
+    """Kills `or` -> `and` in `_inn_geography` (line 324): with neither KPP nor INN the mutant raises on `None[:2]`."""
     value, why = S._geography(Counterparty(inn=None, name="x"), "Санкт-Петербург", 1.0)
     assert value == 0.0 and why.endswith("регион не определён")
 
