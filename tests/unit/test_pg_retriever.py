@@ -16,6 +16,7 @@ from src.contracts import Query
 from src.match import index as index_mod
 from src.match import pg_retriever
 from src.match import search as search_mod
+from src.match.store import ParquetStore
 from tests.unit.test_db_embed import fake_encode
 
 CUTOFF = date(2025, 7, 1)
@@ -48,7 +49,7 @@ def test_pg_branch_runs_even_when_eval_passes_weights(search_data, tmp_path, mon
     monkeypatch.setattr(search_mod, "load_config", lambda: cfg)
     calls = []
 
-    def fake_hybrid(idx, text, hits, top):
+    def fake_hybrid(idx, text, hits, top, model=None):
         calls.append(text)
         return hits, True
 
@@ -109,7 +110,9 @@ def pg_vectors(search_data, monkeypatch):
         ensure_hnsw(c, VEC)
     monkeypatch.setenv("DATABASE_URL", URL)
     monkeypatch.setattr(pg_retriever, "VEC_SCHEMA", VEC)
-    monkeypatch.setattr(pg_retriever, "_state", {"encoder": fake_encode})
+    monkeypatch.setattr(pg_retriever, "_state", {})
+    monkeypatch.setattr(pg_retriever, "_encoders", {pg_retriever.MODEL: fake_encode})
+    monkeypatch.setattr(pg_retriever, "_coverage", {})
     yield c_url()
     if "conn" in pg_retriever._state:
         pg_retriever._state["conn"].close()
@@ -119,7 +122,7 @@ def pg_vectors(search_data, monkeypatch):
 
 @needs_pg
 def test_vector_half_never_returns_documents_after_as_of(search_data, pg_vectors):
-    idx = index_mod.get_index(search_data, CUTOFF)
+    idx = index_mod.get_index(ParquetStore(search_data), CUTOFF)
     texts = dict(zip(*[c.to_pylist() for c in __import__("pyarrow.parquet", fromlist=["x"]).read_table(
         idx.path / "texts.parquet", columns=["doc_id", "text"]).columns], strict=True))
     docs = pg_retriever.vector_docs(idx, "Ручки шариковые")

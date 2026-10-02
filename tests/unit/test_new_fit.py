@@ -30,7 +30,7 @@ AT = datetime(2026, 10, 1, tzinfo=UTC)
 def _env(monkeypatch):
     monkeypatch.delenv("DISCOVERY_NEW_FIT", raising=False)
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", 0.0)
-    monkeypatch.setattr(rmsp, "_blocked_until", 0.0)
+    rmsp.PACER.reset()
 
 
 def _cfg(**over) -> dict:

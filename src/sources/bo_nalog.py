@@ -12,14 +12,13 @@ Cache (src/sources/cache.py): the answer as flat lines `row.<inn>.<field>: <valu
 from __future__ import annotations
 
 import os
-import threading
-import time
 from typing import Any
 
 import httpx
 
 from src.contracts import inn_is_valid
 from src.sources.cache import CachedPage, SourceCache
+from src.sources.pacing import HostPacer
 
 BASE = "https://bo.nalog.gov.ru"
 SOURCE = "ФНС: ГИР БО (бухгалтерская отчётность)"
@@ -29,9 +28,8 @@ TIMEOUT_S = float(os.environ.get("BO_TIMEOUT_S", "5.0"))
 BLOCK_COOLDOWN_S = 900.0
 FIELDS = ("shortName", "ogrn", "statusCode", "statusDate", "okved2", "region")
 
-_lock = threading.Lock()
-_last_request = 0.0
-_blocked_until = 0.0
+# MIN_INTERVAL_S is read at every request (a test or an operator may override the module value)
+PACER = HostPacer(lambda: MIN_INTERVAL_S, BLOCK_COOLDOWN_S)
 
 
 class Blocked(RuntimeError):
@@ -45,12 +43,11 @@ def search_url(inn: str) -> str:
 
 
 def blocked() -> bool:
-    return time.monotonic() < _blocked_until
+    return PACER.blocked()
 
 
 def _block(reason: str) -> Blocked:
-    global _blocked_until
-    _blocked_until = time.monotonic() + BLOCK_COOLDOWN_S
+    PACER.block()
     return Blocked(f"bo.nalog.gov.ru: {reason} — останавливаемся, защиту не обходим")
 
 
@@ -89,21 +86,14 @@ def _client() -> httpx.Client:
 
 
 def fetch_raw(inn: str, client: httpx.Client | None = None) -> dict[str, Any]:
-    global _last_request
     search_url(inn)
     if blocked():
         raise Blocked("bo.nalog.gov.ru: пауза после отказа источника ещё не истекла")
     own = client is None
     client = client or _client()
     try:
-        with _lock:
-            wait = MIN_INTERVAL_S - (time.monotonic() - _last_request)
-            if wait > 0:
-                time.sleep(wait)
-            try:
-                r = client.get(f"{BASE}/advanced-search/organizations/search", params={"query": inn, "page": "0"})
-            finally:
-                _last_request = time.monotonic()
+        with PACER.slot():
+            r = client.get(f"{BASE}/advanced-search/organizations/search", params={"query": inn, "page": "0"})
         if r.status_code in (403, 429):
             raise _block(f"HTTP {r.status_code}")
         r.raise_for_status()
