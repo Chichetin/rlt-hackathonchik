@@ -1,0 +1,25 @@
+/* Reviews of one supplier from 2GIS (#234): the same dark surface and tokens as the ratings block. */
+.gis { margin: 14px 0 6px; color: #e6e9f0; }
+.gis-load { border-radius: 24px; padding: 12px 18px; font-size: 14px; border: 1px solid #ffffff30; background: #ffffff06; color: #edf1f9; }
+.gis-load:hover:not(:disabled) { background: #ffffff10; }
+.gis-load:disabled { opacity: .6; cursor: progress; }
+.gis-note { margin: 12px 0 0; color: #a5adba; font-size: 12.5px; line-height: 1.6; }
+.gis-error { margin: 12px 0 0; color: #ffc4ba; font-size: 14px; line-height: 1.5; }
+.gis-card { margin-top: 20px; padding-top: 16px; border-top: 1px solid #ffffff15; }
+.gis-card > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.gis-card h4 { margin: 0; font: 500 15px var(--sans); }
+.gis-card h4 a { color: #dbe6fb; text-underline-offset: 3px; }
+.gis-trust { padding: 4px 10px; border-radius: 14px; border: 1px solid #ffffff2a; color: #c4ccd8; font-size: 12px; line-height: 1.4; }
+.gis-trust.is-phone, .gis-trust.is-site { color: #cfe9df; border-color: #7fd1b955; background: #7fd1b914; }
+.gis-trust.is-name { color: #f0dcae; border-color: #e6c46a55; background: #e6c46a14; }
+.gis-where { display: flex; flex-wrap: wrap; gap: 2px 18px; margin: 8px 0 0; color: #b8bfcb; font-size: 13px; line-height: 1.6; }
+.gis-rating { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 8px 0 0; font-size: 14px; }
+.gis-rating strong { font: 500 15px var(--mono); }
+.gis-rating .rating-stars { font-size: 16px; }
+.gis-quotes { list-style: none; margin: 12px 0 0; padding: 0; }
+.gis-quotes li { padding: 14px 0; border-top: 1px solid #ffffff15; }
+.gis-quotes blockquote { margin: 0; padding-left: 12px; border-left: 2px solid #ffffff26; color: #d1d7e0; font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.gis-quotes footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 10px; padding-left: 14px; color: #969fab; font-size: 12px; }
+.gis-quotes footer .rating-stars { font-size: 14px; }
+.gis-quotes footer a { color: #a9c3ee; text-underline-offset: 3px; }
+.gis-load:focus-visible, .gis-card a:focus-visible { outline: 2px solid var(--accent, #9db4ff); outline-offset: 2px; }
