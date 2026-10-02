@@ -620,6 +620,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     store = get_store()
     as_of = query.as_of
     idx = get_index(store, as_of)
+    lot_date = as_of  # activity is counted up to the lot's date (#589)
+    if as_of is not None and idx.data_end is not None and as_of > idx.data_end:
+        as_of = None  # a lot after the data (defense export): its history is all of it — the prebuilt snapshot
     if idx.n_docs == 0:
         fallback.set_note(fallback.no_history(as_of))
         return []
@@ -671,7 +674,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     pool_wins = max((c.class_wins if by_class else c.n_wins) for c in cands)
     _fit_signals.set({"top_bm25": top_bm25, "tokens": len(set(tokens)), "retriever": cfg["retriever"],
                       "ladder": any(c.found_by for c in cands)})
-    ref = as_of or idx.data_end
+    ref = lot_date or idx.data_end
     last_day = as_of - timedelta(days=1) if as_of else idx.data_end  # history is strictly before as_of
     # on: every candidate needs its history (the score depends on it); shadow: nothing here — the weight is 0, the
     # order does not depend on it; shadow_reliability() fills only what the user sees (the page, the export rows)
@@ -698,9 +701,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             exp_rank = mix_incumbent(exp_rank, "", incumbent.get(c.inn, 0), shares["incumbent"])[0]
         exp_why += _profile_note(cp)
         if opts["activity_by"] == "similar" and c.last_similar is not None:
-            act, act_why = _recency(c.last_similar, ref, as_of, "Последнее участие в закупке с похожими позициями")
+            act, act_why = _recency(c.last_similar, ref, lot_date, "Последнее участие в закупке с похожими позициями")
         else:
-            act, act_why = _activity(cp, ref, as_of)
+            act, act_why = _activity(cp, ref, lot_date)
         price = _price(cp, query.budget, as_of, opts["price_decades"]) if opts["price"] == "scale" else None
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so

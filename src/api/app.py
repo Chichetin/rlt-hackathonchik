@@ -41,6 +41,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 from urllib.parse import quote
 
@@ -228,6 +229,17 @@ def health() -> Health:
                   store=store)
 
 
+def _after_data(as_of: date) -> bool:
+    """A lot's date after the indexed history (#589): the search reuses the full index, no new one is built."""
+    from src.match.index import get_index
+
+    try:
+        end = get_index(None, None).data_end
+    except Exception:  # noqa: BLE001 — no data: the search itself answers 503
+        return False
+    return end is not None and as_of > end
+
+
 def _accepted(query: Query) -> None:
     """422 before the search for what the product does not take: an empty text (#113); `as_of` — the eval
     knob (search() is called directly there): through the API a client date built a new BM25 index per date
@@ -235,8 +247,9 @@ def _accepted(query: Query) -> None:
     (#145, F-01); a text over MAX_TEXT_CHARS (F-02)."""
     if not query.text.strip():
         raise HTTPException(422, "Пустой запрос")
-    if query.as_of is not None:
-        raise HTTPException(422, "as_of задаётся только в backtest (make eval): API ищет по всем данным")
+    if query.as_of is not None and not _after_data(query.as_of):
+        raise HTTPException(422, "as_of внутри периода данных — только в backtest (make eval): API ищет по всем "
+                                 "данным; дата лота после конца данных (выгрузка защиты) принимается")
     if len(query.text) > MAX_TEXT_CHARS:
         raise HTTPException(422, f"Текст запроса длиннее {MAX_TEXT_CHARS:_} символов".replace("_", " ")
                                  + " — оставьте наименование позиции или фрагмент ТЗ")
