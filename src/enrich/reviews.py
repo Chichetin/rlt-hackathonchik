@@ -6,9 +6,9 @@ city. How far a card is trusted is the `basis`, from the strongest to the weakes
 
 - `phone` / `email` / `site` — a phone, an email or a site of the card equals the company's own
   (`Counterparty.contacts`, each with its Evidence from the registry): confirmed, `verified=True`;
-- `legal_name` — the card itself names the legal entity («ООО Грейс трэйд»), it equals ours AND no other organization of
-  the whole search result carries the same legal name (several different «ООО Сатурн» exist): the quotes are shown,
-  marked «не подтверждено по ИНН»;
+- `legal_name` — the card shown (the branch of the organization that itself names the legal entity: «ООО Грейс трэйд»)
+  equals ours AND no other organization of the whole search result carries the same legal name (several different
+  «ООО Сатурн» exist): the quotes are shown, marked «не подтверждено по ИНН»;
 - `name` — only the brand is equal, or the legal name is shared by several organizations: the card is listed (the user
   sees its sphere and address and can open it), but no quote, no rating and no number of reviews is shown until a
   contact confirms it.
@@ -189,22 +189,27 @@ def _legal_matches(card: gis2.Card, form: str | None, brand_norm: str) -> bool:
     return form is not None and legal[0] == form  # a form on both sides and the same: «АО Сатурн» ≠ «ООО САТУРН»
 
 
+def _org_key(card: gis2.Card) -> str:
+    return card.org_id or card.id
+
+
 def _candidates(found: list[gis2.Card], form: str | None, brand_norm: str) -> list[gis2.Card]:
-    """One card per organization (its branch with the most reviews); the ones that name our legal entity come first,
-    so a chain with many branches cannot push them out of the first MAX_CARDS."""
+    """One card per organization — its branch that ITSELF names our legal entity, else the one with the most reviews —
+    and the organizations that name our legal entity come first, so a chain with many branches cannot push them out of
+    the first MAX_CARDS. (Branches of one organization may name different legal entities: a franchise.)"""
     best: dict[str, gis2.Card] = {}
+
+    def rank(c: gis2.Card) -> tuple[bool, int]:
+        return _legal_matches(c, form, brand_norm), c.review_count or 0
+
     for c in found:
         if not _same_brand(c, brand_norm):
             continue
-        key = c.org_id or c.id
-        if key not in best or (c.review_count or 0) > (best[key].review_count or 0):
+        key = _org_key(c)
+        if key not in best or rank(c) > rank(best[key]):
             best[key] = c
     ranked = sorted(best.values(), key=lambda c: not _legal_matches(c, form, brand_norm))  # stable
     return ranked[:MAX_CARDS]
-
-
-def _org_key(card: gis2.Card) -> str:
-    return card.org_id or card.id
 
 
 def _legal_organizations(found: list[gis2.Card], form: str | None, brand_norm: str) -> set[str]:
@@ -269,12 +274,12 @@ def _basis(card: gis2.Card, cp: Counterparty, unique_legal: bool) -> tuple[Basis
 def _other_legal_entity(card: gis2.Card) -> str:
     """How the legal entity of a card that is NOT ours is named to the user: a natural person (ИП) is not named."""
     legal = card.legal_name or ""
-    return "индивидуальный предприниматель" if legal.upper().startswith("ИП") else f"«{legal}»"
+    return "индивидуальный предприниматель" if legal.upper().startswith(("ИП", "ИНДИВИДУАЛЬН")) else f"«{legal}»"
 
 
-def _note(basis: Basis, card: gis2.Card, proof: str, legal_orgs: int, in_legal: bool) -> str:
-    """Why the card has this status — what really matched and what did not. `in_legal`: the organization of the card
-    is one of those of the search result that carry OUR legal name."""
+def _note(basis: Basis, card: gis2.Card, proof: str, legal_orgs: int, names_ours: bool, form_known: bool) -> str:
+    """Why the card has this status — what really matched and what did not. `names_ours`: this very card names OUR
+    legal entity; `form_known`: the legal form of the company is known (so the card's legal entity can be compared)."""
     if basis == "phone":
         return (f"Телефон из карточки ({_pretty_phone(proof)}) совпал с телефоном компании из реестра: "
                 "карточка относится к ней.")
@@ -288,9 +293,12 @@ def _note(basis: Basis, card: gis2.Card, proof: str, legal_orgs: int, in_legal: 
                 "публикует: проверьте адрес и сферу.")
     shown = ("Отзывы, рейтинг и число отзывов не показываются, пока карточку не подтвердит контакт; "
              "откройте её и проверьте адрес и сферу.")
-    if in_legal and legal_orgs > 1:
+    if names_ours and legal_orgs > 1:
         return (f"Юрлицо «{card.legal_name}» в выдаче 2ГИС у нескольких разных организаций ({legal_orgs}): "
                 f"какая из них эта компания, по карточке не определить, ИНН 2ГИС не публикует. {shown}")
+    if card.legal_name and not form_known:
+        return (f"2ГИС указывает юрлицо — {_other_legal_entity(card)}, а форму юрлица компании по её названию не "
+                f"определить: сверить не с чем, ИНН 2ГИС не публикует. {shown}")
     if card.legal_name:
         return (f"2ГИС указывает другое юрлицо — {_other_legal_entity(card)}, оно не совпадает с названием компании; "
                 f"название «{card.brand}» общее, ИНН 2ГИС не публикует. {shown}")
@@ -312,14 +320,16 @@ def _quotes(page: gis2.ReviewsPage, src: _Page, url: str) -> list[ReviewQuote]:
     return out
 
 
-def _build(card: gis2.Card, cp: Counterparty, brand: str, city: str, src: _Page,
+def _build(card: gis2.Card, cp: Counterparty, form: str | None, brand: str, city: str, src: _Page,
            client: httpx.Client | None, legal: set[str]) -> tuple[ReviewCard | None, str | None, int]:
     """The card of the answer (None when none of its facts can be proved from a page), a message when its reviews
     could not be read, and the number of reviews 2GIS shows for it (for ordering only)."""
     tab = gis2.reviews_url(city, card.id)
     shown_count = card.review_count or 0
-    # the legal name confirms the card only when ONE organization of the whole search result carries it: this one
-    unique_legal = len(legal) == 1 and _org_key(card) in legal
+    brand_norm = _norm(brand)
+    # the legal name confirms the card only when ONE organization of the whole search result carries it AND the card
+    # that is shown names it itself (a franchise: another branch of the organization may name another legal entity)
+    unique_legal = len(legal) == 1 and _legal_matches(card, form, brand_norm)
     page: gis2.ReviewsPage | None = None
     problem: str | None = None
     # The tab holds the reviews and the contacts of the card. With nothing to compare them with (the company has no
@@ -332,6 +342,8 @@ def _build(card: gis2.Card, cp: Counterparty, brand: str, city: str, src: _Page,
             log.warning("reviews: вкладка отзывов %s не прочитана: %s", card.id, e)
             problem = "Не удалось прочитать тексты отзывов: 2ГИС сейчас недоступен."
     full = page.card if page is not None else card
+    names_ours = _legal_matches(full, form, brand_norm)
+    unique_legal = unique_legal and names_ours  # the tab of the card is judged too
     read_from = tab if page is not None else gis2.search_url(city, brand)  # the page the card facts came from
     basis, proof = _basis(full, cp, unique_legal)
     evidence: list[Evidence] = []
@@ -358,7 +370,8 @@ def _build(card: gis2.Card, cp: Counterparty, brand: str, city: str, src: _Page,
     return ReviewCard(
         branch_id=card.id, title=full.name, address=full.address, rubrics=full.rubrics, url=tab,
         rating=None if weak else full.rating, review_count=None if weak else full.review_count,
-        basis=basis, verified=TIER[basis] == 0, note=_note(basis, full, proof, len(legal), _org_key(card) in legal),
+        basis=basis, verified=TIER[basis] == 0,
+        note=_note(basis, full, proof, len(legal), names_ours, form is not None),
         quotes=quotes, evidence=[head, *evidence],
     ), problem, shown_count
 
@@ -387,7 +400,7 @@ def find_reviews(cp: Counterparty, cache: SourceCache | None = None,
     if not candidates:
         return ReviewsResult(inn=cp.inn, status="not_found", queried=brand,
                              message=f"В 2ГИС нет карточки с названием «{brand}».")
-    built = [_build(c, cp, brand, city, src, client, legal) for c in candidates]
+    built = [_build(c, cp, form, brand, city, src, client, legal) for c in candidates]
     ranked = sorted(((c, n) for c, _, n in built if c is not None), key=lambda x: (TIER[x[0].basis], -x[1]))
     cards = [c for c, _ in ranked]
     problems = [p for _, p, _ in built if p]

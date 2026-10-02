@@ -493,9 +493,6 @@ def test_a_legal_name_without_a_legal_form_is_not_a_legal_entity(cache):
     card = reviews.find_reviews(
         company(GRACE, "7811777270"), cache=cache, client=Site(search={"ГРЕЙС ТРЭЙД": bare}).client()).cards[0]
     assert (card.basis, card.quotes) == ("name", [])
-    # and our own name without a form cannot be compared either
-    plain = reviews.find_reviews(company("Грейс трэйд", "7811777270"), cache=cache, client=Site().client())
-    assert all(c.basis == "name" for c in plain.cards)
 
 
 def test_the_legal_entity_is_counted_over_the_whole_result_even_for_cards_of_another_brand(cache):
@@ -526,3 +523,95 @@ def test_a_contact_found_on_the_search_page_is_proved_on_that_page_when_the_tab_
     assert (got.basis, got.verified) == ("phone", True) and site.tabs_requested == []
     assert {e.url for e in got.evidence} == {gis2.search_url("spb", "ГРЕЙС ТРЭЙД")}
     assert all(evidence.check_evidence(e, cache.page_text) == [] for e in got.evidence)
+
+
+# --- one organization, several branches, several legal entities (fourth pass) ------------------------------
+
+def _rewrite_search(html: str, edit) -> str:
+    """A recorded search page after `edit(profiles)` — profiles: {branch id: {"data": …}} — in the site's escaping."""
+    state = gis2._state(html, gis2._INITIAL)
+    assert state is not None
+    edit(state["data"]["entity"]["profile"])
+
+    def lit(obj: object) -> str:
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+
+    return f"<html><script>var initialState = JSON.parse('{lit(state)}');</script></html>"
+
+
+def test_a_franchise_the_branch_shown_is_the_one_that_names_our_company_not_the_sole_trader_of_another_branch(cache):
+    """The organization has two branches: the one with the reviews names «ИП Иванов…», the warehouse names «ООО Грейс
+    трэйд». The reviews belong to the sole trader's branch: not shown under our company, the name not repeated."""
+    def franchise(profiles):
+        main = profiles["70000001065972795"]["data"]
+        main["name_ex"]["legal_name"] = "ИП Иванов Иван Иванович"
+
+    site = Site(search={"ГРЕЙС ТРЭЙД": _rewrite_search(page("search_grace_trade.html"), franchise)})
+    result = reviews.find_reviews(company(GRACE, "7811777270"), cache=cache, client=site.client())
+    assert len(result.cards) == 1
+    card = result.cards[0]
+    assert card.title == "Грейс трэйд, склад" and (card.basis, card.quotes) == ("legal_name", [])
+    assert "Иванов" not in card.note and "ООО Грейс трэйд" in card.note
+    assert site.tabs_requested == []  # the warehouse has no reviews; the sole trader's branch is not read
+
+
+def test_a_branch_without_a_legal_entity_does_not_speak_for_an_ambiguous_organization(cache):
+    """Two organizations name «ООО Грейс трэйд»; the first one also has a branch with more reviews and no legal entity.
+    The branch that names it is shown, and its note names it — never «None»."""
+    def add_branch(profiles):
+        first = profiles["700000020000000"]
+        extra = json.loads(json.dumps(first))
+        extra["data"]["id"] = "700000020000099"
+        extra["data"]["name_ex"].pop("legal_name")
+        extra["data"]["reviews"] = {"general_rating": 4.0, "general_review_count": 50}
+        profiles["700000020000099"] = extra
+
+    html = _rewrite_search(_search_with_organizations(2), add_branch)
+    site = Site(search={"ГРЕЙС ТРЭЙД": html}, tabs={})
+    cards = {c.branch_id: c for c in reviews.find_reviews(
+        company(GRACE, "7811777270"), cache=cache, client=site.client()).cards}
+    assert "700000020000099" not in cards and "700000020000000" in cards
+    for card in cards.values():
+        assert card.basis == "name" and "None" not in card.note
+        assert "«ООО Грейс трэйд» в выдаче 2ГИС у нескольких разных организаций (2)" in card.note
+
+
+def test_of_two_branches_naming_our_company_the_one_with_more_reviews_is_shown_whatever_the_order(cache):
+    def swap(profiles):
+        branch = profiles.pop("70000001065972795")  # the branch with the review goes last
+        profiles["70000001065972795"] = branch
+
+    html = _rewrite_search(page("search_grace_trade.html"), swap)
+    first_id = next(iter(gis2._state(html, gis2._INITIAL)["data"]["entity"]["profile"]))  # type: ignore[index]
+    assert first_id == "70000001081189400"  # the warehouse comes first in the page
+    card = reviews.find_reviews(
+        company(GRACE, "7811777270"), cache=cache, client=Site(search={"ГРЕЙС ТРЭЙД": html}).client()).cards[0]
+    assert card.title == "Грейс трэйд" and len(card.quotes) == 1
+
+
+def test_a_company_whose_legal_form_is_unknown_cannot_be_compared_and_the_note_says_so(cache):
+    site = Site(search={"Грейс трэйд": page("search_grace_trade.html")})
+    result = reviews.find_reviews(company("Грейс трэйд", "7811777270"), cache=cache, client=site.client())
+    assert result.status == "ok"  # the search was answered (the query is the brand as written)
+    card = result.cards[0]
+    assert (card.basis, card.quotes) == ("name", [])
+    assert "форму юрлица компании по её названию не определить" in card.note
+    assert "другое юрлицо" not in card.note  # it is not claimed to be another one
+
+
+def test_a_sole_trader_in_the_full_form_is_not_named_either(cache):
+    full_form = "Индивидуальный предприниматель Петров Пётр Петрович"
+    sole = page("search_grace_trade.html").replace("ООО Грейс трэйд", full_form)
+    card = reviews.find_reviews(
+        company(GRACE, "7811777270"), cache=cache, client=Site(search={"ГРЕЙС ТРЭЙД": sole}).client()).cards[0]
+    assert card.basis == "name" and "индивидуальный предприниматель" in card.note and "Петров" not in card.note
+
+
+def test_a_tab_that_names_another_legal_entity_than_the_search_does_not_get_quoted(cache):
+    """The search says «ООО Грейс трэйд», the tab of the same card another one: the card that is read is judged."""
+    tab = page("reviews_grace_trade.html").replace("ООО Грейс трэйд", "ООО Грейс трэйд Нева")
+    site = Site(tabs={"70000001065972795": tab})
+    card = reviews.find_reviews(company(GRACE, "7811777270"), cache=cache, client=site.client()).cards[0]
+    assert site.tabs_requested == ["/spb/firm/70000001065972795/tab/reviews"]
+    assert (card.basis, card.quotes, card.rating) == ("name", [], None)
+    assert "другое юрлицо — «ООО Грейс трэйд Нева»" in card.note
