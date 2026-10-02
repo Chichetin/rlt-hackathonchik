@@ -27,7 +27,7 @@ def _case(qid: str, grades: dict[str, int]) -> EvalCase:
 
 
 def test_evaluate_counts_only_cases_with_a_winner(monkeypatch):
-    monkeypatch.setattr(R, "_rank_search", lambda q, cfg: ["B", "A"])
+    monkeypatch.setattr(R, "_picked_search", lambda q, cfg: (["B", "A"], False))
     cases = [_case("q1", {"A": 2, "B": 1}), _case("q2", {"B": 1})]  # q2: nobody is marked as the winner
     body = R.evaluate(cases, {"k": 20})
     rows = {q["query_id"]: q for q in body["per_query"]}
@@ -40,7 +40,7 @@ def test_evaluate_counts_only_cases_with_a_winner(monkeypatch):
 
 
 def test_evaluate_without_any_winner_has_no_winner_metrics(monkeypatch):
-    monkeypatch.setattr(R, "_rank_search", lambda q, cfg: ["A"])
+    monkeypatch.setattr(R, "_picked_search", lambda q, cfg: (["A"], False))
     body = R.evaluate([_case("q1", {"A": 1})], {"k": 20})
     assert not set(WINNER_METRICS) & set(body["metrics"])
 
