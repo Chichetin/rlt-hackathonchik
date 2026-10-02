@@ -21,6 +21,7 @@ __pycache__/
 .ruff_cache/
 node_modules/
 src/ui/dist/
+dist-static/
 src/ui/test-results/
 src/ui/playwright-report/
 *.tsbuildinfo

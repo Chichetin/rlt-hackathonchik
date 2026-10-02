@@ -12,7 +12,7 @@ PART ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs openapi openapi-check \
-        seal-check layers ui-build api worker ui-dev demo e2e eval parity latency eval-final up down db-load db-embed okpd2 data pool-load
+        seal-check layers ui-build api worker ui-dev demo e2e eval parity latency eval-final up down db-load db-embed okpd2 data pool-load static-demo
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -81,6 +81,10 @@ worker:            ## воркер очереди обогащения
 
 ui-dev:            ## Vite dev-сервер с прокси на API
 	cd $(UI) && API_PORT=$(PORT) npx vite
+
+static-demo:       ## запасной статический стенд без API (#283) → dist-static/; публикация — подтверждение №4
+	@[ -d .venv ] && [ -d $(UI)/node_modules ] || $(MAKE) setup
+	bash scripts/static_demo.sh
 
 demo:              ## всё одной командой с чистого клона, на кеше: http://127.0.0.1:$(PORT)
 	@[ -d .venv ] && [ -d $(UI)/node_modules ] || $(MAKE) setup

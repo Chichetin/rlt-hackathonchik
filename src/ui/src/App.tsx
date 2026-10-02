@@ -46,6 +46,7 @@ import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } f
 import "./testset.css";
 import { componentText, formulaScore, rankerReason, rankerShort } from "./ranker";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
+import { STATIC_DEMO } from "./staticApi";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -681,6 +682,13 @@ export function App() {
         <h1>{path === "/results" ? "Поставщики для вашей закупки" : "Подбор поставщиков для закупки"}</h1>
         {path !== "/results" && <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>}
       </div>
+
+      {STATIC_DEMO && (
+        <div className="stub" role="status" data-testid="static-demo">
+          Демонстрационные данные: статический стенд без сервера — заранее посчитанная выдача по примерам и реальным
+          закупкам; фильтры, выгрузка и оценки здесь не работают.
+        </div>
+      )}
 
       {res?.stub && (
         <div className="stub" role="status">
