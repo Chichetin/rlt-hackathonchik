@@ -47,12 +47,16 @@ def release(tmp_path: Path) -> dict[str, str]:
             z.writestr(name, f"a;b\n{name};1\n")
     names = (*PROCESSED, "raw-24-25.zip")
     (assets / "SHA256SUMS").write_text("".join(f"{sha(assets / n)}  {n}\n" for n in names), encoding="utf-8")
+    (assets / "sources-cache.sqlite").write_text("snapshot of the source cache\n", encoding="utf-8")
+    snapshot = f"{sha(assets / 'sources-cache.sqlite')}  sources-cache.sqlite\n"
+    (assets / "SHA256SUMS.cache").write_text(snapshot, encoding="utf-8")
     gh = bin_dir / "gh"
     gh.write_text(FAKE_GH, encoding="utf-8")
     gh.chmod(0o755)
     return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_ASSETS": str(assets),
             "FAKE_LOG": str(tmp_path / "gh.log"), "DATA_PROCESSED_DIR": str(tmp_path / "out" / "processed"),
-            "DATA_RAW_DIR": str(tmp_path / "out" / "raw dir")}  # a space in the path on purpose
+            "DATA_RAW_DIR": str(tmp_path / "out" / "raw dir"),
+            "SOURCE_CACHE": str(tmp_path / "out" / "cache dir" / "sources.sqlite")}  # a space in the path on purpose
 
 
 def run(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -128,3 +132,31 @@ def test_without_gh_says_what_to_install(tmp_path):
     (tools / "dirname").symlink_to(str(shutil.which("dirname")))
     res = run(["processed"], {"PATH": str(tools), "DATA_PROCESSED_DIR": str(tmp_path / "p")})
     assert res.returncode == 1 and "нужен GitHub CLI (gh)" in res.stderr and not (tmp_path / "p").exists()
+
+
+def test_cache_snapshot_is_downloaded_once_and_a_local_cache_is_not_overwritten(release):
+    target = Path(release["SOURCE_CACHE"])
+    res = run(["cache"], release)
+    assert res.returncode == 0, res.stderr
+    assert target.read_text(encoding="utf-8") == "snapshot of the source cache\n"
+    assert not list(target.parent.glob(".download.*"))
+    assert downloads(release) == ["SHA256SUMS.cache", "sources-cache.sqlite"]  # the data SHA256SUMS are not touched
+    again = run(["cache"], release)
+    assert again.returncode == 0 and "уже на месте" in again.stdout and downloads(release) == ["SHA256SUMS.cache"]
+    target.write_text("newer local cache", encoding="utf-8")  # the local cache may hold more than the snapshot
+    kept = run(["cache"], release)
+    assert kept.returncode == 0 and "не перезаписываю" in kept.stderr
+    assert target.read_text(encoding="utf-8") == "newer local cache" and downloads(release) == ["SHA256SUMS.cache"]
+    forced = run(["cache"], {**release, "CACHE_FORCE": "1"})
+    assert forced.returncode == 0 and target.read_text(encoding="utf-8") == "snapshot of the source cache\n"
+
+
+def test_cache_with_wrong_checksum_is_refused_and_not_part_of_all(release):
+    (Path(release["FAKE_ASSETS"]) / "sources-cache.sqlite").write_text("tampered", encoding="utf-8")
+    res = run(["cache"], release)
+    assert res.returncode == 1 and "контрольная сумма sources-cache.sqlite не сошлась" in res.stderr
+    assert not Path(release["SOURCE_CACHE"]).exists()
+    downloads(release)
+    res_all = run([], release)  # no part = all: the data, never the cache
+    assert res_all.returncode == 0, res_all.stderr
+    assert "sources-cache.sqlite" not in downloads(release) and not Path(release["SOURCE_CACHE"]).exists()
