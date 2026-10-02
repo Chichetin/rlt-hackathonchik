@@ -1,0 +1,441 @@
+{
+ "exp": "X-rank-ideas",
+ "n_train_cases": 3000,
+ "train_rows": 536244,
+ "train_positives": 4332,
+ "n_dev_cases": 2000,
+ "dev_rows": 359881,
+ "groups": {
+  "cust": [
+   "cust_grp_wins",
+   "cust_grp_days",
+   "cust_wins"
+  ],
+  "cont": [
+   "log_cont_bids",
+   "cont_share",
+   "cont_win_rate"
+  ],
+  "smp": [
+   "smp_lot_x_share"
+  ]
+ },
+ "nan_share_dev": {
+  "cust_grp_wins": 0.011,
+  "cust_grp_days": 0.952,
+  "cust_wins": 0.011,
+  "log_cont_bids": 0.0,
+  "cont_share": 0.188,
+  "cont_win_rate": 0.224,
+  "smp_lot_x_share": 0.006
+ },
+ "variants": {
+  "base": {
+   "trees": 155,
+   "gain_new": {},
+   "metrics": {
+    "winner@10": 0.5976,
+    "winner@1": 0.2851,
+    "recall@10": 0.5762
+   }
+  },
+  "+cust": {
+   "trees": 105,
+   "gain_new": {
+    "cust_grp_wins": 0.017,
+    "cust_grp_days": 0.0327,
+    "cust_wins": 0.0836
+   },
+   "metrics": {
+    "winner@10": 0.6052,
+    "winner@1": 0.2983,
+    "recall@10": 0.5764
+   },
+   "delta_vs_base": {
+    "winner@10": [
+     0.0076,
+     -0.0005,
+     0.0152
+    ],
+    "winner@1": [
+     0.0131,
+     0.0005,
+     0.0243
+    ],
+    "recall@10": [
+     0.0001,
+     -0.0064,
+     0.0066
+    ]
+   }
+  },
+  "+cont": {
+   "trees": 148,
+   "gain_new": {
+    "log_cont_bids": 0.0028,
+    "cont_share": 0.0073,
+    "cont_win_rate": 0.0091
+   },
+   "metrics": {
+    "winner@10": 0.5991,
+    "winner@1": 0.2776,
+    "recall@10": 0.5769
+   },
+   "delta_vs_base": {
+    "winner@10": [
+     0.0015,
+     -0.0051,
+     0.0081
+    ],
+    "winner@1": [
+     -0.0076,
+     -0.0172,
+     0.003
+    ],
+    "recall@10": [
+     0.0007,
+     -0.0048,
+     0.0066
+    ]
+   }
+  },
+  "+smp": {
+   "trees": 134,
+   "gain_new": {
+    "smp_lot_x_share": 0.0188
+   },
+   "metrics": {
+    "winner@10": 0.6016,
+    "winner@1": 0.2796,
+    "recall@10": 0.5789
+   },
+   "delta_vs_base": {
+    "winner@10": [
+     0.004,
+     -0.0035,
+     0.0116
+    ],
+    "winner@1": [
+     -0.0056,
+     -0.0162,
+     0.0051
+    ],
+    "recall@10": [
+     0.0027,
+     -0.0032,
+     0.0091
+    ]
+   }
+  },
+  "+all": {
+   "trees": 211,
+   "gain_new": {
+    "cust_grp_wins": 0.0161,
+    "cust_grp_days": 0.0296,
+    "cust_wins": 0.0709,
+    "log_cont_bids": 0.0021,
+    "cont_share": 0.0074,
+    "cont_win_rate": 0.0077,
+    "smp_lot_x_share": 0.0163
+   },
+   "metrics": {
+    "winner@10": 0.5991,
+    "winner@1": 0.3013,
+    "recall@10": 0.5753
+   },
+   "delta_vs_base": {
+    "winner@10": [
+     0.0015,
+     -0.0061,
+     0.0091
+    ],
+    "winner@1": [
+     0.0162,
+     0.0046,
+     0.0278
+    ],
+    "recall@10": [
+     -0.0009,
+     -0.0076,
+     0.0061
+    ]
+   }
+  },
+  "R-198-shipped": {
+   "metrics": {
+    "winner@10": 0.5966,
+    "winner@1": 0.2851,
+    "recall@10": 0.5716
+   },
+   "delta_vs_base": {
+    "winner@10": [
+     -0.001,
+     -0.0086,
+     0.0066
+    ],
+    "winner@1": [
+     0.0,
+     -0.0096,
+     0.0111
+    ],
+    "recall@10": [
+     -0.0047,
+     -0.0106,
+     0.0013
+    ]
+   }
+  }
+ },
+ "seed_check": {
+  "1": {
+   "base": {
+    "metrics": {
+     "winner@10": 0.6082,
+     "winner@1": 0.2892,
+     "recall@10": 0.5814
+    }
+   },
+   "+cust": {
+    "metrics": {
+     "winner@10": 0.6072,
+     "winner@1": 0.2978,
+     "recall@10": 0.5806
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      -0.001,
+      -0.0091,
+      0.0076
+     ],
+     "winner@1": [
+      0.0086,
+      -0.002,
+      0.0202
+     ],
+     "recall@10": [
+      -0.0009,
+      -0.0076,
+      0.0058
+     ]
+    }
+   },
+   "+smp": {
+    "metrics": {
+     "winner@10": 0.6021,
+     "winner@1": 0.2882,
+     "recall@10": 0.579
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      -0.0061,
+      -0.0131,
+      0.001
+     ],
+     "winner@1": [
+      -0.001,
+      -0.0111,
+      0.0086
+     ],
+     "recall@10": [
+      -0.0024,
+      -0.0081,
+      0.0033
+     ]
+    }
+   },
+   "+all": {
+    "metrics": {
+     "winner@10": 0.6041,
+     "winner@1": 0.2937,
+     "recall@10": 0.5761
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      -0.004,
+      -0.0121,
+      0.004
+     ],
+     "winner@1": [
+      0.0046,
+      -0.0076,
+      0.0182
+     ],
+     "recall@10": [
+      -0.0053,
+      -0.0122,
+      0.0023
+     ]
+    }
+   }
+  },
+  "2": {
+   "base": {
+    "metrics": {
+     "winner@10": 0.5976,
+     "winner@1": 0.2841,
+     "recall@10": 0.5767
+    }
+   },
+   "+cust": {
+    "metrics": {
+     "winner@10": 0.6052,
+     "winner@1": 0.2993,
+     "recall@10": 0.5791
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      0.0076,
+      -0.001,
+      0.0167
+     ],
+     "winner@1": [
+      0.0152,
+      0.0025,
+      0.0278
+     ],
+     "recall@10": [
+      0.0023,
+      -0.0054,
+      0.0099
+     ]
+    }
+   },
+   "+smp": {
+    "metrics": {
+     "winner@10": 0.6021,
+     "winner@1": 0.2861,
+     "recall@10": 0.5798
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      0.0046,
+      -0.003,
+      0.0121
+     ],
+     "winner@1": [
+      0.002,
+      -0.0086,
+      0.0127
+     ],
+     "recall@10": [
+      0.003,
+      -0.0037,
+      0.0097
+     ]
+    }
+   },
+   "+all": {
+    "metrics": {
+     "winner@10": 0.5986,
+     "winner@1": 0.2983,
+     "recall@10": 0.5772
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      0.001,
+      -0.0091,
+      0.0096
+     ],
+     "winner@1": [
+      0.0142,
+      0.0015,
+      0.0268
+     ],
+     "recall@10": [
+      0.0005,
+      -0.0075,
+      0.0084
+     ]
+    }
+   }
+  },
+  "3": {
+   "base": {
+    "metrics": {
+     "winner@10": 0.5966,
+     "winner@1": 0.2851,
+     "recall@10": 0.5752
+    }
+   },
+   "+cust": {
+    "metrics": {
+     "winner@10": 0.6036,
+     "winner@1": 0.2993,
+     "recall@10": 0.5797
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      0.0071,
+      -0.0015,
+      0.0162
+     ],
+     "winner@1": [
+      0.0142,
+      0.003,
+      0.0263
+     ],
+     "recall@10": [
+      0.0045,
+      -0.0032,
+      0.0128
+     ]
+    }
+   },
+   "+smp": {
+    "metrics": {
+     "winner@10": 0.6041,
+     "winner@1": 0.2846,
+     "recall@10": 0.5791
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      0.0076,
+      -0.0005,
+      0.0162
+     ],
+     "winner@1": [
+      -0.0005,
+      -0.0106,
+      0.0096
+     ],
+     "recall@10": [
+      0.0039,
+      -0.0032,
+      0.0113
+     ]
+    }
+   },
+   "+all": {
+    "metrics": {
+     "winner@10": 0.6036,
+     "winner@1": 0.2973,
+     "recall@10": 0.5761
+    },
+    "delta_vs_base": {
+     "winner@10": [
+      0.0071,
+      -0.0015,
+      0.0162
+     ],
+     "winner@1": [
+      0.0121,
+      0.001,
+      0.0253
+     ],
+     "recall@10": [
+      0.0008,
+      -0.007,
+      0.0094
+     ]
+    }
+   }
+  }
+ },
+ "n_winner_cases": 1978,
+ "bootstrap": {
+  "n": 1000,
+  "seed": 577,
+  "ci": "percentile 95%, paired over dev queries"
+ },
+ "elapsed_s": 113.9
+}
