@@ -519,7 +519,7 @@ def run(csv_dir: Path, out: Path, top: int | None = 10, offline: bool | None = N
                 rows, rep = [Checked(m) for m in matches], None
                 for r in rows:
                     write(r, notes)
-            if not rows:
+            if not rows and not any(ranks.values()):  # rows already written stay the answer (#565)
                 stats["empty"] += 1
                 w.row([*base, "", "", "", "", "", "", "", "", "", "", "; ".join(notes) or "кандидатов нет"])
             stats["with_history"] += ranks["history"] > 0
