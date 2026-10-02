@@ -37,9 +37,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from src.ingest import predict as predict_mod
 from src.ingest.testset import TestDataError, TestSet, load_testset
 from src.match import search as search_mod
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
-ROOT = Path(__file__).resolve().parents[2]
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # file contents together, UTF-8
 NOTICES, ITEMS, SUPPLIERS = "Извещения", "ТРУ", "Поставщики"
 ACTIVE = "active"
@@ -80,8 +80,7 @@ class UploadedTestset(BaseModel):
 
 
 def _root() -> Path:
-    d = Path(os.environ.get("TESTSETS_DIR", ROOT / "cache" / "testsets"))
-    return d if d.is_absolute() else ROOT / d
+    return get_settings().testsets_dir
 
 
 def max_body_bytes() -> int:

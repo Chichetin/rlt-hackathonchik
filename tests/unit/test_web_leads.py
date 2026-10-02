@@ -11,6 +11,7 @@ import pytest
 
 from src.contracts import Counterparty, Query, inn_is_valid
 from src.enrich import discover as D
+from src.enrich import web_leads_warm as W
 from src.enrich.evidence import check_counterparty, strip_unverified
 from src.sources import pb_nalog, web_leads
 from src.sources.cache import SourceCache
@@ -149,3 +150,47 @@ def test_card_without_okved_name_and_fallback_without_region(leads_dir, cache, t
         res = _discover(cache, processed)
     assert TRADER not in {m.counterparty.inn for m in res.matches}
     assert "другой регион 1" in res.leads[0] and "регион не установлен 1" in res.leads[0]  # MOSCOW; TRADER
+
+
+def test_stats_count_novelty_and_cached_cards(leads_dir, cache, tmp_path, monkeypatch):
+    """The orchestration moved to enrich (#294): novelty against organizers' data, cards from the cache."""
+    monkeypatch.setenv("SOURCE_CACHE", str(cache.path))
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(_processed(tmp_path, [KNOWN])))
+    st = W.stats(web_leads.load())
+    assert st["17.12"] == {"всего": 7, "без ИНН": 1, "с ИНН": 6, "уже в данных": 1, "новые": 5,
+                           "карточка ФНС в кеше": 4}  # NO_CARD has none
+    assert st["26.20"] == {"всего": 1, "с ИНН": 1, "новые": 1, "карточка ФНС в кеше": 1}
+
+
+def test_warm_asks_only_new_leads_without_a_card_and_stops_on_a_refusal(leads_dir, cache, tmp_path, monkeypatch):
+    monkeypatch.setenv("SOURCE_CACHE", str(cache.path))
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(_processed(tmp_path, [KNOWN])))
+    asked: list[str] = []
+    monkeypatch.setattr(W, "enrich", lambda inn, c: asked.append(inn))
+    assert W.warm(web_leads.load(), 10, 0) == 1 and asked == [NO_CARD]  # known and cached ones are not asked
+
+
+def test_warm_stops_at_the_first_refusal_but_skips_a_company_without_a_card(leads_dir, tmp_path, monkeypatch):
+    """A refusal of the source stops the run (the IP is not banned); «no card in the registry» does not."""
+    only_maker = SourceCache(tmp_path / "only-maker.sqlite")
+    only_maker.put(pb_nalog.card_url(MAKER), _card(MAKER, "17.12", "Производство бумаги и картона"))
+    monkeypatch.setenv("SOURCE_CACHE", str(only_maker.path))
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(_processed(tmp_path, [KNOWN])))
+    todo = sorted([NO_CARD, OTHER, TRADER, MOSCOW])  # new, without a cached card
+    asked: list[str] = []
+
+    def refuse(inn, c):
+        asked.append(inn)
+        raise pb_nalog.CaptchaRequired("captcha")
+
+    monkeypatch.setattr(W, "enrich", refuse)
+    assert W.warm(web_leads.load(), 10, 0) == 0 and asked == todo[:1]  # stopped, the next run continues
+    asked.clear()
+
+    def first_missing(inn, c):
+        asked.append(inn)
+        if inn == todo[0]:
+            raise KeyError(inn)
+
+    monkeypatch.setattr(W, "enrich", first_missing)
+    assert W.warm(web_leads.load(), 10, 0) == 3 and asked == todo

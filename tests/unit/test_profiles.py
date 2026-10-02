@@ -11,6 +11,8 @@ from src.match import search as search_mod
 from src.match.profiles import GOODS, SERVICES, procurement_type, profile_overrides, profile_weights
 from src.match.search import search
 
+pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py
+
 CUTOFF = date(2025, 7, 1)
 BASE = {"product_fit": 0.35, "experience": 0.2, "reliability": 0.2, "activity": 0.1, "geography": 0.1, "price": 0.05}
 ON = {"weights_by_type": {"services": {"geography": 0.0}}}

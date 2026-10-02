@@ -81,7 +81,7 @@ def test_export_encode_import_roundtrip(conn, tmp_path: Path) -> None:
     conn.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(VEC)))
     total = embed(conn, fake_encode, data_schema=SCHEMA, vec_schema=VEC, limit=2)["total"]
     texts, vecs = tmp_path / "texts.parquet", tmp_path / "vecs.parquet"
-    assert export_missing(conn, texts, vec_schema=VEC) == total - 2
+    assert export_missing(conn, texts, vec_schema=VEC, data_schema=SCHEMA) == total - 2
     assert encode_file(texts, vecs, fake_encode, chunk=3) == total - 2
     assert import_file(conn, vecs, data_schema=SCHEMA, vec_schema=VEC, batch_size=2) == total - 2  # several batches
     assert import_file(conn, vecs, data_schema=SCHEMA, vec_schema=VEC, batch_size=2) == 0  # rerun changes nothing

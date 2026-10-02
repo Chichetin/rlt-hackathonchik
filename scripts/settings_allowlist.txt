@@ -1,0 +1,27 @@
+# Файлы src/, которые ещё читают окружение сами (make settings-check, #290). Список только сокращается:
+# файл переводится на src/settings.py (задача #297) — его строка удаляется. Новые файлы сюда не добавлять (исключение — блок внизу, #290).
+
+src/db/embed.py
+src/db/load.py
+src/db/pool.py
+src/enrich/discover.py
+src/enrich/enrich.py
+src/eval/build_cases.py
+src/eval/emb_bench.py
+src/eval/final.py
+src/ingest/build.py
+src/ingest/profile.py
+src/llm/provider.py
+src/sources/bo_nalog.py
+src/sources/cache.py
+src/sources/eis_rnp.py
+src/sources/pb_nalog.py
+src/sources/rmsp.py
+
+# Появились на main, пока #290 была в ревью ; переводятся в #297.
+src/api/lots.py
+src/eval/judge_hist.py
+src/eval/pool_recall.py
+src/match/ranker_train.py
+src/sources/fns_opendata.py
+src/sources/yandex_search.py
