@@ -6,7 +6,8 @@ v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
 2. OKPD2 class of the query: `Query.okpd2`, or — when empty — a vote of the positions that
    matched the query themselves (D-045): group XX.XX first, then the code inside it.
 3. Components in [0, 1], one explanation line each:
-   product_fit — BM25 similarity (normalized by the best candidate) + depth of the OKPD2 match;
+   product_fit — BM25 similarity (normalized by the best candidate), optionally mixed with how well the name of
+                 the best matched position covers the query (options.name_share, #576) + depth of the OKPD2 match;
    experience  — lots and wins in the query's OKPD2 group (level 4) before as_of;
    activity    — days from the last participation to as_of (or to the end of the data);
    geography   — region of the KPP (78 / 47) against Query.region;
@@ -89,6 +90,12 @@ UNAVAILABLE = {
 # The defaults are v1: without the block nothing changes.
 OPTIONS: dict[str, tuple] = {
     "fit_bm25_share": (FIT_BM25_SHARE, None),  # share of BM25 in product_fit, [0, 1]
+    # share of the name match inside the text part of product_fit (#576): 0 — BM25 relative to the best candidate
+    # only (v1), so the best one always gets 1.0; > 0 — the words of the query found in the best position's name
+    "name_share": (0.0, None),
+    # experience saturation (#576): fixed — at sat_lots / sat_wins; pool — at least at the most experienced candidate
+    # of this query, so in a popular category not everyone with 20+ lots gets 1.0
+    "exp_scale": ("fixed", ("fixed", "pool")),
     "experience_by": ("class", ("class", "similar")),  # lots in the OKPD2 group | lots with similar positions
     "tie_break": ("inn", ("inn", "bm25")),  # order of equal scores
     # lots / wins at which experience reaches 1.0 (#196): low caps make active suppliers indistinguishable
@@ -119,6 +126,9 @@ def scoring_options(cfg: dict) -> dict:
     out["price_decades"] = float(out["price_decades"])
     if out["price_decades"] <= 0:
         raise ValueError(f"options.price_decades = {out['price_decades']}: ожидается число > 0")
+    out["name_share"] = float(out["name_share"])
+    if not 0.0 <= out["name_share"] <= 1.0:
+        raise ValueError(f"options.name_share = {out['name_share']}: доля должна быть в [0, 1]")
     if not 0.0 <= out["fit_bm25_share"] <= 1.0:
         raise ValueError(f"options.fit_bm25_share = {out['fit_bm25_share']}: доля должна быть в [0, 1]")
     for name in ("sat_lots", "sat_wins"):
@@ -345,11 +355,27 @@ def _period(as_of: date | None) -> str:
     return f"до {_fmt(as_of)}" if as_of else "за весь период данных"
 
 
+def _name_match(query_tokens: set[str], text: str) -> tuple[float, int, int]:
+    """How well a position name matches the query (#576): 0.7 · share of the query words found in the name +
+    0.3 · share of the name's words that are in the query (a long name with one common word is a weak match).
+    Returns (value, query words found, query words)."""
+    name = set(tokenize(text))
+    if not query_tokens or not name:
+        return 0.0, 0, len(query_tokens)
+    hit = len(query_tokens & name)
+    return 0.7 * hit / len(query_tokens) + 0.3 * hit / len(name), hit, len(query_tokens)
+
+
 def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: bool,
-                 how: str = "", share: float = FIT_BM25_SHARE) -> tuple[float, str]:
+                 how: str = "", share: float = FIT_BM25_SHARE, name_share: float = 0.0,
+                 query_tokens: set[str] | None = None) -> tuple[float, str]:
     sim = c.bm25 / top_bm25 if top_bm25 > 0 else 0.0
     best = c.best_text if len(c.best_text) <= 60 else c.best_text[:57] + "…"
     head = c.found_by or f"Похожие{how} позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
+    if name_share > 0 and query_tokens:
+        name, hit, total = _name_match(query_tokens, c.best_text)
+        sim = name_share * name + (1 - name_share) * sim
+        head = f"{head}; в наименовании совпало слов запроса: {hit} из {total}"
     if not codes:
         return sim, f"{head}; ОКПД2 запроса не определён"
     src = "ОКПД2 определён по похожим позициям" if predicted else "ОКПД2 запроса"
@@ -629,6 +655,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         wins_mode = "rate" if query.channel == "АИС ГЗ" else "count"
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
+    query_tokens = set(tokens)
+    by_class = bool(codes) and opts["experience_by"] == "class"
+    pool_lots = max((c.class_lots if by_class else c.n_lots) for c in cands)
+    pool_wins = max((c.class_wins if by_class else c.n_wins) for c in cands)
     _fit_signals.set({"top_bm25": top_bm25, "tokens": len(set(tokens)), "retriever": cfg["retriever"],
                       "ladder": any(c.found_by for c in cands)})
     ref = as_of or idx.data_end
@@ -645,11 +675,17 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         cp = parties.get(c.inn)
         if cp is None:
             continue
-        fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
-        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"],
-                                   wins_mode)
+        sat_lots, sat_wins = opts["sat_lots"], opts["sat_wins"]
+        if opts["exp_scale"] == "pool":
+            sat_lots, sat_wins = max(sat_lots, pool_lots), max(sat_wins, pool_wins)
+        fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"], opts["name_share"],
+                                    query_tokens)
+        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], sat_lots, sat_wins, wins_mode)
+        exp_rank = exp if opts["exp_scale"] == "fixed" else _experience(
+            c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"], wins_mode)[0]
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
+            exp_rank = mix_incumbent(exp_rank, "", incumbent.get(c.inn, 0), shares["incumbent"])[0]
         exp_why += _profile_note(cp)
         if opts["activity_by"] == "similar" and c.last_similar is not None:
             act, act_why = _recency(c.last_similar, ref, as_of, "Последнее участие в закупке с похожими позициями")
@@ -681,7 +717,17 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
                                      components=comps, origin="history"))
         bm25_of.append(c.bm25)
         if ranked:
-            rows.append(ranker.feature_row(c, top_bm25, {x.name: x.value for x in comps},
+            # the ranker was trained on product_fit without the name match, experience with fixed saturation and
+            # geography without the INN region:
+            # it gets those values, so its order does not move with the display formula (#576)
+            feats = {x.name: x.value for x in comps}
+            feats["experience"] = round(min(1.0, max(0.0, exp_rank)), 4)
+            if opts["name_share"] > 0:
+                feats["product_fit"] = round(min(1.0, _product_fit(c, top_bm25, codes, predicted, how,
+                                                                   opts["fit_bm25_share"])[0]), 4)
+            if shares["inn_region"] > 0:
+                feats["geography"] = round(_geography(cp, target)[0], 4)
+            rows.append(ranker.feature_row(c, top_bm25, feats,
                                            incumbent.get(c.inn, 0) if query.customer_inn else None,
                                            cp, query, ref, codes, predicted))
     if features_out is not None:
