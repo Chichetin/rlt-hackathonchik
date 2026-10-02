@@ -5,6 +5,9 @@ before 2025-01-01, «a winner in the top-10». Here the same lots and the same h
 (src/eval/run.py evaluate), so winner@10 is comparable with theirs. Lots from the sealed period
 (holdout_from, configs/split.yaml) are dropped before any case is built: only their ids and dates are looked at.
 Result: eval/results/<exp>.json, the same record as `make eval`.
+
+`--name-only` (#491): the query is the lot subject only (else procedure_name) — no OKPD2, customer, budget,
+channel — as the jury types it and as art7235 measure «только название».
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import duckdb
 from src.eval import build_cases as BC
 from src.eval import run as R
 from src.eval.split import ROOT, EvalCase, split_config
+from src.match.profiles import procurement_type
 from src.match.store import processed_dir
 
 DEFAULT_LOTS = ROOT / "eval" / "cases" / "art7235_lots.csv"
@@ -60,6 +64,16 @@ def select_cases(lots: list[BC.Lot], ids: list[int], cutoff: date, holdout_from:
     return cases, stats
 
 
+def name_only(case: EvalCase, lot: BC.Lot) -> EvalCase | None:
+    """The case with the query as a user types it: the subject (else procedure_name) only; None without both."""
+    text = (lot.subject or "").strip() or (lot.procedure_name or "").strip()
+    if not text:
+        return None
+    query = case.query.model_copy(update={"text": text, "okpd2": [], "customer_inn": None, "budget": None,
+                                          "channel": None})
+    return case.model_copy(update={"query": query})
+
+
 def read_ids(path: Path, n: int | None) -> list[int]:
     """lot_id column of a csv, duplicates dropped, first `n` (all when n is falsy)."""
     with path.open(encoding="utf-8", newline="") as f:
@@ -85,18 +99,37 @@ def main(argv: list[str] | None = None) -> int:
                     help="write the lot_id of the kept cases to this csv (input of scripts/art7235_driver.py)")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml under this id (v2: no ranker, trained on 2025-04…06)")
+    ap.add_argument("--name-only", action="store_true",
+                    help="query = lot subject only (else procedure_name); --dump-ids then adds a text column")
     args = ap.parse_args(argv)
     cfg = R.load_method_config(args.exp, args.baseline, args.config_of)
     holdout_from = date.fromisoformat(str(split_config()["holdout_from"]))
     ids = read_ids(args.lots, args.n)
     lots = BC.read_lots(processed_dir(), args.cutoff, holdout_from)  # the sealed period is never loaded
     cases, stats = select_cases(lots, ids, args.cutoff, holdout_from, publish_dates(processed_dir(), ids))
+    cards = {c.query.query_id: c.query for c in cases}  # channel and type slices of a name-only run
+    if args.name_only:
+        by_id = {lot.lot_id: lot for lot in lots}
+        named = [name_only(c, by_id[int(c.query.query_id.removeprefix("lot-"))]) for c in cases]
+        stats["no_text"] += named.count(None)
+        cases = [c for c in named if c is not None]
     print("отбор:", stats, f"-> {len(cases)} кейсов", flush=True)
     if args.dump_ids:
-        args.dump_ids.write_text("lot_id\n" + "".join(f"{c.query.query_id.removeprefix('lot-')}\n" for c in cases),
-                                 encoding="utf-8")
-    rec = R.result_record(args.exp, f"ext-{args.lots.stem}-n{args.n}", cfg, R.evaluate(cases, cfg, args.cutoff))
-    rec["selection"] = {**stats, "cases": len(cases), "cutoff": args.cutoff.isoformat(), "lots_file": args.lots.name}
+        with args.dump_ids.open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["lot_id", "text"] if args.name_only else ["lot_id"])
+            for c in cases:
+                w.writerow([c.query.query_id.removeprefix("lot-")] + ([c.query.text] if args.name_only else []))
+    body = R.evaluate(cases, cfg, args.cutoff)
+    if args.name_only:
+        for q in body["per_query"]:
+            card = cards[q["query_id"]]
+            q["channel"], q["type"] = card.channel, procurement_type(card.okpd2) or "unknown"
+        body["slices"] = R.slices(body["per_query"])
+    part = f"ext-{args.lots.stem}-n{args.n}" + ("-name" if args.name_only else "")
+    rec = R.result_record(args.exp, part, cfg, body)
+    rec["selection"] = {**stats, "cases": len(cases), "cutoff": args.cutoff.isoformat(), "lots_file": args.lots.name,
+                        "name_only": args.name_only}
     R.RESULTS.mkdir(parents=True, exist_ok=True)
     out = R.RESULTS / f"{args.exp}.json"
     out.write_text(R.dump_record(rec), encoding="utf-8")
