@@ -6,11 +6,13 @@ PY := uv run --frozen
 UI := src/ui
 PORT ?= 8000
 EXP ?=
+A ?=
+B ?=
 PART ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs openapi openapi-check \
-        seal-check ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed okpd2 data pool-load
+        seal-check layers ui-build api worker ui-dev demo e2e eval parity latency eval-final up down db-load db-embed okpd2 data pool-load
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -59,7 +61,10 @@ openapi-check:     ## контракты, OpenAPI и TS-типы UI не раз�
 seal-check:        ## holdout читают только src/eval/split.py и final.py (D-010)
 	bash scripts/seal_check.sh
 
-check: lint typecheck test test-ui hooks-test openapi-check seal-check stubs   ## всё целиком: общие файлы, freeze, сдача
+layers:            ## импорты в src/ идут вниз по слоям, не вверх (D-106); допущенные нарушения - scripts/layers_allowlist.txt
+	$(PY) python scripts/check_layers.py
+
+check: lint typecheck test test-ui hooks-test openapi-check seal-check layers stubs   ## всё целиком: общие файлы, freeze, сдача
 	@echo "make check: OK"
 
 check-changed:     ## только затронутое относительно origin/main (+ e2e, если задет демо-путь) — по умолчанию
@@ -88,6 +93,9 @@ e2e: ui-build      ## e2e демо-сценария (Playwright), свой по�
 eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-часть)
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
 	$(PY) python -m src.eval.run --exp $(EXP)
+
+parity:            ## побитовое сравнение выдач (ranked) двух прогонов eval: make parity A=<id> B=<id>; коды 0/1/2 (совпали / различаются / не сравнить) — у python -m src.eval.parity, у make — Error 1 / Error 2
+	$(PY) python -m src.eval.parity "$(A)" "$(B)"
 
 predict:           ## тестовая выгрузка организаторов → eval/predict/<папка>.csv: make predict CSV_DIR=<папка> [TOP=10] [OFFLINE=1]
 	@[ -n "$(CSV_DIR)" ] || { echo "нужен CSV_DIR=<папка с Извещения*.csv и ТРУ*.csv>"; exit 2; }

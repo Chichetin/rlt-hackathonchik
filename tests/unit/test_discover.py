@@ -37,7 +37,7 @@ IP_ROW = {"inn": "500100732259", "ogrn": "318169000190351", "nptype": "IP", "cat
 @pytest.fixture(autouse=True)
 def _fast_and_unblocked(monkeypatch):
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", 0.0)
-    monkeypatch.setattr(rmsp, "_blocked_until", 0.0)
+    rmsp.PACER.reset()
 
 
 @pytest.fixture
@@ -329,9 +329,11 @@ def test_live_requests_respect_plan_budget_and_block(tmp_path):
     res = _run(SourceCache(tmp_path / "c.sqlite"), processed, query=q, offline=False, budget_s=0.0,
                client=_client(handler))
     assert posted == [] and all("нет в кеше" in r for r in res.requests)  # budget spent → cache only
+    assert not res.source_failed  # nothing was asked, nothing failed: no «источники не ответили» (#287)
     blocked = _run(SourceCache(tmp_path / "d.sqlite"), processed, query=q, offline=False,
                    client=_client(lambda r: (posted.append("x"), httpx.Response(403))[1]))
     assert posted == ["x"] and blocked.matches == [] and "отказал" in blocked.requests[0]  # one try, then stop
+    assert blocked.source_failed  # the user is told the block may be incomplete (X-Discovery-Error, #287)
     assert any("защиту не обходим" in n for n in blocked.notes)
 
 
@@ -346,9 +348,11 @@ def test_source_timeout_gives_empty_block_and_the_rest_of_the_query_is_cache_onl
     res = _run(SourceCache(tmp_path / "c.sqlite"), processed, offline=False, client=_client(handler))
     assert res.matches == [] and len(calls) == 1  # one attempt, not one per (OKVED, region)
     assert "не ответил" in res.requests[0] and all("в сеть не ходили" in r for r in res.requests[1:])
+    assert res.source_failed  # a timeout is a failed source, not «nobody found» (#287)
     assert rmsp.blocked()  # the hanging source is left alone for a while: the next search does not wait either
     again = _run(SourceCache(tmp_path / "c2.sqlite"), processed, offline=False, client=_client(_no_network))
     assert again.matches == [] and all("в сеть не ходили" in r for r in again.requests)
+    assert again.source_failed  # the next search during the pause is still «may be incomplete» (#287)
 
 
 def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
@@ -389,7 +393,7 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
                                                                      expected_calls):
     budget = 0.6
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
-    monkeypatch.setattr(rmsp, "_last_request", 0.0)
+    rmsp.PACER.reset()
     monkeypatch.setattr(rmsp, "TIMEOUT_S", 3.0)
     calls: list = []
     res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),
@@ -648,17 +652,30 @@ def test_api_search_fills_the_discovered_block(api):
     assert only_lo["discovered"] == []
 
 
-def test_api_facets_of_the_new_block_ignore_the_user_filters(api):
-    """#232: X-Facets «discovered» — from the discovery candidates before the user filters."""
+def test_api_facets_of_the_new_block_count_the_candidates(api):
+    """#232: X-Facets «discovered» — from the discovery candidates, each group after the other groups' filters."""
     import json as _json
     q = {"query_id": "q", "text": "бумага А4"}
     r = api.post("/api/search", json=q)
     disc = _json.loads(r.headers["X-Facets"])["discovered"]
     assert disc == {"kind": {"manufacturer": 0, "distributor": 1, "dealer": 0, "unknown": 0},
-                    "entity": {"ul": 1, "ip": 0, "unknown": 0}}
+                    "entity": {"ul": 1, "ip": 0, "unknown": 0},
+                    "near": {"worked": 1, "near": 1, "any": 1}}  # registry region 78 = the customer's region (#242)
     makers = api.post("/api/search", json={**q, "filters": {"kinds": "manufacturer"}})
     assert makers.json()["discovered"] == [] and makers.headers["X-Total-Discovered"] == "0"
-    assert _json.loads(makers.headers["X-Facets"])["discovered"] == disc  # the chips keep their counts
+    # the role chips keep their counts; ЮЛ/ИП and «near» are counted among manufacturers — none here
+    assert _json.loads(makers.headers["X-Facets"])["discovered"] == {
+        "kind": disc["kind"], "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0, "any": 0}}
+    # «Может работать у заказчика» reaches the block through discover() as every user filter (#242): for a customer
+    # of the Leningrad region (INN 47) the company of the registry region 78 is a neighbour, not «worked»
+    lo = {**q, "customer_inn": "4703173460"}
+    near = api.post("/api/search", json={**lo, "filters": {"near_customer": "near"}})
+    assert near.headers["X-Total-Discovered"] == "1"
+    worked = api.post("/api/search", json={**lo, "filters": {"near_customer": "worked"}})
+    assert worked.json()["discovered"] == [] and worked.headers["X-Total-Discovered"] == "0"
+    assert _json.loads(worked.headers["X-Facets"])["discovered"] == {
+        "kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 0},
+        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 1, "any": 1}}
 
 
 def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):

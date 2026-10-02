@@ -6,11 +6,20 @@ pages each block, the block sizes after filters are in the X-Total-History / X-T
 headers (the frozen SearchResponse has no total). The xlsx export takes every filtered row.
 Counts for the filter chips (#232) are the X-Facets header, ASCII JSON
 `{"history": F, "discovered": F}`, F = `{"kind": {"manufacturer": n, "distributor": n, "dealer": n, "unknown": n},
-"entity": {"ul": n, "ip": n, "unknown": n}}`: every candidate of the block after the legal status (liquidation, RNP)
-and before the user filters, so a chip count is the block size when only that chip is chosen; «Новые» shows at most
-discover.MAX_SHOWN, so its counts are capped at it. Filter keys — src/match/filters.py.
+"entity": {"ul": n, "ip": n, "unknown": n}, "near": {"worked": n, "near": n, "any": n}}`: the candidates of the block
+after the legal status (liquidation, RNP), each group after the user filters of the other groups
+(filters.chip_facets), so a chip count is the block size its choice gives with the other filters on; «Новые» shows
+at most discover.MAX_SHOWN, so its counts are capped at it. Filter keys — src/match/filters.py.
+The customer and the purchase type the search assumed (#242) are the X-Search-Context header, ASCII JSON
+`{"customer_region", "customer_basis": "ИНН 78…" | "регион запроса", "purchase_type": goods | works | services |
+remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_near": near | any, "applied_near":
+worked | near | any}`.
 Why the history block is empty (or how the fallback ladder found it, src/match/fallback.py) is the
 X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeURIComponent in the UI.
+Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error header: the exception type when
+discover() failed (no message, no path), `source_unavailable` when a registry request was refused or failed and
+discover() went on with the rest, or `history_unchecked` when the companies were found but could not be checked
+against organizers' data (so none is called «новая»). Absent — the block is what the sources gave.
 """
 
 from __future__ import annotations
@@ -20,18 +29,20 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi import Query as Param
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 
+from src.api import guard
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.api.ratings import router as ratings_router
@@ -45,11 +56,12 @@ from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
 from src.match import pipeline
 from src.match import search as search_mod
-from src.match.filters import entity_of, kind_of, parse_filters
+from src.match.filters import entity_of, kind_of, near_of, parse_filters
+from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
 from src.match.store import get_store
 from src.sources.cache import SourceCache
-from src.sources.pb_nalog import CaptchaRequired
-from src.worker.queue import engine_from_env, enqueue, status_counts
+from src.sources.pb_nalog import CaptchaRequired, card_url
+from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
 if os.environ.get("DEMO_FIXTURE") == "1":
@@ -61,19 +73,22 @@ KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "
 ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or a natural person (DATA_DICTIONARY)
 # The longest eval query is 4.5k chars; 1 MB of text held a worker for 18 s on the full data (#145, F-02).
 MAX_TEXT_CHARS = 20_000
+HISTORY_UNCHECKED = "history_unchecked"  # X-Discovery-Error: found, but novelty not checked (#287)
+SOURCE_UNAVAILABLE = "source_unavailable"  # X-Discovery-Error: a registry request was refused or failed (#287)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Q-24: with retriever pg_hybrid load the query model and check the vectors before the first request."""
     try:
-        retriever = search_mod.load_config()["retriever"]
+        cfg = search_mod.load_config()
+        retriever, model = cfg["retriever"], cfg.get("embedding_model")
     except (OSError, ValueError, KeyError):
-        retriever = None
+        retriever = model = None
     if retriever == "pg_hybrid":
         from src.match import pg_retriever
 
         try:
-            log.info("pg_hybrid прогрет: %s", pg_retriever.warm())
+            log.info("pg_hybrid прогрет: %s", pg_retriever.warm(model))
         except pg_retriever.VectorsUnavailable as e:
             log.warning("pg_hybrid недоступен, поиск пойдёт по BM25: %s", e)
     yield
@@ -140,14 +155,44 @@ def _accepted(query: Query) -> None:
         raise HTTPException(422, f"Текст запроса длиннее {MAX_TEXT_CHARS:_} символов".replace("_", " ")
                                  + " — оставьте наименование позиции или фрагмент ТЗ")
     try:  # a typo in a filter is an error, not a silently disabled filter (#232, D-030)
-        parse_filters(query.filters)
+        near_of(query, parse_filters(query.filters))
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
 
 
+def _context(query: Query) -> dict[str, object]:
+    """X-Search-Context (#242): the customer's region and the purchase type the search assumed, with their basis."""
+    region, inn_note = search_mod.customer_region(query)  # a note only when the region came from the customer's INN
+    kind, codes = purchase_basis(query.okpd2)
+    return {
+        "customer_region": region,
+        "customer_basis": f"ИНН {(query.customer_inn or '').strip()[:2]}…" if inn_note else "регион запроса",
+        "purchase_type": kind,
+        "purchase_label": PURCHASE_LABEL[kind] if kind else None,
+        "type_basis": codes,
+        "default_near": default_near(kind),
+        "applied_near": near_of(query).choice,
+    }
+
+
+def _discovery_error(res: pipeline.Picked) -> str | None:
+    """X-Discovery-Error (#287): why «Новые» may be incomplete; None — nothing went wrong."""
+    if res.discovery_error:  # an exception type name: an identifier, ASCII for the latin-1 header
+        return res.discovery_error if res.discovery_error.isascii() else "Error"
+    if res.discovery is None:
+        return None
+    # a class was resolved and the registry searched, but organizers' data was not there to check novelty
+    if res.discovery.okpd_classes and not res.discovery.history_checked:
+        return HISTORY_UNCHECKED
+    if res.discovery.source_failed:  # captcha, refusal, timeout: discover() kept going with what it had
+        return SOURCE_UNAVAILABLE
+    return None
+
+
 def _found(query: Query, uncached: set[str] | None = None
-           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]]]:
-    """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets.
+           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]], str | None]:
+    """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets;
+    X-Discovery-Error.
 
     The selection itself is src/match/pipeline.py — the same for make eval and make predict (#220).
     """
@@ -160,7 +205,7 @@ def _found(query: Query, uncached: set[str] | None = None
                                  "или база не отвечает") from e
     if uncached is not None:
         uncached.update(res.uncached)
-    return res.matches, res.note, res.facets
+    return res.matches, res.note, res.facets, _discovery_error(res)
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -189,10 +234,13 @@ def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
     uncached: set[str] = set()
-    matches, note, chips = _found(query, uncached)
+    matches, note, chips, discovery_error = _found(query, uncached)
     if note:
         response.headers["X-Search-Note"] = quote(note)
+    if discovery_error:
+        response.headers["X-Discovery-Error"] = discovery_error
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
+    response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
     if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
         response.headers["X-Excluded-Lot"] = str(own)
     history = [m for m in matches if m.origin == "history"]
@@ -250,12 +298,27 @@ def api_okpd2(codes: str = "") -> dict[str, str]:
     return {c: okpd2_label(c) for c in items}
 
 
-@app.get("/api/counterparty/{inn}", response_model=Counterparty)
+_LIMITED: dict[int | str, dict[str, Any]] = {
+    401: {"description": "нужен ключ API (X-API-Key), если на сервере задан API_KEY"},
+    429: {"description": "лимит очереди или живых обогащений; повторите через Retry-After секунд"},
+}
+
+
+def _answers_from_cache(inn: str) -> bool:
+    """True when enrich() needs no network: offline mode, or a fresh pb card in the cache (its first branch)."""
+    return os.environ.get("ENRICH_OFFLINE") == "1" or SourceCache().get(card_url(inn)) is not None
+
+
+@app.get("/api/counterparty/{inn}", response_model=Counterparty, dependencies=[Depends(guard.require_api_key)],
+         responses=_LIMITED)
 def api_counterparty(inn: str) -> Counterparty:
+    """The card by INN: from the cache at once, otherwise the registries are asked inside the request, so at most
+    COUNTERPARTY_LIVE_MAX of those at once (F-10)."""
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
-        cp = enrich_mod.enrich(inn)
+        with nullcontext() if _answers_from_cache(inn) else guard.live_slots.take():
+            cp = enrich_mod.enrich(inn)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
     except (CaptchaRequired, TimeoutError, httpx.HTTPError) as e:
@@ -266,11 +329,17 @@ def api_counterparty(inn: str) -> Counterparty:
     return strip_unverified(cp, SourceCache().page_text)
 
 
-@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202)
+@app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202,
+          dependencies=[Depends(guard.require_api_key)], responses=_LIMITED)
 def api_enqueue(inn: str) -> EnqueueResult:
+    """Queue the enrichment of an INN for the worker; a new INN over ENRICH_QUEUE_MAX waiting tasks is a 429 (F-10)."""
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
-    return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn))
+    try:
+        return EnqueueResult(task_id=enqueue(_queue(), "enrich", inn, max_pending=guard.queue_max()))
+    except QueueFull as e:
+        log.warning("enrich: очередь полна, %s не поставлен: %s", inn, e)
+        raise guard.busy("очередь обогащения заполнена, повторите позже") from e
 
 
 @app.post("/api/export")
