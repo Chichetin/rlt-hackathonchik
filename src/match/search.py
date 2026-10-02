@@ -441,6 +441,7 @@ def _component(name: str, value: float, weights: dict[str, float], explanation: 
 # exact text match, so its participants would top the list on the answer itself (#249, review #145 F-13).
 _OWN_LOT = re.compile(r"lot-(\d+)")
 _excluded: ContextVar[int | None] = ContextVar("excluded_lot", default=None)
+_predicted: ContextVar[str | None] = ContextVar("predicted_code", default=None)
 # What the last search() in this context found, in absolute terms (not normalized by the best candidate):
 # the raw material of src/match/confidence.py (#281).
 _fit_signals: ContextVar[dict | None] = ContextVar("fit_signals", default=None)
@@ -453,6 +454,13 @@ def fit_signals() -> dict | None:
 def own_lot(query: Query) -> int | None:
     m = _OWN_LOT.fullmatch(query.query_id)
     return int(m.group(1)) if m else None
+
+
+def predicted_code() -> str | None:
+    """The OKPD2 code the last search() in this context predicted for a query without a code (D-045, P-02);
+    None — the query had a code, or nothing matched to predict it from. The block «Новые» searches by its
+    class (src/match/pipeline.py passes it to discover(), #394): one classifier for both blocks."""
+    return _predicted.get()
 
 
 def excluded_lot() -> int | None:
@@ -476,6 +484,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     """
     fallback.reset_note()
     _excluded.set(None)
+    _predicted.set(None)
     _fit_signals.set(None)
     own = own_lot(query)
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
@@ -517,6 +526,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if not codes:
         guess = _predict_okpd2(store, idx, hits, lots, words)
         codes, predicted = ([guess], True) if guess else ([], False)
+        _predicted.set(guess)
     if codes:
         cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg, own)  # #195
         _class_history(store, cands, codes, as_of)
