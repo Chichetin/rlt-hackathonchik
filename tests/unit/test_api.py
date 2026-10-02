@@ -16,7 +16,7 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, ScoreCompon
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'q.sqlite').as_posix()}")
     monkeypatch.setattr(app_mod, "_engine", None)
-    # lots: CSV path unless a test sets parquet
+    # no ingest unless a test builds one (_lots): /api/lot reads the store only (#293)
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "no-processed"))
     return TestClient(app_mod.app)
 
@@ -215,11 +215,34 @@ def test_search_strips_unverified_facts(client, monkeypatch, tmp_path):
     assert all(m["counterparty"]["inn"] == "7801000012" for m in rows)
 
 
-FIXTURE_RAW = "tests/fixtures/raw"
+def _lots(tmp_path, monkeypatch, notices: list[dict], items: list[dict]) -> None:
+    """An ingest directory with notices and items only: /api/lot reads it through the store (#293)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    n = pa.schema([("lot_id", pa.int64()), ("reqnum", pa.string()), ("procedure_name", pa.string()),
+                   ("subject", pa.string()), ("start_price", pa.float64()), ("customer_inn", pa.string()),
+                   ("channel", pa.string())])
+    i = pa.schema([("lot_id", pa.int64()), ("product_name", pa.string()), ("okpd2_code", pa.string())])
+    pq.write_table(pa.Table.from_pylist([{f: r.get(f) for f in n.names} for r in notices], schema=n),
+                   tmp_path / "notices.parquet")
+    pq.write_table(pa.Table.from_pylist(items, schema=i), tmp_path / "items.parquet")
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path))
 
 
-def test_lot_by_lot_id_and_reqnum(client, monkeypatch):
-    monkeypatch.setenv("DATA_RAW_DIR", FIXTURE_RAW)
+DEMO_LOTS = [
+    {"lot_id": 9000001, "procedure_name": "Бумага", "subject": "Бумага офисная А4, 80 г/м², 500 листов",
+     "start_price": 45000.0, "customer_inn": "7804105239", "channel": "ЭМ"},
+    {"lot_id": 9000002, "reqnum": "0372200260025000001", "procedure_name": "Услуги",
+     "subject": "Оказание услуг связи", "start_price": 120000.0, "customer_inn": "7804105239", "channel": "АИС ГЗ"},
+]
+DEMO_ITEMS = [{"lot_id": 9000001, "product_name": "Бумага для офисной техники", "okpd2_code": "17.12.14.119"},
+              {"lot_id": 9000001, "product_name": "Бумага", "okpd2_code": "17.12.14.110"},
+              {"lot_id": 9000002, "product_name": "Услуги связи", "okpd2_code": "61.10.11.110"}]
+
+
+def test_lot_by_lot_id_and_reqnum(client, monkeypatch, tmp_path):
+    _lots(tmp_path, monkeypatch, DEMO_LOTS, DEMO_ITEMS)
     q = client.get("/api/lot/9000001").json()
     assert q["query_id"] == "lot-9000001" and q["text"].startswith("Бумага офисная А4")
     assert q["budget"] == 45000.0 and q["customer_inn"] == "7804105239" and q["channel"] == "ЭМ"
@@ -228,31 +251,30 @@ def test_lot_by_lot_id_and_reqnum(client, monkeypatch):
     assert by_req["query_id"] == "lot-9000002" and by_req["channel"] == "АИС ГЗ"
 
 
-def test_lot_not_found_404(client, monkeypatch):
-    monkeypatch.setenv("DATA_RAW_DIR", FIXTURE_RAW)
+def test_lot_not_found_404(client, monkeypatch, tmp_path):
+    _lots(tmp_path, monkeypatch, DEMO_LOTS, DEMO_ITEMS)
     assert client.get("/api/lot/1").status_code == 404
 
 
-def test_lot_without_data_503(client, monkeypatch, tmp_path):
-    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path / "nope"))
+def test_lot_without_data_503(client):
+    """No ingest built (the client's DATA_PROCESSED_DIR is empty): 503 with the command, not a raw-CSV guess."""
     r = client.get("/api/lot/9000001")
-    assert r.status_code == 503 and "данные" in r.json()["detail"]
+    assert r.status_code == 503 and "данные" in r.json()["detail"] and "src.ingest.build" in r.json()["detail"]
 
 
 def test_lot_rejects_non_digits(client):
     assert client.get("/api/lot/abc").status_code == 422
 
 
-def test_lot_broken_csv_503_not_crash(client, monkeypatch, tmp_path):
-    (tmp_path / "Извещения_bad.csv").write_text("a;b\n1;2\n", encoding="utf-8")
-    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
-    assert client.get("/api/lot/1").status_code == 503
+def test_lot_broken_parquet_503_not_crash(client, monkeypatch, tmp_path):
+    _lots(tmp_path, monkeypatch, DEMO_LOTS, DEMO_ITEMS)
+    (tmp_path / "notices.parquet").write_bytes(b"not a parquet file")
+    assert client.get("/api/lot/9000001").status_code == 503
 
 
-def test_lot_unparsable_price_gives_no_budget(client, monkeypatch, tmp_path):
-    (tmp_path / "Извещения_x.csv").write_text(
-        "lot_id;reqnum;subject;start_price;customer_inn;is_eshop_or_aisgz\n5;;Товар;n/a;;ЭМ\n", encoding="utf-8")
-    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
+def test_lot_without_price_gives_no_budget(client, monkeypatch, tmp_path):
+    # ingest TRY_CASTs start_price: «n/a» in the CSV is NULL here (src/ingest/build.py)
+    _lots(tmp_path, monkeypatch, [{"lot_id": 5, "subject": "Товар", "channel": "ЭМ"}], [])
     q = client.get("/api/lot/5").json()
     assert q["budget"] is None and q["customer_inn"] is None and q["okpd2"] == []
 
@@ -262,18 +284,15 @@ def test_lot_unparsable_price_gives_no_budget(client, monkeypatch, tmp_path):
     ("Закупка, осуществляемая в соответствии с частью 12 статьи 93", "Картридж; Тонер"),  # #113: both templates
 ])
 def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path, procedure, text):
-    (tmp_path / "Извещения_t.csv").write_text(
-        "lot_id;reqnum;procedure_name;subject;start_price;customer_inn;is_eshop_or_aisgz\n"
-        f"7;;{procedure};Закупка у единственного поставщика частью 12 статьи 93;1000;;АИС ГЗ\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "ТРУ_t.csv").write_text("lot_id;product_name;okpd2_code\n7;Тонер;20.59\n7;Картридж;26.20\n",
-                                        encoding="utf-8")
-    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path))
+    _lots(tmp_path, monkeypatch,
+          [{"lot_id": 7, "procedure_name": procedure, "start_price": 1000.0, "channel": "АИС ГЗ",
+            "subject": "Закупка у единственного поставщика частью 12 статьи 93"}],
+          [{"lot_id": 7, "product_name": "Тонер", "okpd2_code": "20.59"},
+           {"lot_id": 7, "product_name": "Картридж", "okpd2_code": "26.20"}])
     assert client.get("/api/lot/7").json()["text"] == text
 
 
-def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
+def test_lot_reads_ingest_parquet(client, monkeypatch, tmp_path):
     import duckdb
     con = duckdb.connect()
     con.execute("COPY (SELECT 77::BIGINT lot_id, '0372200260024000124' reqnum, 'Картриджи' procedure_name, "
@@ -282,7 +301,6 @@ def test_lot_reads_ingest_parquet_first(client, monkeypatch, tmp_path):
     con.execute("COPY (SELECT 77::BIGINT lot_id, 'x' product_name, '26.20.40.190' okpd2_code) "
                 f"TO '{(tmp_path / 'items.parquet').as_posix()}' (FORMAT parquet)")
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path))
-    monkeypatch.setenv("DATA_RAW_DIR", str(tmp_path / "nope"))
     q = client.get("/api/lot/0372200260024000124").json()
     assert q["query_id"] == "lot-77" and q["okpd2"] == ["26.20.40.190"]
     assert q["channel"] == "ЭМ" and q["budget"] == 500.0

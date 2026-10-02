@@ -14,7 +14,6 @@ search() falls back to BM25 with a warning in the API and fails in eval (search.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 
@@ -23,6 +22,7 @@ import pyarrow.parquet as pq
 from src.db.embed import MODEL, Encoder, model_encoder, nearest, spec
 from src.db.norm import normalize
 from src.match.index import LotIndex
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 RRF_K = 60
@@ -72,7 +72,7 @@ def _conn(model: str | None = None):
         return _state["conn"]
     if time.monotonic() < _state.get("down_until", 0.0):
         raise VectorsUnavailable(_state["down_why"])
-    url = os.environ.get("DATABASE_URL", "")
+    url = get_settings().database_url
     if not url.startswith("postgres"):
         raise _down("DATABASE_URL не указывает на Postgres")
     import psycopg

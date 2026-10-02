@@ -1,0 +1,41 @@
+{
+  "model": "e3/user-base-okpd2",
+  "base": "deepvk/USER-base",
+  "pairs": "/mnt/storage/rlt236/e3/pairs/okpd2-100k.parquet",
+  "pairs_manifest": {
+    "kind": "okpd2",
+    "as_of": "2025-04-01",
+    "date_field": "notices.publish_date",
+    "n_pairs": 99985,
+    "batch_size": 256,
+    "batches": 391,
+    "seed": 20261002,
+    "rows": 1550065,
+    "groups_total": 7628,
+    "groups": 6140,
+    "names": 689457,
+    "max_publish_date": "2025-03-31",
+    "lots_used": 370675,
+    "eval_lots_checked": 51599,
+    "eval_lots_overlap": 0,
+    "seconds": 5.6,
+    "created": "2026-10-02T01:57:59+00:00"
+  },
+  "loss": "CachedMultipleNegativesRankingLoss (= MNRL, scale 20, cos; mini-batch 64), in-batch negatives",
+  "epochs": 1,
+  "steps": 391,
+  "batch_size_max": 256,
+  "lr": 2e-05,
+  "warmup": 0.1,
+  "weight_decay": 0.01,
+  "precision": "fp32 + TF32",
+  "prefix": [
+    "query: ",
+    "passage: "
+  ],
+  "loss_first50": 2.9504,
+  "loss_last50": 2.3178,
+  "train_seconds": 633.9,
+  "gpu": "NVIDIA GeForce RTX 4080",
+  "created": "2026-10-02T02:11:37+00:00"
+}

@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 # Baselines (T-08): experiment id -> method and its parameters; configs/search.yaml stays the product method.
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
+SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 # Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
 SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
@@ -344,6 +345,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.baseline and args.config_of:
         print("--baseline и --config-of вместе не задаются", file=sys.stderr)
         return 2
+    if args.sample is not None and args.sample <= 0:
+        print("--sample: нужно число кейсов > 0", file=sys.stderr)
+        return 2
     try:
         cfg = load_method_config(args.exp, args.baseline, args.config_of)
     except ValueError as e:
@@ -371,11 +375,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.corrupt:  # the text only, deterministic per query: every experiment sees the same spoiled queries
         cases = [c.model_copy(update={"query": corrupt.spoil(c.query, args.corrupt)}) for c in cases]
         part = f"{part}-{args.corrupt}"
-    rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
+    pool = cfg.get("method") == "pool_recall"  # recall of the «Новые» pool, its own metrics (#187)
+    if pool:
+        from src.eval import pool_recall
+
+        body = pool_recall.evaluate(cases, cfg, date.fromisoformat(str(split_config()["cutoff"])))
+    else:
+        body = evaluate(cases, cfg)
+    rec = result_record(args.exp, part, cfg, body)
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(dump_record(rec), encoding="utf-8")
-    print_table(rec)
+    if pool:
+        pool_recall.print_table(rec)
+    else:
+        print_table(rec)
     print(f"-> {out.relative_to(ROOT)}")
     return 0
 
