@@ -115,7 +115,7 @@ def build_model(model: str, device: str | None = None):
 def load_model(model: str, device: str | None = None):
     m = build_model(model, device)
     if m.device.type == "cuda" and model in BF16:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         m.to(torch.bfloat16)
     elif m.device.type == "cuda":
@@ -161,7 +161,7 @@ class Corpus:
     """Vectors of the names that are documents of the cutoff index, on GPU; name row -> doc_ids."""
 
     def __init__(self, model: str, idx, gpu_dir: Path = GPU_DIR):
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         m = norm_map(idx)
         norms: list[str] = []
@@ -186,7 +186,7 @@ class Corpus:
 
         A document with several names keeps the cosine of its best name.
         """
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         out: list[list[tuple[int, float]]] = []
         qs = torch.from_numpy(np.asarray(q, dtype=np.float16)).cuda()
@@ -350,7 +350,7 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
     save(bm25_key)
     rows: dict[str, tuple[list[dict], list[dict]]] = {}  # model -> (vector, hybrid) rows, for delta_vs_base
     for model in models:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         corpus = Corpus(model, idx)
         m = load_model(model)
@@ -413,7 +413,7 @@ def _mean(rows: list[dict], key: str) -> float:
 
 def convex_bench(models: list[str], variants: list[str], n: int, seed: int, tune_n: int, out_dir: Path,
                  tune_seed: int = TUNE_SEED) -> None:
-    import torch
+    import torch  # pyright: ignore[reportMissingImports]
 
     cfg = split_config()
     as_of = date.fromisoformat(str(cfg["cutoff"]))

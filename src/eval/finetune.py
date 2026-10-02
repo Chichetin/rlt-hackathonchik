@@ -127,7 +127,7 @@ def build_pairs(processed: Path, kind: str, n_pairs: int, batch_size: int, seed:
 def train(base: str, pairs: Path, model_id: str, lr: float = 2e-5, warmup: float = 0.1, seed: int = 0,
           log_every: int = 50) -> dict:
     """One epoch of MultipleNegativesRankingLoss (GradCache variant) over the pre-built batches, order kept."""
-    import torch
+    import torch  # pyright: ignore[reportMissingImports]
     from sentence_transformers.sentence_transformer.losses import (  # pyright: ignore[reportMissingImports]
         CachedMultipleNegativesRankingLoss,
     )

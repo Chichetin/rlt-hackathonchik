@@ -17,9 +17,8 @@ from fastapi.testclient import TestClient
 from src.api import app as app_mod
 from src.contracts import Query, inn_is_valid
 from src.enrich import discover as D
-from src.enrich import role
 from src.enrich.evidence import check_counterparty
-from src.sources import pb_nalog, rmsp
+from src.sources import pb_nalog, rmsp, role
 from src.sources.cache import SourceCache
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "rmsp"
@@ -37,7 +36,7 @@ IP_ROW = {"inn": "500100732259", "ogrn": "318169000190351", "nptype": "IP", "cat
 @pytest.fixture(autouse=True)
 def _fast_and_unblocked(monkeypatch):
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", 0.0)
-    monkeypatch.setattr(rmsp, "_blocked_until", 0.0)
+    rmsp.PACER.reset()
 
 
 @pytest.fixture
@@ -393,7 +392,7 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
                                                                      expected_calls):
     budget = 0.6
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
-    monkeypatch.setattr(rmsp, "_last_request", 0.0)
+    rmsp.PACER.reset()
     monkeypatch.setattr(rmsp, "TIMEOUT_S", 3.0)
     calls: list = []
     res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),

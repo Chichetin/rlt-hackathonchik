@@ -69,6 +69,8 @@ def test_experiment_overrides_are_merged_over_search_config(tmp_path, monkeypatc
     with pytest.raises(ValueError, match="X-2"):
         R.load_method_config("X-2-real", config_of="X-2")
     assert R.main(["--exp", "X-2-real", "--config-of", "X-2"]) == 2
+    assert R.main(["--exp", "X-1", "--sample", "-5"]) == 2  # review of #246: no silent full run on a bad --sample
+    assert R.main(["--exp", "X-1", "--sample", "0"]) == 2
 
 
 def test_eval_passes_experiment_config_to_search(monkeypatch, tmp_path):
@@ -98,7 +100,8 @@ def test_repository_experiments_are_valid_configs():
 @pytest.mark.parametrize(("exp", "result"), [
     ("v1", "E-002"), ("H-15a-03", "H-15a-03"), ("H-15a-06", "H-15a-06"), ("H-15b", "H-15b"), ("H-15c", "H-15c"),
     ("H-15d-tie", "H-15d-tie"), ("H-15e", "H-15e"), ("H-15f", "H-15f"), ("H-15g", "H-15g"), ("H-15f-geo", "H-15f-geo"),
-    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"),
+    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"), ("v2", "v2"), ("R-198-gbm", "R-198-gbm"),
+    ("S-282-spell", "S-282-on-dev"), ("S-282-nospell", "S-282-off-dev"),
 ])
 def test_experiment_entries_reproduce_recorded_configs(exp, result):
     """The product default moved to H-15f (#174): every entry of configs/experiments.yaml still gives the
@@ -110,6 +113,9 @@ def test_experiment_entries_reproduce_recorded_configs(exp, result):
     from src.match.signals import signal_shares
     assert signal_shares(cfg) == signal_shares(rec)
     assert (cfg["retriever"], cfg["k"]) == (rec["retriever"], rec["k"])
+    from src.match import ranker
+    assert ranker.spec(cfg) == ranker.spec(rec)  # the default has the ranker on (#198): older entries turn it off
+    assert cfg.get("spell", False) == rec.get("spell", False)  # the speller is on (#282): older entries turn it off
 
 
 def test_saturation_summary_counts_distinct_scores():
@@ -124,3 +130,11 @@ def test_saturation_summary_counts_distinct_scores():
     near = [[0.9996, 0.9973, 0.9849, 0.9835, 0.9628]]
     assert summarize(near)["distinct_scores_mean"] == 5.0 and summarize(near)["share_first_at_max"] == 1.0
     assert summarize(near, decimals=2)["distinct_scores_mean"] == 3.0  # 1.00, 1.00, 0.98, 0.98, 0.96
+
+
+def test_drop_okpd2_keeps_text_and_everything_else():
+    c = case("бумага офисная", ["7801000012"])
+    c = c.model_copy(update={"query": c.query.model_copy(update={"okpd2": ["17.12.14.110", "17.12"]})})
+    (got,) = R.drop_okpd2([c])
+    assert got.query.okpd2 == [] and got.query.text == c.query.text and got.relevant_inns == c.relevant_inns
+    assert c.query.okpd2 == ["17.12.14.110", "17.12"]  # the input is not mutated
