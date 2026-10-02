@@ -37,6 +37,7 @@ import {
   type SearchResponse,
   type Counterparty,
 } from "./api";
+import { deepLinkSearch, parseDeepLink, type DeepLink } from "./deeplink";
 import { reviewLinks } from "./reviews";
 import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
@@ -521,6 +522,12 @@ export function App() {
         ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
         : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
       if (window.location.pathname === "/search") go("/results");
+      // the address bar keeps a link that repeats this search (#395): a copied URL opens the same query
+      if (window.location.pathname === "/results") {
+        const loaded = ready ? ready.extra.lot != null : lot != null;
+        const link = deepLinkSearch(ready ? ready.lotId : lotId, loaded, qText);
+        window.history.replaceState(null, "", `/results${link}${window.location.hash}`);
+      }
     } catch (e) {
       if (seq !== runSeq.current) return;
       setError(String(e));
@@ -546,9 +553,35 @@ export function App() {
     }
   }
 
+  // a deep link /search?lot=N or ?q=text (#395) — from a button in a procurement card of АИС ГЗ:
+  // the lot is loaded by the same /api/lot path as by hand, the search starts at once
+  const deepAtMount = useRef<DeepLink>(path === "/search" || path === "/results" ? parseDeepLink(window.location.search) : {});
+  const deepDone = useRef(false);
+  useEffect(() => {
+    const d = deepAtMount.current;
+    if ((!d.lot && !d.q) || deepDone.current) return;
+    deepDone.current = true;
+    setFilters(NO_FILTERS); // a shared link is a plain search, not the filters left in this browser
+    void (async () => {
+      if (d.lot) {
+        setLotId(d.lot);
+        const ready = await loadLot(d.lot);
+        if (ready) await run(NO_FILTERS, ready);
+        else go("/search"); // not found: the form with the reason
+      } else if (d.q) {
+        resetLot();
+        setBudget("");
+        setCustomerInn("");
+        setText(d.q);
+        await run(NO_FILTERS, { text: d.q, lotId: "", budget: "", customerInn: "", extra: { budget: "", customer_inn: "", lot: null, query_id: undefined, customer_region: customerRegion } });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // a reload of /results repeats the saved query
   useEffect(() => {
-    if (path === "/results" && !res && state === "idle" && text.trim()) void run();
+    if (path === "/results" && !deepAtMount.current.lot && !deepAtMount.current.q && !res && state === "idle" && text.trim()) void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 

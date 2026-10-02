@@ -218,3 +218,27 @@ test("мобильная выдача и карточка без горизон�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: "/tmp/rlt-ui-mobile-results.png", fullPage: true });
 });
+
+// #395: ссылка из карточки закупки АИС ГЗ — /search?lot=N открывает подбор по лоту без ручных шагов
+test("deep link: /search?lot=N загружает лот и сразу ищет, адрес остаётся ссылкой", async ({ page }) => {
+  await page.goto(`/search?lot=${DEMO_LOT}`);
+  const history = page.getByRole("region", { name: "С опытом госзакупок" });
+  await expect(history.locator(".item").first()).toBeVisible();
+  await expect(page.locator(".own-lot-note")).toHaveText(new RegExp(`^Закупка ${DEMO_LOT} есть в данных`));
+  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  // скопированная ссылка воспроизводит поиск в новой вкладке
+  const copy = await page.context().newPage();
+  await copy.goto(page.url());
+  await expect(copy.getByRole("region", { name: "С опытом госзакупок" }).locator(".item").first()).toBeVisible();
+  await copy.close();
+});
+
+test("deep link: /search?q=текст ищет по тексту; неизвестный лот — форма с причиной", async ({ page }) => {
+  await page.goto("/search?q=" + encodeURIComponent("Бумага офисная А4"));
+  await expect(page.getByRole("region", { name: "С опытом госзакупок" }).locator(".item").first()).toBeVisible();
+  await expect(page).toHaveURL(/\/results\?q=/);
+
+  await page.goto("/search?lot=999999999");
+  await expect(page).toHaveURL(/\/search/);
+  await expect(page.getByText("Закупка с таким номером не найдена в данных.")).toBeVisible();
+});
