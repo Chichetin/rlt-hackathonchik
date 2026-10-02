@@ -133,6 +133,12 @@ class CounterpartyMatch(_Model):
     score: float
     components: list[ScoreComponent]
     origin: Origin  # history — in organizers' data; discovered — found in open sources
+    # Why the ranker put this match above the next visible one (#278, src/match/ranker.py reason()): «выше
+    # следующего: <feature> — <a> против <b>» — among the features where this one is better by the customer's
+    # reading and the values differ as shown, the largest SHAP difference if it carries ≥ 20 % of the lift;
+    # otherwise «по совокупности признаков модели»; equal model scores — «оценка модели равна; …» / «… порядок
+    # условный». score stays the formula of the components; None for the last one and without a ranker.
+    rank_reason: str | None = None
 
 
 class SearchResponse(_Model):

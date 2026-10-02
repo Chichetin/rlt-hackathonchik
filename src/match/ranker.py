@@ -9,8 +9,9 @@ is v2 (D-077) byte for byte. One feature function (`feature_row`) serves trainin
   lgbm   — LightGBM LambdaMART; contribution of a feature = pred_contrib (SHAP values of the trees).
 
 The card says which features lifted the supplier the most and which pulled it down (product_fit explanation);
-the contract and the six components are unchanged — they keep their values and weights, the order is the model's,
-the score stays on the formula's scale (rerank).
+the six components are unchanged — they keep their values and weights, the order is the model's. The score stays
+the formula of the components (#278, M1hairu's confirmation №3): the relevance the customer reads, the same scale
+as «Новые» and filters.min_score; rank_reason says why the model put a supplier above its visible neighbour.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import json
 import logging
 import math
 import threading
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -279,26 +281,28 @@ _SHARE = {"bm25_rel", "win_rate", "spb_share", "channel_share", "top_class_share
 _FLAG = {"region_kpp", "region_inn", "class_match", "is_ip", "channel_em", "okpd_predicted"}
 
 
+def _value(name: str, x: float) -> str:
+    """The value of a feature as a person reads it — 7 (lots), 240 дн., 85%, да / нет."""
+    if math.isnan(x):
+        return "нет данных"
+    if name in _COUNT:
+        return str(round(math.expm1(x)))
+    if name in ("days_last", "days_first", "days_similar"):
+        return f"{round(math.expm1(x))} дн."
+    if name in _SHARE:
+        return f"{x:.0%}"
+    if name in _FLAG:
+        return "да" if x >= 0.5 else "нет"
+    if name == "price_gap":
+        return f"в {math.exp(x):.1f} раза"
+    if name == "okpd_level":
+        return str(round(x))
+    return f"{x:.2f}"
+
+
 def value_text(name: str, x: float) -> str:
     """'<feature>: <value as a person reads it>' — 7 lots, 240 days, 85%, да / нет."""
-    label = FEATURES[name]
-    if math.isnan(x):
-        return f"{label}: нет данных"
-    if name in _COUNT:
-        v = str(round(math.expm1(x)))
-    elif name in ("days_last", "days_first", "days_similar"):
-        v = f"{round(math.expm1(x))} дн."
-    elif name in _SHARE:
-        v = f"{x:.0%}"
-    elif name in _FLAG:
-        v = "да" if x >= 0.5 else "нет"
-    elif name == "price_gap":
-        v = f"в {math.exp(x):.1f} раза"
-    elif name == "okpd_level":
-        v = str(round(x))
-    else:
-        v = f"{x:.2f}"
-    return f"{label}: {v}"
+    return f"{FEATURES[name]}: {_value(name, x)}"
 
 
 # The UI shows the text after it as the reason of the position (src/ui/src/ranker.ts).
@@ -333,27 +337,121 @@ def _check_profile(x: np.ndarray) -> None:
                     "src.ingest.build", len(PROFILE_IDX))
 
 
-def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
-    """Top-k in the model's order; the product_fit explanation gets the model's reason.
+@dataclass
+class Ranked:
+    """What the model knew about one ordered supplier: rank_reason is built from it after the filters."""
 
-    The score stays on the scale of the formula (Σ weight · component, D-077) — the relevance labels, the «Новые»
-    block and filters.min_score read it — capped by the score of the supplier above: it never contradicts the
-    order. The top one keeps exactly its formula score; a lower one shows min(its formula, the one above).
-    The model's raw output is not a relevance scale (LambdaMART ranks within a query)."""
+    raw: float
+    score: float  # the formula of the components (the relevance shown)
+    row: np.ndarray
+    contrib: np.ndarray
+
+
+# key -> Ranked of the last rerank() in this context (search() clears it): pipeline.pick() explains the order
+# of what is left after the hard and user filters, not of the list before them.
+_ranked: ContextVar[dict[str, Ranked] | None] = ContextVar("ranked", default=None)
+SAME = 1e-9
+
+
+def forget() -> None:
+    _ranked.set(None)
+
+
+def _key(m: CounterpartyMatch) -> str:
+    """The INN; without a valid one — the name, which then carries the raw INN and enrichment keeps it."""
+    return m.counterparty.inn or m.counterparty.name
+
+
+def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
+    """Top-k in the model's order; the product_fit explanation gets the model's reason, rank_reason — why above
+    the next one; equal model scores — by the formula score.
+
+    The score is exactly the formula of the components (Σ weight · component, D-077), uncapped (#278): a cap by
+    the supplier above turned five of ten «1.00» of the demo query into «0.96» — numbers that are not the card's
+    sum and more equal numbers. The model's raw output is not a relevance scale (LambdaMART ranks within a
+    query). Where the number does not explain the order, rank_reason does."""
+    forget()
     if not matches:
         return []
     x = np.asarray(rows, dtype=float)
     _check_profile(x)
     raw = model.raw(x)
-    order = sorted(range(len(matches)), key=lambda i: (-raw[i], matches[i].counterparty.inn or "~"))[:k]
+    order = sorted(range(len(matches)),
+                   key=lambda i: (-raw[i], -matches[i].score, matches[i].counterparty.inn or "~"))[:k]
     contrib = model.contrib(x[order])
-    out = []
-    cap = math.inf
+    out, seen = [], {}
     for j, i in enumerate(order):
         m = matches[i]
-        cap = min(cap, m.score)
         line = explain(model, contrib[j], x[i])
         comps = [c.model_copy(update={"explanation": f"{c.explanation}; {line}"}) if c.name == "product_fit" else c
                  for c in m.components]
-        out.append(m.model_copy(update={"score": round(cap, 4), "components": comps}))
+        out.append(m.model_copy(update={"components": comps}))
+        seen[_key(m)] = Ranked(float(raw[i]), m.score, x[i], contrib[j])
+    _ranked.set(seen)
+    return reasons(out)
+
+
+# How a customer reads a feature: +1 — more is better, −1 — less is better. «Выше следующего» names only a
+# feature where the upper supplier is better by this reading (review of #309): «стаж в данных — 313 дн. против
+# 722 дн.» under «Выше следующего» reads as «less tenure is a plus». Features without a reading (breadth of
+# assortment, share of one customer, properties of the query) are never named there; the card keeps the
+# model's own «за / против» with all of them.
+# «geo» is left out: its weight is 0 (D-077) and the card shows «География +0.00»; region_kpp says the same.
+BETTER: dict[str, int] = {
+    "fit": 1, "exp": 1, "act": 1, "bm25": 1, "bm25_rel": 1, "n_lots": 1, "n_wins": 1, "okpd_level": 1,
+    "class_lots": 1, "class_wins": 1, "cust_lots": 1, "days_last": -1, "days_first": 1, "region_kpp": 1,
+    "region_inn": 1, "win_rate": 1, "lots": 1, "wins": 1, "customers": 1, "spb_share": 1, "price_gap": -1,
+    "active_months": 1, "lots_last_90d": 1, "em_offers": 1, "em_wins": 1, "aisgz_contracts": 1, "smp_contracts": 1,
+    "class_match": 1, "channel_share": 1, "days_similar": -1,
+}
+
+
+# A reason named as THE reason carries at least MIN_SHARE of what lifted `a` above `b` (Σ positive differences of
+# the contributions): «Выше следующего: X» reads as the main reason (second review of #309). A smaller one, but
+# not below MIN_MENTION, is named as one of many: «по совокупности признаков модели, в том числе: X» — the top
+# row of the demo query keeps a readable reason («доля побед — 77% против 42%») without claiming it is the main one.
+MIN_SHARE = 0.2
+MIN_MENTION = 0.05
+
+
+def reason(a: Ranked, b: Ranked) -> str:
+    """Why the model put `a` right above `b` — the text after the UI label «Выше следующего»: among the features
+    where `a` is better by the customer's reading (BETTER) and the two values differ as shown, the one whose
+    contribution differs the most in a's favour (exact for trees and w·z alike) — as the reason if it carries
+    MIN_SHARE of the lift, as «в том числе» if MIN_MENTION; none — «по совокупности признаков модели»."""
+    if a.raw - b.raw <= SAME:
+        if a.score > b.score:
+            return f"оценка модели равна; выше релевантность — {a.score:.4f} против {b.score:.4f}"
+        if a.score == b.score:
+            return "оценка модели и релевантность равны — порядок условный (по ИНН)"
+        return "оценка модели почти равна — порядок условный"
+    diff = a.contrib - b.contrib
+    lift = float(diff[diff > 0].sum())
+    for f in np.argsort(-diff, kind="stable"):
+        if diff[f] <= 0 or diff[f] < MIN_MENTION * lift:
+            break
+        name = NAMES[f]
+        va, vb = float(a.row[f]), float(b.row[f])
+        if math.isnan(va) or math.isnan(vb) or name not in BETTER:
+            continue  # a missing value or a feature without a reading: not a reason a customer can check
+        shown_a, shown_b = _value(name, va), _value(name, vb)
+        if shown_a == shown_b or (va - vb) * BETTER[name] <= 0:
+            continue  # «1.00 против 1.00» (an interaction, or a difference below the shown precision) or a worse value
+        what = f"{FEATURES[name]} — {shown_a} против {shown_b}"
+        if diff[f] >= MIN_SHARE * lift:
+            return f"выше следующего: {what}"
+        return f"по совокупности признаков модели, в том числе: {what}"
+    return "по совокупности признаков модели"
+
+
+def reasons(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """rank_reason of each supplier the model ordered, against the next such supplier of THIS list — after the
+    filters it is the neighbour the customer sees. Others («Новые», v2 without a model) pass unchanged."""
+    seen = _ranked.get() or {}
+    at = [j for j, m in enumerate(matches) if m.origin == "history" and _key(m) in seen]
+    out = list(matches)
+    for n, a in enumerate(at):
+        b = at[n + 1] if n + 1 < len(at) else None
+        why = None if b is None else reason(seen[_key(matches[a])], seen[_key(matches[b])])
+        out[a] = matches[a].model_copy(update={"rank_reason": why})
     return out
