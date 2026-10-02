@@ -13,6 +13,7 @@ Rules (CLAUDE.md, «Проверки кодом»):
    of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/sources/role.py
    (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; or by a `product` Evidence
    whose value is the WHOLE line `gisp.<inn>.product: <name>` of a registry record of this INN (ГИСП, #74);
+   `in_rnp` (True or False) by at least one passing `field="rnp"` Evidence (D-154, #111) — an unbacked flag is None;
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
 
@@ -186,6 +187,14 @@ def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
     return False
 
 
+def _rnp_backed(cp: Counterparty, page_text: PageText) -> bool:
+    """True/False `in_rnp` needs at least one passing `field="rnp"` Evidence (D-154, #111): an
+    unbacked flag (forged, or its page evicted from the cache) is stripped to None («не проверено»),
+    never shown as a guessed «да»/«нет»."""
+    page_text = cached_pages(page_text)
+    return any(e.field == "rnp" and not check_evidence(e, page_text) for e in cp.evidence)
+
+
 def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
     page_text = cached_pages(page_text)
     errors: list[str] = []
@@ -199,6 +208,8 @@ def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
     if cp.kind is not None and not _kind_backed(cp, page_text):
         errors.append(f"роль {cp.kind} без подтверждённого основания: ни основного ОКВЭД с этой ролью по правилу, "
                       "ни продукции в реестре Минпромторга")
+    if cp.in_rnp is not None and not _rnp_backed(cp, page_text):
+        errors.append(f"in_rnp={cp.in_rnp} без подтверждённого Evidence field='rnp'")
     return errors
 
 
@@ -209,4 +220,6 @@ def strip_unverified(cp: Counterparty, page_text: PageText) -> Counterparty:
     contacts = {k: v for k, v in cp.contacts.items() if _backed(cp, k, v, page_text)}
     inn = cp.inn if cp.inn is None or _backed(cp, "inn", cp.inn, page_text) else None
     kind = cp.kind if cp.kind is None or _kind_backed(cp, page_text) else None
-    return cp.model_copy(update={"evidence": good, "contacts": contacts, "inn": inn, "kind": kind})
+    in_rnp = cp.in_rnp if cp.in_rnp is None or _rnp_backed(cp, page_text) else None
+    return cp.model_copy(update={"evidence": good, "contacts": contacts, "inn": inn, "kind": kind,
+                                 "in_rnp": in_rnp})
