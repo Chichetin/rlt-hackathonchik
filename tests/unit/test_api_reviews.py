@@ -22,7 +22,8 @@ PHONE = "+7(812)561-91-10"
 
 
 def registry_company(*, backed: bool = True, name: str = GRACE) -> Counterparty:
-    """As `enrich()` returns it: the phone is a contact; `backed` — the Evidence of the registry stands behind it."""
+    """A company with a phone contact; `backed` — Evidence stands behind it. `enrich()` gives no contacts today: this is
+    the shape the endpoint is ready for, checked here."""
     now = datetime.now(UTC)
     ev = [Evidence(source="data:test", url="data:test#inn", fetched_at=now, fact=f"ИНН {INN}", field="inn", value=INN)]
     if backed:
@@ -98,3 +99,13 @@ def test_the_endpoint_is_in_the_openapi_description(api):
     spec = api.get("/openapi.json").json()
     assert "/api/reviews/{inn}" in spec["paths"]
     assert "ReviewsResult" in spec["components"]["schemas"]
+
+
+def test_a_natural_person_is_refused_before_any_registry_or_2gis_call(api, monkeypatch):
+    def forbidden(inn, cache=None, offline=None):
+        raise AssertionError("the registry must not be asked for an ИП")
+
+    monkeypatch.setattr(enrich_mod, "enrich", forbidden)
+    r = api.get("/api/reviews/781100000020")
+    assert r.status_code == 200 and r.json()["status"] == "unsupported"
+    assert api.site.paths == []  # type: ignore[attr-defined]

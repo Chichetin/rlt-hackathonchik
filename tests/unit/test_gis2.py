@@ -230,6 +230,21 @@ def test_429_pauses_the_host_like_403(cache):
     assert gis2.blocked()
 
 
+def test_a_valid_looking_page_from_another_host_is_not_read(cache):
+    def to_foreign(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "evil.example":
+            return httpx.Response(200, text=SATURN)  # a perfectly parsable page — from the wrong host
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text=ROBOTS)
+        return httpx.Response(302, headers={"Location": "https://evil.example/spb/search/x"}, request=request)
+
+    foreign = httpx.Client(transport=httpx.MockTransport(to_foreign), follow_redirects=True)
+    with pytest.raises(gis2.Blocked):
+        gis2.fetch_search("spb", "Сатурн", cache=cache, client=foreign)
+    assert gis2.blocked()
+    assert cache.get(gis2.search_url("spb", "Сатурн")) is None
+
+
 def test_a_redirect_to_another_host_or_a_captcha_page_is_a_refusal(cache):
     def to_captcha(request: httpx.Request) -> httpx.Response:
         if request.url.host == "captcha.2gis.ru":
@@ -312,3 +327,30 @@ def test_the_operator_switch_stops_every_request(cache, monkeypatch):
     with pytest.raises(gis2.Paused, match="GIS2_DISABLED"):
         gis2.fetch_search("spb", "Сатурн", cache=cache, client=site.client())
     assert site.paths == []
+
+
+def _reviews_page_with(edit) -> str:
+    """The recorded Grace tab after `edit(queries_state)`, written back with the escaping of the site."""
+    html = GRACE_REVIEWS
+    state = gis2._state(html, gis2._QUERY_STATE)
+    assert state is not None
+    edit(state)
+    literal = json.dumps(state, ensure_ascii=False, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+    return html[:html.index(gis2._QUERY_STATE)] + gis2._QUERY_STATE + literal + "');</script></html>"
+
+
+def test_reviews_asked_for_another_object_of_the_page_are_not_this_cards_reviews():
+    def other_object(state):
+        state["queries"][0]["queryKey"][1][0] = "70000001999999999"
+
+    with pytest.raises(gis2.Blocked, match="нет списка отзывов"):  # nothing of THIS card is left: not «no reviews»
+        gis2.parse_reviews_html(_reviews_page_with(other_object))
+
+
+def test_a_review_that_says_it_is_about_another_card_is_skipped():
+    def mixed(state):
+        items = state["queries"][0]["state"]["data"]["pages"][0]["items"]
+        items.append(dict(items[0], id="999", object={"id": "70000001999999999", "type": "branch"}))
+
+    page = gis2.parse_reviews_html(_reviews_page_with(mixed))
+    assert [r.id for r in page.reviews] == [r.id for r in gis2.parse_reviews_html(GRACE_REVIEWS).reviews]

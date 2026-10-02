@@ -2,8 +2,9 @@
 
 Called when the user asks for them in the card — never for a results page, never in the background: one
 supplier, at most a search and three reviews tabs of 2gis.ru (src/sources/gis2.py paces and caches them).
-The company is what `enrich()` already knows (its name and corporate contacts, each only if the Evidence check
-stands behind it: `strip_unverified`); the answer is `src/enrich/reviews.py`'s result with its own Evidence on
+The company is what `enrich()` already knows (its name; `enrich()` gives no contacts today, so a card is confirmed
+by a contact only in tests, and quotes appear for a unique legal name; contacts, if any, only with Evidence:
+`strip_unverified`); the answer is `src/enrich/reviews.py`'s result with its own Evidence on
 every fact. 2GIS being unreachable is `status: "unavailable"` in a 200: the card of the supplier works without it.
 Reviews are not in the score and not in the rating.
 """
@@ -42,6 +43,9 @@ def api_reviews(inn: str) -> reviews.ReviewsResult:
     newest reviews of the trusted ones: quote, date, link — every one with its Evidence."""
     if not inn_is_valid(inn):
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
+    if len(inn) == 12:  # a natural person (ИП): no registry call, no 2GIS call
+        return reviews.ReviewsResult(inn=inn, status="unsupported",
+                                     message="Индивидуальный предприниматель — физическое лицо: отзывы о нём не ищем.")
     try:
         try:
             cp = enrich_mod.enrich(inn, offline=True)  # the card the user is looking at is in the cache already

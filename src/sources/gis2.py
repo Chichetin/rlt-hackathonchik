@@ -254,14 +254,21 @@ def parse_reviews_html(html: str) -> ReviewsPage:
         raise Blocked("2gis.ru: в странице отзывов нет данных (страница защиты или разметка изменилась)")
     reviews: dict[str, Review] = {}
     saw_list = False  # a list of reviews (possibly empty) was found: only then «no reviews» is an answer
+    card_id = cards[0].id
     for q in _items(queries, "queries"):
         key = q.get("queryKey")
         if not (isinstance(key, list) and key and key[0] == "fetchEntityReviews"):
+            continue
+        asked = key[1] if len(key) > 1 and isinstance(key[1], list) and key[1] else None
+        if asked is not None and str(asked[0]) != card_id:  # reviews of some other object of the page
             continue
         for page in _items(_obj(_obj(q, "state"), "data"), "pages"):
             if isinstance(page.get("items"), list):
                 saw_list = True
             for item in _items(page, "items"):
+                owner = _obj(item, "object").get("id")
+                if owner is not None and str(owner) != card_id:  # a review that says it is about another card
+                    continue
                 review = _review(item)
                 if review is not None:
                     reviews.setdefault(review.id, review)

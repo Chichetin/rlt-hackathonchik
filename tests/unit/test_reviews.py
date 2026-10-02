@@ -146,6 +146,7 @@ def test_only_the_name_matches_the_chain_is_shown_without_any_quote(cache):
     assert "может быть другая организация" in card.note
     assert card.rubrics[:1] == ["Стройматериалы"]  # the sphere is shown: the user sees it is not stationery
     assert site.tabs_requested == []  # no phone or site to compare, no legal entity on the card: nothing to read for
+    assert all("рейтинг" not in e.fact and "отзыв" not in e.fact for e in card.evidence)  # not in the facts either
 
 
 def test_with_a_phone_to_compare_the_tab_of_a_name_only_card_is_read_and_may_confirm_it(cache):
@@ -177,6 +178,7 @@ def test_one_legal_name_of_several_organizations_confirms_nothing(cache):
         assert (card.rating, card.review_count) == (None, None)
         assert "у нескольких разных организаций (3)" in card.note and "ООО Сатурн" in card.note
     assert {c.rubrics[0] for c in result.cards} >= {"Заправка картриджей", "Жилищно-коммунальные услуги"}
+    assert all("рейтинг" not in e.fact and "отзыв" not in e.fact for c in result.cards for e in c.evidence)
     assert site.tabs_requested == []  # no contact to compare, an ambiguous legal name: nothing to read for
 
 
@@ -351,7 +353,7 @@ def test_a_confirmation_whose_evidence_does_not_pass_is_not_claimed(cache, monke
     assert {e.field for e in card.evidence} == {"address"}
 
 
-def _search_with_organizations(count: int) -> str:
+def _search_with_organizations(count: int, legal_for: tuple[int, ...] | None = None) -> str:
     html = page("search_grace_trade.html")
     state = gis2._state(html, gis2._INITIAL)
     assert state is not None
@@ -362,6 +364,8 @@ def _search_with_organizations(count: int) -> str:
         node = json.loads(json.dumps(first))
         node["data"]["id"] = f"7000000200000{i:02d}"
         node["data"]["org"]["id"] = f"7000000300000{i:02d}"
+        if legal_for is not None and i not in legal_for:
+            node["data"]["name_ex"].pop("legal_name", None)
         out[node["data"]["id"]] = node
 
     def lit(obj: object) -> str:
@@ -393,3 +397,41 @@ def test_the_operator_can_switch_the_reading_of_2gis_off(cache, monkeypatch):
     site = Site()
     result = reviews.find_reviews(company(GRACE, "7811777270"), cache=cache, client=site.client())
     assert result.status == "unavailable" and "отключено" in (result.message or "") and site.paths == []
+
+
+# --- what the review of the second pass found ----------------------------------------------------------
+
+def test_a_legal_form_that_differs_is_another_legal_entity(cache):
+    """«АО Грейс трэйд» on the card, ООО «ГРЕЙС ТРЭЙД» in the registry: not the same, only the name is shared."""
+    other_form = page("search_grace_trade.html").replace("ООО Грейс трэйд", "АО Грейс трэйд")
+    site = Site(search={"ГРЕЙС ТРЭЙД": other_form})
+    card = reviews.find_reviews(company(GRACE, "7811777270"), cache=cache, client=site.client()).cards[0]
+    assert (card.basis, card.quotes, card.rating) == ("name", [], None) and site.tabs_requested == []
+
+
+def test_the_legal_name_found_only_on_the_tab_does_not_make_a_second_organization_unique(cache):
+    """Two organizations; only the first names the legal entity in the search. The tab of the second names it too —
+    but the uniqueness was counted on the search result, and the second one stays a stranger."""
+    first, second = "700000020000000", "700000020000001"  # the ids _search_with_organizations gives its clones
+    html = _search_with_organizations(2, legal_for=(0,))
+    tab_of = lambda cid: page("reviews_grace_trade.html").replace("70000001065972795", cid)  # noqa: E731
+    site = Site(search={"ГРЕЙС ТРЭЙД": html}, tabs={first: tab_of(first), second: tab_of(second)})
+    cp = company(GRACE, "7811777270", phone="+7 (812) 000-00-00")  # some contact: the tabs are read, nothing matches
+    cards = {c.branch_id: c for c in reviews.find_reviews(cp, cache=cache, client=site.client()).cards}
+    assert cards[first].basis == "legal_name" and len(cards[first].quotes) == 1
+    assert cards[second].basis == "name" and cards[second].quotes == [] and cards[second].rating is None
+
+
+def test_a_natural_person_is_refused_by_the_inn_even_when_the_name_has_no_ip_prefix(cache):
+    site = Site()
+    bare = company("ИВАНОВ ИВАН ИВАНОВИЧ", "781100000020")  # the registry fallback gives the bare name of an ИП
+    result = reviews.find_reviews(bare, cache=cache, client=site.client())
+    assert result.status == "unsupported" and site.paths == []
+
+
+def test_the_page_of_a_platform_is_not_the_site_of_the_company(cache):
+    tab = _tab_with([("1", "2025-01-01", "Нормальный отзыв про срок")],
+                    contacts=[{"type": "website", "url": "https://vk.com/gracetrade"}])
+    cp = company(GRACE, "7811777270", site="https://vk.com/gracetrade")
+    card = reviews.find_reviews(cp, cache=cache, client=Site(tabs={"70000001065972795": tab}).client()).cards[0]
+    assert (card.basis, card.verified) == ("legal_name", False)  # the same host «vk.com» confirms nothing
