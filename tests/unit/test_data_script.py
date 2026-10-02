@@ -251,3 +251,11 @@ def test_gisp_with_wrong_checksum_is_refused_and_not_part_of_all(release):
     assert not (Path(release["GISP_DIR"]) / "products.parquet").exists()
     assert run([], release).returncode == 0 and "gisp-meta.json" not in downloads(release)
     assert not any(Path(release["GISP_DIR"]).rglob("*"))  # nothing written, `all` did not touch the GISP directory
+
+
+def test_gisp_default_directory_is_next_to_data_processed_dir(release):
+    # #465: the product reads <DATA_PROCESSED_DIR>/../external/gisp, the script must put the files there
+    env = {k: v for k, v in release.items() if k != "GISP_DIR"}
+    res = run(["gisp"], env)
+    assert res.returncode == 0, res.stderr
+    assert (Path(env["DATA_PROCESSED_DIR"]).parent / "external" / "gisp" / "products.parquet").exists()
