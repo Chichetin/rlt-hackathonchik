@@ -266,6 +266,17 @@ def test_short_and_service_stems_do_not_make_a_match(gdir, cache, tmp_path):
     assert res.matches == []  # ЭКО-НЕВА has this very code, but no word of the items is in its product's name
 
 
+def test_four_letter_words_are_stems():
+    """#476: «шкаф», «стол», «стул» lost a letter and fell under MIN_STEM: «шкаф металлический» kept only «метал»."""
+    assert D.query_stems("шкаф металлический") == ["шкаф", "метал"]
+    assert D.query_stems("стол письменный; стул офисный") == ["стул", "офисн"]  # items: after the first «;»
+    assert D.query_stems("стол письменный") == ["стол", "письм"]
+    assert D.shared_words(D.query_stems("шкаф металлический"), "Шкафы металлические для одежды") == ["шкаф", "метал"]
+    # 4-letter words that name no product stay out, compared whole; 3 letters are still too short
+    assert D.query_stems("мыло жидкое года типа штук цена гост один при") == ["мыло", "жидко"]
+    assert D.query_stems("годами") == ["годам"]  # a longer word is not a short stop word
+
+
 def test_plural_endings_are_cut_from_stems():
     """#471: «шкафов» became «шкафо» and never met the registry's «Шкафы» (lot 5903085 got no ГИСП company)."""
     for word, stem in {"шкафов": "шкаф", "столов": "стол", "картриджей": "картр", "принтеров": "принт",
