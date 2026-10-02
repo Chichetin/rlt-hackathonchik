@@ -266,6 +266,20 @@ def test_short_and_service_stems_do_not_make_a_match(gdir, cache, tmp_path):
     assert res.matches == []  # ЭКО-НЕВА has this very code, but no word of the items is in its product's name
 
 
+def test_plural_endings_are_cut_from_stems():
+    """#471: «шкафов» became «шкафо» and never met the registry's «Шкафы» (lot 5903085 got no ГИСП company)."""
+    for word, stem in {"шкафов": "шкаф", "столов": "стол", "картриджей": "картр", "принтеров": "принт",
+                       "мониторов": "монит", "ножей": "ноже", "папки": "папк", "бахилы": "бахил", "кресел": "кресе",
+                       "мебелями": "мебел", "прилавках": "прила", "лот": "лот"}.items():
+        assert D._stem(word) == stem, word
+    assert D.query_stems("Поставка хозяйственных шкафов") == ["хозяй", "шкаф"]
+    assert D.shared_words(D.query_stems("шкафов металлических"), "Шкафы офисные МастерПром") == ["шкаф"]
+    # a word whose rest would be shorter than MIN_STEM is not a stem: «мнн», «при», «лот», «ов»
+    assert D.query_stems("при мнн лот ящиков дел") == ["ящик"]
+    # stop words are matched by the first five letters of the whole word, not by the cut stem
+    assert D.query_stems("материалов препаратов медицинских") == []
+
+
 def test_discover_keeps_the_inn_types_and_regions_of_the_block(gdir, cache, tmp_path, monkeypatch):
     """DISCOVERY_NP_TYPES=IP: ЭКО-НЕВА and ПОНИ stay out by type; the Moscow maker of tickets — by its region."""
     monkeypatch.setenv("DISCOVERY_NP_TYPES", "IP")
