@@ -80,8 +80,14 @@ research/DECISIONS.md, src/contracts.py. Перескажи мне в 5 стро
 ## Красный CI
 
 CI (`.github/workflows/ci.yml`, D-105) запускается на каждый PR и push в `main`: job **check** —
-`make -k check`, job **e2e** — `make e2e` на фикстурах. Данные организаторов и Postgres в CI не
-нужны: тесты без них пропускаются (Postgres-сервис — #291).
+`make -k check`, job **e2e** — `make e2e` на фикстурах, job **check-pg** — весь pytest против
+Postgres + pgvector (сервис `pgvector/pgvector:pg16`); там ни один тест не должен пропуститься из-за
+`TEST_DATABASE_URL`. Данные организаторов в CI не нужны.
+
+Postgres-тесты локально: `docker compose up -d db`, затем
+`TEST_DATABASE_URL=postgresql://app:app@127.0.0.1:${PG_PORT:-5432}/app uv run pytest tests/unit/test_store.py`
+(и `test_db_load`, `test_db_pool`, `test_db_embed`, `test_pg_retriever`); без переменной они пропускаются.
+Первый запуск скачивает расширение DuckDB `postgres` с `extensions.duckdb.org` (`src/db/load.py`) — нужна сеть.
 
 1. Открыть упавший job → шаг `make -k check`: `-k` прогоняет все цели, ищите строки
    `make: *** [Makefile:…: <цель>] Error` — это и есть упавшие цели (`lint`, `typecheck`, `test`, …).
@@ -91,5 +97,8 @@ CI (`.github/workflows/ci.yml`, D-105) запускается на каждый 
 3. e2e: внизу запуска — артефакт `playwright-traces` (каталог `test-results/` упавших тестов).
    Скачать, распаковать; в каталоге теста — `error-context.md` (снимок страницы) и трасса:
    `npx playwright show-trace <каталог теста>/trace.zip`. Локально — `make e2e`.
-4. Красный не из-за вашего PR (тот же job красный на `main`) — задача с меткой `blocker`, а не
+4. **check-pg**: упал шаг pytest — тот же тест локально с `TEST_DATABASE_URL` (см. выше); упал шаг
+   «No test skipped for a missing database» — какой-то Postgres-тест пропустился, хотя база есть
+   (строка `SKIPPED … TEST_DATABASE_URL` в логе шага pytest).
+5. Красный не из-за вашего PR (тот же job красный на `main`) — задача с меткой `blocker`, а не
    повторный запуск «на удачу».

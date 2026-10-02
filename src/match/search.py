@@ -38,7 +38,7 @@ import yaml
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
 from src.ingest.okpd2 import label
-from src.match import fallback
+from src.match import fallback, ranker
 from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
 from src.match.profiles import profile_overrides, profile_weights
@@ -124,6 +124,7 @@ def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     scoring_options(cfg)
+    ranker.spec(cfg)  # learned ranker (#198): on by default since D-103
     profile_overrides(cfg)  # weights by procurement type (#104), off by default
     return cfg
 
@@ -443,11 +444,12 @@ def _drop_own(lots: LotHits, own: int | None) -> LotHits:
     return lots.without(own)
 
 def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
-           config: dict | None = None) -> list[CounterpartyMatch]:
+           config: dict | None = None, features_out: list | None = None) -> list[CounterpartyMatch]:
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
 
     `config`: the whole configuration of an experiment (eval); by default configs/search.yaml.
     Why the answer is empty (or found by the fallback ladder): fallback.search_note() after the call.
+    `features_out`: gets (inn, ranker features) of every scored candidate — training of the ranker (#198).
     """
     fallback.reset_note()
     _excluded.set(None)
@@ -492,9 +494,11 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         codes, predicted = ([guess], True) if guess else ([], False)
     if codes:
         _class_history(store, cands, codes, as_of)
+    rk = ranker.spec(cfg)
+    ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
     w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}
-    if shares["incumbent"] > 0 and query.customer_inn:
+    if (shares["incumbent"] > 0 or ranked) and query.customer_inn:
         incumbent = customer_lots(store, [c.inn for c in cands], query.customer_inn, as_of)
     fetched = store.built_at()
     # H-105-winrate: the win rate helps АИС ГЗ (one executor per lot) and hurts ЭМ (many offers, one winner)
@@ -506,6 +510,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
+    rows: list[list[float]] = []  # ranker features of each match (#198)
     target, target_note = customer_region(query)  # «География» against the customer's region (#218)
     for c in cands:
         cp = parties.get(c.inn)
@@ -546,6 +551,22 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         out.append(CounterpartyMatch(counterparty=cp, score=round(sum(x.value * x.weight for x in comps), 4),
                                      components=comps, origin="history"))
         bm25_of.append(c.bm25)
+        if ranked:
+            rows.append(ranker.feature_row(c, top_bm25, {x.name: x.value for x in comps},
+                                           incumbent.get(c.inn, 0) if query.customer_inn else None,
+                                           cp, query, ref, codes, predicted))
+    if features_out is not None:
+        features_out.extend(zip((m.counterparty.inn for m in out), rows, strict=True))
+    if rk is not None:
+        try:
+            model = ranker.load(rk)
+        except (OSError, ImportError, ValueError) as e:  # no model file, no lightgbm, stale features: v2 order
+            log.warning("ранжировщик недоступен, порядок по формуле v2: %s", e)
+            prev = fallback.search_note()
+            why = "ранжировщик недоступен — порядок по формуле v2"
+            fallback.set_note(f"{prev}; {why}" if prev else why)
+        else:
+            return ranker.rerank(model, out, rows, k)
     if opts["tie_break"] == "bm25":
         sims = {id(m): s for m, s in zip(out, bm25_of, strict=True)}
         out.sort(key=lambda m: (-m.score, -sims[id(m)], m.counterparty.inn or "~"))

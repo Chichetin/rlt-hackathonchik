@@ -40,6 +40,7 @@ test("результаты и запрос сохраняются при пер�
 
 
 test("главная и подбор — отдельные страницы, движение меню и reduced motion не ломают переходы", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" }); // the project default is reduce (#255)
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Митрандир");
   await expect(page.getByLabel("Что нужно закупить")).toHaveCount(0);
