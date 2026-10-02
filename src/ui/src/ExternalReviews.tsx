@@ -49,7 +49,7 @@ function GisCard({ card }: { card: ReviewCard }) {
   </article>;
 }
 
-/** Reviews of one supplier from 2GIS — on the user's request, never in the background (#234, D-108). Keyed by INN
+/** Reviews of one supplier from 2GIS — on the user's request, never in the background (#234, D-109). Keyed by INN
  *  by the parent: an answer in flight never lands in the card of the next company. */
 export function ExternalReviews({ inn }: { inn: string | null }) {
   const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");

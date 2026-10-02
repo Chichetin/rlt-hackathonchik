@@ -1,4 +1,4 @@
-"""Reviews of a supplier from 2GIS on demand (#234, D-108): who the card is, what is shown, what is not.
+"""Reviews of a supplier from 2GIS on demand (#234, D-109): who the card is, what is shown, what is not.
 
 2GIS does not publish the INN, so a card is matched by the brand and then trusted only as far as it can be
 checked: a phone / site of the card equal to the company's own (from the registry, with its Evidence) —
@@ -145,6 +145,15 @@ def test_only_the_name_matches_the_chain_is_shown_without_any_quote(cache):
     assert card.quotes == [] and card.review_count == 74
     assert "может быть другая организация" in card.note
     assert card.rubrics[:1] == ["Стройматериалы"]  # the sphere is shown: the user sees it is not stationery
+    assert site.tabs_requested == []  # no phone or site to compare, no legal entity on the card: nothing to read for
+
+
+def test_with_a_phone_to_compare_the_tab_of_a_name_only_card_is_read_and_may_confirm_it(cache):
+    site = Site()
+    cp = company(SATURN, "7801248119", phone="+7 (812) 322-22-66")  # the phone of that very hypermarket card
+    card = reviews.find_reviews(cp, cache=cache, client=site.client()).cards[0]
+    assert site.tabs_requested == ["/spb/firm/5348552839595094/tab/reviews"]
+    assert (card.basis, card.verified) == ("phone", True)  # the contact, not the name, is what confirms
 
 
 def test_a_card_without_reviews_is_listed_and_its_tab_is_not_requested(cache):

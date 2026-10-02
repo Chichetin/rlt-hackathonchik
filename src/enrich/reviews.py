@@ -1,4 +1,4 @@
-"""Reviews of a supplier from 2ГИС, on demand: a quote, its date and a link — or nothing (#234, D-108). Owner: SOURCES.
+"""Reviews of a supplier from 2ГИС, on demand: a quote, its date and a link — or nothing (#234, D-109). Owner: SOURCES.
 
 2GIS does not publish the INN. A card found by the brand is therefore NOT «the company» by itself: the
 company «САТУРН» of the МСП register (stationery) and the building-materials chain «Сатурн» share a name and a
@@ -272,7 +272,10 @@ def _build(card: gis2.Card, cp: Counterparty, form: str | None, brand: str, city
     tab = gis2.reviews_url(city, card.id)
     page: gis2.ReviewsPage | None = None
     problem: str | None = None
-    if (card.review_count or 0) > 0:
+    # The tab holds the reviews and the contacts of the card. With nothing to compare them with (the company has no
+    # phone or site) and no legal entity named by the card, nothing could be shown or confirmed: do not ask.
+    comparable = bool(cp.contacts.get("phone") or cp.contacts.get("site")) or _legal_matches(card, form, brand_norm)
+    if (card.review_count or 0) > 0 and comparable:
         try:
             page = gis2.fetch_reviews(city, card.id, src.cache, client)
         except (gis2.Blocked, gis2.RobotsDisallowed, httpx.HTTPError, ValueError) as e:
