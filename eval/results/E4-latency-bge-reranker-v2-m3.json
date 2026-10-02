@@ -1,0 +1,63 @@
+{
+  "experiment": "E4",
+  "issue": 269,
+  "model": "BAAI/bge-reranker-v2-m3",
+  "revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",
+  "device": "cpu",
+  "cpu": "13th Gen Intel(R) Core(TM) i7-13700KF",
+  "torch_threads": 16,
+  "max_length": 256,
+  "batch_size": 32,
+  "queries": 20,
+  "seed": 20261001,
+  "commit": "aaa1709",
+  "created": "2026-10-02T03:03:03+00:00",
+  "loadavg_before": [
+    5.17,
+    5.55,
+    5.22
+  ],
+  "ms": {
+    "short@50": {
+      "p50": 2104.6,
+      "p95": 4901.4,
+      "mean": 2579.9,
+      "pairs_mean": 50.0
+    },
+    "short@100": {
+      "p50": 3678.0,
+      "p95": 8807.0,
+      "mean": 4534.0,
+      "pairs_mean": 98.1
+    },
+    "short@200": {
+      "p50": 7236.6,
+      "p95": 16076.4,
+      "mean": 7953.3,
+      "pairs_mean": 188.7
+    },
+    "lot@50": {
+      "p50": 4034.4,
+      "p95": 10932.3,
+      "mean": 4838.4,
+      "pairs_mean": 50.0
+    },
+    "lot@100": {
+      "p50": 7754.1,
+      "p95": 22391.1,
+      "mean": 9558.1,
+      "pairs_mean": 100.0
+    },
+    "lot@200": {
+      "p50": 15004.7,
+      "p95": 44582.0,
+      "mean": 18608.8,
+      "pairs_mean": 200.0
+    }
+  },
+  "loadavg_after": [
+    17.07,
+    15.43,
+    11.88
+  ]
+}

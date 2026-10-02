@@ -17,9 +17,8 @@ from fastapi.testclient import TestClient
 from src.api import app as app_mod
 from src.contracts import Query, inn_is_valid
 from src.enrich import discover as D
-from src.enrich import role
 from src.enrich.evidence import check_counterparty
-from src.sources import pb_nalog, rmsp
+from src.sources import pb_nalog, rmsp, role
 from src.sources.cache import SourceCache
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "rmsp"
