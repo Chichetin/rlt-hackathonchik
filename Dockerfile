@@ -15,7 +15,8 @@ COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-dev --extra pg --extra ml   # ml: torch CPU (pytorch-cpu index) for retriever pg_hybrid
 COPY src/ src/
 COPY configs/ configs/
-COPY models/ models/   # ranker R-198-gbm (D-103)
+# ranker R-198-gbm (D-103); Docker has no trailing comments: on the COPY line they become source paths
+COPY models/ models/
 COPY --from=ui /ui/dist src/ui/dist
 EXPOSE 8000
 CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

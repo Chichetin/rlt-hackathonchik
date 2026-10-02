@@ -47,6 +47,7 @@ import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } f
 import "./testset.css";
 import { componentText, formulaScore, rankerReason, rankerShort } from "./ranker";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
+import { STATIC_DEMO } from "./staticApi";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -669,6 +670,12 @@ export function App() {
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
       {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
       <div className="content">
+      {STATIC_DEMO && (
+        <div className="stub" role="status" data-testid="static-demo">
+          Демонстрационные данные: статический стенд без сервера — заранее посчитанная выдача по трём примерам и
+          реальным закупкам; фильтры, выгрузка и оценки здесь не работают.
+        </div>
+      )}
       <AnimatePresence mode="wait" initial={false}>
       <motion.div className={path === "/" ? undefined : "interior-route"} key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -693,9 +700,9 @@ export function App() {
         <p><span>Закупка</span><strong>{res.query.text}</strong></p>
         <div className="results-commands">
           <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
-          <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
+          {!STATIC_DEMO && <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
             setError(`выгрузка в Excel: ${String(e)}`); setState("error");
-          })}>Выгрузить в Excel</button>
+          })}>Выгрузить в Excel</button>}
         </div>
         <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
         {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
