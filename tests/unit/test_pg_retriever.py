@@ -48,7 +48,7 @@ def test_pg_branch_runs_even_when_eval_passes_weights(search_data, tmp_path, mon
     monkeypatch.setattr(search_mod, "load_config", lambda: cfg)
     calls = []
 
-    def fake_hybrid(idx, text, hits, top):
+    def fake_hybrid(idx, text, hits, top, model=None):
         calls.append(text)
         return hits, True
 
@@ -109,7 +109,9 @@ def pg_vectors(search_data, monkeypatch):
         ensure_hnsw(c, VEC)
     monkeypatch.setenv("DATABASE_URL", URL)
     monkeypatch.setattr(pg_retriever, "VEC_SCHEMA", VEC)
-    monkeypatch.setattr(pg_retriever, "_state", {"encoder": fake_encode})
+    monkeypatch.setattr(pg_retriever, "_state", {})
+    monkeypatch.setattr(pg_retriever, "_encoders", {pg_retriever.MODEL: fake_encode})
+    monkeypatch.setattr(pg_retriever, "_coverage", {})
     yield c_url()
     if "conn" in pg_retriever._state:
         pg_retriever._state["conn"].close()

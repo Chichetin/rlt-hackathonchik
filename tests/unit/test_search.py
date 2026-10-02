@@ -13,12 +13,14 @@ from pathlib import Path
 
 import pytest
 
-from src.contracts import Query, inn_is_valid
+from src.contracts import Counterparty, Query, inn_is_valid
 from src.ingest.build import build
 from src.match import index as index_mod
 from src.match import search as search_mod
 from src.match.search import search
 from src.match.text import tokenize, tokenizer_version
+
+pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py
 
 CUTOFF = date(2025, 7, 1)
 FIXTURE_INGEST = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
@@ -32,6 +34,14 @@ def by_inn(matches):
 
 def comp(m, name):
     return next(c for c in m.components if c.name == name)
+
+
+def v1() -> dict:
+    """The product default until #174 (D-004, D-029) — `v1` in configs/experiments.yaml. The tests of the
+    component mechanics below (class experience, 0.6 / 0.4 product_fit, ties by INN) are pinned to it."""
+    from src.eval.run import load_method_config
+
+    return load_method_config("v1")
 
 
 def test_tokenize_normalizes_case_forms_and_a4(monkeypatch):
@@ -57,11 +67,23 @@ def test_paper_query_returns_real_suppliers_with_components(search_data):
 
 
 def test_unavailable_components_have_zero_weight_and_say_no_data(search_data):
-    m = search(Query(query_id="q", text="бумага"))[0]
+    m = search(Query(query_id="q", text="бумага"), config=v1())[0]
     for name in ("reliability", "price"):
         c = comp(m, name)
         assert c.value == 0.0 and c.weight == 0.0 and c.explanation.startswith("Нет данных")
     assert comp(m, "product_fit").weight == 0.35 and comp(m, "experience").weight == 0.2
+
+
+def test_default_scoring_is_h15f_normalized(search_data):
+    """#174 (human confirmation №3): H-15f weights normalized to 1 and its options are the product default."""
+    cfg = search_mod.load_config()
+    assert sum(cfg["weights"].values()) == pytest.approx(1.0) and cfg["weights"]["geography"] == 0.0
+    assert search_mod.scoring_options(cfg) == {"fit_bm25_share": 0.8, "experience_by": "similar", "tie_break": "bm25",
+                                               "sat_lots": 20, "sat_wins": 10}  # caps: the default, #196 is opt-in
+    m = search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]))[0]
+    assert "с похожими позициями" in comp(m, "experience").explanation
+    assert comp(m, "geography").weight == 0.0 and comp(m, "geography").explanation  # shown, not scored
+    assert m.score == pytest.approx(sum(c.value * c.weight for c in m.components), abs=1e-3)
 
 
 def test_weights_argument_overrides_config(search_data):
@@ -84,7 +106,7 @@ def test_as_of_hides_later_lots_and_suppliers(search_data):
 
 
 def test_experience_counts_lots_and_wins_in_okpd2_group(search_data):
-    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])))
+    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]), config=v1()))
     e = comp(m["7801000012"], "experience")
     assert "4 лот(ов) по ОКПД2 17.12" in e.explanation and "побед: 2" in e.explanation
     assert e.value > comp(m["7801000020"], "experience").value  # 1 paper lot, no paper wins
@@ -113,7 +135,7 @@ def test_okpd2_given_vs_predicted(search_data):
 
 
 def test_okpd2_mismatch_lowers_product_fit(search_data):
-    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["61.10.11.110"])))
+    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["61.10.11.110"]), config=v1()))
     c = comp(m["7801000012"], "product_fit")
     assert "в его истории не встречается" in c.explanation and c.value <= 0.6 + 1e-9
 
@@ -129,6 +151,11 @@ def test_geography_by_kpp_region(search_data):
     assert comp(lo["7801000012"], "geography").value == pytest.approx(0.8)
     msk = by_inn(search(Query(query_id="q", text="бумага", region="Москва")))
     assert comp(msk["7801000012"], "geography").value == 0.0
+    # #218: through search() — the customer's region (INN 47…) wins over the default query region
+    cust = by_inn(search(Query(query_id="q", text="бумага", customer_inn="4700000003")))
+    assert comp(cust["4701000038"], "geography").value == 1.0
+    assert comp(cust["7801000012"], "geography").value == pytest.approx(0.8)
+    assert "ИНН заказчика выдан в Ленинградской области" in comp(cust["7801000012"], "geography").explanation
 
 
 def test_activity_decays_with_days_since_last_participation(search_data):
@@ -211,9 +238,9 @@ def test_as_of_boundary_is_strict(tmp_path, monkeypatch):
 
 
 def test_okpd2_subcategory_level_and_group_experience(search_data):
-    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.999"])))
+    m = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.999"]), config=v1()))
     assert "совпадает до подкатегории 17.12.14" in comp(m["7801000012"], "product_fit").explanation
-    g = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.99.000"])))
+    g = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.99.000"]), config=v1()))
     assert "4 лот(ов) по ОКПД2 17.12" in comp(g["7801000012"], "experience").explanation
 
 
@@ -242,16 +269,19 @@ def test_prebuild_cli_without_data_exits_2(tmp_path, monkeypatch):
     assert index_mod.main() == 2
 
 
-# --- scoring options of experiments (#22): v1 is the default, every option is opt-in ---
+# --- scoring options of experiments (#22): each option against v1 (the product default is H-15f since #174) ---
 
 def _cfg(**options) -> dict:
-    return {**search_mod.load_config(), "options": options}
+    base = v1()
+    return {**base, "options": {**base["options"], **options}}
 
 
 def test_scoring_options_default_is_v1_and_unknown_is_an_error():
     assert search_mod.scoring_options({}) == {"fit_bm25_share": search_mod.FIT_BM25_SHARE, "experience_by": "class",
-                                              "tie_break": "inn"}
-    for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"}):
+                                              "tie_break": "inn", "sat_lots": search_mod.SAT_LOTS,
+                                              "sat_wins": search_mod.SAT_WINS}
+    for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"},
+                {"sat_lots": 0}, {"sat_wins": 2.5}, {"sat_lots": True}):
         with pytest.raises(ValueError):
             search_mod.scoring_options({"options": bad})
     with pytest.raises(ValueError, match="retriever"):
@@ -265,7 +295,7 @@ def test_config_argument_without_options_equals_product(search_data):
 
 def test_experience_by_similar_counts_matched_lots(search_data):
     q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
-    by_class = {m.counterparty.inn: m for m in search(q)}
+    by_class = {m.counterparty.inn: m for m in search(q, config=v1())}
     similar = search(q, config=_cfg(experience_by="similar"))
     assert similar and len(similar) == len(by_class)
     for m in similar:
@@ -290,7 +320,7 @@ def test_fit_bm25_share_changes_product_fit(search_data):
 def test_tie_break_bm25_orders_equal_scores_by_similarity(search_data):
     q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
     zero = {"product_fit": 0.0, "experience": 0.0, "activity": 0.0, "geography": 0.0}  # every score ties at 0
-    inns = [m.counterparty.inn or "~" for m in search(q, weights=zero)]
+    inns = [m.counterparty.inn or "~" for m in search(q, weights=zero, config=v1())]
     assert inns == sorted(inns)
     fits = [next(c.value for c in m.components if c.name == "product_fit")
             for m in search(q, weights=zero, config=_cfg(tie_break="bm25", fit_bm25_share=1.0))]
@@ -327,3 +357,83 @@ def test_tokenizers_merge_forms_and_a4_and_switch_version(monkeypatch, name):
     assert len({tuple(tokenize(f)) for f in ("бумага", "бумаги", "бумагу")}) == 1
     assert tokenize("А4") == tokenize("A4") == ["a4"]
     assert tokenizer_version() == ("prefix5-v1" if name == "prefix5" else f"{name}-v1")
+
+
+def test_explanations_name_the_okpd2_class(search_data):
+    given = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"])))["7801000012"]
+    assert "совпадает код 17.12.14.110 «Бумага для печати»" in comp(given, "product_fit").explanation
+    by_class = by_inn(search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]), config=v1()))["7801000012"]
+    assert "по ОКПД2 17.12 «Бумага и картон» за" in comp(by_class, "experience").explanation  # experience by class
+
+
+# #218: «География» is measured against the customer's region, not a fixed St Petersburg
+@pytest.mark.parametrize(("customer_inn", "target", "noted"), [
+    ("4700000003", "Ленинградская область", True),    # customer in the Leningrad region (synthetic valid INN)
+    ("7800000002", "Санкт-Петербург", True),
+    ("7700000009", "Санкт-Петербург", False),         # a Moscow-registered body: INN says nothing, query region stays
+    (None, "Санкт-Петербург", False),
+])
+def test_customer_region(customer_inn, target, noted):
+    q = Query(query_id="t218", text="бумага", customer_inn=customer_inn)
+    region, note = search_mod.customer_region(q)
+    assert region == target
+    assert (note is not None) == noted
+    if noted:
+        assert note is not None and "ИНН заказчика выдан" in note
+
+
+def test_geography_follows_the_customer():
+    org47 = Counterparty(inn="4700000003", name="ООО Ленобл", kpp="470301001")
+    org78 = Counterparty(inn="7800000002", name="ООО Питер", kpp="780101001")
+    lo, _ = search_mod.customer_region(Query(query_id="t218", text="x", customer_inn="4700000003"))
+    assert search_mod._geography(org47, lo)[0] == 1.0
+    assert search_mod._geography(org78, lo)[0] == pytest.approx(search_mod.NEIGHBOUR_VALUE)
+
+
+def test_saturation_caps_spread_experience_of_active_suppliers(search_data):
+    """#196: with the default caps (20 lots / 10 wins) busy suppliers all get experience 1.0; higher caps
+    keep them apart, and the value follows the caps exactly."""
+    from src.match.search import Candidate, _experience, _sat
+
+    busy = Candidate("7801000012", 1.0, 40, 20, 1, "x", date(2025, 1, 1))
+    busier = Candidate("7801000020", 1.0, 400, 200, 1, "x", date(2025, 1, 1))
+    assert _experience(busy, [], None)[0] == _experience(busier, [], None)[0] == 1.0  # saturated by default
+    low, high = (_experience(c, [], None, "similar", 500, 250)[0] for c in (busy, busier))
+    assert low < high < 1.0
+    assert low == pytest.approx(0.5 * _sat(40, 500) + 0.5 * _sat(20, 250))
+    # the option reaches search(): a higher cap never raises a value and lowers the saturated ones
+    q = Query(query_id="q", text="бумага офисная", okpd2=["17.12.14.110"])
+    base = {m.counterparty.inn: comp(m, "experience").value for m in search(q)}
+    capped = {m.counterparty.inn: comp(m, "experience").value
+              for m in search(q, config={**search_mod.load_config(), "options": {
+                  **search_mod.load_config()["options"], "sat_lots": 500, "sat_wins": 250}})}
+    assert base and all(capped[i] <= base[i] for i in base) and any(capped[i] < base[i] for i in base)
+
+
+def test_query_from_a_notice_does_not_find_that_notice(search_data):
+    """#249 (review #145 F-13): a query built from notice 6 (`/api/lot` → `lot-6`) does not get lot 6 back — its own
+    positions would put its own participants on top. 780100000090 stays, found by its other paper lot 1."""
+    q = Query(query_id="ui-1", text="Бумага офисная А4")
+    before = by_inn(search(q))
+    assert search_mod.excluded_lot() is None
+    assert "data:items#6" in {e.url for m in before.values() for e in m.counterparty.evidence}
+    after = by_inn(search(q.model_copy(update={"query_id": "lot-6"})))
+    assert search_mod.excluded_lot() == 6
+    assert "data:items#6" not in {e.url for m in after.values() for e in m.counterparty.evidence}
+    assert "780100000090" in after  # lots 1 and 6 before; lot 1 only now
+    assert "в 2 лот(ах)" in comp(before["780100000090"], "product_fit").explanation
+    assert "в 1 лот(ах)" in comp(after["780100000090"], "product_fit").explanation
+    search(q.model_copy(update={"query_id": "lot-999999"}))  # a notice that is not in the data: nothing removed
+    assert search_mod.excluded_lot() is None
+
+
+def test_query_from_a_notice_does_not_find_it_on_the_fallback_ladder(search_data):
+    """Review of #249: lot 9 «Вода питьевая» is the only lot with its text; without it nothing is found by text, and the
+    OKPD2 rung of the fallback ladder must not bring lot 9 back («Участвовал в лоте 9» under «не входит в подбор»)."""
+    q = Query(query_id="lot-9", text="Вода питьевая", okpd2=["11.07.11.130"])
+    res = search(q)
+    assert search_mod.excluded_lot() == 9
+    assert all(e.url != "data:items#9" for m in res for e in m.counterparty.evidence)
+    assert all("(лот 9)" not in comp(m, "product_fit").explanation for m in res)
+    free = search(q.model_copy(update={"query_id": "ui-1"}))
+    assert any(e.url == "data:items#9" for m in free for e in m.counterparty.evidence)  # the leak this guards against

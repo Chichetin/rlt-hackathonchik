@@ -240,7 +240,7 @@ def test_database_down_after_start_is_503_and_auto_falls_back(loaded, use, monke
     assert client.post("/api/search", json={"query_id": "q", "text": "бумага"}).json()["history"]
 
 
-# --- class_history from the precomputed supplier_items (D-073): the same answer as the original SQL ---
+# --- class_history from the precomputed supplier_items (D-135): the same answer as the original SQL ---
 
 WIDE_CODES = ["17.12.14.110", "17.12.14.119", "17.12.14.1", "17.12.141", "17.121", "17.12.19.000", "17.99.99.000",
               "17.12", "17.1", "17", "26.20.40.110", "26.20.40.119", "26.20", "11.07", "11.07.11.130", "33.12.1",
@@ -357,7 +357,7 @@ def test_loader_builds_supplier_items_per_lot_and_code(wide):
 
 @needs_pg
 def test_class_history_without_supplier_items_still_answers_and_says_so(wide, caplog):
-    """A schema loaded before D-073 has no supplier_items: the old query, a warning, no crash."""
+    """A schema loaded before D-135 has no supplier_items: the old query, a warning, no crash."""
     import psycopg
 
     from src.db.load import pg_dsn

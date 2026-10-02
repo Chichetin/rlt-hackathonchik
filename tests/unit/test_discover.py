@@ -37,7 +37,7 @@ IP_ROW = {"inn": "500100732259", "ogrn": "318169000190351", "nptype": "IP", "cat
 @pytest.fixture(autouse=True)
 def _fast_and_unblocked(monkeypatch):
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", 0.0)
-    monkeypatch.setattr(rmsp, "_blocked_until", 0.0)
+    rmsp.PACER.reset()
 
 
 @pytest.fixture
@@ -329,9 +329,11 @@ def test_live_requests_respect_plan_budget_and_block(tmp_path):
     res = _run(SourceCache(tmp_path / "c.sqlite"), processed, query=q, offline=False, budget_s=0.0,
                client=_client(handler))
     assert posted == [] and all("нет в кеше" in r for r in res.requests)  # budget spent → cache only
+    assert not res.source_failed  # nothing was asked, nothing failed: no «источники не ответили» (#287)
     blocked = _run(SourceCache(tmp_path / "d.sqlite"), processed, query=q, offline=False,
                    client=_client(lambda r: (posted.append("x"), httpx.Response(403))[1]))
     assert posted == ["x"] and blocked.matches == [] and "отказал" in blocked.requests[0]  # one try, then stop
+    assert blocked.source_failed  # the user is told the block may be incomplete (X-Discovery-Error, #287)
     assert any("защиту не обходим" in n for n in blocked.notes)
 
 
@@ -346,9 +348,11 @@ def test_source_timeout_gives_empty_block_and_the_rest_of_the_query_is_cache_onl
     res = _run(SourceCache(tmp_path / "c.sqlite"), processed, offline=False, client=_client(handler))
     assert res.matches == [] and len(calls) == 1  # one attempt, not one per (OKVED, region)
     assert "не ответил" in res.requests[0] and all("в сеть не ходили" in r for r in res.requests[1:])
+    assert res.source_failed  # a timeout is a failed source, not «nobody found» (#287)
     assert rmsp.blocked()  # the hanging source is left alone for a while: the next search does not wait either
     again = _run(SourceCache(tmp_path / "c2.sqlite"), processed, offline=False, client=_client(_no_network))
     assert again.matches == [] and all("в сеть не ходили" in r for r in again.requests)
+    assert again.source_failed  # the next search during the pause is still «may be incomplete» (#287)
 
 
 def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
@@ -389,7 +393,7 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
                                                                      expected_calls):
     budget = 0.6
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
-    monkeypatch.setattr(rmsp, "_last_request", 0.0)
+    rmsp.PACER.reset()
     monkeypatch.setattr(rmsp, "TIMEOUT_S", 3.0)
     calls: list = []
     res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),
@@ -476,6 +480,14 @@ def test_wholesale_neighbour_region_and_ip(tmp_path):
     assert "соседний регион — Ленинградская область" in trader.components[4].explanation
     assert trader.counterparty.region == "Ленинградская область"
 
+    # #218: a customer from the Leningrad region — the wholesaler from 47 is local now, the maker from 78 a neighbour
+    (tmp_path / "cust").mkdir()
+    cust = _run(c, _processed(tmp_path / "cust", []), query=_query(okpd2=["17.12.14.110"], customer_inn="4700000003"))
+    geo = {m.counterparty.inn: m.components[4] for m in cust.matches}
+    assert geo[trader.counterparty.inn].value == 1.0
+    assert geo["7811777270"].value == 0.8
+    assert "ИНН заказчика выдан в Ленинградской области" in geo["7811777270"].explanation
+
 
 def _rows(inns: list[str], okved: str, name: str) -> dict:
     return {"rowCount": -1, "data": [{**ANSWER["data"][0], "inn": i, "okved1": okved, "okved1name": name}
@@ -500,6 +512,23 @@ def test_top_ten_keeps_both_producers_and_distributors(tmp_path):
     assert len(pool) == len(makers) + len(traders)
     assert sorted(cp.inn or "" for cp in pool if cp.kind == "distributor") == sorted(traders)
     assert "всего в реестре не сообщается" in res.requests[0]  # rowCount -1 is not shown as a number
+
+
+def test_candidates_keep_every_role_before_the_user_filters(tmp_path):
+    """#232: X-Facets of «Новые» count the candidates after the legal status but before the user filters and
+    the top-10 cut — choosing a role chip does not change the counts of the other chips."""
+    makers = ["7801000012", "7801000020", "7801000037", "7801000044"]
+    traders = ["7707049388", "7805336905"]
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("17.12", "78"),
+          rmsp.flatten("17.12", "78", "UL", _rows(makers, "17.12", "Производство бумаги и картона")))
+    c.put(rmsp.search_url("46.49.33", "78"),
+          rmsp.flatten("46.49.33", "78", "UL", _rows(traders, "46.49.33", "Торговля оптовая канцелярскими товарами")))
+    res = _run(c, _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"], filters={"kinds": "distributor"}))
+    assert sorted(m.counterparty.inn or "" for m in res.matches) == sorted(traders)
+    assert sorted(m.counterparty.inn or "" for m in res.candidates) == sorted(makers + traders)
+    assert sorted(m.counterparty.inn or "" for m in res.pool) == sorted(traders)  # pool: after the user filters
+    assert {m.counterparty.kind for m in res.candidates} == {"manufacturer", "distributor"}
 
 
 def test_second_wholesale_channel_gives_checked_distributors_only(tmp_path):
@@ -621,6 +650,32 @@ def test_api_search_fills_the_discovered_block(api):
     only_lo = api.post("/api/search", json={"query_id": "q", "text": "бумага А4",
                                             "filters": {"region": "Ленинградская область"}}).json()
     assert only_lo["discovered"] == []
+
+
+def test_api_facets_of_the_new_block_count_the_candidates(api):
+    """#232: X-Facets «discovered» — from the discovery candidates, each group after the other groups' filters."""
+    import json as _json
+    q = {"query_id": "q", "text": "бумага А4"}
+    r = api.post("/api/search", json=q)
+    disc = _json.loads(r.headers["X-Facets"])["discovered"]
+    assert disc == {"kind": {"manufacturer": 0, "distributor": 1, "dealer": 0, "unknown": 0},
+                    "entity": {"ul": 1, "ip": 0, "unknown": 0},
+                    "near": {"worked": 1, "near": 1, "any": 1}}  # registry region 78 = the customer's region (#242)
+    makers = api.post("/api/search", json={**q, "filters": {"kinds": "manufacturer"}})
+    assert makers.json()["discovered"] == [] and makers.headers["X-Total-Discovered"] == "0"
+    # the role chips keep their counts; ЮЛ/ИП and «near» are counted among manufacturers — none here
+    assert _json.loads(makers.headers["X-Facets"])["discovered"] == {
+        "kind": disc["kind"], "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0, "any": 0}}
+    # «Может работать у заказчика» reaches the block through discover() as every user filter (#242): for a customer
+    # of the Leningrad region (INN 47) the company of the registry region 78 is a neighbour, not «worked»
+    lo = {**q, "customer_inn": "4703173460"}
+    near = api.post("/api/search", json={**lo, "filters": {"near_customer": "near"}})
+    assert near.headers["X-Total-Discovered"] == "1"
+    worked = api.post("/api/search", json={**lo, "filters": {"near_customer": "worked"}})
+    assert worked.json()["discovered"] == [] and worked.headers["X-Total-Discovered"] == "0"
+    assert _json.loads(worked.headers["X-Facets"])["discovered"] == {
+        "kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 0},
+        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 1, "any": 1}}
 
 
 def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):

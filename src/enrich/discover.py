@@ -43,7 +43,6 @@ from typing import Literal
 
 import duckdb
 import httpx
-import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.enrich import role
@@ -51,14 +50,13 @@ from src.enrich.enrich import MSP_CATEGORY, enrich, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.ingest.load import suppliers_path
 from src.match import search as search_mod
-from src.match.filters import REGION_CODE, apply_filters
+from src.match.filters import REGION_CODE, apply_filters, apply_legal
 from src.match.index import processed_dir
-from src.sources import pb_nalog, rmsp
+from src.sources import pb_nalog, rmsp, web_leads
 from src.sources.cache import CachedPage, SourceCache
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
-SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 
 MAX_SHOWN = 10  # companies in the block and INNs sent to enrichment per query
 MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wholesale codes × 2 regions
@@ -125,8 +123,12 @@ class Discovery:
     known: int = 0  # found in the registry but already present in organizers' data
     inactive: int = 0  # found but excluded from the registry
     pool: list[CounterpartyMatch] = field(default_factory=list)  # every candidate after filters, before top-10
+    # after the legal status, before the user filters and top-10: X-Facets of the block in /api/search (#232)
+    candidates: list[CounterpartyMatch] = field(default_factory=list)
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
+    leads: list[str] = field(default_factory=list)  # web leads (#108): what happened to them, one line
     notes: list[str] = field(default_factory=list)
+    source_failed: bool = False  # a registry request was refused or failed: the block may be incomplete (#287)
 
 
 def predicted_class_allowed() -> bool:
@@ -351,7 +353,7 @@ def with_card(cp: Counterparty, cache: SourceCache) -> tuple[Counterparty, bool]
 
 
 def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: bool, has_card: bool,
-                region: str, weights: dict[str, float]) -> list[ScoreComponent]:
+                region: str, weights: dict[str, float], region_note: str | None = None) -> list[ScoreComponent]:
     okved, okved_name = row["okved1"], row.get("okved1name", "")
     head = f"Основной ОКВЭД {okved}" + (f" «{okved_name}»" if okved_name else "")
     # A predicted class is never presented as the class of the query (#63: the prediction can be wrong).
@@ -378,6 +380,8 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
         geo, geo_why = NEIGHBOUR_VALUE, f"Реестр МСП: соседний регион — {where}"
     else:
         geo, geo_why = 0.0, f"Реестр МСП: {where}; регион запроса — {region}"
+    if region_note:  # the comparison is with the customer's region, say so
+        geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {region_note}"
 
     parts: dict[str, tuple[float, float, str]] = {
         "product_fit": (FIT[ch.relation], weights.get("product_fit", 0.0), fit_why),
@@ -402,6 +406,81 @@ def _mix(ranked: list[CounterpartyMatch], relation: dict[str, Relation]) -> list
             if q and len(picked) < MAX_SHOWN:
                 picked.append(q.pop(0))
     return sorted(picked, key=lambda m: (-m.score, m.counterparty.inn or "~"))
+
+
+def leads_enabled() -> bool:
+    return os.environ.get("DISCOVERY_LEADS", "1") != "0"
+
+
+def lead_matches(
+    query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], cache: SourceCache,
+    weights: dict[str, float], predicted: bool, processed: Path, region: str, region_note: str | None,
+) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
+    """Web leads of the query's classes (#108, src/sources/web_leads.py): companies outside the МСП registry.
+
+    A lead is shown only when (1) it is absent from organizers' data before `as_of`, (2) its ФНС card (or the
+    fallback registry answer) is in the cache — every shown fact comes from there with its Evidence, nothing
+    from the search result — (3) the main OKVED of that card is the class or its wholesale code and (4) the
+    region by KPP (or the registry) is the query's region or its neighbour, and the INN type is one of
+    DISCOVERY_NP_TYPES — the same rules as the registry channel, so product_fit keeps its steps (D-036).
+    Returns the matches, their relation, the new INNs without a cached card (for the queue) and one line
+    for `Discovery.leads`.
+    """
+    leads = web_leads.for_classes(list(classes), web_leads.load())
+    for inn in skip:  # already found in the МСП registry: one row per company
+        leads.pop(inn, None)
+    if not leads:
+        return [], {}, [], None
+    known = known_inns(list(leads), query.as_of, processed) or set()
+    plan = okved_plan(codes)
+    regions = _regions(query)
+    np_types = _np_types()
+    out: list[CounterpartyMatch] = []
+    relation: dict[str, Relation] = {}
+    no_card: list[str] = []
+    other_okved = other_region = no_region = other_type = 0
+    for inn, lead in leads.items():
+        if inn in known:
+            continue
+        if ("UL" if len(inn) == 10 else "IP") not in np_types:
+            other_type += 1
+            continue
+        try:
+            cp = enrich(inn, cache, offline=True, open_data=False)  # pipeline.verified() adds the ФНС facts
+        except KeyError:  # nothing cached for this INN
+            no_card.append(inn)
+            continue
+        code = cp.okved[0] if cp.okved else ""
+        ch = next((c for c in plan if c.okpd_class == lead.okpd2_class and code.startswith(c.okved)), None)
+        if ch is None:  # the registry does not confirm the category the search found it for
+            other_okved += 1
+            continue
+        regioncode = cp.kpp[:2] if cp.kpp else REGION_CODE.get(cp.region or "", "")
+        if not regioncode or regioncode == "99":  # ГИР БО without KPP; KPP 99 of the largest taxpayers
+            no_region += 1
+            continue
+        if regioncode not in regions:
+            other_region += 1
+            continue
+        # the OKVED name only from a fact «Основной ОКВЭД <code> — <name>» (ГИР БО gives the code alone)
+        okved_name = next((e.value for e in cp.evidence if e.field == "okved" and e.value
+                           and e.fact.startswith(f"Основной ОКВЭД {code} — ")), "")
+        row = {"okved1": code, "okved1name": okved_name, "regioncode": regioncode}
+        comps = []
+        for c in _components(cp, row, ch, predicted, True, region, weights, region_note):
+            why = c.explanation
+            if c.name == "product_fit":
+                why = f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: {why}"
+            elif c.name == "geography" and cp.kpp:
+                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)")
+            comps.append(c.model_copy(update={"explanation": why}))
+        relation[inn] = ch.relation
+        out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
+                                     score=round(sum(c.value * c.weight for c in comps), 4)))
+    line = (f"веб-лиды: по классу {len(leads)}, уже в данных {len(known)}, без карточки ФНС в кеше {len(no_card)}, "
+            f"тип ИНН не из DISCOVERY_NP_TYPES {other_type}, ОКВЭД не подтвердил класс {other_okved}, "
+            f"другой регион {other_region}, регион не установлен {no_region}, в блок {len(out)}")
+    return out, relation, no_card, line
 
 
 def _regions(query: Query) -> list[str]:
@@ -432,7 +511,7 @@ def discover(
     processed = processed or processed_dir()
     offline = offline_mode() if offline is None else offline
     if weights is None:
-        weights = yaml.safe_load(SEARCH_CONFIG.read_text(encoding="utf-8"))["weights"]
+        weights = search_mod.load_config()["weights"]  # validated, as search() reads it (#220 №7)
     assert weights is not None
     res = Discovery()
 
@@ -460,6 +539,7 @@ def discover(
         url = rmsp.search_url(ch.okved, region, np_type)
         # no time left before the deadline → the client raises Paused without a request
         live = not offline and net_ok and cache.get(url) is None and not rmsp.blocked()
+        paused_source = not offline and rmsp.blocked()  # the source is resting after a failure (#287)
         try:
             page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live, deadline=deadline)
         except rmsp.Paused:  # no request was made: pause of the source or no time left
@@ -469,14 +549,17 @@ def discover(
             log.error("discovery: %s", e)
             res.requests.append(f"{label}: источник отказал — остановлено")
             res.notes.append(str(e))
+            res.source_failed = True
             continue
         except (httpx.HTTPError, ValueError) as e:
             net_ok = False
             log.warning("discovery: %s: %s", label, e)
             res.requests.append(f"{label}: источник не ответил ({type(e).__name__})")
+            res.source_failed = True
             continue
         if page is None:
             res.requests.append(f"{label}: нет в кеше, в сеть не ходили")
+            res.source_failed = res.source_failed or paused_source  # not asked because the source failed before
             continue
         if live and cache.get(url) is None:  # the request failed and an outdated answer was used
             net_ok, live = False, False
@@ -500,6 +583,7 @@ def discover(
     matches: list[CounterpartyMatch] = []
     relation: dict[str, Relation] = {}
     no_card: set[str] = set()
+    target, target_note = search_mod.customer_region(query)  # «География» against the customer's region (#218)
     for inn, (row, ch, page) in found.items():
         if known and inn in known:
             continue
@@ -507,9 +591,23 @@ def discover(
         if not has_card:
             no_card.add(inn)
         relation[inn] = ch.relation
-        comps = _components(cp, row, ch, res.predicted, has_card, query.region, weights)
+        comps = _components(cp, row, ch, res.predicted, has_card, target, weights, target_note)
         matches.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                          score=round(sum(c.value * c.weight for c in comps), 4)))
+    lead_no_card: list[str] = []
+    if res.history_checked and leads_enabled():  # web leads (#108): «новые» only after the history check
+        try:
+            found_leads, lead_relation, lead_no_card, line = lead_matches(
+                query, codes, res.okpd_classes, set(found), cache, weights, res.predicted, processed, target,
+                target_note)
+        except Exception:  # noqa: BLE001 — a broken leads file never takes the registry channel down
+            log.exception("discovery: веб-лиды пропущены из-за ошибки")
+            found_leads, lead_relation, line = [], {}, None
+        matches.extend(found_leads)
+        relation.update(lead_relation)
+        if line:
+            res.leads.append(line)
+    res.candidates = sorted(apply_legal(matches), key=lambda m: (-m.score, m.counterparty.inn or "~"))
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
     matches.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
     res.pool = matches
@@ -518,6 +616,12 @@ def discover(
         for m in res.matches:
             if m.counterparty.inn in no_card:
                 enqueue(m.counterparty.inn)
+        for inn in lead_no_card[:MAX_SHOWN]:  # a lead is shown only with a card: get it for the next search
+            try:
+                enqueue(inn)
+            except Exception:  # noqa: BLE001 — a dead queue does not empty the block
+                log.exception("discovery: лид %s не поставлен в очередь", inn)
+                break
     return res
 
 
@@ -527,6 +631,8 @@ def _report(query: Query, res: Discovery, cache: SourceCache) -> None:
           f"{' (определён автоматически search() по похожим закупкам)' if res.predicted else ''}")
     for line in res.requests:
         print(f"  rmsp: {line}")
+    for line in res.leads:
+        print(f"  {line}")
     for note in res.notes:
         print(f"  ! {note}")
     verified = 0

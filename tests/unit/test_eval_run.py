@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -59,8 +60,9 @@ def test_experiment_overrides_are_merged_over_search_config(tmp_path, monkeypatc
     monkeypatch.setattr(R, "EXPERIMENTS_CONFIG", exp)
     product = R.load_method_config("no-such-experiment")
     cfg = R.load_method_config("X-1")
-    assert cfg["signals"]["incumbent"] == 0.3 and cfg["options"] == {"tie_break": "bm25"} and cfg["k"] == 10
-    assert cfg["weights"] == product["weights"] and "options" not in product
+    assert cfg["signals"]["incumbent"] == 0.3 and cfg["k"] == 10
+    assert cfg["options"] == {**product.get("options", {}), "tie_break": "bm25"}  # merged one level deep
+    assert cfg["weights"] == product["weights"]
     # the same overrides under another id (H-15f-real); an unknown id is an error, not the product config
     assert R.load_method_config("X-1-real", config_of="X-1") == cfg
     assert R.load_method_config("X-1-real") == product
@@ -91,3 +93,46 @@ def test_repository_experiments_are_valid_configs():
         cfg = S.check_config(R.load_method_config(exp))
         signal_shares(cfg)
         assert "method" not in cfg
+
+
+@pytest.mark.parametrize(("exp", "result"), [
+    ("v1", "E-002"), ("H-15a-03", "H-15a-03"), ("H-15a-06", "H-15a-06"), ("H-15b", "H-15b"), ("H-15c", "H-15c"),
+    ("H-15d-tie", "H-15d-tie"), ("H-15e", "H-15e"), ("H-15f", "H-15f"), ("H-15g", "H-15g"), ("H-15f-geo", "H-15f-geo"),
+    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"), ("v2", "v2"), ("R-198-gbm", "R-198-gbm"),
+    ("S-282-spell", "S-282-on-dev"), ("S-282-nospell", "S-282-off-dev"),
+])
+def test_experiment_entries_reproduce_recorded_configs(exp, result):
+    """The product default moved to H-15f (#174): every entry of configs/experiments.yaml still gives the
+    effective configuration stored in its result file, so `make eval EXP=<id>` reproduces the slide numbers."""
+    rec = json.loads((R.RESULTS / f"{result}.json").read_text(encoding="utf-8"))["config"]
+    cfg = R.load_method_config(exp)
+    assert cfg["weights"] == rec["weights"]
+    assert search_mod.scoring_options(cfg) == search_mod.scoring_options(rec)
+    from src.match.signals import signal_shares
+    assert signal_shares(cfg) == signal_shares(rec)
+    assert (cfg["retriever"], cfg["k"]) == (rec["retriever"], rec["k"])
+    from src.match import ranker
+    assert ranker.spec(cfg) == ranker.spec(rec)  # the default has the ranker on (#198): older entries turn it off
+    assert cfg.get("spell", False) == rec.get("spell", False)  # the speller is on (#282): older entries turn it off
+
+
+def test_saturation_summary_counts_distinct_scores():
+    from src.eval.saturation import summarize
+
+    rec = summarize([[1.0] * 10, [1.0, 0.9, 0.9, 0.5], [0.7, 0.6, 0.5, 0.4, 0.3], []])
+    assert rec == {"cases": 3, "distinct_scores_mean": 3.0, "share_le_3_distinct": 0.667, "share_all_equal": 0.333,
+                   "share_first_at_max": 0.667}
+    assert summarize([[1.0, 0.5, 0.4]], k=1)["distinct_scores_mean"] == 1.0  # only the top-k is looked at
+    assert summarize([])["cases"] == 0
+    # the screen shows two decimals: scores that differ in the API can be equal there
+    near = [[0.9996, 0.9973, 0.9849, 0.9835, 0.9628]]
+    assert summarize(near)["distinct_scores_mean"] == 5.0 and summarize(near)["share_first_at_max"] == 1.0
+    assert summarize(near, decimals=2)["distinct_scores_mean"] == 3.0  # 1.00, 1.00, 0.98, 0.98, 0.96
+
+
+def test_drop_okpd2_keeps_text_and_everything_else():
+    c = case("бумага офисная", ["7801000012"])
+    c = c.model_copy(update={"query": c.query.model_copy(update={"okpd2": ["17.12.14.110", "17.12"]})})
+    (got,) = R.drop_okpd2([c])
+    assert got.query.okpd2 == [] and got.query.text == c.query.text and got.relevant_inns == c.relevant_inns
+    assert c.query.okpd2 == ["17.12.14.110", "17.12"]  # the input is not mutated

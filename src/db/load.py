@@ -3,7 +3,7 @@
     DATABASE_URL=postgresql://app:app@127.0.0.1:5432/app uv run python -m src.db.load   # make db-load
 
 Tables of data/processed are copied as is into schema `data_new`, indexed for the server-side
-filters and pagination (D-024) and extended with `supplier_items` derived from them (D-073, the read path of
+filters and pagination (D-024) and extended with `supplier_items` derived from them (D-135, the read path of
 `class_history`); row counts are checked against the parquet files, then one transaction replaces schema `data`
 with `data_new`. A rerun is idempotent and readers never see a half-loaded schema. Nothing outside `data` may
 reference it: the swap drops it with CASCADE.
@@ -41,7 +41,7 @@ INDEXES = [
 ]
 
 # (supplier, lot, OKPD2 code) of every participation, physically ordered by supplier: PgStore.class_history reads the
-# candidates' own rows instead of joining each of their lots to `items` (D-073). A lot with several positions of one
+# candidates' own rows instead of joining each of their lots to `items` (D-135). A lot with several positions of one
 # code is one row, so the class counts stay per lot.
 SUPPLIER_ITEMS = """
 CREATE TABLE {new}.supplier_items AS
@@ -66,6 +66,8 @@ def _tables(processed: Path, manifest: dict) -> dict[str, Path]:
     tables = {t: processed / f"{t}.parquet" for t in TABLES}
     if cutoff := manifest.get("cutoff"):
         tables[f"suppliers_{cutoff.replace('-', '_')}"] = processed / f"suppliers_{cutoff}.parquet"
+    if (okpd2 := processed / "okpd2.parquet").exists():  # OKPD2 code → name (#154), make okpd2
+        tables["okpd2"] = okpd2
     return tables
 
 

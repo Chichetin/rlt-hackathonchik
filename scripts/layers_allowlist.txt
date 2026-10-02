@@ -1,0 +1,31 @@
+# Импорты вверх по слоям, которые уже были в src/ на момент появления `make layers` (#288, D-106).
+# Формат: `src.модуль -> src.модуль  # почему и как убрать`. Новое нарушение — ошибка `make layers`.
+# Строку без живого нарушения можно удалять (она тогда устарела — предупреждение); пока нарушение живо,
+# удаление строки делает `make layers` красным.
+# Ограничение: ребро задано парой модулей — новый импорт по уже допущенной паре проходит молча
+# (растёт только число допущенных нарушений в выводе `make layers`).
+# Схема слоёв — scripts/check_layers.py (LAYERS) и docs/project-structure.md, «Правила импортов».
+# Устранение — #294; список печатает `python scripts/check_layers.py --all`.
+
+# Ядро знает про инструмент (eval): печать holdout и конфиг разбиения нужны данным — split_config() вниз.
+src.ingest.build -> src.eval.split      # L1 -> инструмент; split_config()
+src.match.index -> src.eval.split       # L2 -> инструмент; ленивый, в main() сборки индексов
+
+# Нижний слой тянет верхний: роль по ОКВЭД и MSP_CATEGORY лежат в enrich, а нужны источникам и пулу.
+src.db.pool -> src.enrich.role          # L1 -> L3; role.py — чистая функция над contracts, уедет вниз
+src.sources.msp_dump -> src.enrich.role         # L1 -> L3; то же
+src.sources.msp_dump -> src.enrich.enrich       # L1 -> L3; константа MSP_CATEGORY
+
+# web_leads — источник и одновременно оркестратор прогрева (--stats, --enrich): оркестрация должна жить в enrich.
+src.sources.web_leads -> src.enrich.discover    # L1 -> L3; ленивый, _new_inns (discover.py импортирует web_leads — цикл)
+src.sources.web_leads -> src.enrich.enrich      # L1 -> L3; ленивый, warm()
+src.sources.web_leads -> src.match.index        # L1 -> L2; ленивый, processed_dir()
+
+# Офлайн-источник ФНС сверяет факты своей CLI-командой `lookup` с проверкой Evidence (#59): check_evidence — вниз, в contracts.
+src.sources.fns_opendata -> src.enrich.evidence  # L1 -> L3; ленивый, только в main() (`lookup`)
+
+# Загрузчик данных читает через хранилище match: counterparties() должна опираться на parquet, а не на ParquetStore.
+src.ingest.load -> src.match.store      # L1 -> L2; ленивый, counterparties()
+
+# Разбор тестовой выгрузки берёт правило «извещение → Query» из API: _query() — вниз, в ingest или contracts.
+src.ingest.testset -> src.api.lots      # L1 -> L5; ленивый, load_testset() (api.lots импортирует testset — цикл)

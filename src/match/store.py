@@ -54,6 +54,10 @@ class LotHits:
         order = np.lexsort((self.lot_id, -self.score))[:n]
         return [(int(self.lot_id[i]), float(self.score[i])) for i in order]
 
+    def without(self, lot_id: int) -> LotHits:
+        keep = self.lot_id != lot_id
+        return LotHits(self.lot_id[keep], self.score[keep], self.doc_id[keep])
+
 
 class Store(Protocol):
     name: str
@@ -67,7 +71,8 @@ class Store(Protocol):
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]: ...
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]: ...
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
-    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]: ...
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
+                        exclude_lot: int = -1) -> list[tuple]: ...
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
     def lot_names(self, lot_id: int) -> list[str]: ...
@@ -163,7 +168,7 @@ SELECT agg.supplier_inn, agg.lvl, code.okpd2_code, agg.class_lots, agg.class_win
 FROM agg JOIN code USING (supplier_inn)
 """
 
-# The same answer for Postgres from `supplier_items` (src/db/load.py, D-073): the candidates' own (lot, code) rows, no
+# The same answer for Postgres from `supplier_items` (src/db/load.py, D-135): the candidates' own (lot, code) rows, no
 # join of every lot of every candidate to `items`. Per lot: the deepest level, `<level><best code>` (bytewise max = the
 # deepest level, then the greatest code; NULL codes are skipped as NULLS LAST did) and whether a participant won;
 # then per supplier: the deepest level and its code, lots and wins in the group (level >= 2). Suppliers without
@@ -212,6 +217,7 @@ ORDER BY s.inn{c}
 _OKPD2_SUPPLIERS = """
 WITH m AS (
     SELECT DISTINCT lot_id, product_name FROM {t[items]} WHERE {col} IN (SELECT unnest(%(codes)s{text_arr}))
+      AND lot_id <> %(exclude)s  -- the notice the query was built from (#249, F-13); -1 — none
 ),
 j AS (
     SELECT supplier_inn, lot_id, is_winner, publish_date FROM {t[participants]}
@@ -349,8 +355,10 @@ class ParquetStore:
                                  suppliers=self._suppliers(as_of))
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
-    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]:
-        return self._fetch(_okpd2_sql(level), {"codes": codes, "as_of": as_of, "limit": limit}, as_of=as_of)[1]
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
+                        exclude_lot: int = -1) -> list[tuple]:
+        params = {"codes": codes, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
+        return self._fetch(_okpd2_sql(level), params, as_of=as_of)[1]
 
     def lot(self, ident: str) -> tuple | None:
         rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})[1]
@@ -454,13 +462,13 @@ class PgStore:
         return self._fetch(_TEXT_CODES, {"as_of": as_of}, as_of=as_of)[1]
 
     def _has_supplier_items(self) -> bool:
-        """`supplier_items` exists (a schema loaded before D-073 has none); checked at most once per MANIFEST_TTL_S."""
+        """`supplier_items` exists (a schema loaded before D-135 has none); checked at most once per MANIFEST_TTL_S."""
         if self._precomputed and self._precomputed[1] > time.monotonic():
             return self._precomputed[0]
         ok = self._fetch("SELECT to_regclass(%(t)s) IS NOT NULL", {"t": f"{self.schema}.supplier_items"})[1][0][0]
         if not ok:
             log.warning("Postgres: нет %s.supplier_items — class_history читает items, в несколько раз медленнее; "
-                        "`make db-load` (D-073)", self.schema)
+                        "`make db-load` (D-135)", self.schema)
         self._precomputed = (ok, time.monotonic() + MANIFEST_TTL_S)
         return ok
 
@@ -482,8 +490,10 @@ class PgStore:
         cols, rows = self._fetch(_SUPPLIERS, {"inns": inns, "as_of": as_of}, as_of=as_of, suppliers=table)
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
-    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int) -> list[tuple]:
-        return self._fetch(_okpd2_sql(level), {"codes": codes, "as_of": as_of, "limit": limit}, as_of=as_of)[1]
+    def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
+                        exclude_lot: int = -1) -> list[tuple]:
+        params = {"codes": codes, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
+        return self._fetch(_okpd2_sql(level), params, as_of=as_of)[1]
 
     def lot(self, ident: str) -> tuple | None:
         _, rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})
