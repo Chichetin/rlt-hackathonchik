@@ -17,7 +17,8 @@ download per run of `scripts/gisp_download.mjs`, not a crawl; then everything is
 
 `build` keeps every row of the export (`inn_valid` marks a bad checksum, such rows are never returned) in
 `<GISP_DIR>/products.parquet` and the export stamp («Время выгрузки»), the download time and the URL in
-`meta.json` of `DIR` = data/external/gisp (not in git; a symlink to a larger disk is fine). No environment
+`meta.json` of `gisp_dir()` = <DATA_PROCESSED_DIR>/../external/gisp, by default data/external/gisp (not in git;
+a symlink to a larger disk is fine; `DIR` overrides it in tests). No environment
 variable: the environment is read only in src/settings.py (#290); `--out` / `--dir` of the CLI, `DIR` in tests.
 
 Facts: a product record becomes a cached page (`page_url(inn, reg_number)`, the registry URL with `#inn=…&reg=…`,
@@ -375,9 +376,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="command", required=True)
     b = sub.add_parser("build", help="XLSX выгрузки → products.parquet + meta.json")
     b.add_argument("xlsx", type=Path)
-    b.add_argument("--out", type=Path, default=None, help="каталог (по умолчанию data/external/gisp)")
+    b.add_argument("--out", type=Path, default=None, help="каталог (по умолчанию <DATA_PROCESSED_DIR>/../external/gisp)")
     st = sub.add_parser("stats", help="сколько продукции и компаний в выгрузке")
-    st.add_argument("--dir", type=Path, default=None, help="каталог (по умолчанию data/external/gisp)")
+    st.add_argument("--dir", type=Path, default=None, help="каталог (по умолчанию <DATA_PROCESSED_DIR>/../external/gisp)")
     args = ap.parse_args(argv)
     if args.command == "build":
         if not args.xlsx.is_file():

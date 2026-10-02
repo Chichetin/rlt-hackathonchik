@@ -7,7 +7,7 @@
 #   bash scripts/data.sh cache        # the snapshot of the source cache (names, roles, «Новые» of the demo lots);
 #                                     # NOT part of `all`: it is a cache, not data. An existing local cache
 #                                     # is merged (INSERT OR IGNORE by key: its newer rows stay); CACHE_FORCE=1 replaces it
-#   bash scripts/data.sh gisp         # the GISP register (D-153) into data/external/gisp (the assets gisp-products.parquet
+#   bash scripts/data.sh gisp         # the GISP register (D-153) into <processed>/../external/gisp (the assets gisp-products.parquet
 #                                     # and gisp-meta.json of `python -m src.sources.gisp build`); NOT part of `all` either
 #
 # The data never goes to git (.gitignore, check-data-files.sh); the release assets are the storage.
