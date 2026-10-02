@@ -45,12 +45,12 @@ from typing import Literal
 
 from src.contracts import Counterparty, CounterpartyMatch, Query
 from src.match.purchase_type import Near, default_near, purchase_type
+from src.regions import NEIGHBOUR, REGION_CODE
 
 # Stems of a stopped entity in an ЕГРЮЛ/ЕГРИП or ГИР БО status: «прекращена» and «прекратило деятельность»
 # differ in the stem; «недействующее ЮЛ» and «исключено из ЕГРЮЛ» are the tax office striking it off. «Принято
 # решение о предстоящем исключении» is dropped too: the entity still exists, but the tax office considers it abandoned.
 _DEAD = ("ликвид", "банкрот", "прекращ", "прекрат", "недейств", "исключ")
-REGION_CODE = {"Санкт-Петербург": "78", "Ленинградская область": "47"}
 KINDS = ("manufacturer", "distributor", "dealer", "unknown")
 Entity = Literal["ul", "ip"]
 ENTITY_TYPE: dict[str, Entity] = {"ЮЛ": "ul", "ИП": "ip"}  # stats.entity_type of src/ingest/build.py
@@ -140,7 +140,7 @@ def near_of(query: Query, uf: UserFilters | None = None) -> NearCustomer:
     ValueError: "worked" / "near" chosen while the customer's region has no code (nothing to compare with — an
     empty list would look like «nobody nearby»).
     """
-    from src.match.search import NEIGHBOUR, customer_region  # search imports this module: not at the top
+    from src.match.search import customer_region  # search imports this module: not at the top
 
     region, _ = customer_region(query)
     code = REGION_CODE.get(region)
