@@ -196,3 +196,28 @@ def test_formula_like_texts_are_escaped_in_the_file(search_data, tmp_path):
     stats = P.run(d, out, top=2, offline=True)
     assert stats["skipped"] == 6  # resume recognizes an escaped lot_id: no duplicate rows
     assert len(_rows(out)) == len(rows)
+
+
+def test_predict_uses_the_search_pipeline_hard_filters_and_evidence_check(search_data, tmp_path, monkeypatch):
+    """#220, D-097: predict drops a supplier liquidated by its cached ФНС card and passes the Evidence check."""
+    from src.contracts import Counterparty
+    from src.match import pipeline
+
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources.sqlite"))
+    first = tmp_path / "first.csv"
+    P.run(FIX, first, top=5, offline=True)
+    top = next(r["inn"] for r in _rows(first) if r["lot_id"] == "9001" and r["block"] == "История" and r["inn"])
+
+    def cached(inn, cache=None, offline=False, open_data=True):
+        if inn != top:
+            raise KeyError(inn)
+        return Counterparty(inn=inn, name="ООО Тест", status="Организация ликвидирована")
+
+    checked: list[int] = []
+    real_verified = pipeline.verified
+    monkeypatch.setattr(pipeline.enrich_mod, "enrich", cached)
+    monkeypatch.setattr(pipeline, "verified", lambda ms: checked.append(len(ms)) or real_verified(ms))
+    second = tmp_path / "second.csv"
+    P.run(FIX, second, top=5, offline=True)
+    assert top not in {r["inn"] for r in _rows(second) if r["lot_id"] == "9001"}
+    assert len(checked) == 3  # one Evidence check per lot

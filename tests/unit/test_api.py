@@ -1,6 +1,7 @@
 """API: the contract the UI and the e2e demo are built against; search on the ingest fixture."""
 
 import io
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -65,6 +66,15 @@ def test_search_rejects_client_as_of_without_building_an_index(search_client, se
     built = Path(os.environ["INDEX_DIR"])
     assert not built.exists() or not any(built.iterdir())  # nothing was built for the client's date
 
+
+
+def test_search_from_a_notice_says_the_notice_is_left_out(search_client):
+    """#249, F-13: the UI explains why the loaded notice is not among its own results (X-Excluded-Lot)."""
+    r = search_client.post("/api/search", json={"query_id": "lot-6", "text": "Бумага офисная А4"})
+    assert r.status_code == 200 and r.headers["X-Excluded-Lot"] == "6"
+    assert all(e["url"] != "data:items#6" for m in r.json()["history"] for e in m["counterparty"]["evidence"])
+    free = search_client.post("/api/search", json={"query_id": "ui-1", "text": "Бумага офисная А4"})
+    assert "X-Excluded-Lot" not in free.headers
 
 def test_search_rejects_oversized_text(search_client):
     """Unbounded text held a worker: 1 MB — 18 s on the full data; the longest eval query is 4.5k chars (#145, F-02)."""
@@ -194,7 +204,8 @@ def test_search_strips_unverified_facts(client, monkeypatch, tmp_path):
     """A fabricated contact never reaches the card or the xlsx."""
     from src.match import search as search_mod
     monkeypatch.setattr(search_mod, "search", lambda q, k=20: [_fabricated("history"), _fabricated("discovered")])
-    monkeypatch.setattr(app_mod, "SourceCache", lambda: __import__("src.sources.cache", fromlist=["x"]).SourceCache(
+    from src.match import pipeline
+    monkeypatch.setattr(pipeline, "SourceCache", lambda: __import__("src.sources.cache", fromlist=["x"]).SourceCache(
         tmp_path / "c.sqlite"))
     body = client.post("/api/search", json={"query_id": "q", "text": "x"}).json()
     rows = body["history"] + body["discovered"]
@@ -307,7 +318,7 @@ ROLE_ROWS = [  # name, kind, inn (10 digits — ЮЛ, 12 — ИП), score, statu
     ("В РНП", "distributor", "4703173460", 0.85, None, True),
 ]
 ZERO = {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 0},
-        "entity": {"ul": 0, "ip": 0, "unknown": 0}}
+        "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 0, "any": 0}}
 
 
 def _role_rows() -> list[CounterpartyMatch]:
@@ -370,28 +381,37 @@ def test_search_min_score_on_fixture(search_client):
     assert got == [s for s in scores if s >= cut] and len(got) >= 3 and int(kept.headers["X-Total-History"]) == len(got)
 
 
-def test_search_facets_before_user_filters_after_legal_status(roles_client):
-    import json
+def test_search_facets_after_legal_status_each_group_after_the_other_groups(roles_client):
+    """Liquidated / RNP never counted; a group is counted after the filters of the other groups (review of #240)."""
     q = {"query_id": "q", "text": "x", "filters": {"kinds": "distributor"}}
     r = roles_client.post("/api/search?limit=1", json=q)
     raw = r.headers["X-Facets"]
     assert raw.isascii()
     assert json.loads(raw) == {
-        "history": {"kind": {"manufacturer": 1, "distributor": 1, "dealer": 1, "unknown": 2},
-                    "entity": {"ul": 2, "ip": 2, "unknown": 1}},
+        "history": {"kind": {"manufacturer": 1, "distributor": 1, "dealer": 1, "unknown": 2},  # kinds itself: off
+                    "entity": {"ul": 0, "ip": 1, "unknown": 0},  # among distributors: «Опт», ИП
+                    "near": {"worked": 1, "near": 1, "any": 1}},  # «Опт»: ИП, INN 78… (#242)
         "discovered": ZERO}
-    # facets do not depend on the filters, the page or the offset
-    other = roles_client.post("/api/search?limit=2&offset=1", json={"query_id": "q", "text": "x",
-                                                                     "filters": {"entity": "ul", "min_score": 0.8}})
-    assert json.loads(other.headers["X-Facets"]) == json.loads(raw)
+    # the page and the offset do not change the facets, nor does another choice in the same group
+    again = roles_client.post("/api/search?limit=2&offset=1", json=q)
+    assert json.loads(again.headers["X-Facets"]) == json.loads(raw)
+    makers = roles_client.post("/api/search", json={**q, "filters": {"kinds": "manufacturer,dealer"}})
+    assert json.loads(makers.headers["X-Facets"])["history"]["kind"] == json.loads(raw)["history"]["kind"]
+    other = roles_client.post("/api/search", json={"query_id": "q", "text": "x",
+                                                   "filters": {"entity": "ul", "min_score": 0.8}})
+    assert json.loads(other.headers["X-Facets"])["history"] == {
+        "kind": {"manufacturer": 1, "distributor": 0, "dealer": 0, "unknown": 0},  # ЮЛ with score ≥ 0.8: «Завод»
+        "entity": {"ul": 1, "ip": 0, "unknown": 0},  # score ≥ 0.8: «Завод» (ЮЛ)
+        "near": {"worked": 0, "near": 0, "any": 1}}  # «Завод»: ЮЛ without a KPP — region unknown
 
 
 def test_search_facets_on_fixture(search_client):
     import json
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага", "filters": {"entity": "ip"}})
     facets = json.loads(r.headers["X-Facets"])
-    assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 6},
-                                 "entity": {"ul": 4, "ip": 2, "unknown": 0}}
+    assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 2},  # ИП
+                                 "entity": {"ul": 4, "ip": 2, "unknown": 0},  # entity itself: off
+                                 "near": {"worked": 2, "near": 2, "any": 2}}  # the two ИП: INN 78… / 47…, customers 78
     assert r.headers["X-Total-History"] == "2"
 
 
@@ -411,7 +431,8 @@ def test_facets_of_new_are_capped_at_the_block_size(search_client, monkeypatch):
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
     assert json.loads(r.headers["X-Facets"])["discovered"] == {
         "kind": {"manufacturer": discover_mod.MAX_SHOWN, "distributor": 1, "dealer": 0, "unknown": 0},
-        "entity": {"ul": discover_mod.MAX_SHOWN, "ip": 0, "unknown": 0}}
+        "entity": {"ul": discover_mod.MAX_SHOWN, "ip": 0, "unknown": 0},
+        "near": {"worked": 0, "near": 0, "any": discover_mod.MAX_SHOWN}}  # no registry region, no KPP: not guessed
 
 
 def test_facets_of_new_without_history_check_are_zero(search_client, monkeypatch):
@@ -424,6 +445,82 @@ def test_facets_of_new_without_history_check_are_zero(search_client, monkeypatch
         matches=[m], candidates=[m], history_checked=False))
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
     assert r.json()["discovered"] == [] and json.loads(r.headers["X-Facets"])["discovered"] == ZERO
+
+
+def test_discovery_failure_is_a_header_and_history_survives(search_client, monkeypatch):
+    """#287: a broken open source is told to the user (X-Discovery-Error), not shown as «no new companies»."""
+    from src.enrich import discover as discover_mod
+
+    def broken(q, h, **k):
+        raise TimeoutError("/secret/path rmsp.nalog.ru: read timed out")
+
+    monkeypatch.setattr(discover_mod, "discover", broken)
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.status_code == 200 and r.json()["history"]  # the history block is untouched
+    assert r.json()["discovered"] == []
+    assert r.headers["X-Discovery-Error"] == "TimeoutError"  # the type only: no message, no path
+
+    class ОшибкаИсточника(RuntimeError):  # a non-ASCII type name must not make a latin-1 header fail (500)
+        pass
+
+    def broken_ru(q, h, **k):
+        raise ОшибкаИсточника()
+
+    monkeypatch.setattr(discover_mod, "discover", broken_ru)
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.status_code == 200 and r.headers["X-Discovery-Error"] == "Error"
+
+
+def test_registry_refusal_inside_discovery_is_a_header(search_client, monkeypatch):
+    """discover() catches a refused / failed registry request and goes on: still, the block may be incomplete."""
+    from src.enrich import discover as discover_mod
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        okpd_classes=["17.12"], history_checked=True, source_failed=True))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.headers["X-Discovery-Error"] == app_mod.SOURCE_UNAVAILABLE
+
+
+def test_discovery_without_history_check_is_a_header(search_client, monkeypatch):
+    from src.enrich import discover as discover_mod
+    m = CounterpartyMatch(counterparty=Counterparty(inn="7707049388", name="опт"), score=0.3, origin="discovered",
+                          components=[])
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        matches=[m], candidates=[m], okpd_classes=["17.12"], history_checked=False))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.json()["discovered"] == [] and r.headers["X-Discovery-Error"] == app_mod.HISTORY_UNCHECKED
+
+
+@pytest.mark.parametrize("found", [
+    {"okpd_classes": ["17.12"], "history_checked": True},  # the sources answered: the block is what they gave
+    {"okpd_classes": [], "history_checked": False},  # no OKPD2 class: nothing was searched, nothing failed
+])
+def test_no_discovery_header_when_nothing_failed(search_client, monkeypatch, found):
+    from src.enrich import discover as discover_mod
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(**found))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.status_code == 200 and "X-Discovery-Error" not in r.headers
+
+
+def test_corrected_query_is_a_header_and_as_typed_is_one_filter_away(search_client, monkeypatch, tmp_path):
+    """#282: the search tells which text it used after fixing layout / typos; filters.spell=off — as typed."""
+    from types import SimpleNamespace
+    from urllib.parse import unquote
+
+    from src.match import pipeline
+    from src.match import search as search_mod
+    from src.match.speller import Speller
+
+    real = search_mod.load_config
+    monkeypatch.setattr(search_mod, "load_config", lambda *a, **k: {**real(*a, **k), "spell": True})
+    monkeypatch.setattr(pipeline, "get_index", lambda store, as_of: SimpleNamespace(path=tmp_path))
+    monkeypatch.setattr(pipeline.speller, "for_index", lambda path: Speller({"бумага": 500}))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумвга"})
+    assert r.status_code == 200 and json.loads(unquote(r.headers["X-Query-Corrected"])) == [["бумвга", "бумага"]]
+    assert r.json()["query"]["text"] == "бумвга"  # the answer keeps the query as the user typed it
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумвга", "filters": {"spell": "off"}})
+    assert r.status_code == 200 and "X-Query-Corrected" not in r.headers
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert "X-Query-Corrected" not in r.headers  # nothing to fix — no header
 
 
 @pytest.mark.parametrize("filters", [{"kinds": "producer"}, {"entity": "fl"}, {"min_score": "high"}])
@@ -455,3 +552,129 @@ def test_export_takes_the_same_filters(roles_client):
     assert [r["Наименование"] for r in _xlsx(roles_client, entity="ip")] == ["Опт", "Ремонт"]
     assert [r["Наименование"] for r in _xlsx(roles_client, min_score=0.5)] == ["Завод", "Опт", "Дилер"]
     assert [r["Наименование"] for r in _xlsx(roles_client, only_manufacturers=True)] == ["Завод"]
+
+
+# --- #242: «Может работать у заказчика» (near_customer), X-Search-Context, X-Facets.near ---------------------------
+
+NEAR_API_ROWS = [  # name, inn, kpp, region (registry), customers_spb
+    ("СПб", "7801000012", "780101001", None, 2),
+    ("ЛО", "4701000038", "470101001", None, 0),
+    ("Москва, работал в СПб", "7707049388", "770701001", None, 5),
+    ("Москва", "7804428656", "770401001", None, 0),
+    ("ИП СПб", "780100000090", None, None, 1),
+    ("Регион неизвестен", None, None, None, None),
+]
+
+
+def _near_rows() -> list[CounterpartyMatch]:
+    return [CounterpartyMatch(
+        counterparty=Counterparty(inn=inn, name=name, kpp=kpp, region=region,
+                                  stats={} if spb is None else {"customers_spb": spb}),
+        score=0.5, origin="history",
+        components=[ScoreComponent(name="product_fit", value=0.5, weight=1, explanation="x")])
+        for name, inn, kpp, region, spb in NEAR_API_ROWS]
+
+
+@pytest.fixture
+def near_client(client, monkeypatch):
+    """The search answers NEAR_API_ROWS; stub path — no cache, no discovery: the filter and the headers under test."""
+    from src.match import search as search_mod
+    monkeypatch.setattr(search_mod, "IS_STUB", True)
+    monkeypatch.setattr(search_mod, "search", lambda q, k=20: _near_rows())
+    return client
+
+
+def _near_search(client, **q):
+    r = client.post("/api/search", json={"query_id": "q", "text": "x", **q})
+    assert r.status_code == 200, r.text
+    return r, [m["counterparty"]["name"] for m in r.json()["history"]]
+
+
+def test_search_near_customer_choices(near_client):
+    every = [n for n, *_ in NEAR_API_ROWS]
+    assert _near_search(near_client)[1] == every
+    assert _near_search(near_client, filters={"near_customer": "any"})[1] == every
+    assert _near_search(near_client, filters={"near_customer": "near"})[1] == ["СПб", "ЛО", "ИП СПб"]
+    assert _near_search(near_client, filters={"near_customer": "worked"})[1] == [
+        "СПб", "Москва, работал в СПб", "ИП СПб"]
+    # the customer of the Leningrad region (INN 47): «worked» is its own region only
+    lo = _near_search(near_client, customer_inn="4703173460", filters={"near_customer": "worked"})
+    assert lo[1] == ["ЛО"] and lo[0].headers["X-Total-History"] == "1"
+
+
+@pytest.mark.parametrize("okpd2, applied", [(["43.39.11.000"], "near"), (["17.12.14.110"], "any")])
+def test_search_near_customer_auto(near_client, okpd2, applied):
+    r, names = _near_search(near_client, okpd2=okpd2, filters={"near_customer": "auto"})
+    assert names == _near_search(near_client, okpd2=okpd2, filters={"near_customer": applied})[1]
+    assert json.loads(r.headers["X-Search-Context"])["applied_near"] == applied
+
+
+def test_search_context_header(near_client):
+    codes = ["81.21.10.000", "17.12.14.110", "81.22.11.000", "81.29.11.000", "81.10.10.000"]
+    r, _ = _near_search(near_client, okpd2=codes, customer_inn="7804105239", filters={"near_customer": "auto"})
+    raw = r.headers["X-Search-Context"]
+    assert raw.isascii() and ", " not in raw and '": ' not in raw  # compact
+    assert json.loads(raw) == {
+        "customer_region": "Санкт-Петербург", "customer_basis": "ИНН 78…",
+        "purchase_type": "services", "purchase_label": "услуга",
+        "type_basis": ["81.21.10.000", "81.22.11.000", "81.29.11.000"],
+        "default_near": "near", "applied_near": "near"}
+
+
+def test_search_context_without_customer_inn_or_okpd2(near_client):
+    r, _ = _near_search(near_client, region="Ленинградская область")
+    assert json.loads(r.headers["X-Search-Context"]) == {
+        "customer_region": "Ленинградская область", "customer_basis": "регион запроса",
+        "purchase_type": None, "purchase_label": None, "type_basis": [],
+        "default_near": "any", "applied_near": "any"}
+    # an INN of another region (77, a federal body) does not move the customer: the query region stays
+    r, _ = _near_search(near_client, customer_inn="7707049388", okpd2=["17.12.14.110"],
+                        filters={"near_customer": "worked"})
+    ctx = json.loads(r.headers["X-Search-Context"])
+    assert (ctx["customer_region"], ctx["customer_basis"]) == ("Санкт-Петербург", "регион запроса")
+    assert (ctx["purchase_type"], ctx["default_near"], ctx["applied_near"]) == ("goods", "any", "worked")
+
+
+def test_search_facets_near_after_the_other_filters(near_client):
+    r, _ = _near_search(near_client, filters={"near_customer": "near", "entity": "ip"})
+    facets = json.loads(r.headers["X-Facets"])
+    assert facets["history"] == {"kind": {"manufacturer": 0, "distributor": 0, "dealer": 0, "unknown": 1},
+                                 "entity": {"ul": 2, "ip": 1, "unknown": 0},  # near: СПб, ЛО, ИП СПб
+                                 "near": {"worked": 1, "near": 1, "any": 1}}  # ИП: «ИП СПб»
+    assert facets["discovered"]["near"] == {"worked": 0, "near": 0, "any": 0}
+    every = json.loads(_near_search(near_client)[0].headers["X-Facets"])["history"]["near"]
+    assert every == {"worked": 3, "near": 3, "any": len(NEAR_API_ROWS)}
+    lo = json.loads(_near_search(near_client, customer_inn="4703173460")[0].headers["X-Facets"])
+    assert lo["history"]["near"] == {"worked": 1, "near": 3, "any": len(NEAR_API_ROWS)}
+
+
+@pytest.mark.parametrize("q", [{"filters": {"near_customer": "close"}},
+                               {"region": "Москва", "filters": {"near_customer": "near"}}])
+def test_bad_near_customer_is_422(near_client, q):
+    for path in ("/api/search", "/api/export"):
+        r = near_client.post(path, json={"query_id": "q", "text": "x", **q})
+        assert r.status_code == 422 and "filters.near_customer" in r.json()["detail"]
+
+
+def test_export_takes_near_customer(near_client):
+    assert [r["Наименование"] for r in _xlsx(near_client, near_customer="near")] == ["СПб", "ЛО", "ИП СПб"]
+    r = near_client.post("/api/export", json={"query_id": "q", "text": "x", "okpd2": ["43.39.11.000"],
+                                              "filters": {"near_customer": "auto"}})
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [row[1] for row in ws.iter_rows(min_row=2, values_only=True)] == ["СПб", "ЛО", "ИП СПб"]
+
+
+def test_facets_near_of_new_count_the_candidates(search_client, monkeypatch):
+    from src.enrich import discover as discover_mod
+    pool = [CounterpartyMatch(counterparty=Counterparty(inn=i, name=i, kind="manufacturer", region=reg), score=0.4,
+                              origin="discovered", components=[])
+            for i, reg in (("7811777270", "Санкт-Петербург"), ("4703173460", "Ленинградская область"),
+                           ("7810400592", "регион 77"), ("7807032363", None))]
+    pool.append(CounterpartyMatch(  # liquidated: never counted, whatever discover() returns
+        counterparty=Counterparty(inn="7805772436", name="ликв", region="Санкт-Петербург",
+                                  status="В процессе ликвидации"), score=0.9, origin="discovered", components=[]))
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        matches=pool, candidates=pool, history_checked=True))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert json.loads(r.headers["X-Facets"])["discovered"]["near"] == {"worked": 1, "near": 2, "any": 4}

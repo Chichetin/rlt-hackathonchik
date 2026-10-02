@@ -98,7 +98,8 @@ def test_repository_experiments_are_valid_configs():
 @pytest.mark.parametrize(("exp", "result"), [
     ("v1", "E-002"), ("H-15a-03", "H-15a-03"), ("H-15a-06", "H-15a-06"), ("H-15b", "H-15b"), ("H-15c", "H-15c"),
     ("H-15d-tie", "H-15d-tie"), ("H-15e", "H-15e"), ("H-15f", "H-15f"), ("H-15g", "H-15g"), ("H-15f-geo", "H-15f-geo"),
-    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"),
+    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"), ("v2", "v2"), ("R-198-gbm", "R-198-gbm"),
+    ("S-282-spell", "S-282-on-dev"), ("S-282-nospell", "S-282-off-dev"),
 ])
 def test_experiment_entries_reproduce_recorded_configs(exp, result):
     """The product default moved to H-15f (#174): every entry of configs/experiments.yaml still gives the
@@ -110,6 +111,9 @@ def test_experiment_entries_reproduce_recorded_configs(exp, result):
     from src.match.signals import signal_shares
     assert signal_shares(cfg) == signal_shares(rec)
     assert (cfg["retriever"], cfg["k"]) == (rec["retriever"], rec["k"])
+    from src.match import ranker
+    assert ranker.spec(cfg) == ranker.spec(rec)  # the default has the ranker on (#198): older entries turn it off
+    assert cfg.get("spell", False) == rec.get("spell", False)  # the speller is on (#282): older entries turn it off
 
 
 def test_saturation_summary_counts_distinct_scores():

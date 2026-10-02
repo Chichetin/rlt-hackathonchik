@@ -23,8 +23,8 @@ test("меню сверху на телефоне; на подборе рёбр�
   await expect(page.locator(".wave-field-slats .micro-slats canvas")).toBeVisible();
   await expect(page.locator(".wave-patterns, .wave-control")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await nav.getByRole("link", { name: "Настройки" }).click();
-  await expect(page.getByRole("heading", { name: "Настройки подбора" })).toBeVisible();
+  await nav.getByRole("link", { name: "Фильтры" }).click();
+  await expect(page.getByRole("heading", { name: "Фильтры подбора" })).toBeVisible();
   await expect(page.locator(".wave-field-slats .micro-slats canvas")).toBeVisible();
 });
 
