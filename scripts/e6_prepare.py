@@ -20,10 +20,16 @@ def prepare(source: Path, output: Path, dates: list[date]) -> None:
     cutoff = date.fromisoformat(str(split_config()["cutoff"]))
     if source == output or any(day > cutoff for day in dates):
         raise ValueError("use a private output directory and dates no later than the dev cutoff")
+    # ParquetStore.manifest() requires the undated snapshot even when search uses a dated one.
+    core = ("notices.parquet", "participants.parquet", "items.parquet", "suppliers.parquet", "manifest.json")
+    if missing := [name for name in core if not (source / name).is_file()]:
+        raise FileNotFoundError(f"{source}: missing source files: {', '.join(missing)}")
     output.mkdir(parents=True, exist_ok=True)
-    for name in ("notices.parquet", "participants.parquet", "items.parquet", "manifest.json", "eval"):
+    # A transferred source may omit eval; preserve a private dev_full directory in that case.
+    links = (*core, "eval") if (source / "eval").is_dir() else core
+    for name in links:
         target = output / name
-        if not target.exists():
+        if not target.exists() and not target.is_symlink():
             target.symlink_to(source / name, target_is_directory=name == "eval")
         elif target.resolve() != (source / name).resolve():
             raise ValueError(f"{target}: already points to another dataset")
@@ -41,7 +47,9 @@ def prepare(source: Path, output: Path, dates: list[date]) -> None:
             path = temp.as_posix().replace("'", "''")
             con.execute(f"COPY suppliers TO '{path}' (FORMAT parquet)")
             temp.replace(target)  # replaces a private symlink itself, never its source
-            count, last_seen = con.execute("SELECT count(*), max(last_seen) FROM suppliers").fetchone()
+            stats = con.execute("SELECT count(*), max(last_seen) FROM suppliers").fetchone()
+            assert stats is not None  # an aggregate without GROUP BY always returns one row
+            count, last_seen = stats
             print(f"{target.name}: {count} suppliers, last participation {last_seen}")
 
 
