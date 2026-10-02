@@ -121,6 +121,22 @@ def test_lot_lookup_uploaded_then_test_dir_then_data(client, search_data, tmp_pa
     assert client.get("/api/lot/9001").status_code == 404
 
 
+def test_upload_several_files_of_one_kind_are_read_together(client, root):
+    notices_2 = _text(NOTICES).splitlines()[0] + "\n2026-01-18;904;9004;1000.00;;Мел;Поставка мела;false;\"7801000051\";\"780101001\";ЭМ\n"
+    items_2 = 'lot_id;product_name;okpd2_code\n9004;Мел;"08.11.12.110"\n'
+    files = [{"name": "Предзащита_Извещения_1.csv", "text": _text(NOTICES)},
+             {"name": "Предзащита_Извещения_2.csv", "text": notices_2},
+             {"name": "Предзащита_Потоварка_1.csv", "text": _text(ITEMS)},
+             {"name": "Предзащита_Потоварка_2.csv", "text": items_2}]
+    r = _upload(client, files)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["lots"] == 4 and [it["lot_id"] for it in body["items"]] == ["9001", "9002", "9003", "9004"]
+    assert body["items"][3]["okpd2"] == ["08.11.12.110"]
+    assert body["files"] == [f["name"] for f in files]
+    assert client.get("/api/procedure/904").status_code == 200
+
+
 def _cp1251_as_browser_text() -> str:
     # the UI reads a file with File.text(): bytes that are not UTF-8 become U+FFFD
     return "lot_id;subject\n1;Бумага\n".encode("cp1251").decode("utf-8", errors="replace")
@@ -132,8 +148,6 @@ def _cp1251_as_browser_text() -> str:
         ([{"name": "Лоты.csv", "text": "x"}], "Лоты.csv"),
         ([], "Извещения"),
         ([{"name": ITEMS, "text": _text(ITEMS)}], "Извещения"),
-        ([{"name": NOTICES, "text": _text(NOTICES)}, {"name": "Извещения_2.csv", "text": _text(NOTICES)}],
-         "несколько"),
         ([{"name": "Извещения.xlsx", "text": "PK\x03\x04"}], "CSV"),
         ([{"name": NOTICES, "text": "lot_id;name\n1;x\n"}], "Извещения_24-25.csv: нет колонок subject"),
         ([{"name": NOTICES, "text": "lot_id,subject\n1,x\n"}], "разделитель"),

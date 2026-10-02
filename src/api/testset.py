@@ -10,6 +10,7 @@
 
 By file name: `Извещения*.csv` -> Извещения.csv (required), `ТРУ*.csv` -> ТРУ.csv (optional),
 `Поставщики*.csv` is neither stored nor read (the answer must not come from it, D-065) — a warning.
+Several files of one kind are stored side by side (Извещения.csv, Извещения_2.csv, …) and read together (#647).
 Stored in TESTSETS_DIR (default cache/testsets, outside git) under sha256(content)[:12]; the active id
 is the `active` file there, so a restarted API (or another worker process) keeps it. `/api/lot/{ident}`
 looks here first (src/api/lots.py). Format errors are 422 with the TestDataError message, never a path.
@@ -157,8 +158,10 @@ def _sort(files: list[UploadedCsv]) -> tuple[dict[str, tuple[str, str]], list[st
         if not low.endswith(".csv"):
             raise HTTPException(422, f"{name}: нужен CSV («;», UTF-8; в Excel — «Сохранить как → CSV UTF-8»)")
         stored = f"{kind}.csv"
-        if stored in kept:
-            raise HTTPException(422, f"несколько файлов {kind}*.csv: {kept[stored][0]}, {name} — оставьте один")
+        n = 2
+        while stored in kept:  # several files of one kind are read together (#647): Извещения.csv, Извещения_2.csv, …
+            stored = f"{kind}_{n}.csv"
+            n += 1
         if "\ufffd" in f.text:  # File.text() in the browser turns bytes that are not UTF-8 into U+FFFD
             raise HTTPException(422, f"{name}: не UTF-8; пересохраните файл в UTF-8 (в Excel: «CSV UTF-8»)")
         kept[stored] = (name, f.text)
@@ -194,7 +197,7 @@ def _info(set_id: str, folder: Path, ts: TestSet) -> UploadedTestset:
     names: dict[str, str] = meta.get("names") or {p.name: p.name for p in sorted(folder.glob("*.csv"))
                                                   if not p.name.startswith("predict")}
     # dict: a template is one user's file behind both Извещения and ТРУ
-    files = list(dict.fromkeys(names[k] for k in (f"{NOTICES}.csv", f"{ITEMS}.csv") if k in names))
+    files = list(dict.fromkeys(v for kind in (NOTICES, ITEMS) for k, v in sorted(names.items()) if k.startswith(kind)))
     warnings = [*meta.get("warnings", []), *(_rename(w, names) for w in ts.warnings)]
     items = [UploadedLot(lot_id=lt.lot_id, reqnum=lt.reqnum, procedure_id=lt.procedure_id, text=lt.query.text,
                          okpd2=list(lt.query.okpd2), notes=list(lt.notes)) for lt in ts.lots]
