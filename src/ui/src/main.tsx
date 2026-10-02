@@ -12,6 +12,11 @@ import "./supplier-results.css";
 import "./work-glass.css";
 import "./work-typography.css";
 import "./results-reader.css";
+import "./light-theme.generated.css";
+import "./light-theme.css";
+import { initTheme } from "./theme";
+
+initTheme();
 
 if (STATIC_DEMO) installStaticApi(); // the static stand without the API (#283)
 

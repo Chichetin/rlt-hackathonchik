@@ -2,6 +2,7 @@ import { type AnchorHTMLAttributes, type ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { WarmHints } from "./Micro";
 import { glide } from "./Motion";
+import { ThemeToggle } from "./theme";
 
 type Link = (to: string) => AnchorHTMLAttributes<HTMLAnchorElement>;
 const pages = [
@@ -35,6 +36,7 @@ export function GlassHeader({ path, link, mark }: { path: string; link: Link; ma
           <span className="nav-icon"><NavIcon icon={icon} /></span><span className="nav-label">{label}</span>
         </a>)}
       </nav></WarmHints>
+      <ThemeToggle />
     </div>
   </header>;
 }
