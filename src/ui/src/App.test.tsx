@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { App, discoveryAlert, noteText } from "./App";
 import { reviewLinks } from "./reviews";
 import { buildQuery, type Counterparty, type Filters, filterNotes, NO_FILTERS, regionLabel, rnpLabel, type SearchResponse } from "./api";
@@ -184,6 +184,28 @@ test("lot number fills the query from the notice", async () => {
   expect(screen.getByText(/ОКПД2: 17.12/)).toBeInTheDocument();
 });
 
+test("procedure number under the OKPD2 field opens its notice and searches (#617)", async () => {
+  const lotQuery = { query_id: "lot-9", text: "Бумага из процедуры", okpd2: ["17.12"], budget: 1000, customer_inn: "7804105239", channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).startsWith("/api/procedure/") ? lotQuery : response), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Номер процедуры"), "1841706");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  expect(await screen.findByDisplayValue("Бумага из процедуры")).toBeInTheDocument();
+  const urls = fetchMock.mock.calls.map(([u]) => String(u));
+  expect(urls).toContain("/api/procedure/1841706");
+  await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).startsWith("/api/search"))).toBe(true));
+  const [, init] = fetchMock.mock.calls.find(([u]) => String(u).startsWith("/api/search"))!;
+  expect(JSON.parse(String(init?.body))).toMatchObject({ query_id: "lot-9", text: "Бумага из процедуры", okpd2: ["17.12"], budget: 1000 });
+});
+
+test("unknown procedure number says so", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ detail: "нет" }), { status: 404 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Номер процедуры"), "42");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Процедура с таким номером не найдена");
+});
+
 test("lot 503 says data is not connected and falls back to free text", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ detail: "нет данных" }), { status: 503 }));
   window.history.replaceState(null, "", "/search?lot=9");
@@ -308,6 +330,10 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
 });
 
 test("history is paged on the server: total from the header, «Показать ещё» appends the next page", async () => {
+  // the end of the list never reaches the screen here: only the button loads more (#615 loads on scroll)
+  const seen = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } } as unknown as typeof IntersectionObserver;
+  onTestFinished(() => { globalThis.IntersectionObserver = seen; });
   const page = (names: string[]) => ({ ...structuredClone(response), stub: false, discovered: [], history: names.map((n) => match(n, "history")) });
   const urls: string[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
@@ -325,9 +351,25 @@ test("history is paged on the server: total from the header, «Показать 
   expect(searches()[0]).toBe("/api/search?limit=10&offset=0");
   await userEvent.click(within(history).getByRole("button", { name: "Показать ещё" }));
   expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
-  expect(searches()[1]).toBe("/api/search?limit=10&offset=2");
+  expect(searches()[1]).toBe("/api/search?limit=50&offset=2");
   expect(within(history).getAllByRole("listitem")).toHaveLength(3);
   expect(within(history).queryByRole("button", { name: "Показать ещё" })).not.toBeInTheDocument();
+});
+
+test("scrolling to the end of the list loads the next page without the button (#615)", async () => {
+  const page = (names: string[]) => ({ ...structuredClone(response), stub: false, discovered: [], history: names.map((n) => match(n, "history")) });
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const offset = Number(new URL(String(url), "http://x").searchParams.get("offset"));
+    const body = offset === 0 ? page(["ООО Альфа", "ООО Гамма"]) : page(["ООО Дельта"]);
+    return new Response(JSON.stringify(body), { status: 200, headers: { "X-Total-History": "3", "X-Total-Discovered": "0" } });
+  });
+  // test-setup: every observed element is on screen, as when the end of the list is scrolled to
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const history = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
+  expect(within(history).getAllByRole("listitem")).toHaveLength(3);
 });
 
 // #84: «Новые» emptied by a filter. Mock: requests with the given filter get no new companies.

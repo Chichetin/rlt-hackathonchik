@@ -177,8 +177,13 @@ def test_api_opens_test_lot_by_number(search_data, monkeypatch):
     assert r.status_code == 200 and r.json()["okpd2"] == ["26.70.22.150"]
     assert client.get("/api/lot/0172200000126000001").json()["query_id"] == "lot-9001"
     assert client.get("/api/lot/9").status_code == 200  # training lots still open
+    p = client.get("/api/procedure/903").json()  # #639: by the procedure number, in the test export files
+    assert p["query_id"] == "lot-9003" and p["okpd2"] == ["26.70.22.150"]
+    assert client.get("/api/procedure/109").status_code == 404  # a training procedure: not searched, files only
+    assert client.get("/api/procedure/9003").status_code == 404  # a lot_id is not a procedure number
     monkeypatch.setenv("TEST_DATA_DIR", str(FIX / "missing"))
     assert client.get("/api/lot/9003").status_code == 404
+    assert client.get("/api/procedure/903").status_code == 409  # no files uploaded
 
 
 def test_duplicate_lot_rows_and_empty_okpd2_cells(tmp_path):

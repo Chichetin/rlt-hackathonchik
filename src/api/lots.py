@@ -1,4 +1,4 @@
-"""Lot lookup: notice number (lot_id or reqnum) -> Query built from organizers' data.
+"""Lot lookup: notice number (lot_id or reqnum) or procedure number (procedure_id) -> Query from organizers' data.
 
 Reads the store search() reads (src/match/store.py): Postgres schema `data` or ingest parquet — one SQL for
 both (#293: no second copy of the lookup on raw CSV — `make demo` builds the ingest, `make up` reads Postgres
@@ -15,16 +15,21 @@ still searched.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import duckdb
 
 from src.contracts import Query
 from src.ingest.notice import notice_query
-from src.match.store import StoreUnavailable, get_store
+from src.match.store import Store, StoreUnavailable, get_store
 from src.settings import get_settings
 
+if TYPE_CHECKING:
+    from src.ingest.testset import TestSet
+
 log = logging.getLogger(__name__)
-_testsets: dict[tuple[str, float], object] = {}
+_testsets: dict[tuple[str, float], TestSet] = {}
 
 
 class LotDataUnavailable(RuntimeError):
@@ -35,9 +40,9 @@ class LotNotFound(KeyError):
     pass
 
 
-def _test_lot(ident: str) -> Query | None:
-    """Lot from TEST_DATA_DIR (re-read when the folder changes); None when unset, absent or broken."""
-    from src.ingest.testset import TestDataError, TestSet, load_testset
+def _test_set() -> TestSet | None:
+    """The export in TEST_DATA_DIR (re-read when the folder changes); None when unset, absent or broken."""
+    from src.ingest.testset import TestDataError, load_testset
 
     path = get_settings().test_data_dir  # relative — from the repository root
     if path is None:
@@ -51,29 +56,20 @@ def _test_lot(ident: str) -> Query | None:
     except (TestDataError, OSError) as e:
         log.warning("TEST_DATA_DIR=%s не читается: %s", path, e)
         return None
-    assert isinstance(ts, TestSet)
-    lot = ts.find(ident)
-    return lot.query if lot else None
+    return ts
 
 
-def _uploaded_lot(ident: str) -> Query | None:
-    """Lot from the test export uploaded in the UI; None when none is active (src/api/testset.py)."""
+def _test_sets() -> list[TestSet]:
+    """The export uploaded in the UI (src/api/testset.py), then TEST_DATA_DIR — the ones present."""
     from src.api.testset import active_testset
 
-    ts = active_testset()
-    lot = ts.find(ident) if ts else None
-    return lot.query if lot else None
+    return [ts for ts in (active_testset(), _test_set()) if ts is not None]
 
 
-def find_lot(ident: str) -> Query:
-    ident = ident.strip()
-    for lookup in (_uploaded_lot, _test_lot):
-        test = lookup(ident)
-        if test is not None:
-            return test
+def _store_lot(lot_of: Callable[[Store], tuple | None], ident: str) -> Query:
     try:
         store = get_store()
-        row = store.lot(ident)
+        row = lot_of(store)
         okpd2 = store.lot_okpd2(row[0]) if row else []
         names = store.lot_names(row[0]) if row else []
     except StoreUnavailable as e:  # not loaded (the message names the command), or the database went down
@@ -83,3 +79,30 @@ def find_lot(ident: str) -> Query:
     if row is None:
         raise LotNotFound(ident)
     return notice_query(*row, okpd2=okpd2, names=names)
+
+
+def find_lot(ident: str) -> Query:
+    ident = ident.strip()
+    for ts in _test_sets():
+        lot = ts.find(ident)
+        if lot is not None:
+            return lot.query
+    return _store_lot(lambda s: s.lot(ident), ident)
+
+
+class NoTestFiles(LookupError):
+    pass
+
+
+def find_procedure(ident: str) -> Query:
+    """Procedure number (Извещения.procedure_id, 1:1 with the lot) -> the Query of its lot — only in the uploaded
+    test export files (and TEST_DATA_DIR), never in the training data (#639). No files -> NoTestFiles."""
+    ident = ident.strip()
+    sets = _test_sets()
+    if not sets:
+        raise NoTestFiles(ident)
+    for ts in sets:
+        lot = ts.find_procedure(ident)
+        if lot is not None:
+            return lot.query
+    raise LotNotFound(ident)

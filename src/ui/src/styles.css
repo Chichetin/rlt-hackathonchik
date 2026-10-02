@@ -98,6 +98,7 @@ select { flex: 1; max-width: 240px; font-size: 12px; padding: 6px 8px; }
 .hint { color: var(--muted); font-size: 13px; margin: 12px 0 20px; }
 .empty { color: var(--muted); font-size: 13px; border: 1px dashed #ffffff40; padding: 18px; border-radius: 4px; }
 .list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.list > li { content-visibility: auto; contain-intrinsic-size: auto 190px; } /* #615: up to 200 rows, only those near the screen are laid out and painted */
 .item { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px 12px; width: 100%; padding: 18px; text-align: left; background: #070f164a; color: var(--ink); border: 1px solid #ffffff26; }
 .item:hover:not(:disabled) { background: #bca3f31a; border-color: #d6c2ff80; }
 .name { font-size: 15px; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
@@ -645,3 +646,10 @@ html { scroll-padding-top: 80px; }
 .live-details[open] { color: var(--faint); font-size: 13px; line-height: 1.5; }
 .chip.live-found { background: color-mix(in srgb, var(--g-new) 18%, transparent); color: var(--g-new);
   border-color: color-mix(in srgb, var(--g-new) 40%, transparent); font-weight: 600; }
+
+/* #635: requisites under the supplier's name in the reading pane — labelled, readable in both themes */
+.requisites { margin: 14px 0 8px; padding: 12px 16px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 8px; }
+.requisites h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.requisites .facts { grid-template-columns: max-content minmax(0,1fr); gap: 6px 18px; }
+.requisites .facts dt { color: var(--muted); font-size: 13px; }
+.requisites .facts dd { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
