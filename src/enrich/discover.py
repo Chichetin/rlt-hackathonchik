@@ -264,6 +264,15 @@ def _lots_class(history: Sequence[CounterpartyMatch], store: Store | None = None
 def known_inns(inns: Sequence[str], as_of: date | None, store: Store | None = None) -> set[str] | None:
     """INNs present in organizers' data (before as_of) — the suppliers table of `store` (default: the store
     search() reads, Postgres in `make up`); None — the data is absent, nothing checked."""
+    if as_of is not None:  # a lot after the data (#589, defense export): everyone in the data is before it
+        from src.match.index import get_index
+
+        try:
+            end = get_index(store, None).data_end
+        except _STORE_ERRORS:
+            end = None
+        if end is not None and as_of > end:
+            as_of = None
     try:
         everyone = (store or get_store()).supplier_inns(as_of)
     except _STORE_ERRORS as e:  # StoreUnavailable (no table for as_of, Postgres down) is an OSError

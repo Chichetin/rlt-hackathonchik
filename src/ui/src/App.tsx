@@ -418,11 +418,12 @@ export function App() {
       setOkpd2Input("");
       setBudget(q.budget ? String(q.budget) : "");
       setCustomerInn(q.customer_inn ?? "");
-      setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
+      setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget, as_of: q.as_of });
       setLotQueryId(q.query_id);
-      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}: запрос заполнен из извещения.${auto ? "" : " Проверьте и нажмите «Найти поставщиков»."}` });
+      const dated = q.as_of ? ` от ${new Date(q.as_of).toLocaleDateString("ru-RU")} — история до этой даты` : "";
+      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}${dated}: запрос заполнен из извещения.${auto ? "" : " Проверьте и нажмите «Найти поставщиков»."}` });
       const budgetText = q.budget ? String(q.budget) : "";
-      const lotCtx = { okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget };
+      const lotCtx = { okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget, as_of: q.as_of };
       return {
         text: q.text,
         lotId: id,

@@ -7,6 +7,11 @@ The expert (checkpoint 1, #120): «тестовая выгрузка, форма
 Format problems raise TestDataError with a human message (file, column, what to do) — never a
 traceback. Per-lot problems (empty OKPD2, empty subject, bad price) are notes on the lot, not errors.
 History of the test lots is NOT needed: search() and discover() run on the training data.
+
+Defense export (#589, «Предзащита_Извещения_1..4.csv» + «Предзащита_Потоварка_1..4.csv»): files are found by a
+part of the name (`Потоварка` is ТРУ), several sets are read together; a header cell with «;» inside quotes
+(`"reqnum;procedure_name"`) is split. `publish_date` of the lot is the date of its query (Query.as_of): history
+strictly before it, activity counted up to it.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from __future__ import annotations
 import csv
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from src.contracts import Query
@@ -53,16 +59,23 @@ class TestSet:
                 or next((lt for lt in self.lots if ident == lt.reqnum), None))
 
 
-def _one(folder: Path, prefix: str, required: bool) -> Path | None:
-    found = sorted(folder.glob(f"{prefix}*.csv"))
-    if not found:
-        if required:
-            raise TestDataError(f"в {folder} нет файла {prefix}*.csv (нужен формат выгрузки организаторов)")
+NOTICE_NAMES = ("Извещения",)
+ITEM_NAMES = ("ТРУ", "Потоварка")  # the defense export calls the positions file «Потоварка» (#589)
+
+
+def _files(folder: Path, names: tuple[str, ...], required: bool) -> list[Path]:
+    """CSV files whose name contains one of `names` (any prefix / suffix: «Предзащита_Извещения_1.csv»), sorted."""
+    found = sorted({p for p in folder.glob("*.csv") if any(n.lower() in p.name.lower() for n in names)})
+    if not found and required:
+        raise TestDataError(f"в {folder} нет файла {names[0]}*.csv (нужен формат выгрузки организаторов)")
+    return found
+
+
+def _publish_date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value.strip()[:10]) if value.strip() else None
+    except ValueError:
         return None
-    if len(found) > 1:
-        raise TestDataError(f"в {folder} несколько файлов {prefix}*.csv: {', '.join(p.name for p in found)} — "
-                            "оставьте один")
-    return found[0]
 
 
 def _rows(path: Path, columns: tuple[str, ...], required: tuple[str, ...], warnings: list[str]) -> list[dict]:
@@ -74,15 +87,10 @@ def _rows(path: Path, columns: tuple[str, ...], required: tuple[str, ...], warni
     except OSError as e:
         raise TestDataError(f"{path.name}: не читается ({e.strerror})") from e
     lines = text.splitlines()
+    if lines:  # «"reqnum;procedure_name"» — two columns in one quoted cell (#589): a header has no quotes inside
+        lines[0] = lines[0].replace('"', "")
     reader = csv.DictReader(lines, delimiter=";", quotechar='"')
     header = [h.strip() for h in (reader.fieldnames or [])]
-    glued = [h for h in header if ";" in h]
-    if glued:  # a quoted header cell hiding the delimiter: "reqnum;procedure_name" (#590)
-        split = [p.strip().strip('"') for h in header for p in h.split(";") if p.strip().strip('"')]
-        first = next(csv.reader(lines[1:2], delimiter=";", quotechar='"'), [])
-        if len(first) == len(split):  # only when the data rows are as wide as the split header
-            header = split
-            warnings.append(f"{path.name}: в заголовке склеены колонки {', '.join(glued)} — разделены по «;»")
     if not header:
         raise TestDataError(f"{path.name}: пустой файл, нет строки заголовка")
     missing = [c for c in required if c not in header]
@@ -110,13 +118,15 @@ def load_testset(folder: Path) -> TestSet:
     if not folder.is_dir():
         raise TestDataError(f"папка {folder} не найдена")
     warnings: list[str] = []
-    n_path = _one(folder, "Извещения", required=True)
-    assert n_path is not None
-    i_path = _one(folder, "ТРУ", required=False)
-    if i_path is None:
+    n_paths = _files(folder, NOTICE_NAMES, required=True)
+    i_paths = _files(folder, ITEM_NAMES, required=False)
+    if not i_paths:
         warnings.append("нет ТРУ*.csv: ОКПД2 лотов неизвестен, поиск только по тексту предмета")
-    notices = _rows(n_path, NOTICE_COLUMNS, NOTICE_REQUIRED, warnings)
-    items = _rows(i_path, ITEM_COLUMNS, ITEM_REQUIRED, warnings) if i_path else []
+    notices: list[dict] = []
+    for p in n_paths:
+        notices += [{**r, "_file": p.name} for r in _rows(p, NOTICE_COLUMNS, NOTICE_REQUIRED, warnings)]
+    items = [r for p in i_paths for r in _rows(p, ITEM_COLUMNS, ITEM_REQUIRED, warnings)]
+    n_name = ", ".join(p.name for p in n_paths)
     codes: dict[str, list[str]] = {}
     for it in items:
         if it["lot_id"] and it["okpd2_code"]:
@@ -128,7 +138,7 @@ def load_testset(folder: Path) -> TestSet:
     for n, row in enumerate(notices, start=2):
         lot_id = row.get("lot_id", "")
         if not lot_id:
-            warnings.append(f"{n_path.name}, строка {n}: пустой lot_id — строка пропущена")
+            warnings.append(f"{row['_file']}, строка {n}: пустой lot_id — строка пропущена")
             continue
         if lot_id in seen:
             continue  # the training ingest keeps the first row of a lot too
@@ -148,9 +158,12 @@ def load_testset(folder: Path) -> TestSet:
             price = ""
         q = notice_query(lot_id, subject or None, pname or None, price or None, row.get("customer_inn") or None,
                          row.get("is_eshop_or_aisgz") or None, okpd2=okpd2)
+        published = _publish_date(row.get("publish_date", ""))
+        if published is not None:  # the lot is searched as of its own date (#589)
+            q = q.model_copy(update={"as_of": published})
         lots.append(TestLot(lot_id=lot_id, reqnum=row.get("reqnum") or None, query=q, notes=notes))
     if not lots:
-        raise TestDataError(f"{n_path.name}: ни одного лота с lot_id")
+        raise TestDataError(f"{n_name}: ни одного лота с lot_id")
     for w in warnings:
         log.warning("тестовая выгрузка %s: %s", folder, w)
     return TestSet(lots=lots, warnings=warnings)
