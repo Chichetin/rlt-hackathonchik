@@ -33,6 +33,7 @@ SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
 SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 # Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
+SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
 RANKED_LIMIT = 5000  # per-case top-k lists are stored for parts up to this size
 RESULTS = ROOT / "eval" / "results"
@@ -216,7 +217,7 @@ def _vectors(cfg: dict) -> dict | None:
         return None
     from src.match import pg_retriever
 
-    return pg_retriever.coverage()
+    return pg_retriever.coverage(cfg.get("embedding_model"))
 
 
 def _store() -> str:

@@ -1,8 +1,8 @@
 {
   "exp_id": "v2",
   "part": "dev",
-  "created_at": "2026-10-01T21:43:58+00:00",
-  "commit": "50730f12d6ab38aee98bf20fe59f5e4b01144c62",
+  "created_at": "2026-10-01T23:16:00+00:00",
+  "commit": "1086c2cf256e1b12fd0b8a49ff1816a579e50cde",
   "dirty": false,
   "config": {
     "retriever": "bm25",
@@ -27,12 +27,12 @@
     }
   },
   "tokenizer_version": "prefix5-v1",
-  "config_sha256": "289f04b36242b7cc78cd8b41531db6060c61b7ae943c782ac9c9c68656453ba4",
+  "config_sha256": "b917630409dd9240652c4f5f9da660a4ca3917b98987ba84f34d827840d5b272",
   "stub": false,
   "vectors": null,
   "store": "parquet",
   "n_queries": 2000,
-  "elapsed_s": 351.9,
+  "elapsed_s": 262.7,
   "metrics": {
     "recall@10": {
       "value": 0.4907479797979798,
@@ -265,6 +265,16 @@
         }
       }
     }
+  },
+  "today_filters": {
+    "k": 10,
+    "checked": 19974,
+    "cached": 0,
+    "cached_share": 0.0,
+    "legal_dropped": 0,
+    "legal_dropped_relevant": 0,
+    "cases_with_legal_dropped_relevant": 0,
+    "note": "сегодняшний кеш ФНС/РНП по top-10 backtest; в метрики и bootstrap не входит (D-097)"
   },
   "per_query": [
     {"query_id": "lot-5594995", "recall@10": 0.0, "mrr": 0.0, "ndcg@10": 0.0, "channel": "ЭМ", "winner_new": true, "ranked": ["780230329216", "780435345748", "291800885540", "7811756312", "7801289813", "7811726371", "222507110997", "290209052229", "7816514525", "780624001990", "7804340539", "781137079147", "366312223017", "7802810789", "781139523135", "7806301091", "212907305930", "782576126608", "471504580206", "7806616849"]},
