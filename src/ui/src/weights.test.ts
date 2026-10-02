@@ -52,8 +52,9 @@ test("a preset re-ranks: «Рядом с заказчиком» lifts the local 
 
 test("custom weights are normalised over components with data, all-zero falls back to the standard", () => {
   const w = normalize({ product_fit: 2, experience: 2, reliability: 5, activity: 0, geography: 0, price: 5 });
-  expect(w.product_fit).toBe(0.5);
-  expect(w.reliability).toBe(0);
+  // since D-198 (#585) all six criteria have data: shares of the sum 14
+  expect(w.product_fit).toBeCloseTo(2 / 14, 10);
+  expect(w.reliability).toBeCloseTo(5 / 14, 10);
   expect(normalize({ product_fit: 0, experience: 0, reliability: 0, activity: 0, geography: 0, price: 0 })).toEqual(normalize(DEFAULT_WEIGHTS));
 });
 
