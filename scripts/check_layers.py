@@ -55,7 +55,7 @@ LAYERS: dict[str, int] = {
     "src.worker": 5,
     # L6: tools — they may import the product, nothing of the product imports them
     "src.eval": 6,
-    "src.match.ranker_train": 6,  # offline training of the ranker (#198): reads eval cases, the product does not import it
+    "src.match.ranker_train": 6,  # offline ranker training (#198): reads eval cases; the product never imports it
 }
 LAYER_NAMES = {
     0: "контракты, настройки",
