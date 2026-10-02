@@ -1,0 +1,14 @@
+{
+  "commit": "1086c2cf256e1b12fd0b8a49ff1816a579e50cde",
+  "captured_at": "2026-10-01T23:03:33.373044+00:00",
+  "sha256": {
+    "configs/search.yaml": "1f43652429e2a741a76029de72519e9d9fd0525376b44e61d5a5807a5dfe5896",
+    "src/match/search.py": "e6824e611c32b3d08bbe950fd4a9bcd97d0edeb230a684d5ebcd5c71b97e1965",
+    "src/match/pipeline.py": "11f310b5f2108fed9f79239ed7c5fbb6b5c8a354b8cb2993e3cec25c591ab31c",
+    "src/match/store.py": "3d4de385ea96720b3b36d31e697d76f6f42a81710ad9758c61afbac36777cbc3",
+    "src/api/app.py": "7d6ec780608f9d5e227dd529d92676824a30e970fc129a9e3d4718cbb947ef95",
+    "src/ui/src/App.tsx": "df020c896a2fa5b0aca3479be5e569b2160f64a523b47613197afd4ef0dd47cd",
+    "src/ui/src/Landing.tsx": "64dc5751b9a53a5572699e11a77e1097412aa39e1bc543e64f97e6b19925f4dc",
+    "src/ui/src/weights.ts": "7d9a8bc222199e46a959e9a64a697d2e6e3876d7e29d70d5b4b96eab5f0a0884"
+  }
+}
