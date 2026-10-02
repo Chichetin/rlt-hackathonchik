@@ -17,6 +17,7 @@ import pytest
 
 from src.contracts import Counterparty, Evidence, Query, inn_is_valid
 from src.enrich import discover as D
+from src.enrich.enrich import add_open_data
 from src.enrich.evidence import check_counterparty, strip_unverified
 from src.sources import gisp, rmsp, role
 from src.sources.cache import SourceCache
@@ -307,3 +308,22 @@ def test_lookup_is_fast_enough_for_the_search_budget(gdir):
     for _ in range(5):
         gisp.by_okpd2(["17.23.13.130"], gdir)
     assert (time.perf_counter() - t) / 5 < 0.5
+
+
+# --- the card: any supplier, history included ------------------------------------------------------------
+
+def test_card_of_any_supplier_gets_the_registry_role_once(gdir, cache):
+    """add_open_data() (what the card, the xlsx and predict show): a supplier with a product in the registry
+    becomes a manufacturer with the registry as its basis; a second pass adds nothing; others are untouched."""
+    at = datetime.fromtimestamp(FETCHED, UTC)
+    page = cache.put("https://rmsp.nalog.ru/y", f"row.{POLY}.okved1: 46.49.33\nrow.4703173460.okved1: 46.49.33")
+    cards = [Counterparty(inn=i, name="x", kind="distributor", evidence=[
+        Evidence(source=rmsp.SOURCE, url=page.url, fetched_at=at, fact="ИНН", field="inn", value=i),
+        Evidence(source=rmsp.SOURCE, url=page.url, fetched_at=at, fact="Роль — дистрибьютор", field="okved",
+                 value=f"row.{i}.okved1: 46.49.33")]) for i in (POLY, "4703173460")]
+    poly, other = add_open_data(cards, cache)
+    assert poly.kind == "manufacturer" and check_counterparty(poly, cache.page_text) == []
+    assert [e.fact for e in poly.evidence if e.source == gisp.SOURCE][0].startswith("Производит: «Конверты почтовые")
+    assert other == cards[1]
+    again = add_open_data([poly], cache)[0]
+    assert again.evidence == poly.evidence
