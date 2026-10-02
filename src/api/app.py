@@ -60,6 +60,7 @@ from src.api.reviews import router as reviews_router
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
+from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import strip_unverified
 from src.ingest.okpd2 import label as okpd2_label
@@ -349,6 +350,29 @@ def api_search(query: Query, response: Response,
         discovered=_verified(discovered[offset:offset + limit]),
         stub=_is_stub(),
     )
+
+
+_LIVE_LOCK = threading.Lock()  # one live search at a time: every one spends the human's Yandex budget
+
+
+@app.post("/api/live-search", response_model=list[CounterpartyMatch],
+          responses={429: {"description": "живой поиск уже идёт — повторите позже"},
+                     503: {"description": "живой поиск не настроен (нет ключа или потолков Яндекса) или у закупки "
+                                          "нет класса ОКПД2"}})
+def api_live_search(query: Query, response: Response) -> list[CounterpartyMatch]:
+    """The button «Искать в реальном времени» (#550): new suppliers of this purchase found by Yandex now
+    (discover.live_search), without the trigger «< 3 strong» and without a deadline. The UI sends the query with the
+    OKPD2 class «Новые» searched by. What happened — the X-Live-Note header, percent-encoded UTF-8."""
+    if not _LIVE_LOCK.acquire(blocking=False):
+        raise guard.busy("живой поиск уже идёт — повторите позже")
+    try:
+        live = discover_mod.live_search(query)
+    except discover_mod.LiveOff as e:
+        raise HTTPException(503, str(e)) from e
+    finally:
+        _LIVE_LOCK.release()
+    response.headers["X-Live-Note"] = quote(live.note)
+    return _verified(live.matches)
 
 
 @app.get("/api/lot/{ident}", response_model=Query)
