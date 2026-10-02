@@ -177,6 +177,12 @@ def test_export_xlsx(search_client):
     header = [c.value for c in ws[1]]
     assert header[:3] == ["Блок", "Наименование", "ИНН"] and ws.max_row > 1
     assert ws.cell(row=2, column=3).value == "7801000012"
+    # the order and the relevance are two columns (#278, D-156): the place is the block's order, not the score's
+    place, score = header.index("Место в блоке") + 1, header.index("Релевантность (формула критериев)") + 1
+    assert "Выше следующего" in header and "Score" not in header
+    history = [r for r in range(2, ws.max_row + 1) if ws.cell(row=r, column=1).value == "С опытом госзакупок"]
+    assert [ws.cell(row=r, column=place).value for r in history] == list(range(1, len(history) + 1))
+    assert all(isinstance(ws.cell(row=r, column=score).value, float) for r in history)
 
 
 def test_export_kind_column_in_russian(client, monkeypatch):

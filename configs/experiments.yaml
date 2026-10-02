@@ -185,7 +185,7 @@ H-105-combo-aisgz:   # combo + сглаженная доля побед толь
 # R-105-gbm обучен src.match.ranker_train --name R-105 теми же данными и seed, что R-198, плюс этот признак.
 H-105-rk:
   ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt}
-# reliability (#72, D-153). Подвыборка — каждый 4-й кейс dev: `uv run python -m src.eval.run --exp <id> --every 4`.
+# reliability (#72, D-157). Подвыборка — каждый 4-й кейс dev: `uv run python -m src.eval.run --exp <id> --every 4`.
 # "on" в кавычках — иначе YAML 1.1 читает bool. Сняты до D-103 / D-109: ранжировщик и исправление запроса выключены.
 rel-off-s500:    # на прежнем дефолте v1 (до D-077): reliability в карточке, не в балле
   spell: false

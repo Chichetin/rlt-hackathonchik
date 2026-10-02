@@ -68,6 +68,11 @@ test("settings live in this browser only and survive a reload", () => {
   expect(loadWeights()).toEqual(STANDARD);
 });
 
+test("reweight drops the ranker's reason for the next supplier (#278)", () => {
+  const m = { ...match("A", { product_fit: 1 }), rank_reason: "выше следующего: x" };
+  expect(reweight(m, DEFAULT_WEIGHTS).rank_reason).toBeNull();
+});
+
 test("reliability is for reference, price has no data — the slider rows say which (#72)", () => {
   expect(offNote("reliability")).toBe("справочно — в оценку не входит");
   expect(offNote("price")).toBe("нет данных — в оценку не входит");
