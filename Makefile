@@ -12,7 +12,7 @@ PART ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs openapi openapi-check \
-        seal-check layers ui-build api worker ui-dev demo e2e eval parity latency eval-final up down db-load db-embed okpd2 data pool-load
+        seal-check layers ui-build api worker ui-dev demo e2e eval parity latency eval-final up down db-load db-embed okpd2 data pool-load static-demo
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -82,6 +82,10 @@ worker:            ## воркер очереди обогащения
 ui-dev:            ## Vite dev-сервер с прокси на API
 	cd $(UI) && API_PORT=$(PORT) npx vite
 
+static-demo:       ## запасной статический стенд без API (#283) → dist-static/; публикация — подтверждение №4
+	@[ -d .venv ] && [ -d $(UI)/node_modules ] || $(MAKE) setup
+	bash scripts/static_demo.sh
+
 demo:              ## всё одной командой с чистого клона, на кеше: http://127.0.0.1:$(PORT)
 	@[ -d .venv ] && [ -d $(UI)/node_modules ] || $(MAKE) setup
 	$(MAKE) ui-build
@@ -90,9 +94,9 @@ demo:              ## всё одной командой с чистого кл�
 e2e: ui-build      ## e2e демо-сценария (Playwright), свой порт: E2E_PORT=8766
 	cd $(UI) && npx playwright test
 
-eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-часть)
+eval:              ## make eval EXP=<id> [SAMPLE=N] [CORRUPT=typo|layout] → eval/results/<id>.json (dev-часть)
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
-	$(PY) python -m src.eval.run --exp $(EXP)
+	$(PY) python -m src.eval.run --exp $(EXP) $(if $(CORRUPT),--corrupt $(CORRUPT)) $(if $(SAMPLE),--sample $(SAMPLE))
 
 parity:            ## побитовое сравнение выдач (ranked) двух прогонов eval: make parity A=<id> B=<id>; коды 0/1/2 (совпали / различаются / не сравнить) — у python -m src.eval.parity, у make — Error 1 / Error 2
 	$(PY) python -m src.eval.parity "$(A)" "$(B)"

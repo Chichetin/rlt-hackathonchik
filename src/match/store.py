@@ -168,6 +168,29 @@ SELECT agg.supplier_inn, agg.lvl, code.okpd2_code, agg.class_lots, agg.class_win
 FROM agg JOIN code USING (supplier_inn)
 """
 
+# The same answer for Postgres from `supplier_items` (src/db/load.py, D-135): the candidates' own (lot, code) rows, no
+# join of every lot of every candidate to `items`. Per lot: the deepest level, `<level><best code>` (bytewise max = the
+# deepest level, then the greatest code; NULL codes are skipped as NULLS LAST did) and whether a participant won;
+# then per supplier: the deepest level and its code, lots and wins in the group (level >= 2). Suppliers without
+# positions get no row, as with the inner join above.
+_CLASS_HISTORY_PG = """
+WITH li AS (
+    SELECT supplier_inn, lot_id, bool_or(is_winner) AS win, max(lvl) AS lvl, max((lvl::text || okpd2_code){c}) AS lc
+    FROM (
+        SELECT supplier_inn, lot_id, is_winner, okpd2_code,
+               CASE WHEN okpd2_code = ANY(%(q9)s{text_arr}) THEN 4
+                    WHEN okpd2_l6 = ANY(%(q6)s{text_arr}) THEN 3
+                    WHEN okpd2_l4 = ANY(%(q4)s{text_arr}) THEN 2
+                    WHEN okpd2_l2 = ANY(%(q2)s{text_arr}) THEN 1 ELSE 0 END AS lvl
+        FROM {t[supplier_items]}
+        WHERE supplier_inn = ANY(%(inns)s{text_arr}) AND {cond}
+    ) m GROUP BY supplier_inn, lot_id
+)
+SELECT supplier_inn, max(lvl), substr(max(lc{c}), 2),
+       count(*) FILTER (WHERE lvl >= 2), count(*) FILTER (WHERE lvl >= 2 AND win)
+FROM li GROUP BY supplier_inn
+"""
+
 # Lots of one customer per supplier before as_of: the incumbent signal (src/match/signals.py, #22).
 _CUSTOMER_LOTS = """
 SELECT supplier_inn, count(DISTINCT lot_id) FROM {t[participants]}
@@ -362,6 +385,7 @@ class PgStore:
         self.dsn, self.schema = pg_dsn(url), schema
         self._local = threading.local()
         self._manifest: tuple[dict, float] | None = None
+        self._precomputed: tuple[bool, float] | None = None
         self._sql_kw = {"c": ' COLLATE "C"', "bigint_arr": "::bigint[]", "text_arr": "::text[]"}
 
     def __repr__(self) -> str:
@@ -381,7 +405,8 @@ class PgStore:
         import psycopg
 
         s = self.schema
-        t = {n: f"{s}.{n}" for n in ("notices", "items", "participants")} | {"suppliers": f"{s}.{suppliers}"}
+        t = {n: f"{s}.{n}" for n in ("notices", "items", "participants", "supplier_items")} | {
+            "suppliers": f"{s}.{suppliers}"}
         lots_sql = "unnest(%(l_lot)s::bigint[], %(l_score)s::float8[], %(l_doc)s::int[]) AS l(lot_id, score, doc_id)"
         if lots is not None:
             params = {**params, "l_lot": [int(x) for x in lots.lot_id], "l_score": [float(x) for x in lots.score],
@@ -436,8 +461,20 @@ class PgStore:
     def text_codes(self, as_of: date | None) -> list[tuple[str, str, int]]:
         return self._fetch(_TEXT_CODES, {"as_of": as_of}, as_of=as_of)[1]
 
+    def _has_supplier_items(self) -> bool:
+        """`supplier_items` exists (a schema loaded before D-135 has none); checked at most once per MANIFEST_TTL_S."""
+        if self._precomputed and self._precomputed[1] > time.monotonic():
+            return self._precomputed[0]
+        ok = self._fetch("SELECT to_regclass(%(t)s) IS NOT NULL", {"t": f"{self.schema}.supplier_items"})[1][0][0]
+        if not ok:
+            log.warning("Postgres: нет %s.supplier_items — class_history читает items, в несколько раз медленнее; "
+                        "`make db-load` (D-135)", self.schema)
+        self._precomputed = (ok, time.monotonic() + MANIFEST_TTL_S)
+        return ok
+
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]:
-        _, rows = self._fetch(_CLASS_HISTORY, {"inns": inns, "as_of": as_of, **class_params(codes)}, as_of=as_of)
+        template = _CLASS_HISTORY_PG if self._has_supplier_items() else _CLASS_HISTORY
+        _, rows = self._fetch(template, {"inns": inns, "as_of": as_of, **class_params(codes)}, as_of=as_of)
         return {r[0]: tuple(r[1:]) for r in rows}
 
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]:

@@ -447,7 +447,7 @@ def lead_matches(
             other_type += 1
             continue
         try:
-            cp = enrich(inn, cache, offline=True)
+            cp = enrich(inn, cache, offline=True, open_data=False)  # pipeline.verified() adds the ФНС facts
         except KeyError:  # nothing cached for this INN
             no_card.append(inn)
             continue
