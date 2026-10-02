@@ -365,6 +365,26 @@ export async function uploadTestset(files: File[]): Promise<Testset> {
   return body;
 }
 
+// The customer's list of purchases by the template (#501): one .xlsx or .csv, sent as base64 in JSON.
+export const TEMPLATE_URL = "/api/testset/template.xlsx";
+export const PREDICT_XLSX_URL = "/api/testset/predict.xlsx?top=10";
+
+function base64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+export async function uploadTemplate(file: File): Promise<Testset> {
+  const payload = { name: file.name, data: base64(await file.arrayBuffer()) };
+  const r = await fetch("/api/testset/template", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (!r.ok) throw new Error(await detail(r));
+  const body: unknown = await r.json();
+  if (!isTestset(body)) throw new Error("сервер не принял список закупок: неожиданный ответ");
+  return body;
+}
+
 function isTestset(x: unknown): x is Testset {
   const t = x as Partial<Testset> | null;
   return !!t && typeof t.id === "string" && Array.isArray(t.items) && Array.isArray(t.files) && Array.isArray(t.warnings);
