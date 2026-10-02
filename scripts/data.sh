@@ -7,6 +7,8 @@
 #   bash scripts/data.sh cache        # the snapshot of the source cache (names, roles, «Новые» of the demo lots);
 #                                     # NOT part of `all`: it is a cache, not data. An existing local cache
 #                                     # is merged (INSERT OR IGNORE by key: its newer rows stay); CACHE_FORCE=1 replaces it
+#   bash scripts/data.sh gisp         # the GISP register (D-153) into data/external/gisp (the assets gisp-products.parquet
+#                                     # and gisp-meta.json of `python -m src.sources.gisp build`); NOT part of `all` either
 #
 # The data never goes to git (.gitignore, check-data-files.sh); the release assets are the storage.
 # Every file is checked against SHA256SUMS of the release; a file that already matches is not
@@ -23,12 +25,15 @@ RAW_ZIP="raw-24-25.zip"
 CACHE_ASSET="sources-cache.sqlite"  # public answers of the registries (url, body, status, time): no keys, no headers
 CACHE_SUMS="SHA256SUMS.cache"       # its own checksum list: the SHA256SUMS of the data stay untouched
 CACHE_TARGET="${SOURCE_CACHE:-$ROOT/cache/sources.sqlite}"
+GISP_SUMS="SHA256SUMS.gisp"         # its own checksum list as well
+GISP_TARGET="${GISP_DIR:-$ROOT/data/external/gisp}"  # = gisp.DIR in src/sources/gisp.py
+GISP_ASSETS=(gisp-products.parquet:products.parquet gisp-meta.json:meta.json)  # <asset>:<file name in the directory>; meta last
 PROCESSED_FILES=(notices.parquet participants.parquet items.parquet suppliers.parquet
                  suppliers_2025-07-01.parquet manifest.json)
 
 fail() { echo "make data: $*" >&2; exit 1; }
 
-case "$PART" in all|processed|raw|cache) ;; *) fail "неизвестная часть '$PART' (all | processed | raw | cache)";; esac
+case "$PART" in all|processed|raw|cache|gisp) ;; *) fail "неизвестная часть '$PART' (all | processed | raw | cache | gisp)";; esac
 command -v gh >/dev/null 2>&1 || fail "нужен GitHub CLI (gh) с доступом к репозиторию: https://cli.github.com, затем gh auth login"
 cd "$ROOT"  # gh takes the repository from the current directory
 
@@ -59,6 +64,7 @@ SUMS_DIR="$(mktemp -d)"  # the checksum list is tiny: the system temporary direc
 TMP_DIRS+=("$SUMS_DIR")
 SUMS_ASSET=SHA256SUMS
 [ "$PART" = cache ] && SUMS_ASSET="$CACHE_SUMS"
+[ "$PART" = gisp ] && SUMS_ASSET="$GISP_SUMS"
 download "$SUMS_ASSET" "$SUMS_DIR" \
   || fail "релиз $TAG недоступен или в нём нет $SUMS_ASSET (сеть, gh auth login или нет доступа к репозиторию)"
 
@@ -66,9 +72,10 @@ expected() { awk -v f="$1" '$2 == f { print $1 }' "$SUMS_DIR/$SUMS_ASSET"; }
 
 fetch() {  # fetch <asset> <target dir>: skip a matching file, otherwise download, verify, rename in
   local name="$1" dir="$2" want tmp
+  local out="${3:-$name}"  # the file name in <dir> when it differs from the asset name
   want="$(expected "$name")"
-  [ -n "$want" ] || fail "в SHA256SUMS релиза $TAG нет файла $name"
-  if [ -f "$dir/$name" ] && [ "$(sha "$dir/$name")" = "$want" ]; then
+  [ -n "$want" ] || fail "в $SUMS_ASSET релиза $TAG нет файла $name"
+  if [ -f "$dir/$out" ] && [ "$(sha "$dir/$out")" = "$want" ]; then
     echo "ok        $name (уже на месте)"
     return 0
   fi
@@ -77,7 +84,7 @@ fetch() {  # fetch <asset> <target dir>: skip a matching file, otherwise downloa
   tmp="$NEW_TMP"
   download "$name" "$tmp" || fail "не скачался $name"
   [ "$(sha "$tmp/$name")" = "$want" ] || fail "контрольная сумма $name не сошлась — файл не записан"
-  mv -f "$tmp/$name" "$dir/$name"
+  mv -f "$tmp/$name" "$dir/$out"
 }
 
 csv_sums() {  # "<sha256>  <name>" of every CSV in <dir>, sorted by name
@@ -149,4 +156,9 @@ print("cache: добавлено из снимка записей:", con.execute
     fi
   fi
   echo "cache: готово ($CACHE_TARGET)"
+fi
+
+if [ "$PART" = gisp ]; then
+  for pair in "${GISP_ASSETS[@]}"; do fetch "${pair%%:*}" "$GISP_TARGET" "${pair#*:}"; done
+  echo "gisp: готово ($GISP_TARGET)"
 fi
