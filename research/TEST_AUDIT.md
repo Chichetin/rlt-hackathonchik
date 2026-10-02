@@ -37,8 +37,10 @@
 
 **Два яруса.** Мутант сначала проверяют тесты первого яруса (`pytest -x`); не покраснели — весь остальной
 `tests/unit` (без первого яруса, `-x`). Выжил после обоих ярусов — выжил. Строка `KILLED-BY: direct|rest` в
-выводе показывает, кто убил: из 674 убитых **656** убил первый ярус и **18** — тесты вне его (веса контрольных
-сумм ИНН проверяет, например, ярус 2). Таймаут мутанта 240 с; **по таймауту не убит ни один**.
+выводе показывает, кто убил: из 674 убитых **656** убил первый ярус и **18** — тесты вне его. Из этих 18 шестнадцать —
+веса 12-значного ИНН (`_INN12_W1`, `_INN12_W2`, строки 31–32 `contracts.py`): тесты, проверяющие ИНН напрямую, их не
+ловили, а тесты других модулей с ИНН индивидуальных предпринимателей — ловили; ещё по одному — `near_marks`
+(filters.py:129) и `_product_fit` (search.py:269). Таймаут мутанта 240 с; **по таймауту не убит ни один**.
 
 **Почему cosmic-ray, а не mutmut.** `mutmut` 3.8.0 на этом проекте останавливается на первом же импорте:
 `assert not name.startswith("src.")` в `mutmut/stats.py::record_trampoline_hit` — он не поддерживает пакет
@@ -240,28 +242,32 @@ evidence.py:204) — это тот же дефект, что `AddNot` на то�
 - Эквивалентность разобрана вручную по диффу и области значений (где можно — проверено: BM25 `lucene`
   неотрицателен, `bm25s.BM25().method`); строгого доказательства нет.
 - «После» — повторная проверка выживших, не полный прогон (см. «Цифры»).
-- Порога мутаций в CI нет (так поставлена задача): полный прогон занимает около 1 ч 15 мин на 4 ядрах
-  (четыре процесса параллельно, `search.py` — самый долгий). Повторять — после крупных правок скоринга
-  или Evidence, по тем же командам.
+- Порога мутаций в CI нет (так поставлена задача): полный прогон — около 1 ч 15 мин, если области идут
+  параллельно на 4 ядрах (`search.py` — самый долгий), подряд — дольше. Повторять — после крупных правок
+  скоринга или Evidence, по тем же командам.
 - Только Linux, Python 3.12, `.venv` проекта (`uv sync --frozen`), PyPI для `cosmic-ray==8.7.0`.
 
 ## Воспроизведение
 
-Скрипт ниже — то, чем получены цифры (в виде одного файла); сохраните как `audit.sh` и запустите из корня
-репозитория: `bash audit.sh 0b7a6c1 all` («до» аудита) или `bash audit.sh HEAD all` («после»; в `tests/unit`
-уже лежит `test_mutation_audit.py`, он входит во второй ярус, и выживших должно остаться 25). Имя вместо
-`all` (`role`, `contracts`, `evidence`, `filters`, `search`) — одна область. Работает в копиях `/tmp/mutaudit/*`
-(`git clone --local`, cosmic-ray переписывает файлы на месте — рабочее дерево не трогается). Итог каждой
-области печатается строкой `<имя>-<проход>: всего …, выполнено …, убито …, выжило …`; список выживших с
-диффами — `/tmp/mutaudit/<имя>-<проход>/surviving.txt`. Проход `ops` — основной набор операторов, `is` — второй
-(`is` ↔ `is not`).
+Нужны `uv`, `.venv` проекта (`uv sync --frozen`) и PyPI для `cosmic-ray==8.7.0`. Всё работает в копиях
+`/tmp/mutaudit/<область>-<проход>` (`git clone --local` + `checkout <коммит>`): cosmic-ray переписывает файлы на месте, рабочее
+дерево не трогается. Проход `ops` — основной набор операторов, `is` — второй (`is` ↔ `is not`).
+
+**1. «До»: прогон мутантов.** Сохраните как `audit.sh`, запустите из корня репозитория:
+`bash audit.sh 0b7a6c1 all` — все области, оба прохода, подряд (время не замерялось, оценка — несколько часов);
+`bash audit.sh 0b7a6c1 role` — одна область (`role`, `contracts`, `evidence`, `filters`, `search`),
+`bash audit.sh 0b7a6c1 evidence is` — одна область, один проход. Цифры ниже получены так: по процессу на область,
+пять процессов параллельно на 4 ядрах, `search` — самый долгий, всё вместе около 1 ч 15 мин. Итог каждого прохода — строка
+`<имя>-<проход>: всего …, выполнено …, убито …, выжило …`; выжившие с диффами — в
+`/tmp/mutaudit/<имя>-<проход>/surviving.txt`. Цифры таблицы «Цифры» воспроизводятся **только на 0b7a6c1**: с тех пор
+другие задачи правили `search.py`, `filters.py`, `evidence.py` (`HEAD` даст другие числа и номера строк).
 
 ```bash
 #!/bin/bash
-# Мутационный аудит ядра (research/TEST_AUDIT.md). Запуск из корня репозитория: bash audit.sh <REV> <имя|all>
+# Мутационный аудит ядра (research/TEST_AUDIT.md). Запуск из корня репозитория: bash audit.sh <REV> <имя|all> [ops|is|"ops is"]
 #   REV — коммит, на котором считаем («до» аудита — 0b7a6c1; HEAD ветки #302 — «после», с новыми тестами)
 set -euo pipefail
-REPO=$(git rev-parse --show-toplevel); PY=$REPO/.venv/bin/python; REV=${1:?REV}; ONLY=${2:-all}
+REPO=$(git rev-parse --show-toplevel); PY=$REPO/.venv/bin/python; REV=${1:?REV}; ONLY=${2:-all}; PASSES=${3:-"ops is"}
 CR="uv run --no-project --with cosmic-ray==8.7.0"
 T=tests/unit
 
@@ -334,7 +340,7 @@ EOT
   )
 }
 
-for pass in ops is; do
+for pass in $PASSES; do
   audit role      src/enrich/role.py      all "$T/test_role.py $T/test_discover.py" $pass
   audit contracts src/contracts.py        inn_is_valid,_control "$T/test_evidence.py $T/test_api_limits.py $T/test_thin.py" $pass 30-32
   audit evidence  src/enrich/evidence.py  all "$T/test_evidence.py $T/test_role.py $T/test_enrich.py $T/test_enrich_fallback.py $T/test_eis_rnp.py $T/test_discover.py $T/test_web_leads.py $T/test_ingest.py $T/test_msp_dump.py $T/test_db_pool.py" $pass
@@ -343,7 +349,38 @@ for pass in ops is; do
 done
 ```
 
-Проверка скрипта: `bash audit.sh 0b7a6c1 role` дало `role-ops: всего 173, отфильтровано 104, выполнено 69,
-убито 68 {'direct': 68}, выжило 1` и `role-is: всего 173, отфильтровано 172, выполнено 1, убито 1, выжило 0`.
-Расчёт объёма остальных областей (число мутантов к запуску: 69 / 111 / 159 / 233 / 179 в проходе `ops` и
-1 / 0 / 14 / 20 / 5 в `is`) совпал с прогоном, которым получены цифры выше.
+**2. «После»: новые тесты против выживших.** Сохраните как `recheck.py`; после шага 1 для нужных сессий:
+`python recheck.py "$(git rev-parse --show-toplevel)" evidence-ops evidence-is filters-ops role-ops …`. Скрипт копирует
+`tests/unit/test_mutation_audit.py` в копию, применяет каждого выжившего (`cosmic-ray apply`), запускает только этот файл
+тестов, возвращает исходный файл и печатает «убит новыми тестами» или «ВЫЖИЛ». «ВЫЖИЛ» должны остаться ровно 25
+мутантов из таблицы выше (эквивалентные и незначимые).
+
+```python
+# «После»: каждого выжившего мутанта из /tmp/mutaudit/<сессия>/session.sqlite применить к копии и прогнать новые тесты.
+# python recheck.py <корень репозитория> <сессия> [<сессия> ...]     сессия — evidence-ops, evidence-is, filters-ops, …
+import os, sqlite3, subprocess, sys
+
+repo, sessions = sys.argv[1], sys.argv[2:]
+py = f"{repo}/.venv/bin/python"
+apply_cmd = "uv run --no-project --with cosmic-ray==8.7.0 cosmic-ray apply".split()
+for name in sessions:
+    w = f"/tmp/mutaudit/{name}"
+    subprocess.run(["cp", f"{repo}/tests/unit/test_mutation_audit.py", f"{w}/tests/unit/"], check=True)
+    rows = sqlite3.connect(f"{w}/session.sqlite").execute(
+        "select m.module_path, m.operator_name, m.occurrence from mutation_specs m "
+        "join work_results r using (job_id) where r.test_outcome = 'SURVIVED'").fetchall()
+    for mod, op, occ in rows:
+        subprocess.run(apply_cmd + [mod, op, str(occ)], cwd=w, check=True, capture_output=True)
+        p = subprocess.run([py, "-m", "pytest", "tests/unit/test_mutation_audit.py", "-q", "-p", "no:cacheprovider",
+                            "-W", "ignore"], cwd=w, capture_output=True, text=True,
+                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        subprocess.run(["git", "checkout", "--", mod], cwd=w, check=True)  # вернуть файл
+        print(name, mod, op, occ, "убит новыми тестами" if p.returncode else "ВЫЖИЛ")
+```
+
+Проверка скриптов: `bash audit.sh 0b7a6c1 role` дало `role-ops: всего 173, отфильтровано 104, выполнено 69, убито 68
+{'direct': 68}, выжило 1` и `role-is: всего 173, отфильтровано 172, выполнено 1, убито 1, выжило 0`;
+`bash audit.sh 0b7a6c1 evidence is` — `evidence-is: всего 263, отфильтровано 249, выполнено 14, убито 13, выжило 1`, а
+`recheck.py … evidence-is` — «убит новыми тестами» (`Is_IsNot`, evidence.py:204). Число мутантов к запуску у остальных областей
+(69 / 111 / 159 / 233 / 179 в проходе `ops` и 1 / 0 / 14 / 20 / 5 в `is`: роль, ИНН, Evidence, фильтры, скоринг) совпало с
+прогоном, которым получены цифры выше; полностью `audit.sh` целиком не перезапускался (только эти проверки).
