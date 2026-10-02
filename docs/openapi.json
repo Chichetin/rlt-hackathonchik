@@ -591,7 +591,7 @@
     "/api/procedure/{ident}": {
       "get": {
         "summary": "Api Procedure",
-        "description": "Procedure number (Извещения.procedure_id, #617) -> Query of its lot; query_id names the lot (lot-<lot_id>).",
+        "description": "Procedure number (Извещения.procedure_id) -> Query of its lot from the uploaded test export files only (#639);\nquery_id names the lot (lot-<lot_id>). 409 when no files are uploaded.",
         "operationId": "api_procedure_api_procedure__ident__get",
         "parameters": [
           {

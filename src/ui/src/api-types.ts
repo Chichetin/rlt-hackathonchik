@@ -244,7 +244,8 @@ export interface paths {
         };
         /**
          * Api Procedure
-         * @description Procedure number (Извещения.procedure_id, #617) -> Query of its lot; query_id names the lot (lot-<lot_id>).
+         * @description Procedure number (Извещения.procedure_id) -> Query of its lot from the uploaded test export files only (#639);
+         *     query_id names the lot (lot-<lot_id>). 409 when no files are uploaded.
          */
         get: operations["api_procedure_api_procedure__ident__get"];
         put?: never;
