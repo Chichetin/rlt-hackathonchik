@@ -101,3 +101,12 @@ def test_last_similar_is_before_as_of_and_is_the_latest_matched_lot(search_data)
     assert cands
     for c in cands:
         assert c.last_similar is not None and c.best_date <= c.last_similar < CUTOFF
+
+
+def test_win_rate_only_for_aisgz(search_data):
+    cfg = search_mod.load_config()
+    on = {**cfg, "options": {**cfg["options"], "experience_wins": "rate_aisgz"}}
+    em = search(Query(query_id="q", text="бумага офисная", channel="ЭМ", as_of=CUTOFF), config=on)
+    ais = search(Query(query_id="q", text="бумага офисная", channel="АИС ГЗ", as_of=CUTOFF), config=on)
+    assert em and all("доля побед" not in _comp(m, "experience").explanation for m in em)
+    assert ais and all("доля побед" in _comp(m, "experience").explanation for m in ais)

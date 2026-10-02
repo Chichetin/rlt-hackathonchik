@@ -94,7 +94,7 @@ OPTIONS: dict[str, tuple] = {
     "activity_by": ("all", ("all", "similar")),
     # experience (#105): count — 0.5·sat(lots) + 0.5·sat(wins); rate — the wins half is the smoothed win rate
     # (wins + 1) / (lots + 2), so 1 win of 20 lots is not «experienced winner»
-    "experience_wins": ("count", ("count", "rate")),
+    "experience_wins": ("count", ("count", "rate", "rate_aisgz")),  # rate_aisgz: rate only for channel АИС ГЗ
 }
 PRICE_DECADES = 2.0  # price = 1 − |log10(budget / median)| / 2: 0 at a 100× difference
 
@@ -497,6 +497,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if shares["incumbent"] > 0 and query.customer_inn:
         incumbent = customer_lots(store, [c.inn for c in cands], query.customer_inn, as_of)
     fetched = store.built_at()
+    # H-105-winrate: the win rate helps АИС ГЗ (one executor per lot) and hurts ЭМ (many offers, one winner)
+    wins_mode = opts["experience_wins"]
+    if wins_mode == "rate_aisgz":
+        wins_mode = "rate" if query.channel == "АИС ГЗ" else "count"
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
     ref = as_of or idx.data_end
@@ -509,7 +513,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
         exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"],
-                                   opts["experience_wins"])
+                                   wins_mode)
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)

@@ -89,3 +89,6 @@ H-105-price05-d1:   # price обнуляется при 10× (как в пред
 H-105-combo:     # price 0.05 (масштаб НМЦК) + свежесть по похожим позициям — две компоненты, что не ухудшили dev
   weights: {price: 0.05}
   options: {price: scale, activity_by: similar}
+H-105-combo-aisgz:   # combo + сглаженная доля побед только для канала АИС ГЗ (там один исполнитель на лот)
+  weights: {price: 0.05}
+  options: {price: scale, activity_by: similar, experience_wins: rate_aisgz}
