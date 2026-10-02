@@ -103,7 +103,9 @@ def test_depth_changes_okved_match():
     agree = _score(cp, page, "перчатки", okved="22.19.6").part("okved_match").value
     cls = _score(cp, page, "перчатки", okved="22.19").part("okved_match").value
     differs = _score(cp, page, "перчатки", okved="22.19.3").part("okved_match").value
-    assert (agree, cls, differs) == (cfg["depth"]["agree"], cfg["depth"]["class"], cfg["depth"]["differs"])
+    base = D.FIT["class"]  # the depth scales the OKVED step of «Новые» (#614: 0.7, not 1.0)
+    assert (agree, cls, differs) == pytest.approx(
+        (base * cfg["depth"]["agree"], base * cfg["depth"]["class"], base * cfg["depth"]["differs"]))
     assert agree > cls > differs
 
 

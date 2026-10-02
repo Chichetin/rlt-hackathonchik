@@ -1042,7 +1042,7 @@ export function App() {
             rows={newRows}
             total={newTotal}
             liveInns={live.inns}
-            action={<LiveSearch live={live} onRun={() => void runLive()} />}
+            action={<LiveSearch live={live} query={shownQuery?.text} onRun={() => void runLive()} />}
             onMore={weights ? undefined : () => void showMore("discovered")}
             loadingMore={more}
             onOpen={selectResult}
