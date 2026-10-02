@@ -515,7 +515,7 @@ def test_corrected_query_is_a_header_and_as_typed_is_one_filter_away(search_clie
     monkeypatch.setattr(pipeline, "get_index", lambda store, as_of: SimpleNamespace(path=tmp_path))
     monkeypatch.setattr(pipeline.speller, "for_index", lambda path: Speller({"бумага": 500}))
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумвга"})
-    assert r.status_code == 200 and unquote(r.headers["X-Query-Corrected"]) == "бумага"
+    assert r.status_code == 200 and json.loads(unquote(r.headers["X-Query-Corrected"])) == [["бумвга", "бумага"]]
     assert r.json()["query"]["text"] == "бумвга"  # the answer keeps the query as the user typed it
     r = search_client.post("/api/search", json={"query_id": "q", "text": "бумвга", "filters": {"spell": "off"}})
     assert r.status_code == 200 and "X-Query-Corrected" not in r.headers

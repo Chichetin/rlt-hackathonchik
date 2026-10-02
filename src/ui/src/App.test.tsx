@@ -117,15 +117,16 @@ test("a corrected query is said, and «искать как введено» repe
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
     const body = JSON.parse(String((init as RequestInit).body));
     bodies.push(body);
-    const headers: Record<string, string> = body.filters?.spell === "off" ? {} : { "X-Query-Corrected": encodeURIComponent("бумага") };
+    const fixed = encodeURIComponent(JSON.stringify([["бумвга", "бумага"]]));
+    const headers: Record<string, string> = body.filters?.spell === "off" ? {} : { "X-Query-Corrected": fixed };
     return new Response(JSON.stringify(response), { status: 200, headers });
   });
   render(<App />);
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумвга");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const note = await screen.findByTestId("query-corrected");
-  expect(note).toHaveTextContent("Показаны результаты по запросу «бумага»");
-  await userEvent.click(within(note).getByRole("button", { name: "Искать как введено: «бумвга»" }));
+  expect(note).toHaveTextContent("Запрос исправлен (раскладка или опечатки): «бумвга» → «бумага».");
+  await userEvent.click(within(note).getByRole("button", { name: "Искать как введено" }));
   await waitFor(() => expect(screen.queryByTestId("query-corrected")).toBeNull());
   expect(bodies.at(-1)).toMatchObject({ text: "бумвга", filters: { spell: "off" } });
   expect(bodies[0].filters.spell).toBeUndefined(); // the first search is corrected by the server

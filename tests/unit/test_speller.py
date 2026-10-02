@@ -47,7 +47,7 @@ def test_layout_and_typos_are_fixed(sp, typed, searched):
     "бумага офисная, картридж HP", "катридж",  # known words, a frequent corpus typo, a brand
     "квадрокоптер", "лодки, лотки",  # rare but real words: no frequent neighbour that much more frequent
     "зонты", "зеленка", "дума", "чист",  # Russian words with a much more frequent corpus word one edit away
-    "ротокан",  # not a dictionary word, but the only neighbour («потока») starts with another letter
+    "ротокан",  # not a dictionary word: «потока» is 2 edits away and the word is too short for 2 (DIST2_LEN)
     "огнетушитель ОП-4 5 кг", "реагенты для ИФА",  # unknown words without a close known one, codes, numbers
 ])
 def test_right_words_are_never_changed(sp, text):
@@ -57,7 +57,7 @@ def test_right_words_are_never_changed(sp, text):
 
 @pytest.mark.parametrize("text", [
     "перчатик", "стол письменый",  # the typo is past the 5th letter: the search sees the same token (prefix5)
-    "КПИ ДПЛС",  # abbreviations in capitals
+    "КПИ ДПЛС", "БУМВГА",  # in capitals: an abbreviation or a code, even when it looks like a typo
     "бумага Бумвга",  # a capitalised word inside a phrase is a name
 ])
 def test_left_as_typed_when_it_changes_nothing_or_is_a_name(sp, text):
@@ -76,6 +76,25 @@ def test_damerau_distance():
     assert damerau("перчатик", "перчатки", 2) == 1  # adjacent transposition
     assert damerau("ркатридж", "картридж", 2) == 2
     assert damerau("бумага", "квадрокоптер", 2) == 3  # cut at the limit
+
+
+def test_read_only_index_keeps_the_dictionary_in_memory(tmp_path, monkeypatch):
+    """make up mounts indexes read-only: the dictionary is built once, not on every search (review #282)."""
+    pq.write_table(pa.table({"doc_id": pa.array([0], pa.int32()), "text": ["Бумага офисная"]}),
+                   tmp_path / "texts.parquet")
+    speller._SPELLERS.clear()
+    built: list[int] = []
+    real = speller.vocabulary
+    monkeypatch.setattr(speller, "vocabulary", lambda texts: built.append(1) or real(texts))
+
+    def read_only(self, *a, **k):
+        raise OSError(30, "Read-only file system")
+
+    monkeypatch.setattr(Path, "write_text", read_only)
+    assert speller.for_index(tmp_path).freq == {"бумага": 1, "офисная": 1}
+    assert speller.for_index(tmp_path).freq == {"бумага": 1, "офисная": 1}
+    assert built == [1] and not (tmp_path / speller.VOCAB_FILE).exists()
+    speller._SPELLERS.clear()
 
 
 def test_dictionary_is_built_from_the_index_texts_and_cached(tmp_path):

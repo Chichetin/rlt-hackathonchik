@@ -9,7 +9,8 @@ Only a word that is NOT a trusted word of the dictionary is touched:
    («зонты», «зеленка», «дума» are words even when the corpus has none of them — never «corrected» into
    «зоны», «пеленка», «дома»): a known word with the same first letter within Damerau–Levenshtein distance 1
    (2 for words of ≥ DIST2_LEN letters, never for a capitalised word), found through single-delete keys
-   (SymSpell-like), much more frequent than the word; among several, the frequency discounted by DIST_DISCOUNT
+   (SymSpell-like: single deletes on both sides, so not every 2-edit word is found — it is then left as typed),
+   much more frequent than the word; among several, the frequency discounted by DIST_DISCOUNT
    per edit decides («кортриджж» → «картридж», not the corpus typo «катридж»). A rare corpus word
    (< TRUSTED names) is still a typo when a word one edit away is RARE_RATIO times more frequent;
    a word in TRUSTED names or more is never changed.
@@ -222,7 +223,12 @@ _build_lock = threading.Lock()
 
 
 def for_index(index_dir: Path) -> Speller:
-    """The speller of one BM25 index (its texts.parquet), the dictionary cached next to it on disk."""
+    """The speller of one BM25 index (its texts.parquet), the dictionary cached next to it on disk.
+
+    The disk copy is a convenience: in `make up` the index directory is read-only for the API, so a failed write
+    only logs a warning — the dictionary stays in memory and is never rebuilt per request. Prebuild it with the
+    index (`python -m src.match.index`) so the first search does not pay the ≈ 6 s.
+    """
     key = str(index_dir)
     with _build_lock:
         if key not in _SPELLERS:
@@ -235,8 +241,12 @@ def for_index(index_dir: Path) -> Speller:
                     if texts_path.exists() else []
                 freq = vocabulary([t for t in texts if t])
                 tmp = path.with_suffix(f".tmp{os.getpid()}")  # API, worker and parallel evals build it at once
-                tmp.write_text(json.dumps(freq, ensure_ascii=False), encoding="utf-8")
-                tmp.replace(path)
+                try:
+                    tmp.write_text(json.dumps(freq, ensure_ascii=False), encoding="utf-8")
+                    tmp.replace(path)
+                except OSError as e:  # read-only index (make up): keep it in memory, say how to prebuild
+                    log.warning("speller: словарь не сохранён рядом с индексом (%s) — соберите заранее: "
+                                "python -m src.match.index", e)
                 log.info("speller: словарь %d словоформ из %s", len(freq), index_dir.name)
             if len(_SPELLERS) >= 4:
                 _SPELLERS.pop(next(iter(_SPELLERS)))

@@ -855,11 +855,13 @@ export function App() {
         </p>
       ))}
 
-      {path === "/results" && res?.corrected && shownQuery && state !== "loading" && (
+      {path === "/results" && res?.corrections && shownQuery && state !== "loading" && (
         <p className="lotmsg spell-note" role="note" data-testid="query-corrected">
-          Показаны результаты по запросу «{res.corrected}» — исправлены раскладка или опечатки.{" "}
-          <button type="button" className="spell-undo" onClick={() => void run(filters, undefined, shownQuery.text)}>
-            Искать как введено: «{shownQuery.text}»
+          Запрос исправлен (раскладка или опечатки):{" "}
+          {res.corrections.map(([typed, searched], i) => <span key={i}>{i > 0 && ", "}«{typed}» → «{searched}»</span>)}.{" "}
+          <button type="button" className="spell-undo" title={shownQuery.text}
+            onClick={() => void run(filters, undefined, shownQuery.text)}>
+            Искать как введено
           </button>
         </p>
       )}
