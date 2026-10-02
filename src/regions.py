@@ -33,11 +33,11 @@ NEIGHBOUR: dict[str, str] = {r.code: r.neighbour for r in REGIONS}
 
 
 def name_by_code(code: str | None) -> str | None:
-    """Name of a known region by its two-digit code (a KPP prefix), else None."""
+    """Name of a known region by a code or a whole KPP (only its first two digits count), else None."""
     return REGION_NAME.get((code or "")[:2]) if code else None
 
 
 def label_by_code(code: str | None) -> str | None:
     """Name of a known region, «регион <code>» for another one, None without a code (src/match/filters.py reads
-    «регион NN» back)."""
+    «регион NN» back). Takes the two-digit code itself, not a KPP — use name_by_code for a KPP."""
     return REGION_NAME.get(code or "") or (f"регион {code}" if code else None)
