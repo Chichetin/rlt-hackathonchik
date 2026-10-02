@@ -501,6 +501,28 @@ def test_no_discovery_header_when_nothing_failed(search_client, monkeypatch, fou
     assert r.status_code == 200 and "X-Discovery-Error" not in r.headers
 
 
+def test_corrected_query_is_a_header_and_as_typed_is_one_filter_away(search_client, monkeypatch, tmp_path):
+    """#282: the search tells which text it used after fixing layout / typos; filters.spell=off — as typed."""
+    from types import SimpleNamespace
+    from urllib.parse import unquote
+
+    from src.match import pipeline
+    from src.match import search as search_mod
+    from src.match.speller import Speller
+
+    real = search_mod.load_config
+    monkeypatch.setattr(search_mod, "load_config", lambda *a, **k: {**real(*a, **k), "spell": True})
+    monkeypatch.setattr(pipeline, "get_index", lambda store, as_of: SimpleNamespace(path=tmp_path))
+    monkeypatch.setattr(pipeline.speller, "for_index", lambda path: Speller({"бумага": 500}))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумвга"})
+    assert r.status_code == 200 and json.loads(unquote(r.headers["X-Query-Corrected"])) == [["бумвга", "бумага"]]
+    assert r.json()["query"]["text"] == "бумвга"  # the answer keeps the query as the user typed it
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумвга", "filters": {"spell": "off"}})
+    assert r.status_code == 200 and "X-Query-Corrected" not in r.headers
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert "X-Query-Corrected" not in r.headers  # nothing to fix — no header
+
+
 @pytest.mark.parametrize("filters", [{"kinds": "producer"}, {"entity": "fl"}, {"min_score": "high"}])
 def test_bad_filter_value_is_422_not_a_silent_no_filter(roles_client, filters):
     for path in ("/api/search", "/api/export"):

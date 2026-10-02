@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from src.contracts import Query
-from src.eval import baselines
+from src.eval import baselines, corrupt
 from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import pipeline
@@ -324,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="cut every query text to its first N words — short queries as users type them (#281)")
     ap.add_argument("--sample", type=int, default=None,
                     help="first screen on N cases of the part (fixed seed): winners only go to the full run")
+    ap.add_argument("--corrupt", default=None, choices=corrupt.MODES,
+                    help="spoil the query texts (typos / Latin layout) to measure the speller (#282)")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
@@ -347,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
             print("--words: ожидается целое число ≥ 1", file=sys.stderr)
             return 2
         cases, part = first_words(cases, args.words), f"{part}-w{args.words}"
+    if args.corrupt:  # the text only, deterministic per query: every experiment sees the same spoiled queries
+        cases = [c.model_copy(update={"query": corrupt.spoil(c.query, args.corrupt)}) for c in cases]
+        part = f"{part}-{args.corrupt}"
     rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
