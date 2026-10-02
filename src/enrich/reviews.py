@@ -186,7 +186,7 @@ def _legal_matches(card: gis2.Card, form: str | None, brand_norm: str) -> bool:
     legal = brand_of(card.legal_name) if card.legal_name else None
     if legal is None or _norm(legal[1]) != brand_norm:
         return False
-    return form is None or legal[0] is None or legal[0] == form
+    return form is not None and legal[0] == form  # a form on both sides and the same: «АО Сатурн» ≠ «ООО САТУРН»
 
 
 def _candidates(found: list[gis2.Card], form: str | None, brand_norm: str) -> list[gis2.Card]:
@@ -266,7 +266,15 @@ def _basis(card: gis2.Card, cp: Counterparty, unique_legal: bool) -> tuple[Basis
     return ("legal_name", "") if unique_legal else ("name", "")
 
 
-def _note(basis: Basis, card: gis2.Card, proof: str, legal_orgs: int) -> str:
+def _other_legal_entity(card: gis2.Card) -> str:
+    """How the legal entity of a card that is NOT ours is named to the user: a natural person (ИП) is not named."""
+    legal = card.legal_name or ""
+    return "индивидуальный предприниматель" if legal.upper().startswith("ИП") else f"«{legal}»"
+
+
+def _note(basis: Basis, card: gis2.Card, proof: str, legal_orgs: int, in_legal: bool) -> str:
+    """Why the card has this status — what really matched and what did not. `in_legal`: the organization of the card
+    is one of those of the search result that carry OUR legal name."""
     if basis == "phone":
         return (f"Телефон из карточки ({_pretty_phone(proof)}) совпал с телефоном компании из реестра: "
                 "карточка относится к ней.")
@@ -278,13 +286,16 @@ def _note(basis: Basis, card: gis2.Card, proof: str, legal_orgs: int) -> str:
         return (f"2ГИС указывает юрлицо «{card.legal_name}» — оно совпадает с названием компании, и в выдаче 2ГИС это "
                 "юрлицо у одной организации. Телефон, email и сайт для сверки не совпали или неизвестны, а ИНН 2ГИС не "
                 "публикует: проверьте адрес и сферу.")
-    if legal_orgs > 1:
+    shown = ("Отзывы, рейтинг и число отзывов не показываются, пока карточку не подтвердит контакт; "
+             "откройте её и проверьте адрес и сферу.")
+    if in_legal and legal_orgs > 1:
         return (f"Юрлицо «{card.legal_name}» в выдаче 2ГИС у нескольких разных организаций ({legal_orgs}): "
-                "какая из них эта компания, по карточке не определить, ИНН 2ГИС не публикует. Отзывы, рейтинг и число "
-                "отзывов не показываются, пока карточку не подтвердит контакт; откройте её и проверьте адрес и сферу.")
+                f"какая из них эта компания, по карточке не определить, ИНН 2ГИС не публикует. {shown}")
+    if card.legal_name:
+        return (f"2ГИС указывает другое юрлицо — {_other_legal_entity(card)}, оно не совпадает с названием компании; "
+                f"название «{card.brand}» общее, ИНН 2ГИС не публикует. {shown}")
     return (f"Название «{card.brand}» в карточке есть, но юрлицо не указано, а ИНН 2ГИС не публикует — это может "
-            "быть другая организация. Отзывы, рейтинг и число отзывов не показываются, пока карточку не подтвердит "
-            "контакт; откройте карточку и проверьте адрес и сферу.")
+            f"быть другая организация. {shown}")
 
 
 def _quotes(page: gis2.ReviewsPage, src: _Page, url: str) -> list[ReviewQuote]:
@@ -321,19 +332,20 @@ def _build(card: gis2.Card, cp: Counterparty, brand: str, city: str, src: _Page,
             log.warning("reviews: вкладка отзывов %s не прочитана: %s", card.id, e)
             problem = "Не удалось прочитать тексты отзывов: 2ГИС сейчас недоступен."
     full = page.card if page is not None else card
+    read_from = tab if page is not None else gis2.search_url(city, brand)  # the page the card facts came from
     basis, proof = _basis(full, cp, unique_legal)
     evidence: list[Evidence] = []
     if proof:
         field, label = {"phone": ("phone", "Телефон +" + proof), "email": ("email", "Email " + proof)}.get(
             basis, ("site", "Сайт " + proof))
-        match = _evidence(src, tab, field, proof, f"{label} в карточке 2ГИС совпадает с контактом компании из реестра")
+        match = _evidence(src, read_from, field, proof,
+                          f"{label} в карточке 2ГИС совпадает с контактом компании из реестра")
         if match is None:  # never claim «подтверждено» on a fact that did not pass
             basis = "legal_name" if unique_legal else "name"
         else:
             evidence.append(match)
     # The first fact is built AFTER the final basis: a stranger's rating and number of reviews are not in any field
     weak = basis == "name"
-    read_from = tab if page is not None else gis2.search_url(city, brand)  # the page the card facts came from
     where = full.address or ""
     named = len(_norm(where)) >= check.MIN_TEXT
     stats = "" if weak else ", ".join(x for x in (f"рейтинг {full.rating:g}" if full.rating is not None else "",
@@ -346,7 +358,7 @@ def _build(card: gis2.Card, cp: Counterparty, brand: str, city: str, src: _Page,
     return ReviewCard(
         branch_id=card.id, title=full.name, address=full.address, rubrics=full.rubrics, url=tab,
         rating=None if weak else full.rating, review_count=None if weak else full.review_count,
-        basis=basis, verified=TIER[basis] == 0, note=_note(basis, full, proof, len(legal)),
+        basis=basis, verified=TIER[basis] == 0, note=_note(basis, full, proof, len(legal), _org_key(card) in legal),
         quotes=quotes, evidence=[head, *evidence],
     ), problem, shown_count
 

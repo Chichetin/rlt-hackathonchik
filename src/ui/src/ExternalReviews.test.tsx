@@ -122,4 +122,5 @@ test("without an INN there is no button and no request", () => {
 test("dates are written day.month.year without a timezone shift", () => {
   expect(ruDate("2024-03-15")).toBe("15.03.2024");
   expect(ruDate("2026-10-02T01:09:17Z")).toBe("02.10.2026");
+  expect(ruDate("2026-10-01T22:30:00Z")).toBe("02.10.2026"); // 01:30 in Moscow: the day of the reading is the next one
 });

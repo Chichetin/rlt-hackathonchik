@@ -353,7 +353,8 @@ def test_a_confirmation_whose_evidence_does_not_pass_is_not_claimed(cache, monke
     assert {e.field for e in card.evidence} == {"address"}
 
 
-def _search_with_organizations(count: int, legal_for: tuple[int, ...] | None = None) -> str:
+def _search_with_organizations(count: int, legal_for: tuple[int, ...] | None = None,
+                               other_brand: tuple[int, ...] = ()) -> str:
     html = page("search_grace_trade.html")
     state = gis2._state(html, gis2._INITIAL)
     assert state is not None
@@ -366,6 +367,9 @@ def _search_with_organizations(count: int, legal_for: tuple[int, ...] | None = N
         node["data"]["org"]["id"] = f"7000000300000{i:02d}"
         if legal_for is not None and i not in legal_for:
             node["data"]["name_ex"].pop("legal_name", None)
+        if i in other_brand:  # another brand of the SAME legal entity
+            node["data"]["name"] = "Совсем другое название"
+            node["data"]["name_ex"].update(primary="Совсем другое название", short_name="Совсем другое название")
         out[node["data"]["id"]] = node
 
     def lit(obj: object) -> str:
@@ -435,3 +439,90 @@ def test_the_page_of_a_platform_is_not_the_site_of_the_company(cache):
     cp = company(GRACE, "7811777270", site="https://vk.com/gracetrade")
     card = reviews.find_reviews(cp, cache=cache, client=Site(tabs={"70000001065972795": tab}).client()).cards[0]
     assert (card.basis, card.verified) == ("legal_name", False)  # the same host «vk.com» confirms nothing
+
+
+# --- the notes tell what really matched (third pass) -----------------------------------------------------
+
+def _combined_search(*fixtures: str, take: dict[str, int] | None = None) -> str:
+    """One search page from the cards of several recorded ones (organizations of one result)."""
+    profiles: dict[str, dict] = {}
+    for name in fixtures:
+        state = gis2._state(page(name), gis2._INITIAL)
+        assert state is not None
+        profiles.update(list(state["data"]["entity"]["profile"].items())[: (take or {}).get(name, 99)])
+
+    def lit(obj: object) -> str:
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+
+    literal = lit({"data": {"entity": {"profile": profiles}}})
+    return f"<html><script>var initialState = JSON.parse('{literal}');</script></html>"
+
+
+def test_the_note_of_a_chain_among_ambiguous_legal_entities_does_not_borrow_their_name(cache):
+    """Two organizations named «ООО Сатурн» and the chain (no legal entity on its card): the chain's note must say what
+    it says about ITSELF, not «Юрлицо «None» … у нескольких организаций»."""
+    html = _combined_search("search_saturn_legal.html", "search_saturn.html", take={"search_saturn_legal.html": 2})
+    site = Site(search={"САТУРН": html})
+    result = reviews.find_reviews(company(SATURN, "7801248119"), cache=cache, client=site.client())
+    assert result.status == "ok" and all(c.basis == "name" for c in result.cards)
+    for card in result.cards:
+        assert "None" not in card.note
+        if card.title.startswith("Сатурн, строительный"):
+            assert "юрлицо не указано" in card.note and "нескольких" not in card.note
+        else:
+            assert "у нескольких разных организаций (2)" in card.note
+
+
+def test_a_card_that_names_another_legal_entity_says_so(cache):
+    other = page("search_grace_trade.html").replace("ООО Грейс трэйд", "АО Грейс трэйд")
+    card = reviews.find_reviews(
+        company(GRACE, "7811777270"), cache=cache, client=Site(search={"ГРЕЙС ТРЭЙД": other}).client()).cards[0]
+    assert card.basis == "name" and "другое юрлицо — «АО Грейс трэйд»" in card.note
+    assert "юрлицо не указано" not in card.note
+
+
+def test_a_sole_trader_named_as_the_legal_entity_of_a_card_is_not_named_to_the_user(cache):
+    sole = page("search_grace_trade.html").replace("ООО Грейс трэйд", "ИП Иванов Иван Иванович")
+    card = reviews.find_reviews(
+        company(GRACE, "7811777270"), cache=cache, client=Site(search={"ГРЕЙС ТРЭЙД": sole}).client()).cards[0]
+    assert card.basis == "name" and "индивидуальный предприниматель" in card.note and "Иванов" not in card.note
+
+
+def test_a_legal_name_without_a_legal_form_is_not_a_legal_entity(cache):
+    bare = page("search_grace_trade.html").replace("ООО Грейс трэйд", "Грейс трэйд")
+    card = reviews.find_reviews(
+        company(GRACE, "7811777270"), cache=cache, client=Site(search={"ГРЕЙС ТРЭЙД": bare}).client()).cards[0]
+    assert (card.basis, card.quotes) == ("name", [])
+    # and our own name without a form cannot be compared either
+    plain = reviews.find_reviews(company("Грейс трэйд", "7811777270"), cache=cache, client=Site().client())
+    assert all(c.basis == "name" for c in plain.cards)
+
+
+def test_the_legal_entity_is_counted_over_the_whole_result_even_for_cards_of_another_brand(cache):
+    """Another brand of the same legal entity is not a candidate to show, but it makes the legal name ambiguous: the
+    count is taken BEFORE the cut to candidates."""
+    html = _search_with_organizations(2, other_brand=(1,))
+    site = Site(search={"ГРЕЙС ТРЭЙД": html}, tabs={})
+    cards = reviews.find_reviews(company(GRACE, "7811777270"), cache=cache, client=site.client()).cards
+    assert len(cards) == 1 and (cards[0].basis, cards[0].quotes) == ("name", [])
+    assert "у нескольких разных организаций (2)" in cards[0].note
+
+
+def test_a_contact_found_on_the_search_page_is_proved_on_that_page_when_the_tab_was_not_read(cache):
+    """A card without reviews: no tab is read; if the search page itself shows the card's phone, the proof is on it."""
+    state = gis2._state(page("search_grace_trade.html"), gis2._INITIAL)
+    assert state is not None
+    card = next(iter(state["data"]["entity"]["profile"].values()))["data"]
+    card["reviews"] = {}
+    card["contact_groups"] = [{"contacts": [{"type": "phone", "value": "+78125619110", "text": "+7 812 561-91-10"}]}]
+
+    def lit(obj: object) -> str:
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+
+    html = f"<html><script>var initialState = JSON.parse('{lit(state)}');</script></html>"
+    site = Site(search={"ГРЕЙС ТРЭЙД": html})
+    result = reviews.find_reviews(company(GRACE, "7811777270", phone="+78125619110"), cache=cache, client=site.client())
+    got = result.cards[0]
+    assert (got.basis, got.verified) == ("phone", True) and site.tabs_requested == []
+    assert {e.url for e in got.evidence} == {gis2.search_url("spb", "ГРЕЙС ТРЭЙД")}
+    assert all(evidence.check_evidence(e, cache.page_text) == [] for e in got.evidence)

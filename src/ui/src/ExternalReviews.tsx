@@ -16,9 +16,11 @@ const TRUST: Record<ReviewCard["basis"], string> = {
   name: "Совпало только название",
 };
 
+/** A plain date is written as it is; a moment of reading is shown as a day in Moscow time (the users are in СПб),
+ *  not in UTC: a page read at 01:00 MSK is not «yesterday». */
 export function ruDate(iso: string): string {
-  const day = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  return day ? `${day[3]}.${day[2]}.${day[1]}` : new Date(iso).toLocaleDateString("ru-RU");
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return day ? `${day[3]}.${day[2]}.${day[1]}` : new Date(iso).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow" });
 }
 
 function GisCard({ card }: { card: ReviewCard }) {

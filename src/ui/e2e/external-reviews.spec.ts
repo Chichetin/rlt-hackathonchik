@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // Reviews of one supplier from 2GIS (#234): only /api/reviews is intercepted — the e2e server has no internet, and
 // the answers below are the shapes src/enrich/reviews.py returns for the recorded pages (tests/fixtures/gis2).
+// «Подтверждено по телефону» below is the SHAPE of an answer the endpoint is ready for; today `enrich()` gives no contacts (#357)
 const TAB = "https://2gis.ru/spb/firm/70000001065972795/tab/reviews";
 const SATURN = "https://2gis.ru/spb/firm/5348552839595094/tab/reviews";
 const ev = (url: string, field: string, value: string, fact: string) =>
