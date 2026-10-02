@@ -531,7 +531,7 @@ export interface components {
             url: string;
             /**
              * Rating
-             * @description рейтинг карточки, как его показывает 2ГИС
+             * @description рейтинг карточки, как его показывает 2ГИС; пусто, пока нет подтверждения контактом (basis=name)
              */
             rating: number | null;
             /** Review Count */
@@ -540,10 +540,10 @@ export interface components {
              * Basis
              * @enum {string}
              */
-            basis: "phone" | "site" | "legal_name" | "name";
+            basis: "phone" | "email" | "site" | "legal_name" | "name";
             /**
              * Verified
-             * @description True только при совпадении телефона или сайта с данными компании
+             * @description True только при совпадении телефона, email или сайта с данными компании
              */
             verified: boolean;
             /**

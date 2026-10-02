@@ -1405,7 +1405,7 @@
               }
             ],
             "title": "Rating",
-            "description": "рейтинг карточки, как его показывает 2ГИС"
+            "description": "рейтинг карточки, как его показывает 2ГИС; пусто, пока нет подтверждения контактом (basis=name)"
           },
           "review_count": {
             "anyOf": [
@@ -1422,6 +1422,7 @@
             "type": "string",
             "enum": [
               "phone",
+              "email",
               "site",
               "legal_name",
               "name"
@@ -1431,7 +1432,7 @@
           "verified": {
             "type": "boolean",
             "title": "Verified",
-            "description": "True только при совпадении телефона или сайта с данными компании"
+            "description": "True только при совпадении телефона, email или сайта с данными компании"
           },
           "note": {
             "type": "string",

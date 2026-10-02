@@ -10,7 +10,7 @@
 .gis-card h4 { margin: 0; font: 500 15px var(--sans); }
 .gis-card h4 a { color: #dbe6fb; text-underline-offset: 3px; }
 .gis-trust { padding: 4px 10px; border-radius: 14px; border: 1px solid #ffffff2a; color: #c4ccd8; font-size: 12px; line-height: 1.4; }
-.gis-trust.is-phone, .gis-trust.is-site { color: #cfe9df; border-color: #7fd1b955; background: #7fd1b914; }
+.gis-trust.is-phone, .gis-trust.is-email, .gis-trust.is-site { color: #cfe9df; border-color: #7fd1b955; background: #7fd1b914; }
 .gis-trust.is-name { color: #f0dcae; border-color: #e6c46a55; background: #e6c46a14; }
 .gis-where { display: flex; flex-wrap: wrap; gap: 2px 18px; margin: 8px 0 0; color: #b8bfcb; font-size: 13px; line-height: 1.6; }
 .gis-rating { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 8px 0 0; font-size: 14px; }

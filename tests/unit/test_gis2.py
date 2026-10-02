@@ -220,3 +220,95 @@ def test_requests_are_paced(cache, monkeypatch):
     gis2.fetch_reviews("spb", ROSTELECOM_ID, cache=cache, client=site.client())
     # robots.txt, the search and the reviews tab are three requests to one host: each next one waited
     assert len(slept) == 2 and all(s > 0 for s in slept)
+
+
+# --- manners of the client: what stops it, what it never does ----------------------------------------
+
+def test_429_pauses_the_host_like_403(cache):
+    with pytest.raises(gis2.Blocked):
+        gis2.fetch_search("spb", "Сатурн", cache=cache, client=Site(status=429).client())
+    assert gis2.blocked()
+
+
+def test_a_redirect_to_another_host_or_a_captcha_page_is_a_refusal(cache):
+    def to_captcha(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "captcha.2gis.ru":
+            return httpx.Response(200, text="Подтвердите, что вы не робот")
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text=ROBOTS)
+        return httpx.Response(302, headers={"Location": "https://captcha.2gis.ru/check"}, request=request)
+
+    foreign = httpx.Client(transport=httpx.MockTransport(to_captcha), follow_redirects=True)
+    with pytest.raises(gis2.Blocked):
+        gis2.fetch_search("spb", "Сатурн", cache=cache, client=foreign)
+    assert gis2.blocked()
+
+
+def test_a_timeout_pauses_the_host_and_the_next_call_sends_nothing(cache, monkeypatch):
+    monkeypatch.setattr(gis2, "DOWN_COOLDOWN_S", 600.0)
+
+    def dead(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("no answer", request=request)
+
+    with pytest.raises(httpx.ConnectTimeout):
+        gis2.fetch_search("spb", "Сатурн", cache=cache, client=httpx.Client(transport=httpx.MockTransport(dead)))
+    site = Site()
+    with pytest.raises(gis2.Paused):
+        gis2.fetch_search("spb", "Альтера", cache=cache, client=site.client())
+    assert site.paths == []
+
+
+def test_robots_txt_is_asked_before_the_reviews_tab_too(cache):
+    site = Site(robots="User-agent: *\nDisallow: /spb/firm/\n")
+    with pytest.raises(gis2.RobotsDisallowed):
+        gis2.fetch_reviews("spb", ROSTELECOM_ID, cache=cache, client=site.client())
+    assert site.paths == ["/robots.txt"]
+
+
+def test_a_card_other_than_the_one_asked_for_is_an_error_not_an_answer(cache):
+    site = Site(reviews=GRACE_REVIEWS)  # the page of another card comes back
+    with pytest.raises(ValueError, match="вместо карточки"):
+        gis2.fetch_reviews("spb", ROSTELECOM_ID, cache=cache, client=site.client())
+    assert cache.get(gis2.reviews_url("spb", ROSTELECOM_ID)) is None  # and it is not cached as the answer
+
+
+def test_hidden_reviews_and_reviews_without_text_or_date_are_skipped():
+    html = GRACE_REVIEWS
+    state = gis2._state(html, gis2._QUERY_STATE)
+    assert state is not None
+    items = state["queries"][0]["state"]["data"]["pages"][0]["items"]
+    base = items[0]
+    items[:] = [
+        dict(base, id="1", is_hidden=True),  # hidden by 2GIS
+        dict(base, id="2", text="   "),  # no text
+        dict(base, id="3", date_created="вчера"),  # no date
+        dict(base, id="4", rating=9),  # a rating outside 1–5 is dropped, the review is not
+        dict(base, id="5", text="Нормальный отзыв"),
+    ]
+    literal = json.dumps(state, ensure_ascii=False, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+    head = html[:html.index(gis2._QUERY_STATE)]
+    page = gis2.parse_reviews_html(head + gis2._QUERY_STATE + literal + "');</script></html>")
+    assert [(r.id, r.rating) for r in page.reviews] == [("4", None), ("5", 5)]
+
+
+def test_a_page_without_a_list_of_reviews_is_blocked_not_read_as_no_reviews():
+    html = GRACE_REVIEWS.replace('"items"', '"entries"')  # the markup changed under us
+    with pytest.raises(gis2.Blocked, match="нет списка отзывов"):
+        gis2.parse_reviews_html(html)
+    assert gis2.parse_reviews_html(EMPTY).reviews == []  # an empty list IS an answer
+
+
+def test_emails_of_the_card_are_read_lower_cased_and_survive_the_flat_text():
+    html = GRACE_REVIEWS.replace('"contacts":[', '"contacts":[{"type":"email","value":"Info@GraceTrade.RU"},', 1)
+    page = gis2.parse_reviews_html(html)
+    assert page.card.emails == ["info@gracetrade.ru"]
+    assert "card.70000001065972795.email: info@gracetrade.ru" in gis2.flatten_reviews(page)
+    assert gis2.parse_reviews(gis2.flatten_reviews(page)) == page
+
+
+def test_the_operator_switch_stops_every_request(cache, monkeypatch):
+    monkeypatch.setenv("GIS2_DISABLED", "yes")
+    site = Site()
+    with pytest.raises(gis2.Paused, match="GIS2_DISABLED"):
+        gis2.fetch_search("spb", "Сатурн", cache=cache, client=site.client())
+    assert site.paths == []

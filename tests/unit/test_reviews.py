@@ -41,9 +41,9 @@ GRACE_TAB = "/spb/firm/70000001065972795/tab/reviews"
 
 
 class Site:
-    def __init__(self, status: int = 200, tabs: dict[str, str] | None = None):
+    def __init__(self, status: int = 200, tabs: dict[str, str] | None = None, search: dict[str, str] | None = None):
         self.status, self.tabs = status, TABS if tabs is None else tabs
-        self.search = SEARCH
+        self.search = SEARCH if search is None else search
         self.paths: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -142,7 +142,7 @@ def test_only_the_name_matches_the_chain_is_shown_without_any_quote(cache):
     assert result.status == "ok" and len(result.cards) == 1  # three branches of one organization → one card
     card = result.cards[0]
     assert (card.basis, card.verified) == ("name", False)
-    assert card.quotes == [] and card.review_count == 74
+    assert card.quotes == [] and (card.rating, card.review_count) == (None, None)  # a stranger's stars are not shown
     assert "может быть другая организация" in card.note
     assert card.rubrics[:1] == ["Стройматериалы"]  # the sphere is shown: the user sees it is not stationery
     assert site.tabs_requested == []  # no phone or site to compare, no legal entity on the card: nothing to read for
@@ -154,6 +154,38 @@ def test_with_a_phone_to_compare_the_tab_of_a_name_only_card_is_read_and_may_con
     card = reviews.find_reviews(cp, cache=cache, client=site.client()).cards[0]
     assert site.tabs_requested == ["/spb/firm/5348552839595094/tab/reviews"]
     assert (card.basis, card.verified) == ("phone", True)  # the contact, not the name, is what confirms
+
+
+def test_a_phone_that_is_not_the_cards_leaves_the_name_only_card_without_quotes_even_though_the_tab_was_read(cache):
+    """The typical real case: the company has a phone (from the registry), the chain has another one."""
+    site = Site()
+    cp = company(SATURN, "7801248119", phone="+7 (812) 000-00-00")
+    card = reviews.find_reviews(cp, cache=cache, client=site.client()).cards[0]
+    assert site.tabs_requested == ["/spb/firm/5348552839595094/tab/reviews"]  # it was read, the reviews are on it...
+    assert (card.basis, card.verified) == ("name", False)
+    assert card.quotes == [] and (card.rating, card.review_count) == (None, None)  # ...and none of them is shown
+
+
+def test_one_legal_name_of_several_organizations_confirms_nothing(cache):
+    """Three different organizations of the search carry «ООО Сатурн» (cartridges, housing services, heating):
+    the legal name does not say which of them is the stationery wholesaler."""
+    site = Site(search={"САТУРН": page("search_saturn_legal.html")})
+    result = reviews.find_reviews(company(SATURN, "7801248119"), cache=cache, client=site.client())
+    assert result.status == "ok" and len(result.cards) == 3
+    for card in result.cards:
+        assert (card.basis, card.verified, card.quotes) == ("name", False, [])
+        assert (card.rating, card.review_count) == (None, None)
+        assert "у нескольких разных организаций (3)" in card.note and "ООО Сатурн" in card.note
+    assert {c.rubrics[0] for c in result.cards} >= {"Заправка картриджей", "Жилищно-коммунальные услуги"}
+    assert site.tabs_requested == []  # no contact to compare, an ambiguous legal name: nothing to read for
+
+
+def test_a_phone_still_confirms_one_of_several_organizations_with_the_same_legal_name(cache):
+    tab = page("reviews_grace_trade.html").replace("70000001065972795", "70000001025095817")
+    site = Site(search={"САТУРН": page("search_saturn_legal.html")}, tabs={"70000001025095817": tab})
+    cp = company(SATURN, "7801248119", phone="+7 (812) 561-91-10")  # a phone on the page of the first card
+    result = reviews.find_reviews(cp, cache=cache, client=site.client())
+    assert result.cards[0].branch_id == "70000001025095817" and result.cards[0].verified  # the contact decides
 
 
 def test_a_card_without_reviews_is_listed_and_its_tab_is_not_requested(cache):
@@ -208,11 +240,14 @@ def test_a_second_request_for_the_same_company_is_answered_from_the_cache(cache)
 
 # --- what a quote is ---------------------------------------------------------------------------
 
-def _tab_with(items: list[tuple[str, str, str]]) -> str:
-    """The recorded Grace tab with other reviews, (id, day, text): same structure, same escaping as the site."""
+def _tab_with(items: list[tuple[str, str, str]], contacts: list[dict] | None = None) -> str:
+    """The recorded Grace tab with other reviews, (id, day, text), and extra contacts of the card: same structure and
+    escaping as the site."""
     html = page("reviews_grace_trade.html")
     initial, queries = gis2._state(html, gis2._INITIAL), gis2._state(html, gis2._QUERY_STATE)
     assert initial is not None and queries is not None
+    card = next(iter(initial["data"]["entity"]["profile"].values()))["data"]
+    card["contact_groups"][0]["contacts"].extend(contacts or [])
     queries["queries"][0]["state"]["data"]["pages"][0]["items"] = [
         {"id": rid, "date_created": f"{day}T10:00:00.000000+03:00", "rating": 4, "text": text,
          "is_hidden": False, "provider": "2gis"} for rid, day, text in items
@@ -278,3 +313,83 @@ def test_fetched_at_of_the_evidence_is_the_time_the_page_was_read(cache):
     card = reviews.find_reviews(company(GRACE, "7811777270"), cache=cache, client=Site().client()).cards[0]
     got = card.quotes[0].evidence.fetched_at
     assert before.replace(microsecond=0) <= got <= datetime.now(UTC)
+
+
+# --- more bases, the cut, the switch ---------------------------------------------------------------
+
+def test_the_email_of_the_registry_equal_to_the_email_of_the_card_confirms_it(cache):
+    tab = _tab_with([("1", "2025-01-01", "Нормальный отзыв про срок")],
+                    contacts=[{"type": "email", "value": "Info@GraceTrade.ru", "text": "info@gracetrade.ru"}])
+    site = Site(tabs={"70000001065972795": tab})
+    cp = company(GRACE, "7811777270", email="INFO@gracetrade.ru")
+    card = reviews.find_reviews(cp, cache=cache, client=site.client()).cards[0]
+    assert (card.basis, card.verified) == ("email", True) and "Email" in card.note
+    assert {e.field for e in card.evidence} == {"address", "email"}
+    assert all(evidence.check_evidence(e, cache.page_text) == [] for e in card.evidence)
+    assert [q.text for q in card.quotes] == ["Нормальный отзыв про срок"]
+
+
+def test_another_email_or_another_site_confirms_nothing(cache):
+    tab = _tab_with([("1", "2025-01-01", "Нормальный отзыв про срок")],
+                    contacts=[{"type": "email", "value": "info@gracetrade.ru", "text": "info@gracetrade.ru"}])
+    cp = company(GRACE, "7811777270", email="sales@other.example", site="https://other.example")
+    card = reviews.find_reviews(
+        cp, cache=cache, client=Site(tabs={"70000001065972795": tab}).client()).cards[0]
+    assert (card.basis, card.verified) == ("legal_name", False)  # not confirmed: the legal name is the next level
+
+
+def test_a_confirmation_whose_evidence_does_not_pass_is_not_claimed(cache, monkeypatch):
+    real = reviews._evidence
+
+    def refuse_phone(src, url, field, value, fact):
+        return None if field == "phone" else real(src, url, field, value, fact)
+
+    monkeypatch.setattr(reviews, "_evidence", refuse_phone)
+    cp = company(GRACE, "7811777270", phone="+78125619110")  # the card has this phone, the proof cannot be shown
+    card = reviews.find_reviews(cp, cache=cache, client=Site().client()).cards[0]
+    assert (card.basis, card.verified) == ("legal_name", False)
+    assert {e.field for e in card.evidence} == {"address"}
+
+
+def _search_with_organizations(count: int) -> str:
+    html = page("search_grace_trade.html")
+    state = gis2._state(html, gis2._INITIAL)
+    assert state is not None
+    profiles = state["data"]["entity"]["profile"]
+    first = next(iter(profiles.values()))
+    out = {}
+    for i in range(count):
+        node = json.loads(json.dumps(first))
+        node["data"]["id"] = f"7000000200000{i:02d}"
+        node["data"]["org"]["id"] = f"7000000300000{i:02d}"
+        out[node["data"]["id"]] = node
+
+    def lit(obj: object) -> str:
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+
+    state_literal = lit({"data": {"entity": {"profile": out}}})
+    return f"<html><script>var initialState = JSON.parse('{state_literal}');</script></html>"
+
+
+def test_at_most_three_organizations_are_shown_and_the_ones_naming_our_legal_entity_come_first(cache):
+    html = _search_with_organizations(5)
+    site = Site(search={"ГРЕЙС ТРЭЙД": html}, tabs={})
+    result = reviews.find_reviews(company(GRACE, "7811777270"), cache=cache, client=site.client())
+    assert len(result.cards) == reviews.MAX_CARDS
+    assert all(c.basis == "name" for c in result.cards)  # five organizations share the legal name: ambiguous
+
+
+def test_a_branch_chain_does_not_push_the_legal_entity_out_of_the_cut(cache):
+    """The chain has many branches (one organization); the cut counts organizations, and our legal name goes first."""
+    chain = gis2.parse_search_html(page("search_saturn.html"))  # 3 branches of ONE organization
+    legal = gis2.parse_search_html(page("search_saturn_legal.html"))  # 3 other organizations
+    found = chain + legal[:1]
+    got = reviews._candidates(found, "ООО", reviews._norm("САТУРН"))
+    assert [c.org_id for c in got] == [legal[0].org_id, chain[0].org_id]  # one card per organization, legal first
+
+
+def test_the_operator_can_switch_the_reading_of_2gis_off(cache, monkeypatch):
+    monkeypatch.setenv("GIS2_DISABLED", "1")
+    site = Site()
+    result = reviews.find_reviews(company(GRACE, "7811777270"), cache=cache, client=site.client())
+    assert result.status == "unavailable" and "отключено" in (result.message or "") and site.paths == []

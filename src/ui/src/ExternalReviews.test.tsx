@@ -27,7 +27,7 @@ test("nothing is requested until the user asks; one click reads 2GIS for this IN
   const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(json(result()));
   render(<ExternalReviews inn="7811777270" />);
   expect(fetchSpy).not.toHaveBeenCalled();
-  expect(screen.getByText(/один запрос, около 15 секунд/)).toBeInTheDocument();
+  expect(screen.getByText(/до пяти запросов с паузами, около 15 секунд/)).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Показать отзывы из 2ГИС" }));
   expect(fetchSpy).toHaveBeenCalledTimes(1);
   expect(String(fetchSpy.mock.calls[0]![0])).toBe("/api/reviews/7811777270");
@@ -47,7 +47,7 @@ test("a confirmed card shows the quote with its date, rating and the page it was
   expect(quotes.getByText("15.03.2024")).toHaveAttribute("datetime", "2024-03-15");
   expect(quotes.getByRole("link", { name: "2ГИС, прочитано 02.10.2026" })).toHaveAttribute("href", TAB);
   expect(screen.getByText(/В подбор и рейтинг отзывы не входят/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Обновить отзывы из 2ГИС" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: /отзывы из 2ГИС|Повторить/ })).not.toBeInTheDocument(); // the answer is kept: no refresh
 });
 
 test("a card that only shares the name is listed with its sphere and the warning — and without a single quote", async () => {
@@ -62,9 +62,18 @@ test("a card that only shares the name is listed with its sphere and the warning
   const article = within(await screen.findByRole("article", { name: /Сатурн, строительный гипермаркет/ }));
   expect(article.getByText("Совпало только название")).toHaveClass("is-name");
   expect(article.getByText("Стройматериалы, Отделочные материалы")).toBeInTheDocument();
-  expect(article.getByText(/74 отзыва в 2ГИС/)).toBeInTheDocument();
+  // even if a server sent them: a stranger's stars and number of reviews are not shown for a name-only card
+  expect(article.queryByText(/74 отзыва/)).not.toBeInTheDocument();
+  expect(article.queryByRole("img", { name: /из 5/ })).not.toBeInTheDocument();
   expect(article.getByText(/может быть другая организация/)).toBeInTheDocument();
   expect(article.queryByRole("list")).not.toBeInTheDocument();
+});
+
+test("a card confirmed by email says so", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(json(result({ cards: [card({ basis: "email", note: "Email из карточки совпал с email компании из реестра." })] })));
+  render(<ExternalReviews inn="7811777270" />);
+  await userEvent.click(screen.getByRole("button", { name: "Показать отзывы из 2ГИС" }));
+  expect(await screen.findByText("Подтверждено по email")).toHaveClass("is-email");
 });
 
 test("the legal entity named by the card is not presented as a confirmation", async () => {
@@ -87,7 +96,8 @@ test("nothing found, an entrepreneur and an unreachable 2GIS say what happened i
   fetchSpy.mockResolvedValueOnce(json(result({ status: "unavailable", cards: [], message: "2ГИС сейчас недоступен — попробуйте позже." })));
   render(<ExternalReviews inn="7811777270" />);
   await userEvent.click(screen.getByRole("button", { name: "Показать отзывы из 2ГИС" }));
-  expect(await screen.findByText(/2ГИС сейчас недоступен — попробуйте позже\. Нажмите кнопку ещё раз позже/)).toBeInTheDocument();
+  expect(await screen.findByText("2ГИС сейчас недоступен — попробуйте позже.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Повторить запрос" })).toBeEnabled();
 });
 
 test("a busy server (429) and a broken connection are errors the user can retry", async () => {
@@ -97,7 +107,7 @@ test("a busy server (429) and a broken connection are errors the user can retry"
   await userEvent.click(screen.getByRole("button", { name: "Показать отзывы из 2ГИС" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("запрашивают для других компаний");
   fetchSpy.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-  await userEvent.click(screen.getByRole("button", { name: "Показать отзывы из 2ГИС" }));
+  await userEvent.click(screen.getByRole("button", { name: "Повторить запрос" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось получить отзывы");
 });
 

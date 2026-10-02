@@ -23,8 +23,8 @@ const ANSWER = {
     },
     {
       branch_id: "5348552839595094", title: "Сатурн, строительный гипермаркет", address: "Литовская улица, 15",
-      rubrics: ["Стройматериалы", "Отделочные материалы"], url: SATURN, rating: 4.9, review_count: 74, basis: "name", verified: false,
-      note: "Название «Сатурн» в карточке есть, но юрлицо не указано, а ИНН 2ГИС не публикует — это может быть другая организация. Отзывы не показываются, пока принадлежность не подтверждена; откройте карточку и проверьте адрес и сферу.",
+      rubrics: ["Стройматериалы", "Отделочные материалы"], url: SATURN, rating: null, review_count: null, basis: "name", verified: false,
+      note: "Название «Сатурн» в карточке есть, но юрлицо не указано, а ИНН 2ГИС не публикует — это может быть другая организация. Отзывы, рейтинг и число отзывов не показываются, пока карточку не подтвердит контакт; откройте карточку и проверьте адрес и сферу.",
       quotes: [], evidence: [ev(SATURN, "address", "Литовская улица, 15", "Карточка 2ГИС «Сатурн, строительный гипермаркет»")],
     },
   ],
@@ -61,6 +61,8 @@ test("отзывы 2ГИС — по кнопке, с уровнем довери
   const chain = block.getByRole("article", { name: /Сатурн, строительный гипермаркет/ });
   await expect(chain.getByText("Совпало только название", { exact: true })).toBeVisible();
   await expect(chain.getByRole("list")).toHaveCount(0);
+  await expect(chain.getByText(/отзыв.* в 2ГИС/)).toHaveCount(0); // no stranger's number of reviews
+  await expect(block.getByRole("button", { name: /отзывы из 2ГИС|Повторить/ })).toHaveCount(0); // the answer is kept
   await expect(block.getByText(/В подбор и рейтинг отзывы не входят/)).toBeVisible();
   expect(asked).toHaveLength(1);
   // the links to search by hand stay (D-066), and the ratings of customers are a block of their own

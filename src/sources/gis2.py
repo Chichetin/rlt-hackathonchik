@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import quote
 
 import httpx
@@ -79,6 +79,7 @@ class Card:
     review_count: int | None
     phones: list[str]  # digits, as in `value` of the contact
     sites: list[str]
+    emails: list[str] = field(default_factory=list)  # lower case
 
     @property
     def brand(self) -> str:
@@ -186,6 +187,7 @@ def _card(d: dict) -> Card | None:
     rating, count = rv.get("general_rating"), rv.get("general_review_count")
     phones: list[str] = []
     sites: list[str] = []
+    emails: list[str] = []
     for group in _items(d, "contact_groups"):
         for c in _items(group, "contacts"):
             kind = c.get("type")
@@ -195,6 +197,10 @@ def _card(d: dict) -> Card | None:
                 site = str(c.get("url") or c.get("value") or c.get("text") or "").strip()
                 if site:
                     sites.append(site)
+            elif kind == "email":
+                email = str(c.get("value") or c.get("text") or "").strip().lower()
+                if "@" in email:
+                    emails.append(email)
     return Card(
         id=cid,
         name=_squash(name),
@@ -207,6 +213,7 @@ def _card(d: dict) -> Card | None:
         review_count=count if isinstance(count, int) and not isinstance(count, bool) else None,
         phones=list(dict.fromkeys(phones)),
         sites=list(dict.fromkeys(sites)),
+        emails=list(dict.fromkeys(emails)),
     )
 
 
@@ -246,19 +253,20 @@ def parse_reviews_html(html: str) -> ReviewsPage:
     if not cards or queries is None:
         raise Blocked("2gis.ru: в странице отзывов нет данных (страница защиты или разметка изменилась)")
     reviews: dict[str, Review] = {}
-    found = False
+    saw_list = False  # a list of reviews (possibly empty) was found: only then «no reviews» is an answer
     for q in _items(queries, "queries"):
         key = q.get("queryKey")
         if not (isinstance(key, list) and key and key[0] == "fetchEntityReviews"):
             continue
-        found = True
         for page in _items(_obj(_obj(q, "state"), "data"), "pages"):
+            if isinstance(page.get("items"), list):
+                saw_list = True
             for item in _items(page, "items"):
                 review = _review(item)
                 if review is not None:
                     reviews.setdefault(review.id, review)
-    if not found:
-        raise Blocked("2gis.ru: в странице нет запроса отзывов (разметка изменилась?)")
+    if not saw_list:
+        raise Blocked("2gis.ru: в странице нет списка отзывов (разметка изменилась или защита)")
     return ReviewsPage(card=cards[0], reviews=list(reviews.values()))
 
 
@@ -272,14 +280,15 @@ def _phone_text(digits: str) -> str:
 
 def _card_lines(c: Card) -> list[str]:
     lines = [f"card.{c.id}.name: {c.name}"]
-    for field, value in (("primary", c.primary), ("legal_name", c.legal_name), ("org_id", c.org_id),
+    for name, value in (("primary", c.primary), ("legal_name", c.legal_name), ("org_id", c.org_id),
                          ("address", c.address), ("rubrics", "; ".join(c.rubrics) or None),
                          ("rating", None if c.rating is None else repr(c.rating)),
                          ("review_count", None if c.review_count is None else str(c.review_count))):
         if value:
-            lines.append(f"card.{c.id}.{field}: {value}")
+            lines.append(f"card.{c.id}.{name}: {value}")
     lines += [f"card.{c.id}.phone: {_phone_text(p)}" for p in c.phones]
     lines += [f"card.{c.id}.site: {s}" for s in c.sites]
+    lines += [f"card.{c.id}.email: {e}" for e in c.emails]
     return lines
 
 
@@ -316,7 +325,7 @@ def _card_from_fields(cid: str, f: dict[str, list[str]]) -> Card:
         id=cid, name=one("name") or "", primary=one("primary"), legal_name=one("legal_name"), org_id=one("org_id"),
         address=one("address"), rubrics=[r for r in (one("rubrics") or "").split("; ") if r],
         rating=float(rating) if rating else None, review_count=int(count) if count else None,
-        phones=[_digits(p) for p in f.get("phone", [])], sites=f.get("site", []),
+        phones=[_digits(p) for p in f.get("phone", [])], sites=f.get("site", []), emails=f.get("email", []),
     )
 
 
@@ -337,6 +346,11 @@ def parse_reviews(flat: str) -> ReviewsPage:
 
 # --- the client --------------------------------------------------------------------------------
 
+def disabled() -> bool:
+    """`GIS2_DISABLED=1`: an operator switched the reading of 2gis.ru off (read at every call, like PB_DISABLED)."""
+    return os.environ.get("GIS2_DISABLED", "").strip().lower() in {"1", "true", "yes"}
+
+
 def blocked() -> bool:
     """True while the host is paused: after a refusal (15 min) or after a timeout (DOWN_COOLDOWN_S)."""
     return PACER.blocked()
@@ -353,6 +367,8 @@ def _client() -> httpx.Client:
 
 
 def _get(client: httpx.Client, url: str) -> httpx.Response:
+    if disabled():
+        raise Paused("2gis.ru: чтение отключено (GIS2_DISABLED)")
     if blocked():
         raise Paused("2gis.ru: пауза после отказа или таймаута источника ещё не истекла")
     with PACER.slot(timeout=TIMEOUT_S) as limit:

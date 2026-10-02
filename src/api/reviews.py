@@ -11,7 +11,6 @@ Reviews are not in the score and not in the rating.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import httpx
@@ -28,7 +27,7 @@ from src.sources.pb_nalog import CaptchaRequired
 log = logging.getLogger(__name__)
 
 router = APIRouter()
-_slots = guard.LiveSlots(max(1, int(os.environ.get("REVIEWS_LIVE_MAX") or 2)))  # reads of 2gis.ru at once
+_slots = guard.LiveSlots(guard._int_env("REVIEWS_LIVE_MAX", 2))  # reads of 2gis.ru at once
 
 _LIMITED: dict[int | str, dict[str, Any]] = {
     401: {"description": "нужен ключ API (X-API-Key), если на сервере задан API_KEY"},

@@ -10,6 +10,7 @@ type ReviewCard = components["schemas"]["ReviewCard"];
 // equal to the company's own confirms the card. The label says it in the words the customer needs.
 const TRUST: Record<ReviewCard["basis"], string> = {
   phone: "Подтверждено по телефону",
+  email: "Подтверждено по email",
   site: "Подтверждено по сайту",
   legal_name: "Юрлицо совпало по названию, не по ИНН",
   name: "Совпало только название",
@@ -30,11 +31,12 @@ function GisCard({ card }: { card: ReviewCard }) {
       <span>{card.address ?? "Адрес не указан"}</span>
       {card.rubrics.length > 0 && <span>{card.rubrics.slice(0, 2).join(", ")}</span>}
     </p>
-    <p className="gis-rating">
+    {/* a stranger's stars are a digest of a stranger's reviews: for «only the name matches» they are not shown at all */}
+    {card.basis !== "name" && <p className="gis-rating">
       {card.review_count
-        ? <>{card.rating !== null && <><Stars value={card.rating} /><strong>{card.rating.toLocaleString("ru-RU")}</strong></>}<span>{reviewCount(card.review_count)} в 2ГИС</span></>
+        ? <>{card.rating != null && <><Stars value={card.rating} /><strong>{card.rating.toLocaleString("ru-RU")}</strong></>}<span>{reviewCount(card.review_count)} в 2ГИС</span></>
         : <span>Отзывов в 2ГИС нет</span>}
-    </p>
+    </p>}
     <p className="gis-note">{card.note}</p>
     {card.quotes.length > 0 && <ul className="gis-quotes" aria-label={`Цитаты из 2ГИС: ${card.title}`}>
       {card.quotes.map(q => <li key={`${q.date}-${q.text}`}>
@@ -74,18 +76,20 @@ export function ExternalReviews({ inn }: { inn: string | null }) {
     }
   }
 
-  const retry = data?.status === "unavailable";
+  // the answer is kept for a week on the server: asking again is only for «2GIS did not answer»
+  const again = state === "error" || (state === "ready" && data?.status === "unavailable");
+  const showButton = state === "idle" || state === "loading" || again;
   return <div className="gis" aria-busy={state === "loading"}>
-    <button type="button" className="gis-load" disabled={state === "loading"} onClick={() => void load()}>
-      {state === "loading" ? "Читаем 2ГИС…" : state === "ready" ? "Обновить отзывы из 2ГИС" : "Показать отзывы из 2ГИС"}
-    </button>
-    {state === "idle" && <p className="gis-note">Ищем по названию компании в 2ГИС: один запрос, около 15 секунд. Ответ запоминается.</p>}
+    {showButton && <button type="button" className="gis-load" disabled={state === "loading"} onClick={() => void load()}>
+      {state === "loading" ? "Читаем 2ГИС…" : again ? "Повторить запрос" : "Показать отзывы из 2ГИС"}
+    </button>}
+    {state === "idle" && <p className="gis-note">Ищем компанию в 2ГИС по названию: до пяти запросов с паузами, около 15 секунд. Ответ запоминается на неделю.</p>}
     {state === "loading" && <p className="gis-note" role="status">Читаем 2ГИС по названию компании. Это может занять до 15 секунд.</p>}
     {state === "error" && <p className="gis-error" role="alert">
       {busy ? "Отзывы сейчас запрашивают для других компаний. Повторите через полминуты." : "Не удалось получить отзывы. Карточка поставщика от этого не зависит — повторите позже."}
     </p>}
     {state === "ready" && data && <>
-      {data.status !== "ok" && <p className="gis-note" role="status">{data.message}{retry ? " Нажмите кнопку ещё раз позже." : ""}</p>}
+      {data.status !== "ok" && <p className="gis-note" role="status">{data.message}</p>}
       {data.status === "ok" && data.message && <p className="gis-note" role="status">{data.message}</p>}
       {(data.cards ?? []).map(c => <GisCard key={c.branch_id} card={c} />)}
       {data.status === "ok" && <p className="gis-note">{data.disclaimer}</p>}
