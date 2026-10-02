@@ -7,6 +7,7 @@ import duckdb
 import pytest
 
 from src.enrich import okved_link
+from src.eval import okved_link as link_eval
 
 CUTOFF, HOLDOUT = date(2025, 7, 1), date(2025, 10, 1)
 
@@ -101,7 +102,7 @@ def test_rule_d036_is_class_plus_wholesale_row():
 
 def test_evaluate_counts_only_cold_dev_winners_and_never_the_holdout(dirs):
     processed, pool = dirs
-    res = okved_link.evaluate(CUTOFF, HOLDOUT, processed, pool, min_lift=1.5, min_suppliers=2)
+    res = link_eval.evaluate(CUTOFF, HOLDOUT, processed, pool, min_lift=1.5, min_suppliers=2)
     # cold dev winners: G (lot 3) and H (lot 4); A (lot 5) and D (lot 8) are known from train, X (lot 6) is holdout
     assert (res["n"], res["cold_winner_pairs"], res["cold_in_pool_share"]) == (2, 2, 1.0)
     assert res["rules"]["class"]["hit"] == 0.0  # nobody has OKVED 21.20 / 17.12
