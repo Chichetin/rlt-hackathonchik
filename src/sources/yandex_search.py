@@ -28,7 +28,7 @@ the plain text of the answer, so src/enrich/evidence.py finds an extracted INN i
 
 CLI (loads .env of the worktree, then of the main checkout; the second identical run is free):
   python -m src.sources.yandex_search "поставщик канцтоваров Санкт-Петербург" [-n 10] [--region 2]
-  python -m src.sources.yandex_search --stats          # attempts today / the daily cap
+  python -m src.sources.yandex_search --stats          # on/off and why; attempts today, all time, left of 2500
 """
 
 from __future__ import annotations
@@ -345,10 +345,11 @@ def _ready() -> None:
 
 
 def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
-              client: httpx.Client | None = None, on_send: Callable[[], None] | None = None) -> str:
+              client: httpx.Client | None = None, *, on_send: Callable[[], None]) -> str:
     """One live, paid POST. The decoded XML; YandexSearchError on a refusal (no key, 4xx/5xx, timeout).
 
-    `on_send` runs inside the pacer slot right before the POST (the spend reservation); it may raise.
+    `on_send` runs inside the pacer slot right before the POST — the spend reservation and the ceilings; it may
+    raise. Required: a paid request never leaves without them (use search(), it passes them).
     """
     _ready()
     body: dict[str, object] = {
@@ -364,8 +365,7 @@ def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
     client = client or httpx.Client(timeout=TIMEOUT_S)
     try:
         with PACER.slot():
-            if on_send is not None:
-                on_send()
+            on_send()
             # bytes, not str: the body must leave as UTF-8 whatever the console encoding is
             r = client.post(ENDPOINT, content=json.dumps(body, ensure_ascii=False).encode("utf-8"),
                             headers={"Authorization": f"Api-Key {api_key()}",

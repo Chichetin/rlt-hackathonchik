@@ -329,3 +329,20 @@ def test_stats_says_why_off(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capt
     assert ys.main(["--stats"]) == 0
     out = capsys.readouterr().out
     assert "выключен: не задан YANDEX_MAX_PER_RUN" in out and "всего: 0 из 2500 (осталось 2500)" in out
+
+
+def test_ceiling_refusal_returns_stale_answer(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    api = Api(xml)
+    ys.search(QUERY, 3, cache=SourceCache(tmp_path / "s.sqlite"), client=api.client(), lot="1")
+    monkeypatch.setenv("YANDEX_MAX_PER_LOT", "1")
+    answer = ys.search(QUERY, 3, cache=SourceCache(tmp_path / "s.sqlite", ttl_s=0), client=api.client(), lot="1")
+    assert answer is not None and answer.from_cache and api.calls == 1
+
+
+def test_ledger_refusal_does_not_count_in_the_run(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YANDEX_SEARCH_DAILY_MAX", "1")
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml)
+    ys.search("первый", 3, cache=cache, client=api.client(), lot="1")
+    with pytest.raises(ys.BudgetExceeded, match="YANDEX_SEARCH_DAILY_MAX"):
+        ys.search("второй", 3, cache=cache, client=api.client(), lot="1")
+    assert ys.RUN_CAPS.run == 1 and ys.RUN_CAPS.lots == {"1": 1}  # nothing left: nothing counted
