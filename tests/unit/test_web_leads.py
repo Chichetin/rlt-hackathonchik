@@ -169,8 +169,28 @@ def test_warm_asks_only_new_leads_without_a_card_and_stops_on_a_refusal(leads_di
     monkeypatch.setattr(W, "enrich", lambda inn, c: asked.append(inn))
     assert W.warm(web_leads.load(), 10, 0) == 1 and asked == [NO_CARD]  # known and cached ones are not asked
 
+
+def test_warm_stops_at_the_first_refusal_but_skips_a_company_without_a_card(leads_dir, tmp_path, monkeypatch):
+    """A refusal of the source stops the run (the IP is not banned); «no card in the registry» does not."""
+    only_maker = SourceCache(tmp_path / "only-maker.sqlite")
+    only_maker.put(pb_nalog.card_url(MAKER), _card(MAKER, "17.12", "Производство бумаги и картона"))
+    monkeypatch.setenv("SOURCE_CACHE", str(only_maker.path))
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(_processed(tmp_path, [KNOWN])))
+    todo = sorted([NO_CARD, OTHER, TRADER, MOSCOW])  # new, without a cached card
+    asked: list[str] = []
+
     def refuse(inn, c):
+        asked.append(inn)
         raise pb_nalog.CaptchaRequired("captcha")
 
     monkeypatch.setattr(W, "enrich", refuse)
-    assert W.warm(web_leads.load(), 10, 0) == 0  # stops, the next run continues
+    assert W.warm(web_leads.load(), 10, 0) == 0 and asked == todo[:1]  # stopped, the next run continues
+    asked.clear()
+
+    def first_missing(inn, c):
+        asked.append(inn)
+        if inn == todo[0]:
+            raise KeyError(inn)
+
+    monkeypatch.setattr(W, "enrich", first_missing)
+    assert W.warm(web_leads.load(), 10, 0) == 3 and asked == todo

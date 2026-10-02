@@ -90,3 +90,6 @@ def for_classes(classes: list[str], leads: list[Lead]) -> dict[str, Lead]:
                 out.setdefault(lead.inn, lead)
     return out
 
+
+if __name__ == "__main__":  # the CLI moved (#294): say so instead of exiting silently
+    raise SystemExit("лиды: python -m src.enrich.web_leads_warm --stats | --enrich")
