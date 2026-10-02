@@ -712,7 +712,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
         if profile_note:
             geo_why = f"{geo_why}; {profile_note}"
-        wc = _without_price(w) if price is None else w
+        wc = _without_price(w) if price is None and opts["price"] == "scale" else w
         no_price = NO_PRICE if opts["price"] == "scale" else UNAVAILABLE["price"]
         comps = [
             _component("product_fit", fit, wc, fit_why),

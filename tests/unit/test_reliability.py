@@ -206,7 +206,8 @@ def mode(monkeypatch):
         cfg = search_mod.load_config()
         weights = {**cfg["weights"], "reliability": 0.2} if value == "on" else cfg["weights"]
         monkeypatch.setattr(search_mod, "load_config",
-                            lambda: {**cfg, "weights": weights, "reliability": {"mode": value}})
+                            lambda: {**cfg, "weights": weights, "reliability": {"mode": value},
+                                     "options": {**cfg["options"], "price": "none"}})  # price weight not spread (#585)
     return apply
 
 

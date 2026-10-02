@@ -216,6 +216,10 @@ def test_reliability_is_read_for_the_shown_page_and_the_export_rows_only(search_
     candidates the pipeline scores; the export reads it for its own rows."""
     from src.match.store import ParquetStore
 
+    from src.match import search as search_mod
+
+    cfg = search_mod.load_config()
+    monkeypatch.setattr(search_mod, "load_config", lambda: {**cfg, "reliability": {"mode": "shadow"}})  # on since #585
     calls: list[int] = []
     real = ParquetStore.supplier_history
     monkeypatch.setattr(ParquetStore, "supplier_history", lambda self, inns, as_of: calls.append(len(inns))
