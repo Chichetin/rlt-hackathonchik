@@ -33,7 +33,7 @@ from urllib.parse import parse_qs, urlparse
 
 from src.contracts import inn_is_valid
 from src.enrich.evidence import value_in_page
-from src.eval.run import RESULTS, git
+from src.eval.run import RESULTS, git, tree_dirty
 from src.eval.split import ROOT
 from src.sources import bo_nalog, eis_rnp, pb_nalog, rmsp
 from src.sources.cache import SourceCache
@@ -289,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         "kind": "source-table",
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": git("rev-parse", "HEAD"),
-        "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
+        "dirty": tree_dirty(),
         "config": {"cache": cache.path.name, "pages_in_cache": len(pages),
                    "organizers_data_checked": known is not None},
         "sources": [to_json(r) for r in rows],
