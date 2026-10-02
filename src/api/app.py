@@ -178,6 +178,7 @@ _probe = Probe()
 
 
 def _run_probe(probe: Probe, done: threading.Event) -> None:
+    status = "search_failed"
     try:
         pipeline.pick(PROBE_QUERY, discovery=False)
         status = "ok"
@@ -186,10 +187,10 @@ def _run_probe(probe: Probe, done: threading.Event) -> None:
         status = "no_data"
     except Exception:  # noqa: BLE001 — health reports any failure of the search, it does not raise it
         log.exception("health: пробный поиск упал")
-        status = "search_failed"
-    with probe.lock:
-        probe.status, probe.at, probe.running = status, time.monotonic(), None
-    done.set()
+    finally:  # even a BaseException must not leave every later health waiting on a probe that is gone
+        with probe.lock:
+            probe.status, probe.at, probe.running = status, time.monotonic(), None
+        done.set()
 
 
 def _search_status() -> str:

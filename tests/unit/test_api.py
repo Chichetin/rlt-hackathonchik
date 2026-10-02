@@ -83,6 +83,9 @@ def test_health_times_out_on_a_hung_search(search_client, monkeypatch):
         assert search_client.get("/api/health").json()["status"] == "search_timeout"
     finally:
         release.set()
+        for t in threading.enumerate():  # the probe ends before the fixtures are torn down
+            if t.name == "health-probe":
+                t.join(5)
 
 
 def test_search_two_blocks_real_inns(search_client):
