@@ -58,6 +58,7 @@ def test_member_of_an_sro_with_the_basis_on_the_cached_page(cache):
     fact = res.evidence[0].fact
     assert "Член СРО «Ассоциация «Петровское объединение строителей»» (СРО-С-303-22122020)" in fact
     assert "в реестре с 16.07.2021" in fact and res.evidence[0].field == "sro"
+    assert res.evidence[0].url == nostroy.member_url(5835754) == "https://reestr.nostroy.ru/member/5835754"
     _checked(res, cache)
     assert seen == [{"filters": {"inn": MEMBER}, "page": 1, "pageCount": "20", "sortBy": {}}]
     page = cache.page_text(nostroy.page_url(MEMBER)) or ""
@@ -115,6 +116,15 @@ def test_offline_reads_the_cache_only_and_refusals_are_never_cached(cache):
     with pytest.raises(nostroy.Blocked, match="не ответ реестра"):
         nostroy.check(MEMBER, cache, _client({MEMBER: httpx.Response(200, text="<html>captcha</html>")}),
                       offline=False)
+    nostroy.PACER.reset()
+    with pytest.raises(nostroy.Blocked, match="не кешируем"):  # an error answer of the registry
+        nostroy.check(MEMBER, cache, _client({MEMBER: {"success": False, "message": "err", "data": {}}}),
+                      offline=False)
+    nostroy.PACER.reset()
+    with pytest.raises(httpx.HTTPStatusError):
+        nostroy.check(MEMBER, cache, _client({MEMBER: httpx.Response(502)}), offline=False)
+    assert nostroy.PACER.blocked()  # a failing host is left alone
+    assert cache.get(nostroy.page_url(MEMBER), allow_stale=True) is None
     with pytest.raises(ValueError):
         nostroy.check("7839024640", cache, _client({}), offline=False)  # a bad checksum is never asked
 

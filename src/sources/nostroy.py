@@ -11,8 +11,10 @@ any two requests, a refusal (403/429, an answer that is not the registry's) paus
 What goes to the cache (src/sources/cache.py): `page_url(inn)` → the answer as flat `key: value` lines
 (`query.inn`, `count`, `record.<i>.<key>`), JSON escaping removed, so every Evidence value occurs literally
 (src/enrich/evidence.py);
-`raw_url(inn)` → the raw answer for audit. The director's name is dropped from both: a natural person, not needed for
-the fact (152-ФЗ, CLAUDE.md).
+`member_url(id)` → the lines of one record, the Evidence link of «член» / «исключён» (the registry's card of
+that record opens without a filter); `raw_url(inn)` → the raw answer for audit. The director's name is dropped from
+all of them: a natural person, not needed for the fact (152-ФЗ, CLAUDE.md). An answer with `success` other than true
+is never cached; a 5xx pauses the host for DOWN_COOLDOWN_S.
 
 Answer (member, evidence):
 - a record with this INN, «Является членом», SRO not deactivated → True, one Evidence per such record (SRO, its
@@ -57,7 +59,7 @@ BLOCK_COOLDOWN_S = 900.0
 DOWN_COOLDOWN_S = 90.0
 PACER = HostPacer(lambda: MIN_INTERVAL_S, BLOCK_COOLDOWN_S)
 MSK = ZoneInfo("Europe/Moscow")
-_KEYS = ("inn", "short_description", "full_description", "registration_number", "registry_registration_date",
+_KEYS = ("id", "inn", "short_description", "full_description", "registration_number", "registry_registration_date",
          "ogrnip", "inventory_number")
 
 
@@ -76,6 +78,11 @@ def page_url(inn: str) -> str:
     return f"{BASE}/sro/all/member/list#inn={inn}"
 
 
+def member_url(record_id: str | int) -> str:
+    """The registry's card of one membership record (route `/member/:id` of the web app) — opens without a filter."""
+    return f"{BASE}/member/{record_id}"
+
+
 def raw_url(inn: str) -> str:
     return f"{API}?inn={inn}#raw"
 
@@ -87,20 +94,28 @@ def _clean(answer: dict[str, Any]) -> dict[str, Any]:
     return {**answer, "data": data}
 
 
+def _record_lines(i: int, r: dict[str, Any]) -> list[str]:
+    lines = [f"record.{i}.{k}: {r[k]}" for k in _KEYS if r.get(k) not in (None, "")]
+    lines.append(f"record.{i}.member_status: {(r.get('member_status') or {}).get('title', '')}")
+    sro = r.get("sro") or {}
+    lines.append(f"record.{i}.sro: {sro.get('full_description', '')}")
+    lines.append(f"record.{i}.sro_registration_number: {sro.get('registration_number', '')}")
+    if sro.get("deactivate_message"):
+        lines.append(f"record.{i}.sro_deactivated: {sro['deactivate_message']}")
+    return lines
+
+
 def flatten(answer: dict[str, Any], inn: str) -> str:
     data = answer.get("data") or {}
     lines = [f"query.inn: {inn}", f"success: {str(bool(answer.get('success'))).lower()}", f"count: {data.get('count')}"]
     for i, r in enumerate(data.get("data") or []):
-        for k in _KEYS:
-            if r.get(k) not in (None, ""):
-                lines.append(f"record.{i}.{k}: {r[k]}")
-        lines.append(f"record.{i}.member_status: {(r.get('member_status') or {}).get('title', '')}")
-        sro = r.get("sro") or {}
-        lines.append(f"record.{i}.sro: {sro.get('full_description', '')}")
-        lines.append(f"record.{i}.sro_registration_number: {sro.get('registration_number', '')}")
-        if sro.get("deactivate_message"):
-            lines.append(f"record.{i}.sro_deactivated: {sro['deactivate_message']}")
+        lines += _record_lines(i, r)
     return "\n".join(lines) + "\n"
+
+
+def flatten_record(r: dict[str, Any]) -> str:
+    """The page of one record (member_url): the same lines as in the search answer, nothing added."""
+    return "\n".join(_record_lines(0, r)) + "\n"
 
 
 def parse(text: str) -> tuple[bool, int | None, list[dict[str, str]]]:
@@ -132,6 +147,8 @@ def _post(client: httpx.Client, inn: str) -> dict[str, Any]:
     if r.status_code in (403, 429):
         PACER.block()
         raise Blocked(f"reestr.nostroy.ru ответил {r.status_code} — останавливаемся")
+    if r.status_code >= 500:  # the host is failing: leave it alone as after a network error
+        PACER.block(DOWN_COOLDOWN_S)
     r.raise_for_status()
     try:
         answer = r.json()
@@ -140,6 +157,9 @@ def _post(client: httpx.Client, inn: str) -> dict[str, Any]:
     if not isinstance(answer, dict) or not isinstance(answer.get("data"), dict):
         PACER.block()
         raise Blocked("reestr.nostroy.ru вернул не ответ реестра — останавливаемся")
+    if answer.get("success") is not True:  # an error answer of the registry is never cached as a fact
+        PACER.block(DOWN_COOLDOWN_S)
+        raise Blocked(f"reestr.nostroy.ru: success={answer.get('success')!r}, {answer.get('message')!r} — не кешируем")
     return answer
 
 
@@ -171,6 +191,9 @@ def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | Non
         if own:
             client.close()
     cache.put(raw_url(inn), json.dumps(answer, ensure_ascii=False))
+    for r in (answer.get("data") or {}).get("data") or []:
+        if r.get("id") not in (None, ""):
+            cache.put(member_url(r["id"]), flatten_record(r))
     return cache.put(url, flatten(answer, inn))
 
 
@@ -185,8 +208,9 @@ def answer(inn: str, page: CachedPage) -> SroResult:
     at = datetime.fromtimestamp(page.fetched_at, tz=UTC)
     day = at.astimezone(MSK).strftime("%d.%m.%Y")
 
-    def ev(value: str, fact: str) -> Evidence:
-        return Evidence(source=SOURCE, url=page.url, fetched_at=at, fact=fact, field="sro", value=value)
+    def ev(value: str, fact: str, record: dict[str, str] | None = None) -> Evidence:
+        url = member_url(record["id"]) if record and record.get("id") else page.url  # the record's own card
+        return Evidence(source=SOURCE, url=url, fetched_at=at, fact=fact, field="sro", value=value)
 
     success, count, records = parse(page.body)
     if not success or count is None:
@@ -201,14 +225,14 @@ def answer(inn: str, page: CachedPage) -> SroResult:
         for r in current:
             since = _date(r.get("registry_registration_date", ""))
             facts.append(ev(r["sro_registration_number"], f"Член СРО «{r['sro']}» ({r['sro_registration_number']})"
-                            + (f", в реестре с {since}" if since else "") + f" — реестр НОСТРОЙ на {day}"))
+                            + (f", в реестре с {since}" if since else "") + f" — реестр НОСТРОЙ на {day}", r))
         return SroResult(True, facts)
     complete = count <= len(records)
     if own and complete and all(r.get("member_status") == EXCLUDED for r in own):
         r = own[0]
         fact = (f"Был членом СРО «{r['sro']}» ({r['sro_registration_number']}), статус «{EXCLUDED}» — "
                 f"реестр НОСТРОЙ на {day}")
-        return SroResult(False, [ev(r["sro_registration_number"], fact)])
+        return SroResult(False, [ev(r["sro_registration_number"], fact, r)])
     return SroResult(None, [])
 
 
