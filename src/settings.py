@@ -86,6 +86,10 @@ class Settings:
     bm25_tokenizer = _Var("BM25_TOKENIZER", lambda v: v)  # overrides `tokenizer:` of configs/search.yaml
     # block «Новые» (src/match/new_fit.py, #77): off | shadow | on, overrides `mode:` of configs/discover.yaml
     discovery_new_fit = _Var("DISCOVERY_NEW_FIT", lambda v: (v or "").strip() or None)
+    # EIS contract history (src/sources/eis_contracts.py, #244): cache ages, s; cards opened per check
+    eis_contracts_search_max_age_s = _Var("EIS_CONTRACTS_SEARCH_MAX_AGE_S", lambda v: float(v or 7 * 24 * 3600))
+    eis_contracts_card_max_age_s = _Var("EIS_CONTRACTS_CARD_MAX_AGE_S", lambda v: float(v or 30 * 24 * 3600))
+    eis_contracts_max_cards = _Var("EIS_CONTRACTS_MAX_CARDS", lambda v: int(v or 3))
     # worker (src/worker): unlike the two limits above this one always raised on garbage, a typo is not a default
     queue_stale_running_s = _Var("QUEUE_STALE_RUNNING_S", lambda v: int(v or QUEUE_STALE_RUNNING_DEFAULT_S))
 
