@@ -188,7 +188,6 @@
 .branch-route{display:flex;align-items:center;gap:22px;font:28px var(--body)}
 .branch-route b{font:24px var(--body);color:#92afd4}.registry .branch-route b{color:#aaa8b6}
 .candidate-branch p{font:22px var(--body);color:#aeb3bd;margin:20px 0 0}
-.new-candidates-note{font:20px var(--body);color:#b4b8c2;margin:13px 0 32px}
 .new-example{margin:6px 0 18px;padding:14px 0 0;border-top:1px solid #ffffff25}
 .new-example p{font:19px/1.35 var(--body);color:#b4b8c2;margin:8px 0 0}
 .new-example .new-example-name{font:22px var(--body);color:#e1e3e9}.new-example-name b{font-weight:500}
