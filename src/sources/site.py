@@ -20,6 +20,7 @@ from __future__ import annotations
 import html as html_mod
 import re
 import threading
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -224,8 +225,9 @@ def pick_inn(seen: Counter[str]) -> tuple[str | None, str]:
 
 
 def site_inn(home: str, cache: SourceCache | None = None, client: httpx.Client | None = None,
-             offline: bool = False) -> SiteInn:
-    """Home page, then requisite links, until a page states an INN (at most MAX_PAGES pages)."""
+             offline: bool = False, deadline: float | None = None) -> SiteInn:
+    """Home page, then requisite links, until a page states an INN (at most MAX_PAGES pages). `deadline`
+    (time.monotonic()) — after it the remaining pages are read from the cache only."""
     cache = cache or SourceCache()
     domain = (urlsplit(home).hostname or "").removeprefix("www.")
     res = SiteInn(domain=domain, inn=None, url=None)
@@ -239,7 +241,8 @@ def site_inn(home: str, cache: SourceCache | None = None, client: httpx.Client |
                 continue
             res.pages.append(url)
             try:
-                page = fetch_page(url, cache, client, offline)
+                late = deadline is not None and time.monotonic() >= deadline
+                page = fetch_page(url, cache, client, offline or late)
             except httpx.HTTPError as e:
                 res.reason = f"сайт недоступен: {type(e).__name__}"
                 if url == home:

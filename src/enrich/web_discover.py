@@ -28,10 +28,11 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from functools import cache
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -59,7 +60,7 @@ GOODS_CLASSES = range(1, 34)  # OKPD2 01–33 are goods; the rest — services a
 PurchaseKind = Literal["goods", "services"]
 
 
-@cache
+@lru_cache(maxsize=4)
 def _config(path: Path, mtime_ns: int) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
@@ -170,8 +171,10 @@ def lot_leads(lot: str, text: str, okpd_class: str, strong: int, *, okpd2: Seque
     """The fallback path for one lot: `text` — its subject, `okpd_class` — the class its leads answer, `strong`
     — how many strong candidates the free sources gave. Not needed or off → nothing is done, the reason is
     returned. `cache` — site pages (the source cache of discover); `search_cache` — the answers of the client
-    (its own shared file by default). `offline` → cached answers and pages only. `deadline` (time.monotonic())
-    — no new site is opened after it; the answers are cached, the next search of the lot continues for free."""
+    (its own shared file by default). `offline` → cached answers and pages only. `deadline` (time.monotonic(), the
+    deadline of the whole search) — after it nothing goes to the network: answers and pages are read from the cache
+    only, and a live request is cut to the time left. Once `max_sites` sites are checked no further query is sent.
+    What was not reached is cached by nobody and costs nothing: the next search of the lot continues."""
     cfg = cfg or load_config()
     need, why = needed(strong, cfg)
     out = Fallback(lot=lot, used=False, reason=why)
@@ -187,11 +190,31 @@ def lot_leads(lot: str, text: str, okpd_class: str, strong: int, *, okpd2: Seque
     out.used = True
     notes: list[str] = []
     seen: set[str] = set()
+    max_sites = int(cfg.get("max_sites", 6))
+    timed_out = False
+
+    def left() -> float | None:
+        """Seconds of network time left; None — no deadline; 0 — none left (cache only)."""
+        return None if deadline is None else max(deadline - time.monotonic(), 0.0)
+
+    def live() -> bool:
+        nonlocal timed_out
+        ok = not offline and left() != 0.0
+        timed_out = timed_out or (not offline and not ok)
+        return ok
+
     for q in out.queries:
+        if len(out.sites) >= max_sites:  # nothing more would be opened: do not pay for another answer
+            break
         try:
-            answer = yandex_search.search(q, int(cfg.get("results", 10)), region, cache=search_cache, client=client,
-                                          offline_only=offline or None, lot=lot)
-        except yandex_search.YandexSearchError as e:  # a ceiling, a refusal, a pause: no more requests here
+            if live():
+                with _bounded(client, left(), yandex_search.TIMEOUT_S) as c:
+                    answer = yandex_search.search(q, int(cfg.get("results", 10)), region, cache=search_cache,
+                                                  client=c, lot=lot)
+            else:
+                answer = yandex_search.search(q, int(cfg.get("results", 10)), region, cache=search_cache,
+                                              offline_only=True, lot=lot)
+        except (yandex_search.YandexSearchError, httpx.HTTPError) as e:  # a ceiling, a refusal: no more requests
             notes.append(str(e))
             break
         if answer is None:  # offline and never asked
@@ -203,24 +226,41 @@ def lot_leads(lot: str, text: str, okpd_class: str, strong: int, *, okpd2: Seque
             if not dom or dom in seen or skipped(dom, skip):
                 continue
             seen.add(dom)
-            if len(out.sites) >= int(cfg.get("max_sites", 6)):
-                break
-            if deadline is not None and time.monotonic() >= deadline:
-                notes.append("время запроса вышло — остальные сайты в следующий раз")
+            if len(out.sites) >= max_sites:
                 break
             s = SiteCheck(domain=dom, home=f"{p.scheme}://{p.netloc}/", query=answer.query)
-            found = site.site_inn(s.home, cache, site_client, offline=offline)
+            if live():
+                with _bounded(site_client, left(), site.TIMEOUT_S) as c:
+                    found = site.site_inn(s.home, cache, c, deadline=deadline)
+            else:
+                found = site.site_inn(s.home, cache, offline=True)
             s.inn, s.inn_url, s.pages, s.reason = found.inn, found.url, list(found.pages), found.reason
             out.sites.append(s)
             if s.inn and s.inn_url and s.inn not in {lead.inn for lead in out.leads}:
                 out.leads.append(web_leads.Lead(
-                    okpd2_class=okpd_class, inn=s.inn, name=hit.title, site=dom, role_claim="unknown", region=None,
+                    okpd2_class=okpd_class, inn=s.inn, name=dom, site=dom, role_claim="unknown", region=None,
                     source_url=s.inn_url, search_query=answer.query, found_at=date.today()))
     out.reason = (f"{why}; запросов {len(out.queries)}, из них платных {out.requests_live}; сайтов проверено "
-                  f"{len(out.sites)}, ИНН на сайте у {len(out.leads)}" + ("; " + "; ".join(notes) if notes else ""))
+                  f"{len(out.sites)}, ИНН на сайте у {len(out.leads)}"
+                  + ("; время запроса вышло — дальше только кеш, остальное в следующий раз" if timed_out else "")
+                  + ("; " + "; ".join(notes) if notes else ""))
     if out.requests_live:
         log.warning("Яндекс Search (запасной путь), лот %s: %d платных запросов", lot, out.requests_live)
     return out
+
+
+@contextmanager
+def _bounded(client: httpx.Client | None, left: float | None, default_s: float) -> Iterator[httpx.Client | None]:
+    """The caller's client as is; without one, a client whose timeout is the time left (None — the module's own)."""
+    if client is not None or left is None:
+        yield client
+        return
+    own = httpx.Client(timeout=max(min(left, default_s), 0.5),
+                       headers={"User-Agent": site.UA, "Accept-Language": "ru"})
+    try:
+        yield own
+    finally:
+        own.close()
 
 
 def with_site(cp: Counterparty, s: SiteCheck, cache: SourceCache) -> Counterparty:

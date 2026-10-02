@@ -500,17 +500,19 @@ def lead_matches(
 def yandex_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], history: Sequence[CounterpartyMatch],
     current: Sequence[CounterpartyMatch], cache: SourceCache, weights: dict[str, float], predicted: bool,
-    processed: Path, region: str, region_note: str | None, *, offline: bool, budget_s: float,
+    processed: Path, region: str, region_note: str | None, *, offline: bool, deadline: float,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """The paid fallback (#194, src/enrich/web_discover.py): Yandex → company site → INN → the road of a web lead.
 
-    Asked only when the free sources — the history block and every «Новые» found so far — hold fewer strong
-    candidates than `min_strong`. The lot of the per-lot ceiling is `query.query_id`. A company already in `skip`
-    (found by the registry or a lead file) is not repeated. Returns what `lead_matches` returns.
+    Asked only when the free sources — the first MAX_SHOWN of the history block and every «Новые» found so far —
+    hold fewer strong candidates than `min_strong`. The lot of the per-lot ceiling is `query.query_id`. `deadline` —
+    the one of the whole discover(): after it Yandex and the sites are read from their caches only. Leads answer the
+    first class of the query. A company already in `skip` (found by the registry or a lead file) is not repeated.
+    Returns what `lead_matches` returns.
     """
-    strong = web_discover.strong_count([*history, *apply_legal(list(current))])
+    strong = web_discover.strong_count([*history[:MAX_SHOWN], *apply_legal(list(current))])
     fb = web_discover.lot_leads(query.query_id, query.text, classes[0], strong, okpd2=codes, cache=cache,
-                                offline=offline, deadline=time.monotonic() + budget_s)
+                                offline=offline, deadline=deadline)
     if not fb.used:
         return [], {}, [], f"Яндекс (запасной путь): {fb.reason}"
     leads = {lead.inn: lead for lead in fb.leads if lead.inn and lead.inn not in skip}
@@ -712,7 +714,7 @@ def discover(
         try:
             found_web, web_relation, web_no_card, line = yandex_matches(
                 query, codes, res.okpd_classes, {m.counterparty.inn or "" for m in matches}, history, matches, cache,
-                weights, res.predicted, processed, target, target_note, offline=offline, budget_s=budget_s)
+                weights, res.predicted, processed, target, target_note, offline=offline, deadline=deadline)
         except Exception:  # noqa: BLE001 — the paid fallback never takes the free channels down
             log.exception("discovery: запасной путь Яндекс пропущен из-за ошибки")
             found_web, web_relation, web_no_card, line = [], {}, [], None

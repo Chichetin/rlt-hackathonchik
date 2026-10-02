@@ -8,6 +8,7 @@ sites are synthetic HTML, ФНС cards are synthetic texts with the checksum-val
 from __future__ import annotations
 
 import base64
+import time
 from pathlib import Path
 
 import duckdb
@@ -142,23 +143,37 @@ def test_lot_leads_take_the_inn_the_site_states_and_skip_directories(cache):
     api, calls = Api(), []
     fb = W.lot_leads("lot-1", LOT_TEXT, "21.20", 1, okpd2=["21.20.10.110"], cache=cache, client=api.client(),
                      site_client=_sites(calls))
-    assert fb.used and fb.requests_live == 3 and len(api.queries) == 3
-    assert ys.RUN_CAPS.lots == {"lot-1": 3}  # the per-lot ceiling counts this lot (lot= is passed)
+    # the first answer already fills max_sites (6 of configs/yandex_discovery.yaml): the other two queries are not paid
+    assert fb.used and fb.requests_live == 1 and len(api.queries) == 1
+    assert ys.RUN_CAPS.lots == {"lot-1": 1}  # the per-lot ceiling counts this lot (lot= is passed)
     assert [lead.inn for lead in fb.leads] == [MAKER, KNOWN, OTHER]
     lead = fb.leads[0]
     assert (lead.okpd2_class, lead.site, lead.source_url) == ("21.20", "privivka.spb.ru", "https://privivka.spb.ru/")
     assert lead.search_query == "поставка вакцин производитель"  # the query as the client normalized and paid it
     assert not any("2gis.ru" in u for u in calls)  # a directory is never opened
-    assert len(fb.sites) == 6  # max_sites of configs/yandex_discovery.yaml
+    assert len(fb.sites) == 6
     again = W.lot_leads("lot-1", LOT_TEXT, "21.20", 1, cache=cache, client=api.client(), site_client=_sites())
-    assert again.requests_live == 0 and len(api.queries) == 3  # the second time is free (cache)
+    assert again.requests_live == 0 and len(api.queries) == 1  # the second time is free (cache)
 
 
 def test_per_lot_ceiling_stops_the_lot(cache, monkeypatch):
     monkeypatch.setenv("YANDEX_MAX_PER_LOT", "1")
     api = Api()
-    fb = W.lot_leads("lot-1", LOT_TEXT, "21.20", 0, cache=cache, client=api.client(), site_client=_sites())
+    wide = {**W.load_config(), "max_sites": 50}  # sites never fill up: every query of the lot is wanted
+    fb = W.lot_leads("lot-1", LOT_TEXT, "21.20", 0, cache=cache, client=api.client(), site_client=_sites(), cfg=wide)
     assert fb.requests_live == 1 and len(api.queries) == 1 and "YANDEX_MAX_PER_LOT" in fb.reason
+
+
+def test_after_the_deadline_only_the_caches_are_read(cache):
+    """/api/search: the deadline of discover() holds — no paid request, no site request once it is over."""
+    api, calls = Api(), []
+    late = W.lot_leads("lot-1", LOT_TEXT, "21.20", 0, cache=cache, client=api.client(), site_client=_sites(calls),
+                       deadline=time.monotonic() - 1)
+    assert api.queries == [] and calls == [] and late.leads == [] and "время запроса вышло" in late.reason
+    _warm(cache)  # a run with time to spare cached the answer and the pages
+    cached = W.lot_leads("lot-1", LOT_TEXT, "21.20", 0, cache=cache, client=api.client(), site_client=_sites(calls),
+                         deadline=time.monotonic() - 1)
+    assert api.queries == [] and calls == [] and [lead.inn for lead in cached.leads] == [MAKER, KNOWN, OTHER]
 
 
 def test_contacts_of_an_individual_are_not_taken_from_the_site(cache):
@@ -226,6 +241,15 @@ def test_a_company_of_a_lead_file_is_not_repeated(cache, tmp_path, monkeypatch):
 
 def test_off_by_default_changes_nothing(cache, tmp_path, monkeypatch):
     _warm(cache)
+    (tmp_path / "leads" / "web.csv").write_text(
+        ";".join(web_leads.COLUMNS) + "\n" + f"21.20;{MAKER};ООО;x.ru;manufacturer;Санкт-Петербург;https://x.ru/;"
+        "вакцины ИНН;2026-10-01\n", encoding="utf-8")
+    processed = _processed(tmp_path, [])
     monkeypatch.delenv("YANDEX_SEARCH_API_KEY")
-    res = _discover(cache, _processed(tmp_path, []))
-    assert res.matches == [] and res.leads == []  # not even a line: the block is what it was before #194
+    monkeypatch.setattr(D, "yandex_matches", lambda *a, **k: pytest.fail("the fallback ran while off"))
+    off = _discover(cache, processed)
+    # exactly the lead channel of #108: the same company, explanation and one funnel line — nothing of Yandex
+    assert [m.counterparty.inn for m in off.matches] == [MAKER]
+    assert off.matches[0].components[0].explanation.startswith("Найдена веб-поиском по товару")
+    assert {e.source for e in off.matches[0].counterparty.evidence} == {pb_nalog.SOURCE}
+    assert len(off.leads) == 1 and off.leads[0].startswith("веб-лиды:")
