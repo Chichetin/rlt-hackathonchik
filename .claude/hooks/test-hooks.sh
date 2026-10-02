@@ -174,6 +174,9 @@ expect_out() { # expect_out <has|lacks> <описание> <шаблон>
 }
 expect_out has   "контекст: основная копия на main — предупреждение" "основной копии"
 expect_out has   "контекст: нет remote — предупреждение, без падения" "нет remote origin"
+# #450: on a slow Windows machine `timeout 10` killed issues.sh before its warning; a timeout that kills at once
+mkdir -p "$TMP/slow" && printf '#!/usr/bin/env bash\nexit 124\n' > "$TMP/slow/timeout" && chmod +x "$TMP/slow/timeout"
+PATH="$TMP/slow:$PATH" expect_out has "контекст: нет remote — предупреждение, даже если timeout оборвал issues.sh" "нет remote origin"
 git remote add origin https://github.com/team/plan.git
 expect_out has   "контекст: мои задачи"                     "#3 BM25 по наименованиям"
 expect_out has   "контекст: входящее называет задачу"  "#3 BM25 по наименованиям — новый комментарий от mate"
