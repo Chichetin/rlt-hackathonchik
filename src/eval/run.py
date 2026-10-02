@@ -249,6 +249,11 @@ def free_text(cases: list[EvalCase]) -> list[EvalCase]:
         for c in cases]
 
 
+def free_text_bare(cases: list[EvalCase]) -> list[EvalCase]:
+    """Compatibility name for #511; both CLI modes share the same input transformation."""
+    return free_text(cases)
+
+
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
     from src.match.text import tokenizer_name, tokenizer_version
 
@@ -383,6 +388,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="drop the ОКПД2 of every query: the class is predicted from the text (P-02, #349)")
     ap.add_argument("--free-text", action="store_true",
                     help="subject only, no ОКПД2 / customer / budget / channel — the UI free text (#490)")
+    ap.add_argument("--free-text-bare", action="store_true",
+                    help="the lot subject only, no ОКПД2 / customer / budget / channel — the jury's query (#511)")
     ap.add_argument("--exact-docs", type=int, default=None,
                     help="experiment only: search.EXACT_DOCS (0 — vote only, P-01; default — P-02), #349")
     args = ap.parse_args(argv)
@@ -418,6 +425,8 @@ def main(argv: list[str] | None = None) -> int:
         cases, part = drop_okpd2(cases), f"{part}-nocode"
     if args.free_text:
         cases, part = free_text(cases), f"{part}-free"
+    if args.free_text_bare:
+        cases, part = free_text_bare(cases), f"{part}-bare"
     if args.exact_docs is not None:
         if args.exact_docs < 0:
             print("--exact-docs: ожидается целое число ≥ 0", file=sys.stderr)
