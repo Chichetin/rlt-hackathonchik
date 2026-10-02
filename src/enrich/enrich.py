@@ -196,6 +196,23 @@ def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> C
                         is_msp=is_msp, okved=[f["okved2"]] if f.get("okved2") else [], evidence=ev)
 
 
+def with_bo_status(cp: Counterparty, cache: SourceCache, offline: bool) -> Counterparty:
+    """A registry card plus the ФНС status from ГИР БО (#454): the МСП registry has no status. One cached ГИР БО
+    request with its pacing (offline — the cache only); no answer, no row or no status — the card as it is."""
+    inn = cp.inn or ""
+    try:
+        page = bo_nalog.fetch(inn, cache, offline=offline)
+    except (bo_nalog.Blocked, httpx.HTTPError, ValueError) as e:
+        log.warning("enrich %s: статус из ГИР БО не получен: %s", inn, e)
+        return cp
+    code = bo_nalog.parse(page.body).get("statusCode") if page is not None else None
+    if page is None or not code:
+        return cp
+    ev = list(cp.evidence)
+    _evidence(bo_nalog.SOURCE, page, ev)("status", f"statusCode: {code}", f"Статус в ГИР БО: {code}")
+    return cp.model_copy(update={"status": bo_status(code), "evidence": ev})
+
+
 def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | None:
     """rmsp by INN, then bo when rmsp has no row. None: neither source gave an answer at all."""
     msp: CachedPage | None = None
@@ -204,7 +221,7 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
     except (rmsp.Blocked, httpx.HTTPError, ValueError) as e:
         log.warning("enrich %s: реестр МСП недоступен: %s", inn, e)
     if msp is not None and any(r.get("inn") == inn for r in rmsp.parse(msp.body).rows):
-        return from_rmsp(inn, msp)
+        return with_bo_status(from_rmsp(inn, msp), cache, offline)
     bo: CachedPage | None = None
     try:
         bo = bo_nalog.fetch(inn, cache, offline=offline)
