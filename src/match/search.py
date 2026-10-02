@@ -670,7 +670,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
     if not query.customer_inn and not ranked:  # #511: the formula orders free text without a customer
         opts = no_customer_options(cfg)
-    order_w = opts["order_weights"] if weights is None and not ranked else {}  # #612: hidden order of the formula
+    # #612: the order of the formula path by options.order_weights; weights other than the config's order by the score
+    order_w = opts["order_weights"] if w == cfg["weights"] and not ranked else {}
     w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}
     if (shares["incumbent"] > 0 or ranked) and query.customer_inn:

@@ -72,6 +72,11 @@ def test_product_without_customer_orders_as_f511_sat100_and_scores_by_the_produc
     assert len(got) > 2
     measured = search_mod.search(FREE, config=run.load_method_config("F-511-sat100"))
     assert [m.counterparty.inn for m in got] == [m.counterparty.inn for m in measured]
+    by_activity_only = {**product, "no_customer_options": {**product["no_customer_options"],
+                                                           "order_weights": {"activity": 1.0}}}
+    # eval (pipeline.pick with a config) passes the config's own weights: the same order as the product
+    assert search_mod.search(FREE, config=by_activity_only, weights=product["weights"]) == search_mod.search(
+        FREE, config=by_activity_only)
     plain = {**product, "no_customer_options": {k: v for k, v in product["no_customer_options"].items()
                                                 if k != "order_weights"}}
     by_score = {m.counterparty.inn: m for m in search_mod.search(FREE, config=plain)}
