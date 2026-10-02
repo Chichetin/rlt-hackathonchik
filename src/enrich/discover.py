@@ -77,8 +77,13 @@ MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wh
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
-FIT = {"class": 1.0, "wholesale": 0.6}  # product_fit of a discovered company (D-036)
+FIT = {"class": 0.7, "wholesale": 0.42}  # product_fit of a discovered company (D-036); ×0.7 (#614, human decision
+# 02.10): an OKVED match is a class, not the product — 1.0 only for a product confirmed by ГИСП or the site
 RETAIL_OKVED, RETAIL_FIT = "47", 0.4  # the live button only (#583): a retailer of goods found by the product
+# the live button only, goods (#634, human decision 02.10, №3): a wholesaler of any class, a maker of the same OKPD2
+# division (2 digits) — found by the product with the INN on its own site, kept with a lower product_fit
+WHOLESALE_OKVED = "46"
+LOOSE_FIT = {"retail": RETAIL_FIT, "wholesale": 0.4, "division": 0.5}
 COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geography", "price")
 
 # OKPD2 prefix (longest wins) → OKVED2 wholesale codes for these goods, the main one first. A hand-made
@@ -418,6 +423,28 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
             for n in COMPONENT_ORDER]
 
 
+NO_HISTORY = ("experience", "activity")  # always 0 for a company outside the organizers' data
+
+
+def full_scale(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """Score of «Новые» on 0–1 (#614, human decision 02.10, confirmation №3): experience and activity are 0 by
+    definition, so their weight moves to the other weighted components (product_fit, geography) in proportion; the
+    components still add up to the score, the order inside the block does not change."""
+    out = []
+    for m in matches:
+        rest = sum(c.weight for c in m.components if c.name not in NO_HISTORY)
+        if rest <= 0:
+            out.append(m)
+            continue
+        comps = [c.model_copy(update={"weight": 0.0, "explanation": f"{c.explanation} — у новой компании истории "
+                                      "нет: вес перенесён на соответствие товару и географию (балл по шкале 0–1)"})
+                 if c.name in NO_HISTORY else c.model_copy(update={"weight": round(c.weight / rest, 4)})
+                 for c in m.components]
+        out.append(m.model_copy(update={"components": comps,
+                                        "score": round(sum(c.value * c.weight for c in comps), 4)}))
+    return out
+
+
 def _order(backed: set[str]) -> Callable[[CounterpartyMatch], tuple[float, bool, str]]:
     """Score order; among equal scores a product confirmed by the registry (ГИСП) first, then by INN."""
     return lambda m: (-m.score, (m.counterparty.inn or "") not in backed, m.counterparty.inn or "~")
@@ -500,9 +527,14 @@ def lead_matches(
             continue
         code = cp.okved[0] if cp.okved else ""
         ch = next((c for c in plan if c.okpd_class == lead.okpd2_class and code.startswith(c.okved)), None)
-        retail = ch is None and live and any_region and code.startswith(RETAIL_OKVED)
-        if retail:  # #583: the button takes a retailer of goods (47.x) found by the product, with a lower fit
-            ch = Channel(okved=RETAIL_OKVED, okpd_class=lead.okpd2_class, relation="wholesale")
+        cls = lead.okpd2_class or ""
+        loose = ""  # #583, #634: what the button takes beyond the plan — retail, wholesale, a maker of the division
+        if ch is None and live and any_region:
+            loose = ("retail" if code.startswith(RETAIL_OKVED) else "wholesale" if code.startswith(WHOLESALE_OKVED)
+                     else "division" if code[:2] and code[:2] == cls[:2] else "")
+        if loose:
+            ch = Channel(okved={"retail": RETAIL_OKVED, "wholesale": WHOLESALE_OKVED}.get(loose, code[:2]),
+                         okpd_class=cls, relation="class" if loose == "division" else "wholesale")
         if ch is None:  # the registry does not confirm the category the search found it for
             other_okved += 1
             continue
@@ -522,10 +554,13 @@ def lead_matches(
         comps = []
         for c in _components(cp, row, ch, predicted, True, region, weights, region_note):
             why = c.explanation
-            if c.name == "product_fit" and retail:
-                c = c.model_copy(update={"value": RETAIL_FIT})
-                why = (f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: основной ОКВЭД {code} — "
-                       "розничная торговля, производство и опт по реестру не подтверждены")
+            if c.name == "product_fit" and loose:
+                c = c.model_copy(update={"value": LOOSE_FIT[loose]})
+                why = "Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: основной ОКВЭД " + code + {
+                    "retail": " — розничная торговля, производство и опт по реестру не подтверждены",
+                    "wholesale": f" — оптовая торговля; опт товаров класса {cls} по реестру не подтверждён",
+                    "division": f" — производство того же раздела ОКПД2 {code[:2]}, но не класса {cls}",
+                }[loose]
             elif c.name == "product_fit":
                 why = f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: {why}"
             elif c.name == "geography":  # the region comes from the card, not from a registry row
@@ -635,7 +670,7 @@ def live_search(query: Query, *, cache: SourceCache | None = None, processed: Pa
     if no_card:
         note += f"; без карточки ФНС не показаны {len(no_card)}"
     log.info("живой поиск %s: %d компаний; %s", query.query_id, len(found), note)
-    return Live(matches=sorted(apply_filters(found, query), key=_order(set())), note=note)
+    return Live(matches=sorted(apply_filters(full_scale(found), query), key=_order(set())), note=note)
 
 
 GISP_MARK = "реестру Минпромторга (ГИСП)"  # in product_fit of a product confirmed by the registry (#74)
@@ -1123,7 +1158,7 @@ STEP = {"site": 1.0, "catalog": 0.8, "class": 0.6, "extra": 0.5, "wholesale": 0.
         # body of #74); a code of the same kind with two words — 0.8, our reading within that decision (as a catalog)
         "registry": 1.0, "registry_kind": 0.8}
 POOL_LIMIT = 400  # pool candidates per region read for one query (main OKVED first)
-POOL_EXTRA_FIT = 0.5  # an additional OKVED of the class (decision 22 of IR630): below the 0.6 step of «Новые»
+POOL_EXTRA_FIT = 0.35  # an additional OKVED of the class (decision 22 of IR630): below the 0.42 step of «Новые» (#614)
 
 
 LARGE_SOURCE = {"bo": "ГИР БО", "pb": "Карточка ФНС"}  # who names the region of a company outside the registry

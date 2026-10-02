@@ -55,7 +55,7 @@ from pydantic import BaseModel
 
 from src.api import guard
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
-from src.api.lots import LotDataUnavailable, LotNotFound, find_lot, find_procedure
+from src.api.lots import LotDataUnavailable, LotNotFound, NoTestFiles, find_lot, find_procedure
 from src.api.ratings import router as ratings_router
 from src.api.reviews import router as reviews_router
 from src.api.testset import UploadLimit
@@ -303,7 +303,24 @@ def _found(query: Query, uncached: set[str] | None = None) -> pipeline.Picked:
                                  "или база не отвечает") from e
     if uncached is not None:
         uncached.update(res.uncached)
+    res.matches = by_score(res.matches)
     return res
+
+
+def by_score(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """The shown order is the shown score, descending (#624, the human's decision 02.10): a lower score never
+    stands above a higher one. The model's order (ranker, order_weights D-201) only breaks ties — sorted() is
+    stable. «Выше следующего» (rank_reason) stays only where the neighbour below is the one it was written for."""
+    out: list[CounterpartyMatch] = []
+    for origin in ("history", "discovered"):
+        group = [m for m in matches if m.origin == origin]
+        below = {id(a): id(b) for a, b in zip(group, group[1:], strict=False)}
+        ranked = sorted(group, key=lambda m: -m.score)
+        for i, m in enumerate(ranked):
+            nxt = id(ranked[i + 1]) if i + 1 < len(ranked) else None
+            same = m.rank_reason is None or below.get(id(m)) == nxt
+            out.append(m if same else m.model_copy(update={"rank_reason": None}))
+    return out + [m for m in matches if m.origin not in ("history", "discovered")]
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -404,15 +421,16 @@ def api_lot(ident: str) -> Query:
 
 @app.get("/api/procedure/{ident}", response_model=Query)
 def api_procedure(ident: str) -> Query:
-    """Procedure number (Извещения.procedure_id, #617) -> Query of its lot; query_id names the lot (lot-<lot_id>)."""
+    """Procedure number (Извещения.procedure_id) -> Query of its lot from the uploaded test export files only (#639);
+    query_id names the lot (lot-<lot_id>). 409 when no files are uploaded."""
     if not ident.strip().isdigit():
         raise HTTPException(422, "номер процедуры — только цифры")
     try:
         return find_procedure(ident)
+    except NoTestFiles as e:
+        raise HTTPException(409, "файлы выгрузки не загружены — загрузите Извещения и ТРУ (Потоварку)") from e
     except LotNotFound as e:
-        raise HTTPException(404, "процедура с таким номером не найдена в данных") from e
-    except LotDataUnavailable as e:
-        raise HTTPException(503, str(e)) from e
+        raise HTTPException(404, "процедура с таким номером не найдена в загруженных файлах") from e
 
 
 @app.get("/api/lot/{ident}/backtest", response_model=Backtest)

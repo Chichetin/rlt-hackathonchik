@@ -14,6 +14,7 @@ import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
+import { Requisites } from "./Requisites";
 import { lookupOkpd2Name, okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
@@ -441,8 +442,10 @@ export function App() {
       const st = e instanceof LotError ? e.status : 0;
       const why =
         st === 404
-          ? `${what} с таким номером не найдена в данных.`
-          : st === 503
+          ? by === "procedure" ? "Процедура с таким номером не найдена в загруженных файлах выгрузки." : "Закупка с таким номером не найдена в данных."
+          : st === 409
+            ? "Файлы выгрузки не загружены: загрузите Извещения и ТРУ (Потоварку) в блоке тестовой выгрузки, поиск по номеру процедуры идёт по ним."
+            : st === 503
             ? "Данные закупок на сервере не подключены."
             : st === 422
               ? by === "procedure" ? "Номер процедуры — только цифры." : "Номер закупки — только цифры (lot_id или реестровый номер)."
@@ -1038,7 +1041,7 @@ export function App() {
             rows={newRows}
             total={newTotal}
             liveInns={live.inns}
-            action={<LiveSearch live={live} onRun={() => void runLive()} />}
+            action={<LiveSearch live={live} query={shownQuery?.text} onRun={() => void runLive()} />}
             onMore={weights ? undefined : () => void showMore("discovered")}
             loadingMore={more}
             onOpen={selectResult}
@@ -1277,6 +1280,8 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
           </li>
         ))}
       </ul>
+
+      <Requisites cp={cp} />
 
       <h3>Сведения о компании</h3>
       <dl className="facts">

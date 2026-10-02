@@ -7,7 +7,8 @@ afterEach(() => vi.useRealTimers());
 describe("LiveSearch (#583)", () => {
   it("shows the button and runs the search", () => {
     const run = vi.fn();
-    render(<LiveSearch live={LIVE_IDLE} onRun={run} />);
+    const { container } = render(<LiveSearch live={LIVE_IDLE} onRun={run} />);
+    expect(container.querySelector(".live-yandex")).not.toBeNull();  // the Yandex mark on the button (#623)
     fireEvent.click(screen.getByRole("button", { name: /Искать в реальном времени/ }));
     expect(run).toHaveBeenCalledOnce();
   });
@@ -19,6 +20,7 @@ describe("LiveSearch (#583)", () => {
     expect(screen.getByRole("status")).toHaveTextContent(LIVE_STEPS[0]);
     act(() => { vi.advanceTimersByTime(2700); });
     expect(screen.getByRole("status")).toHaveTextContent(LIVE_STEPS[1]);
+    expect(screen.getByRole("heading", { name: "Ищем в реальном времени" })).toBeInTheDocument();  // the scene (#623)
   });
 
   it("the result is one short line, the funnel only under «Подробнее»", () => {

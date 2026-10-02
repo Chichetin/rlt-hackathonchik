@@ -212,9 +212,9 @@ def test_discover_shows_only_active_new_companies_with_evidence(cache, tmp_path)
         assert cp.kind == "manufacturer"  # main OKVED 17.23 — section C (D-057), basis is an Evidence
         assert [c.name for c in m.components] == list(D.COMPONENT_ORDER)
     first = res.matches[0]
-    assert first.counterparty.name == 'ООО "МАРКЛИП"' and first.score == 0.45  # 0.35·1.0 + 0.1·1.0
+    assert first.counterparty.name == 'ООО "МАРКЛИП"' and first.score == 0.345  # 0.35·0.7 + 0.1·1.0 (#614)
     fit = first.components[0]
-    assert fit.value == 1.0 and "ОКВЭД 17.23" in fit.explanation and "классом ОКПД2 запроса 17.23" in fit.explanation
+    assert fit.value == 0.7 and "ОКВЭД 17.23" in fit.explanation and "классом ОКПД2 запроса 17.23" in fit.explanation
     assert "вероятно производитель" in fit.explanation and "автоматически" not in fit.explanation
     assert fit.explanation.endswith("; совпадение по классу ОКВЭД (4 знака), не по товару")
     assert first.components[1].explanation == "В данных организаторов за 2024–2025 не встречается ни в одной закупке"
@@ -524,8 +524,8 @@ def test_wholesale_neighbour_region_and_ip(tmp_path):
          "okved1name": "Производство бумаги и картона"}]}))
     res = _run(c, _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]))
     maker, trader = res.matches
-    assert maker.counterparty.inn == "7811777270" and maker.score == 0.45
-    assert trader.score == 0.29  # 0.35·0.6 + 0.1·0.8
+    assert maker.counterparty.inn == "7811777270" and maker.score == 0.345
+    assert trader.score == 0.227  # 0.35·0.42 + 0.1·0.8 (#614)
     assert trader.components[0].explanation.endswith("вероятно дистрибьютор")  # no «по классу» note for trade
     assert "соседний регион — Ленинградская область" in trader.components[4].explanation
     assert trader.counterparty.region == "Ленинградская область"
@@ -811,7 +811,7 @@ def test_e2e_fixtures_give_the_demo_lot_a_filled_block(tmp_path):
     assert rmsp.seed(FIX / "e2e", c) == 2
     res = _run(c, _processed(tmp_path, []), query=_query(text="Бумага офисная А4", okpd2=["17.12.14.110"]))
     assert len(res.matches) == 10 and res.history_checked
-    assert sorted({m.score for m in res.matches}) == [0.31, 0.45]  # distributors and producers of СПб
+    assert sorted({m.score for m in res.matches}) == [0.247, 0.345]  # distributors and producers of СПб (#614)
     assert all(check_counterparty(m.counterparty, c.page_text) == [] for m in res.matches)
     assert all(m.counterparty.evidence[0].fetched_at.date().isoformat() == "2026-10-01" for m in res.matches)
 
@@ -859,3 +859,21 @@ def test_every_shown_row_without_a_card_is_queued_not_only_ten(tmp_path):
                enqueue=queued.append)
     assert len(res.matches) == len(makers) > D.MAX_SHOWN
     assert sorted(queued) == sorted(makers)
+
+
+def test_full_scale_puts_new_companies_on_zero_to_one(tmp_path):
+    """#614: experience and activity of «Новые» are 0 by definition — their weight moves to the other components."""
+    c = SourceCache(tmp_path / "c.sqlite")
+    assert rmsp.seed(FIX / "e2e", c) == 2
+    res = _run(c, _processed(tmp_path, []), query=_query(text="Бумага офисная А4", okpd2=["17.12.14.110"]))
+    scaled = D.full_scale(res.matches)
+    assert [m.counterparty.inn for m in scaled] == [m.counterparty.inn for m in res.matches]  # order kept
+    for m in scaled:
+        w = {x.name: x.weight for x in m.components}
+        assert w["experience"] == w["activity"] == 0.0 and sum(w.values()) == pytest.approx(1.0, abs=1e-3)
+        assert m.score == pytest.approx(sum(x.value * x.weight for x in m.components), abs=1e-3)
+        assert "истории нет" in m.components[1].explanation
+    best = res.matches[0].model_copy(update={"components": [
+        x.model_copy(update={"value": 1.0}) if x.name in ("product_fit", "geography") else x
+        for x in res.matches[0].components]})
+    assert D.full_scale([best])[0].score == 1.0  # a product confirmed in the customer's region

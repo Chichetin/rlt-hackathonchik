@@ -311,8 +311,8 @@ def _lots(tmp_path, monkeypatch, notices: list[dict], items: list[dict]) -> None
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    n = pa.schema([("lot_id", pa.int64()), ("procedure_id", pa.int64()), ("reqnum", pa.string()),
-                   ("procedure_name", pa.string()), ("subject", pa.string()), ("start_price", pa.float64()), ("customer_inn", pa.string()),
+    n = pa.schema([("lot_id", pa.int64()), ("reqnum", pa.string()), ("procedure_name", pa.string()),
+                   ("subject", pa.string()), ("start_price", pa.float64()), ("customer_inn", pa.string()),
                    ("channel", pa.string())])
     i = pa.schema([("lot_id", pa.int64()), ("product_name", pa.string()), ("okpd2_code", pa.string())])
     pq.write_table(pa.Table.from_pylist([{f: r.get(f) for f in n.names} for r in notices], schema=n),
@@ -324,7 +324,7 @@ def _lots(tmp_path, monkeypatch, notices: list[dict], items: list[dict]) -> None
 DEMO_LOTS = [
     {"lot_id": 9000001, "procedure_name": "Бумага", "subject": "Бумага офисная А4, 80 г/м², 500 листов",
      "start_price": 45000.0, "customer_inn": "7804105239", "channel": "ЭМ"},
-    {"lot_id": 9000002, "procedure_id": 1841706, "reqnum": "0372200260025000001", "procedure_name": "Услуги",
+    {"lot_id": 9000002, "reqnum": "0372200260025000001", "procedure_name": "Услуги",
      "subject": "Оказание услуг связи", "start_price": 120000.0, "customer_inn": "7804105239", "channel": "АИС ГЗ"},
 ]
 DEMO_ITEMS = [{"lot_id": 9000001, "product_name": "Бумага для офисной техники", "okpd2_code": "17.12.14.119"},
@@ -340,15 +340,6 @@ def test_lot_by_lot_id_and_reqnum(client, monkeypatch, tmp_path):
     assert q["okpd2"] == ["17.12.14.110", "17.12.14.119"]
     by_req = client.get("/api/lot/0372200260025000001").json()
     assert by_req["query_id"] == "lot-9000002" and by_req["channel"] == "АИС ГЗ"
-
-
-def test_procedure_opens_its_lot(client, monkeypatch, tmp_path):
-    """#617: the procedure number (Извещения.procedure_id) gives the same query as the number of its lot."""
-    _lots(tmp_path, monkeypatch, DEMO_LOTS, DEMO_ITEMS)
-    assert client.get("/api/procedure/1841706").json() == client.get("/api/lot/9000002").json()
-    assert client.get("/api/procedure/9000001").status_code == 404  # a lot_id is not a procedure number
-    assert client.get("/api/procedure/" + "9" * 30).status_code == 404  # longer than bigint: not a crash
-    assert client.get("/api/procedure/abc").status_code == 422
 
 
 def test_lot_not_found_404(client, monkeypatch, tmp_path):
