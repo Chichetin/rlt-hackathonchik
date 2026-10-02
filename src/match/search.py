@@ -50,6 +50,7 @@ from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
 from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_IN, REGION_NAME, REGION_PREP
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +60,11 @@ IS_STUB = False
 RETRIEVERS = ("bm25", "pg_hybrid")  # pg_hybrid: + pgvector, RRF (src/match/pg_retriever.py, #39)
 # eval sets True: a configured pg_hybrid that is unavailable is an error, not a silent BM25 measurement.
 STRICT_RETRIEVER = False
+# hybrid_short (#485): a short query goes to pg_hybrid with its own embedding model, a long one stays on BM25.
+# scores: rrf — the fused list keeps RRF scores (as pg_hybrid); bm25 — RRF order, scores rescaled to the query's best
+# BM25 (the ranker D-103 was trained on BM25-scale scores).
+HYBRID_SHORT_KEYS = ("model", "max_words", "scores")
+HYBRID_SCORES = ("rrf", "bm25")
 
 TOP_DOCS = 500  # BM25 documents (distinct position texts) taken per query
 CANDIDATES = 200  # suppliers scored per query (by best BM25 of their lots)
@@ -121,9 +127,41 @@ def scoring_options(cfg: dict) -> dict:
     return out
 
 
+def hybrid_short(cfg: dict) -> dict | None:
+    """`hybrid_short:` of the config checked (#485): {model, max_words, scores}; None when the block is absent."""
+    raw = cfg.get("hybrid_short")
+    if not raw:
+        return None
+    if not isinstance(raw, dict) or set(raw) - set(HYBRID_SHORT_KEYS):
+        raise ValueError(f"hybrid_short: ожидается {{{', '.join(HYBRID_SHORT_KEYS)}}}, получено {raw!r}")
+    model, n, scores = raw.get("model"), raw.get("max_words"), raw.get("scores", "rrf")
+    if not isinstance(model, str) or not model:
+        raise ValueError("hybrid_short.model: нужна модель эмбеддингов (src/db/embed.py SPECS)")
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        raise ValueError(f"hybrid_short.max_words = {n!r}: ожидается целое число ≥ 1")
+    if scores not in HYBRID_SCORES:
+        raise ValueError(f"hybrid_short.scores = {scores!r}: ожидается одно из {HYBRID_SCORES}")
+    if cfg.get("retriever") != "bm25":
+        raise ValueError("hybrid_short задаётся только при retriever: bm25")
+    return {"model": model, "max_words": n, "scores": scores}
+
+
+def routed(cfg: dict, text: str) -> dict:
+    """The config this query is searched with (#485): a query of 1..hybrid_short.max_words words → retriever pg_hybrid
+    with the model of hybrid_short; a longer one — the config as is. Without DATABASE_URL to Postgres the product
+    stays on BM25 silently, as before the option; eval (STRICT_RETRIEVER) routes anyway, so missing vectors fail it."""
+    hs = hybrid_short(cfg)
+    if hs is None or not 0 < len(text.split()) <= hs["max_words"]:
+        return cfg
+    if not STRICT_RETRIEVER and not get_settings().database_url.startswith("postgres"):
+        return cfg
+    return {**cfg, "retriever": "pg_hybrid", "embedding_model": hs["model"], "hybrid_scores": hs["scores"]}
+
+
 def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
+    hybrid_short(cfg)  # short queries to pg_hybrid (#485), off by default
     scoring_options(cfg)
     candidates.sizes(cfg)
     ranker.spec(cfg)  # learned ranker (#198): on by default since D-103
@@ -491,6 +529,30 @@ def _drop_own(lots: LotHits, own: int | None) -> LotHits:
     _excluded.set(own)
     return lots.without(own)
 
+def _hybrid_hits(idx: LotIndex, text: str, hits: list[tuple[int, float]],
+                 cfg: dict) -> tuple[list[tuple[int, float]], str]:
+    """pg_hybrid (#39): BM25 hits fused with the nearest names by meaning; BM25 as is when the vectors are unavailable
+    (no psycopg, Postgres, table or model) — an error in eval (STRICT_RETRIEVER)."""
+    try:
+        from src.match import pg_retriever
+    except ImportError as e:  # no extra pg (psycopg): the same as unavailable vectors
+        if STRICT_RETRIEVER:
+            raise
+        log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
+        return hits, ""
+    try:
+        fused, by_meaning = pg_retriever.hybrid(idx, text, hits, TOP_DOCS, model=cfg.get("embedding_model"))
+    except pg_retriever.VectorsUnavailable as e:
+        if STRICT_RETRIEVER:
+            raise
+        log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
+        return hits, ""
+    if cfg.get("hybrid_scores") == "bm25" and fused:  # #485: RRF order on the BM25 scale the ranker was trained on
+        top = hits[0][1] if hits else 1.0
+        fused = [(d, s / fused[0][1] * top) for d, s in fused]
+    return fused, " по словам и смыслу" if by_meaning else ""
+
+
 def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
            config: dict | None = None, features_out: list | None = None) -> list[CounterpartyMatch]:
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
@@ -506,6 +568,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     _fit_signals.set(None)
     own = own_lot(query)
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
+    cfg = routed(cfg, query.text)  # #485: a short query may go to pg_hybrid
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
     rel_mode = reliability_mode(cfg)  # #72: off | shadow | on
@@ -521,15 +584,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     hits = idx.retrieve(tokens, TOP_DOCS)
     how = ""
     if cfg["retriever"] == "pg_hybrid":
-        from src.match import pg_retriever
-
-        try:
-            hits, by_meaning = pg_retriever.hybrid(idx, query.text, hits, TOP_DOCS, model=cfg.get("embedding_model"))
-            how = " по словам и смыслу" if by_meaning else ""
-        except pg_retriever.VectorsUnavailable as e:
-            if STRICT_RETRIEVER:
-                raise
-            log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
+        hits, how = _hybrid_hits(idx, query.text, hits, cfg)
     codes, bad_codes = fallback.okpd2_codes(query.okpd2)
     lots = _drop_own(idx.lot_hits(hits), own)
     cands = _retrieve(store, idx, lots, as_of) if len(lots) else []
@@ -550,6 +605,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg, own)  # #195
         _class_history(store, cands, codes, as_of)
     rk = ranker.spec(cfg)
+    if rk is not None and rk.get("customer_only") and not query.customer_inn:  # #490: learned only on queries
+        rk = None  # with a customer; free text without one goes in the v2 order
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
     w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}
