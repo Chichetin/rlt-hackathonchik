@@ -1,0 +1,41 @@
+{
+  "command": "make check-changed",
+  "upstream": "3ee8298f",
+  "passed": false,
+  "summary": "25 failed, 1981 passed, 36 skipped",
+  "failures": [
+    "tests/unit/test_baselines.py::test_lost_reruns_the_recorded_config_not_the_product_default",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[v1-E-002]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15a-03-H-15a-03]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15a-06-H-15a-06]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15b-H-15b]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15c-H-15c]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15d-tie-H-15d-tie]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15e-H-15e]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15f-H-15f]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15g-H-15g]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15f-geo-H-15f-geo]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-196-sat100-H-196-sat100]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-196-sat500-H-196-sat500]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[v2-v2]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[R-198-gbm-R-198-gbm]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[S-282-spell-S-282-on-dev]",
+    "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[S-282-nospell-S-282-off-dev]",
+    "tests/unit/test_eval_seal.py::test_config_hash_changes_with_weights - ...",
+    "tests/unit/test_experiment_compat.py::test_legacy_saturation_experiment_keeps_its_recorded_formula",
+    "tests/unit/test_experiment_compat.py::test_recorded_routing_experiments_keep_the_original_formula[G-490-free]",
+    "tests/unit/test_experiment_compat.py::test_recorded_routing_experiments_keep_the_original_formula[G-490-dev]",
+    "tests/unit/test_experiment_compat.py::test_recorded_routing_experiments_keep_the_original_formula[G-490L-free]",
+    "tests/unit/test_profiles.py::test_profile_experiment_reproduces_its_recorded_config",
+    "tests/unit/test_signals.py::test_default_config_has_no_active_signal",
+    "tests/unit/test_signals.py::test_incumbent_without_customer_is_noop - ..."
+  ],
+  "product_diff_against_upstream": [],
+  "presentation_checks": {
+    "browser": 61,
+    "content": 22,
+    "motion": 18
+  },
+  "previous_upstream": "0c81afb1",
+  "previous_result": "2004 passed, 36 skipped; check-changed OK"
+}

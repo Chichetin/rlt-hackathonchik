@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T13:04:57.377Z",
+  "checked_at": "2026-10-02T13:15:46.008Z",
   "checks": [
     {
       "name": "Opening contains case, solution, team; supplier belongs to the example",
@@ -83,6 +83,10 @@
     },
     {
       "name": "Chart labels use normalized new-winner comparison",
+      "passed": true
+    },
+    {
+      "name": "Reserve formula agrees with current upstream weights",
       "passed": true
     }
   ],
