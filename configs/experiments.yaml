@@ -117,3 +117,6 @@ S-282-spell:     # #282: исправление раскладки и опеча
   spell: true
 S-282-nospell:   # #282: запрос как введён — база замера S-282 (прогоны S-282-off-* сняты при spell: false в search.yaml)
   spell: false
+# #361: абляция признака win_rate в обученном ранжировщике (без переобучения) — у 59 % поставщиков (только АИС ГЗ) он 1.0 по построению
+A361-no-winrate:
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate]}
