@@ -1,0 +1,1026 @@
+{
+  "exp_id": "latency-parquet-v2",
+  "kind": "latency",
+  "part": "dev",
+  "created_at": "2026-10-01T19:51:02+00:00",
+  "commit": "d3d6564cef42e149794cd8efdf77721e74870de9",
+  "dirty": false,
+  "machine": {
+    "platform": "Linux-7.2.7-arch1-1-x86_64-with-glibc2.44",
+    "python": "3.12.13",
+    "cpus": 16
+  },
+  "store": "parquet",
+  "retriever": "bm25",
+  "n_queries": 200,
+  "warmup": 5,
+  "limit": 20,
+  "latency_ms": {
+    "p50": 377.49,
+    "p95": 457.55,
+    "mean": 361.36,
+    "max": 549.12
+  },
+  "per_query": [
+    {
+      "query_id": "lot-5661907",
+      "ms": 337.65,
+      "total": 125
+    },
+    {
+      "query_id": "lot-5662018",
+      "ms": 322.97,
+      "total": 133
+    },
+    {
+      "query_id": "lot-5664093",
+      "ms": 390.9,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5671903",
+      "ms": 439.22,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5673496",
+      "ms": 237.57,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5677640",
+      "ms": 398.36,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5683087",
+      "ms": 402.67,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5692354",
+      "ms": 363.63,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5692366",
+      "ms": 323.3,
+      "total": 37
+    },
+    {
+      "query_id": "lot-5697657",
+      "ms": 391.54,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5701528",
+      "ms": 194.23,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5702608",
+      "ms": 402.69,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5702761",
+      "ms": 406.14,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5703927",
+      "ms": 408.32,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5705216",
+      "ms": 393.92,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5707787",
+      "ms": 406.0,
+      "total": 166
+    },
+    {
+      "query_id": "lot-5717728",
+      "ms": 197.66,
+      "total": 128
+    },
+    {
+      "query_id": "lot-5719333",
+      "ms": 382.89,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5720556",
+      "ms": 373.18,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5724933",
+      "ms": 394.76,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5726898",
+      "ms": 392.3,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5727042",
+      "ms": 391.05,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5728887",
+      "ms": 393.26,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5731367",
+      "ms": 202.0,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5732175",
+      "ms": 335.06,
+      "total": 147
+    },
+    {
+      "query_id": "lot-5734461",
+      "ms": 395.53,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5734786",
+      "ms": 309.67,
+      "total": 46
+    },
+    {
+      "query_id": "lot-5736113",
+      "ms": 203.23,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5737793",
+      "ms": 462.03,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5739886",
+      "ms": 381.22,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5740000",
+      "ms": 347.27,
+      "total": 101
+    },
+    {
+      "query_id": "lot-5740829",
+      "ms": 288.59,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5742678",
+      "ms": 209.54,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5743259",
+      "ms": 412.32,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5743413",
+      "ms": 210.52,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5743482",
+      "ms": 218.16,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5744810",
+      "ms": 389.61,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5745066",
+      "ms": 423.49,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5745410",
+      "ms": 438.96,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5745594",
+      "ms": 415.6,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5745661",
+      "ms": 460.89,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5745734",
+      "ms": 391.26,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5746209",
+      "ms": 391.06,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5746699",
+      "ms": 393.45,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5746976",
+      "ms": 380.42,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5747017",
+      "ms": 373.91,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5748285",
+      "ms": 381.0,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5750268",
+      "ms": 394.86,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5750333",
+      "ms": 370.74,
+      "total": 189
+    },
+    {
+      "query_id": "lot-5750682",
+      "ms": 387.0,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5751030",
+      "ms": 353.58,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5751486",
+      "ms": 214.81,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5752107",
+      "ms": 350.7,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5752394",
+      "ms": 374.82,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5752535",
+      "ms": 457.55,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5752844",
+      "ms": 266.63,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5753027",
+      "ms": 248.73,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5753170",
+      "ms": 357.99,
+      "total": 121
+    },
+    {
+      "query_id": "lot-5753299",
+      "ms": 427.26,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5753497",
+      "ms": 427.11,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5753705",
+      "ms": 392.83,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5754047",
+      "ms": 429.51,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5754368",
+      "ms": 368.4,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5754389",
+      "ms": 445.1,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5754409",
+      "ms": 384.38,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5754461",
+      "ms": 314.77,
+      "total": 78
+    },
+    {
+      "query_id": "lot-5754826",
+      "ms": 458.55,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5754854",
+      "ms": 374.48,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5754963",
+      "ms": 357.68,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5755160",
+      "ms": 366.29,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5755608",
+      "ms": 351.11,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5755916",
+      "ms": 386.98,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756055",
+      "ms": 365.73,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756095",
+      "ms": 384.9,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756164",
+      "ms": 117.73,
+      "total": 30
+    },
+    {
+      "query_id": "lot-5756298",
+      "ms": 335.39,
+      "total": 120
+    },
+    {
+      "query_id": "lot-5756309",
+      "ms": 360.06,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756326",
+      "ms": 379.69,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756402",
+      "ms": 353.57,
+      "total": 121
+    },
+    {
+      "query_id": "lot-5756421",
+      "ms": 365.01,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756707",
+      "ms": 277.51,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756747",
+      "ms": 249.1,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756809",
+      "ms": 220.25,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5756905",
+      "ms": 427.0,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757033",
+      "ms": 426.76,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757061",
+      "ms": 350.19,
+      "total": 68
+    },
+    {
+      "query_id": "lot-5757072",
+      "ms": 417.09,
+      "total": 178
+    },
+    {
+      "query_id": "lot-5757151",
+      "ms": 381.57,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757155",
+      "ms": 354.0,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757168",
+      "ms": 384.38,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757354",
+      "ms": 295.59,
+      "total": 29
+    },
+    {
+      "query_id": "lot-5757384",
+      "ms": 385.73,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757464",
+      "ms": 362.85,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757712",
+      "ms": 400.02,
+      "total": 155
+    },
+    {
+      "query_id": "lot-5757755",
+      "ms": 393.99,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757779",
+      "ms": 383.82,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5757910",
+      "ms": 400.61,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5758092",
+      "ms": 366.0,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5758190",
+      "ms": 152.09,
+      "total": 91
+    },
+    {
+      "query_id": "lot-5758300",
+      "ms": 392.32,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5758415",
+      "ms": 322.18,
+      "total": 87
+    },
+    {
+      "query_id": "lot-5758500",
+      "ms": 405.88,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5758684",
+      "ms": 368.66,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5758694",
+      "ms": 383.68,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5758708",
+      "ms": 401.5,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759002",
+      "ms": 451.82,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759034",
+      "ms": 382.22,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759093",
+      "ms": 388.53,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759119",
+      "ms": 354.75,
+      "total": 137
+    },
+    {
+      "query_id": "lot-5759247",
+      "ms": 370.39,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759302",
+      "ms": 366.16,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759310",
+      "ms": 425.1,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759324",
+      "ms": 253.45,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759330",
+      "ms": 434.8,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759360",
+      "ms": 250.08,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759426",
+      "ms": 377.51,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759464",
+      "ms": 445.21,
+      "total": 28
+    },
+    {
+      "query_id": "lot-5759531",
+      "ms": 549.12,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759574",
+      "ms": 465.14,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759671",
+      "ms": 255.56,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759724",
+      "ms": 400.68,
+      "total": 101
+    },
+    {
+      "query_id": "lot-5759779",
+      "ms": 409.88,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759797",
+      "ms": 372.57,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759813",
+      "ms": 288.82,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759913",
+      "ms": 377.84,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759929",
+      "ms": 371.96,
+      "total": 95
+    },
+    {
+      "query_id": "lot-5759966",
+      "ms": 198.55,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5759988",
+      "ms": 382.46,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5760207",
+      "ms": 460.37,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5760299",
+      "ms": 511.47,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5760327",
+      "ms": 438.14,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5760383",
+      "ms": 382.96,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5760390",
+      "ms": 455.14,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5760454",
+      "ms": 402.49,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5760496",
+      "ms": 434.16,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5760526",
+      "ms": 380.75,
+      "total": 124
+    },
+    {
+      "query_id": "lot-5760595",
+      "ms": 364.46,
+      "total": 94
+    },
+    {
+      "query_id": "lot-5760609",
+      "ms": 401.06,
+      "total": 130
+    },
+    {
+      "query_id": "lot-5760613",
+      "ms": 380.37,
+      "total": 59
+    },
+    {
+      "query_id": "lot-5760844",
+      "ms": 427.55,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761022",
+      "ms": 414.35,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761161",
+      "ms": 266.15,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761234",
+      "ms": 451.36,
+      "total": 198
+    },
+    {
+      "query_id": "lot-5761284",
+      "ms": 422.13,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761312",
+      "ms": 409.02,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761519",
+      "ms": 360.95,
+      "total": 124
+    },
+    {
+      "query_id": "lot-5761613",
+      "ms": 361.86,
+      "total": 121
+    },
+    {
+      "query_id": "lot-5761684",
+      "ms": 383.89,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761710",
+      "ms": 368.52,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761727",
+      "ms": 416.54,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761821",
+      "ms": 386.54,
+      "total": 115
+    },
+    {
+      "query_id": "lot-5761911",
+      "ms": 465.11,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5761936",
+      "ms": 515.31,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762167",
+      "ms": 219.46,
+      "total": 171
+    },
+    {
+      "query_id": "lot-5762193",
+      "ms": 335.71,
+      "total": 166
+    },
+    {
+      "query_id": "lot-5762241",
+      "ms": 423.24,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762260",
+      "ms": 363.98,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762332",
+      "ms": 376.21,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762373",
+      "ms": 398.8,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762383",
+      "ms": 377.57,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762385",
+      "ms": 197.59,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762392",
+      "ms": 386.43,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762400",
+      "ms": 327.12,
+      "total": 87
+    },
+    {
+      "query_id": "lot-5762404",
+      "ms": 377.02,
+      "total": 164
+    },
+    {
+      "query_id": "lot-5762408",
+      "ms": 385.05,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762427",
+      "ms": 364.91,
+      "total": 194
+    },
+    {
+      "query_id": "lot-5762465",
+      "ms": 468.93,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762485",
+      "ms": 377.49,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762525",
+      "ms": 371.84,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762602",
+      "ms": 230.96,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762660",
+      "ms": 238.49,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762710",
+      "ms": 368.04,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762747",
+      "ms": 377.39,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762763",
+      "ms": 363.71,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762765",
+      "ms": 132.18,
+      "total": 64
+    },
+    {
+      "query_id": "lot-5762828",
+      "ms": 351.94,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762878",
+      "ms": 108.12,
+      "total": 6
+    },
+    {
+      "query_id": "lot-5762889",
+      "ms": 360.19,
+      "total": 174
+    },
+    {
+      "query_id": "lot-5762898",
+      "ms": 348.52,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5762984",
+      "ms": 396.44,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763002",
+      "ms": 375.55,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763030",
+      "ms": 375.71,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763046",
+      "ms": 333.59,
+      "total": 118
+    },
+    {
+      "query_id": "lot-5763094",
+      "ms": 361.44,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763231",
+      "ms": 382.14,
+      "total": 180
+    },
+    {
+      "query_id": "lot-5763254",
+      "ms": 373.05,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763337",
+      "ms": 343.19,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763344",
+      "ms": 336.98,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763345",
+      "ms": 349.77,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763379",
+      "ms": 386.93,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763387",
+      "ms": 398.88,
+      "total": 177
+    },
+    {
+      "query_id": "lot-5763399",
+      "ms": 388.72,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763448",
+      "ms": 365.53,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763533",
+      "ms": 307.48,
+      "total": 72
+    },
+    {
+      "query_id": "lot-5763562",
+      "ms": 266.06,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763565",
+      "ms": 372.1,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763587",
+      "ms": 151.09,
+      "total": 120
+    },
+    {
+      "query_id": "lot-5763621",
+      "ms": 373.3,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763658",
+      "ms": 209.88,
+      "total": 200
+    },
+    {
+      "query_id": "lot-5763788",
+      "ms": 374.36,
+      "total": 200
+    }
+  ]
+}
