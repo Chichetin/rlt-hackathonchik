@@ -11,7 +11,7 @@ B ?=
 PART ?=
 CONFIRM ?=
 
-.PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs openapi openapi-check \
+.PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs settings-check openapi openapi-check \
         seal-check layers ui-build api worker ui-dev demo e2e eval parity latency eval-final up down db-load db-embed okpd2 data pool-load static-demo
 
 help:              ## список целей
@@ -64,7 +64,10 @@ seal-check:        ## holdout читают только src/eval/split.py и fin
 layers:            ## импорты в src/ идут вниз по слоям, не вверх (D-106); допущенные нарушения - scripts/layers_allowlist.txt
 	$(PY) python scripts/check_layers.py
 
-check: lint typecheck test test-ui hooks-test openapi-check seal-check layers stubs   ## всё целиком: общие файлы, freeze, сдача
+settings-check:    ## окружение читает только src/settings.py (остальные файлы — scripts/settings_allowlist.txt)
+	$(PY) python scripts/check_settings.py
+
+check: lint typecheck test test-ui hooks-test openapi-check seal-check layers settings-check stubs   ## всё целиком: общие файлы, freeze, сдача
 	@echo "make check: OK"
 
 check-changed:     ## только затронутое относительно origin/main (+ e2e, если задет демо-путь) — по умолчанию

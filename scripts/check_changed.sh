@@ -79,6 +79,7 @@ has '^(\.claude/hooks/|\.claude/settings\.json|\.githooks/|scripts/issues\.sh)' 
 if has '^src/'; then
   run bash scripts/seal_check.sh
   run "${PY[@]}" python scripts/check_stubs.py
+  run "${PY[@]}" python scripts/check_settings.py
 fi
 has '^(src/|scripts/(check_layers\.py|layers_allowlist\.txt)$)' && run "${PY[@]}" python scripts/check_layers.py
 e2e_needed && run make e2e

@@ -36,7 +36,7 @@ LAYERS: dict[str, int] = {
     # L0: types and settings every layer may read
     "src.contracts": 0,
     "src.regions": 0,  # not there yet (#292)
-    "src.settings": 0,  # not there yet (#290)
+    "src.settings": 0,
     # L1: external sources, storage, the ingest core, the task queue
     "src.sources": 1,
     "src.db": 1,
