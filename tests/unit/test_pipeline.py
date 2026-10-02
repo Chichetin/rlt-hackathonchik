@@ -126,7 +126,15 @@ def test_rank_reason_compares_with_the_neighbour_left_after_the_filters(no_cache
     before = pipeline.pick(_query(), config=cfg).history
     first, second, third = (m.counterparty.inn for m in before[:3])
     assert first and second and third and lots[first] != lots[third]  # preconditions of the fixture
+    want = f"выше следующего: лоты с похожими позициями — {lots[first]} против {lots[third]}"
+    # a user filter hides the second one: the reason is computed after the user filters too
+    user = pipeline.apply_user_filters
+    monkeypatch.setattr(pipeline, "apply_user_filters",
+                        lambda ms, q: [m for m in user(ms, q) if m.counterparty.inn != second])
+    after = pipeline.pick(_query(), config=cfg).history
+    assert [m.counterparty.inn for m in after[:2]] == [first, third] and after[0].rank_reason == want
+    monkeypatch.setattr(pipeline, "apply_user_filters", user)
+    # a hard filter (liquidated today) hides it
     monkeypatch.setattr(pipeline.enrich_mod, "enrich", _liquidated(second))
     after = pipeline.pick(_query(), config=cfg).history
-    assert [m.counterparty.inn for m in after[:2]] == [first, third]
-    assert after[0].rank_reason == f"выше следующего: лоты с похожими позициями — {lots[first]} против {lots[third]}"
+    assert [m.counterparty.inn for m in after[:2]] == [first, third] and after[0].rank_reason == want

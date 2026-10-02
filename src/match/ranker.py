@@ -327,8 +327,9 @@ def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float
 # 722 дн.» under «Выше следующего» reads as «less tenure is a plus». Features without a reading (breadth of
 # assortment, share of one customer, properties of the query) are never named there; the card keeps the
 # model's own «за / против» with all of them.
+# «geo» is left out: its weight is 0 (D-077) and the card shows «География +0.00»; region_kpp says the same.
 BETTER: dict[str, int] = {
-    "fit": 1, "exp": 1, "act": 1, "geo": 1, "bm25": 1, "bm25_rel": 1, "n_lots": 1, "n_wins": 1, "okpd_level": 1,
+    "fit": 1, "exp": 1, "act": 1, "bm25": 1, "bm25_rel": 1, "n_lots": 1, "n_wins": 1, "okpd_level": 1,
     "class_lots": 1, "class_wins": 1, "cust_lots": 1, "days_last": -1, "days_first": 1, "region_kpp": 1,
     "region_inn": 1, "win_rate": 1, "lots": 1, "wins": 1, "customers": 1, "spb_share": 1, "price_gap": -1,
     "active_months": 1, "lots_last_90d": 1, "em_offers": 1, "em_wins": 1, "aisgz_contracts": 1, "smp_contracts": 1,
@@ -336,19 +337,27 @@ BETTER: dict[str, int] = {
 }
 
 
+# A named reason carries at least this share of what lifted `a` above `b` (Σ positive differences of the
+# contributions): «Выше следующего: X» reads as the main reason, not a 1 % one (second review of #309; on six
+# demo queries 46 of 52 pairs keep a named feature).
+MIN_SHARE = 0.2
+
+
 def reason(a: Ranked, b: Ranked) -> str:
-    """Why the model put `a` right above `b`: among the features where `a` is better by the customer's reading
-    (BETTER) and the two values differ as shown, the one whose contribution differs the most in a's favour
-    (exact for trees and w·z alike); none — «по совокупности признаков»."""
+    """Why the model put `a` right above `b` — the text after the UI label «Выше следующего»: among the features
+    where `a` is better by the customer's reading (BETTER) and the two values differ as shown, the one whose
+    contribution differs the most in a's favour, if it carries MIN_SHARE of the lift (exact for trees and w·z
+    alike); none — «по совокупности признаков модели»."""
     if a.raw - b.raw <= SAME:
         if a.score > b.score:
-            return f"модель оценила одинаково со следующим; выше по релевантности — {a.score:.4f} против {b.score:.4f}"
+            return f"оценка модели равна; выше релевантность — {a.score:.4f} против {b.score:.4f}"
         if a.score == b.score:
-            return "модель и релевантность одинаковы со следующим — порядок условный (по ИНН)"
-        return "модель оценила почти одинаково со следующим — порядок условный"
+            return "оценка модели и релевантность равны — порядок условный (по ИНН)"
+        return "оценка модели почти равна — порядок условный"
     diff = a.contrib - b.contrib
+    lift = float(diff[diff > 0].sum())
     for f in np.argsort(-diff, kind="stable"):
-        if diff[f] <= 0:
+        if diff[f] <= 0 or diff[f] < MIN_SHARE * lift:
             break
         name = NAMES[f]
         va, vb = float(a.row[f]), float(b.row[f])
@@ -358,7 +367,7 @@ def reason(a: Ranked, b: Ranked) -> str:
         if shown_a == shown_b or (va - vb) * BETTER[name] <= 0:
             continue  # «1.00 против 1.00» (an interaction, or a difference below the shown precision) or a worse value
         return f"выше следующего: {FEATURES[name]} — {shown_a} против {shown_b}"
-    return "модель оценила выше следующего по совокупности признаков — подробно в карточке"
+    return "по совокупности признаков модели"
 
 
 def reasons(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
