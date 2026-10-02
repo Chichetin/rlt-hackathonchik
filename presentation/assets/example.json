@@ -1,0 +1,73 @@
+{
+  "captured_at": "2026-10-01T23:03:33.373044+00:00",
+  "source_commit": "1086c2cf256e1b12fd0b8a49ff1816a579e50cde",
+  "query": {
+    "query_id": "presentation-example",
+    "text": "Поставка картриджей для принтеров",
+    "okpd2": [],
+    "ktru": null,
+    "region": "Санкт-Петербург",
+    "budget": null,
+    "customer_inn": null,
+    "channel": null,
+    "as_of": null,
+    "filters": {
+      "near_customer": "auto"
+    }
+  },
+  "stub": false,
+  "mode": "FastAPI TestClient; parquet; DISCOVERY_OFFLINE=1; ENRICH_OFFLINE=1; LLM_PROVIDER=none; queue disabled in test harness; index build forbidden",
+  "result": {
+    "inn": "7802843456",
+    "name": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ТСК ВЕКТОР ЛАЙН\"",
+    "score": 0.9996,
+    "components": [
+      {
+        "name": "product_fit",
+        "value": 1.0,
+        "weight": 0.762,
+        "explanation": "Похожие позиции в 126 лот(ах), лучшее совпадение «Поставка картриджей для принтеров» (лот 5424546); ОКПД2 определён по похожим позициям: совпадает код 28.23.25.000 «Части и принадлежности прочих офисных машин»"
+      },
+      {
+        "name": "experience",
+        "value": 1.0,
+        "weight": 0.19,
+        "explanation": "126 лот(ов) с похожими позициями за весь период данных, из них побед: 36"
+      },
+      {
+        "name": "reliability",
+        "value": 0.0,
+        "weight": 0.0,
+        "explanation": "Нет данных: статус, РНП и расторжения ещё не подключены — в score не входит"
+      },
+      {
+        "name": "activity",
+        "value": 0.9923,
+        "weight": 0.048,
+        "explanation": "Последнее участие 30.12.2025 — 1 дн. до конца данных (31.12.2025)"
+      },
+      {
+        "name": "geography",
+        "value": 1.0,
+        "weight": 0.0,
+        "explanation": "КПП 780201001: на налоговом учёте в Санкт-Петербурге"
+      },
+      {
+        "name": "price",
+        "value": 0.0,
+        "weight": 0.0,
+        "explanation": "Нет данных: в выгрузке нет цены контракта, только НМЦК — в score не входит"
+      }
+    ],
+    "historical_evidence": [
+      {
+        "source": "data:items",
+        "url": "data:items#5424546",
+        "fetched_at": "2026-10-01T18:23:26Z",
+        "fact": "Участвовал в лоте 5424546 от 02.12.2024: «Поставка картриджей для принтеров» (данные организаторов)",
+        "field": null,
+        "value": null
+      }
+    ]
+  }
+}

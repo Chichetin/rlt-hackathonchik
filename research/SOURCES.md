@@ -376,7 +376,7 @@ R-01 | <ссылка>
   кеш источника — строка нулей с пометкой, а не число. Электронный магазин и АИС ГЗ — первоисточник данных
   организаторов, в таблице строка «сверка», а не источник новых (D-061).
 
-Открытые данные ФНС (#59, D-130): `python -m src.sources.fns_opendata download && python -m src.sources.fns_opendata build`, факты по ИНН — `python -m src.sources.fns_opendata lookup <ИНН>`. Покрытие поставщиков организаторов (нужны `data/processed/suppliers.parquet` и `fns_opendata.parquet`): `uv run python -c "import duckdb; S='data/processed/suppliers.parquet'; F='data/processed/fns_opendata.parquet'; print(duckdb.sql(f\"SELECT length(inn) AS len, count(*) AS suppliers, count(*) FILTER (WHERE inn IN (SELECT inn FROM read_parquet('{F}'))) AS in_fns FROM read_parquet('{S}') WHERE inn_valid GROUP BY 1 ORDER BY 1\"))"` — 10 цифр: 20 589 / 18 423, 12 цифр (ИП): 23 585 / 0.
+Открытые данные ФНС (#59, D-130): `python -m src.sources.fns_opendata download && python -m src.sources.fns_opendata build`, факты по ИНН — `python -m src.enrich.fns_lookup <ИНН>`. Покрытие поставщиков организаторов (нужны `data/processed/suppliers.parquet` и `fns_opendata.parquet`): `uv run python -c "import duckdb; S='data/processed/suppliers.parquet'; F='data/processed/fns_opendata.parquet'; print(duckdb.sql(f\"SELECT length(inn) AS len, count(*) AS suppliers, count(*) FILTER (WHERE inn IN (SELECT inn FROM read_parquet('{F}'))) AS in_fns FROM read_parquet('{S}') WHERE inn_valid GROUP BY 1 ORDER BY 1\"))"` — 10 цифр: 20 589 / 18 423, 12 цифр (ИП): 23 585 / 0.
 
 ### Журнал research-спринтов
 
