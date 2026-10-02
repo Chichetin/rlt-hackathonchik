@@ -1,4 +1,4 @@
-"""Layer guard for src/: an import goes down the layers or stays in its own, never up (D-102, #288).
+"""Layer guard for src/: an import goes down the layers or stays in its own, never up (D-106, #288).
 
     python scripts/check_layers.py [--root DIR] [--allowlist FILE] [--all]      (make layers)
 
@@ -296,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join("  " + describe(e) for e in report.new))
             print("  Импорт идёт только вниз или внутри слоя: вынесите нужное вниз (общий тип — в src/contracts.py) "
                   "или передайте зависимость аргументом.")
-            print("  Схема слоёв — docs/project-structure.md, «Правила импортов», D-102.")
+            print("  Схема слоёв — docs/project-structure.md, «Правила импортов», D-106.")
         return 1
     print(f"layers: OK — модулей {report.modules}, импортов {report.edges}, "
           f"допущенных нарушений {len(report.allowed)} ({allow_path.name})")

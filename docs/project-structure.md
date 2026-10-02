@@ -60,7 +60,7 @@ scripts/              # issues.sh, download-models.sh, check_stubs.py, check_lay
 ## Правила импортов
 
 Направление зависимостей проверяет код, а не память: `make layers` (`scripts/check_layers.py`) входит в
-`make check` и `make check-changed`. Решение и обоснование — D-102.
+`make check` и `make check-changed`. Решение и обоснование — D-106.
 
 **Модуль слоя Lk импортирует только слои ≤ k** — вниз или в свой слой, не вверх. Считаются все
 импорты: верхнего уровня, ленивые (внутри функции), относительные и под `if TYPE_CHECKING:`.

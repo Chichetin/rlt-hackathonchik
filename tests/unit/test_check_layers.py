@@ -1,4 +1,4 @@
-"""scripts/check_layers.py (`make layers`): an import goes down the layers, never up (#288, D-102).
+"""scripts/check_layers.py (`make layers`): an import goes down the layers, never up (#288, D-106).
 
 A toy src/ tree in tmp_path with its own layer table: direct, lazy, TYPE_CHECKING and relative
 imports, a cycle, a module without a layer, the allowlist. The last test runs the real tree.

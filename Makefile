@@ -59,7 +59,7 @@ openapi-check:     ## контракты, OpenAPI и TS-типы UI не раз�
 seal-check:        ## holdout читают только src/eval/split.py и final.py (D-010)
 	bash scripts/seal_check.sh
 
-layers:            ## импорты в src/ идут вниз по слоям, не вверх (D-102); допущенные нарушения - scripts/layers_allowlist.txt
+layers:            ## импорты в src/ идут вниз по слоям, не вверх (D-106); допущенные нарушения - scripts/layers_allowlist.txt
 	$(PY) python scripts/check_layers.py
 
 check: lint typecheck test test-ui hooks-test openapi-check seal-check layers stubs   ## всё целиком: общие файлы, freeze, сдача

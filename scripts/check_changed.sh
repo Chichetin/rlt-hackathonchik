@@ -13,7 +13,7 @@
 #   демо-путь (граф src/api/app.py, src/ui, фикстуры, configs, Makefile) → make e2e
 #   API / контракт / типы / генератор OpenAPI → openapi-check
 #   хуки, issues.sh            → test-hooks
-#   src/…, check_layers.py     → layers (импорты вниз по слоям, D-102), для src/ ещё seal-check, stubs (секунды)
+#   src/…, check_layers.py     → layers (импорты вниз по слоям, D-106), для src/ ещё seal-check, stubs (секунды)
 # Отбор упал — проверяется всё, а не ничего. BASE=<ref> — сравнить с другой веткой.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 2
