@@ -30,7 +30,6 @@ it on by default changes the scoring methodology — human confirmation №3).
 from __future__ import annotations
 
 import logging
-import os
 import re
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -44,6 +43,7 @@ import duckdb
 import yaml
 
 from src.contracts import Counterparty, Evidence
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -69,7 +69,7 @@ def config(path: Path = CONFIG) -> dict[str, Any]:
 
 def mode(cfg: dict[str, Any] | None = None) -> Mode:
     """DISCOVERY_NEW_FIT overrides `new_fit.mode`; an unknown value falls back to shadow with a warning."""
-    raw = os.environ.get("DISCOVERY_NEW_FIT") or str((cfg or config()).get("mode", "shadow"))
+    raw = get_settings().discovery_new_fit or str((cfg or config()).get("mode", "shadow"))
     if raw not in MODES:
         log.warning("new_fit: неизвестный режим %r — используется shadow", raw)
         return "shadow"
