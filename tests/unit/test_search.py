@@ -76,17 +76,19 @@ def test_unavailable_components_have_zero_weight_and_say_no_data(search_data):
 
 
 def test_default_scoring_is_h15f_normalized(search_data):
-    """#174 (human confirmation №3): H-15f weights normalized to 1 and its options are the product default."""
+    """#174, #576 (human confirmation №3): weights normalized to 1, H-15f options + name match, pool experience."""
     cfg = search_mod.load_config()
-    assert sum(cfg["weights"].values()) == pytest.approx(1.0) and cfg["weights"]["geography"] == 0.0
+    assert sum(cfg["weights"].values()) == pytest.approx(1.0) and cfg["weights"]["geography"] > 0.0
     assert search_mod.scoring_options(cfg) == {"fit_bm25_share": 0.8, "experience_by": "similar", "tie_break": "bm25",
+                                               "name_share": 0.5, "exp_scale": "pool",
                                                "sat_lots": 20, "sat_wins": 10,  # caps: the default, #196 is opt-in
                                                "price": "none", "activity_by": "all",
                                                # #105 options are opt-in
                                                "experience_wins": "count", "price_decades": 2.0}
     m = search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]))[0]
     assert "с похожими позициями" in comp(m, "experience").explanation
-    assert comp(m, "geography").weight == 0.0 and comp(m, "geography").explanation  # shown, not scored
+    assert comp(m, "geography").weight > 0.0 and comp(m, "geography").explanation
+    assert "в наименовании совпало слов запроса" in comp(m, "product_fit").explanation
     assert m.score == pytest.approx(sum(c.value * c.weight for c in m.components), abs=1e-3)
 
 
@@ -148,8 +150,8 @@ def test_geography_by_kpp_region(search_data):
     spb = by_inn(search(Query(query_id="q", text="бумага")))
     assert comp(spb["7801000012"], "geography").value == 1.0
     assert comp(spb["4701000038"], "geography").value == pytest.approx(0.8)
-    assert comp(spb["780100000090"], "geography").value == 0.0  # sole trader, no KPP
-    assert "регион не определён" in comp(spb["780100000090"], "geography").explanation
+    assert comp(spb["780100000090"], "geography").value == 1.0  # sole trader, no KPP: INN region (#576)
+    assert "ИНН выдан" in comp(spb["780100000090"], "geography").explanation
     lo = by_inn(search(Query(query_id="q", text="бумага", region="Ленинградская область")))
     assert comp(lo["4701000038"], "geography").value == 1.0
     assert comp(lo["7801000012"], "geography").value == pytest.approx(0.8)
@@ -284,7 +286,8 @@ def test_scoring_options_default_is_v1_and_unknown_is_an_error():
     assert search_mod.scoring_options({}) == {"fit_bm25_share": search_mod.FIT_BM25_SHARE, "experience_by": "class",
                                               "tie_break": "inn", "sat_lots": search_mod.SAT_LOTS,
                                               "sat_wins": search_mod.SAT_WINS, "price": "none", "activity_by": "all",
-                                              "experience_wins": "count", "price_decades": 2.0}
+                                              "experience_wins": "count", "price_decades": 2.0,
+                                              "name_share": 0.0, "exp_scale": "fixed"}
     for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"},
                 {"sat_lots": 0}, {"sat_wins": 2.5}, {"sat_lots": True}):
         with pytest.raises(ValueError):
