@@ -1232,8 +1232,8 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
 
       <h3>Сведения о компании</h3>
       <dl className="facts">
-        <dt>ИНН</dt>
-        <dd>{cp.inn ?? "не подтверждён"}</dd>
+        <dt>{cp.inn || !cp.country || cp.country === "RU" ? "ИНН" : "Идентификатор"}</dt>
+        <dd>{cp.inn || !cp.country || cp.country === "RU" ? cp.inn ?? "не подтверждён" : <SupplierId cp={cp} />}</dd>
         <dt>Тип</dt>
         <dd>{KIND_LABEL[cp.kind ?? "unknown"]}</dd>
         <dt>Статус</dt>
