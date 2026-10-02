@@ -550,6 +550,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg, own)  # #195
         _class_history(store, cands, codes, as_of)
     rk = ranker.spec(cfg)
+    if rk is not None and rk.get("customer_only") and not query.customer_inn:  # #490: learned only on queries
+        rk = None  # with a customer; free text without one goes in the v2 order
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
     w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}

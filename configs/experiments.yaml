@@ -71,10 +71,10 @@ H-15f-geo:       # проверка: H-15f с ненулевым весом ге
   ranker: null
 R-198-lr:        # обученный ранжировщик (#198): логистическая регрессия поверх кандидатов и компонент v2 (E-003)
   spell: false
-  ranker: {kind: logreg, model: models/ranker/R-198-lr.json}
+  ranker: {kind: logreg, model: models/ranker/R-198-lr.json, customer_only: false}
 R-198-gbm:       # обученный ранжировщик (#198): LightGBM LambdaMART, объяснение — pred_contrib
   spell: false
-  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, customer_only: false}
 # Шире набор кандидатов (#195): + поставщики заказчика и частые поставщики группы ОКПД2, поверх v2 (без ранжировщика).
 C-195-cg:        # заказчик 30 + группа ОКПД2 30
   spell: false
@@ -125,11 +125,16 @@ S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — луч�
   ranker: null
 S-282-spell:     # #282: исправление раскладки и опечаток в запросе (с D-109 — дефолт продукта)
   spell: true
+  ranker: {customer_only: false}  # сняты до #490
 S-282-nospell:   # #282: запрос как введён — база замера S-282 (прогоны S-282-off-* сняты при spell: false в search.yaml)
   spell: false
+  ranker: {customer_only: false}
+# #490: продукт до #490 — ранжировщик и на запросах без ИНН заказчика (база замера G-490)
+R-490-off:
+  ranker: {customer_only: false}
 # #361: абляция признака win_rate в обученном ранжировщике (без переобучения) — у 59 % поставщиков (только АИС ГЗ) он 1.0 по построению
 A361-no-winrate:
-  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate]}
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate], customer_only: false}
 # Абляция компонент (#191): формула v2 (как `v2`) с весом одной компоненты = 0; ранжировщик выключен — у него вес
 # компоненты = 0 без переобучения не определён. `abl-base` — та же база на том же коде (парное сравнение).
 abl-base:
@@ -184,7 +189,7 @@ H-105-combo-aisgz:   # combo + сглаженная доля побед толь
 # #105 поверх дефолта D-103 (ранжировщик): признак days_similar — давность последней похожей закупки.
 # R-105-gbm обучен src.match.ranker_train --name R-105 теми же данными и seed, что R-198, плюс этот признак.
 H-105-rk:
-  ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt}
+  ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt, customer_only: false}
 # reliability (#72, D-157). Подвыборка — каждый 4-й кейс dev: `uv run python -m src.eval.run --exp <id> --every 4`.
 # "on" в кавычках — иначе YAML 1.1 читает bool. Сняты до D-103 / D-109: ранжировщик и исправление запроса выключены.
 rel-off-s500:    # на прежнем дефолте v1 (до D-077): reliability в карточке, не в балле
