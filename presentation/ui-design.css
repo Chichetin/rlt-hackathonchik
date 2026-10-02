@@ -216,3 +216,20 @@
 #s7 h1{font-size:63px;line-height:1.12;max-width:1300px}
 #s7 .final-result{margin-top:36px}#s7 .final-route{margin-bottom:26px!important}
 #s7 .next-step{margin-top:30px}#s7 .next-step h2{font-size:27px}
+
+/* Requested title: case, solution, team. No supplier example on the opening. */
+#s1 .title-layout{display:grid;grid-template-columns:1fr 390px;gap:55px;align-items:center;margin-top:45px}
+#s1 .case-label{font:18px var(--body);color:#8f97a6;margin:0 0 16px}
+#s1 .case-title{font:28px/1.45 var(--body);color:#c5c8d0;margin:0 0 32px}
+#s1 h1{font:500 110px/1.1 Tektur;letter-spacing:-3px;margin:0 0 55px;white-space:nowrap}
+#s1 .team-credit{border-top:1px solid #ffffff28;padding-top:25px;display:flex;align-items:baseline;gap:23px}
+#s1 .team-credit span{font:20px var(--body);color:#939aa6}#s1 .team-credit h2{font:500 35px var(--body);margin:0}
+#s1 .title-mark{height:370px;min-height:0;padding:0;border:0;position:relative}
+#s1 .title-mark .hero-jewel{width:245px;height:245px;right:70px;top:60px;opacity:1}
+#s1 .title-mark .jewel-glass svg{opacity:.8}
+#s3 .new-example{margin-top:8px;padding:18px 0 10px}
+#s3 .new-pair p{font:20px/1.4 var(--body);margin:8px 0}
+#s3 .new-example-source{font:17px var(--body)}
+#s5 .slide-deck{font-size:25px}
+#s6 .eval-boundary{font-size:20px}
+#s6 .eval-ci-note{font-size:17px}

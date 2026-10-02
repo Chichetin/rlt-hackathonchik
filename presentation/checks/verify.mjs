@@ -10,7 +10,7 @@ check(await page.locator('.slide[data-kind=main]').count()===7,'7 main slides');
 check(await page.locator('#stage').getAttribute('data-reserve-seconds')==='15','15 seconds of reserve, no extra slide');check(await page.locator('button,dialog').count()===0,'No on-screen buttons or modes');check(await page.locator('.source').count()===0,'No internal source footers');check(await page.locator('img[src$=".png"]').count()===0,'No bitmap UI screenshots in the deck');
 for(const id of ['s1','s2','s3','s4','s5','s6','s7','b1','b2','b3','b4','b5']){
  for(const step of id==='s2'?[0,1,2]:[0]){
-  await scene(id,step);await page.screenshot({path:path.join(out,`${id}${id==='s2'?'-'+step:''}.png`)});
+  await scene(id,step);await page.evaluate(()=>document.fonts.ready);await page.waitForTimeout(100);await page.screenshot({path:path.join(out,`${id}${id==='s2'?'-'+step:''}.png`)});
   const issues=await page.evaluate(id=>{const el=document.getElementById(id),b=el.getBoundingClientRect(),issues=[],w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);while(w.nextNode()){const n=w.currentNode;if(!n.textContent.trim()||n.parentElement.closest('[hidden]'))continue;const r=document.createRange();r.selectNodeContents(n);for(const q of r.getClientRects())if(q.width&&q.height&&(q.left<b.left-2||q.right>b.right+2||q.top<b.top-2||q.bottom>b.bottom+2))issues.push(n.textContent.trim())}return issues},id);
   layouts.push({id,step,issues});check(issues.length===0,`${id}/${step}: all text within safe area`);
  }
