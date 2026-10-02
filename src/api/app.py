@@ -269,7 +269,7 @@ def api_search(query: Query, response: Response,
     _queue_uncached(page, uncached)
     return SearchResponse(
         query=query,
-        history=_verified(page),
+        history=_verified(pipeline.with_reliability(page, query.as_of)),  # shadow: the shown page only (#72)
         discovered=_verified(discovered[offset:offset + limit]),
         stub=_is_stub(),
     )
@@ -362,7 +362,7 @@ def api_enqueue(inn: str) -> EnqueueResult:
 
 @app.post("/api/export")
 def api_export(query: Query) -> StreamingResponse:
-    matches = _verified(_found(query).matches)
+    matches = _verified(pipeline.with_reliability(_found(query).matches, query.as_of))  # the rows exported (#72)
     res = SearchResponse(query=query, history=[m for m in matches if m.origin == "history"],
                          discovered=[m for m in matches if m.origin == "discovered"], stub=_is_stub())
     wb = Workbook()

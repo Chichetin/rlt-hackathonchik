@@ -16,10 +16,12 @@ test("пресет весов пересчитывает выдачу тольк
   const values = scores.map(Number);
   expect(values).toEqual([...values].sort((a, b) => b - a)); // re-sorted by the local score
 
-  // advanced mode: no-data criteria are shown, but cannot be weighted
+  // advanced mode: criteria out of the score are shown, but cannot be weighted — price has no data,
+  // reliability is for reference (shadow, #72)
   await page.goto("/settings");
   await page.getByRole("switch", { name: /Продвинутый режим/ }).check();
-  await expect(page.getByText("нет данных — в оценку не входит")).toHaveCount(2);
+  await expect(page.getByText("нет данных — в оценку не входит")).toHaveCount(1);
+  await expect(page.getByText("справочно — в оценку не входит")).toHaveCount(1);
   await page.getByRole("button", { name: "Вернуть стандарт" }).click();
   await expect(page.getByRole("radio", { name: /Стандарт/ })).toHaveAttribute("aria-checked", "true");
 

@@ -30,7 +30,7 @@ from src.match.reliability import (
     smooth,
     spearman,
 )
-from src.match.search import search
+from src.match.search import search, shadow_reliability
 from src.match.store import ParquetStore
 
 CUTOFF = date(2025, 7, 1)
@@ -38,9 +38,12 @@ PRIOR = Prior(win_rate=0.4, retention=0.3)
 REF = date(2025, 7, 1)
 
 
-def h(lots=10, wins=4, customers=5, won=3, rep=1, months=6, first=date(2024, 7, 1)) -> History:
+def h(lots=10, wins=4, customers=5, won=3, rep=1, months=6, first=date(2024, 7, 1), em_lots=None,
+      em_wins=None) -> History:
+    """All lots in ЭМ unless said otherwise."""
     return History(lots=lots, wins=wins, customers=customers, won_customers=won, repeat_customers=rep,
-                   active_months=months, first_seen=first)
+                   active_months=months, first_seen=first, em_lots=lots if em_lots is None else em_lots,
+                   em_wins=wins if em_wins is None else em_wins)
 
 
 def rel(m):
@@ -61,6 +64,28 @@ def test_pool_prior_is_the_pooled_rate_of_the_candidates():
     p = pool_prior([h(lots=10, wins=5, won=4, rep=1), h(lots=30, wins=5, won=2, rep=2)])
     assert p.win_rate == pytest.approx(10 / 40) and p.retention == pytest.approx(3 / 6)
     assert pool_prior([]) == Prior(0.0, 0.0)
+    # the win rate pools ЭМ only: АИС ГЗ rows are winners only (is_winner = 1 for all of them)
+    p = pool_prior([h(lots=12, wins=7, em_lots=10, em_wins=5), h(lots=5, wins=5, em_lots=0, em_wins=0)])
+    assert p.win_rate == pytest.approx(5 / 10)
+
+
+def test_win_rate_counts_only_em_lots():
+    """АИС ГЗ in the data has winners only (is_winner = 1 in all 279 031 rows): 100 % there is by construction."""
+    only_aisgz = h(lots=2, wins=2, em_lots=0, em_wins=0)
+    s = history_parts(only_aisgz, PRIOR, REF)
+    assert "win_rate" not in s  # the part is skipped, the others are renormalized
+    value, why = history_reliability(only_aisgz, PRIOR, REF)
+    rest = {k: w for k, w in HISTORY_PARTS.items() if k != "win_rate"}
+    assert value == pytest.approx(sum(w * s[k] for k, w in rest.items()) / sum(rest.values()))
+    assert why.startswith("В АИС ГЗ в данных только победители: 2 контракта") and "Побед" not in why
+    # mixed: the rate is the ЭМ one, the АИС ГЗ contracts are said separately
+    mixed = h(lots=13, wins=6, em_lots=10, em_wins=3)
+    value, why = history_reliability(mixed, PRIOR, REF)
+    assert history_parts(mixed, PRIOR, REF)["win_rate"] == pytest.approx(smooth(3, 10, PRIOR.win_rate, 5))
+    assert why.startswith("Побед в ЭМ 3 из 10 лотов") and "в АИС ГЗ 3 контракта (в данных только победители)" in why
+    # АИС ГЗ wins never lift the rate: the same ЭМ record with or without 50 АИС ГЗ contracts
+    assert history_parts(h(lots=60, wins=53, em_lots=10, em_wins=3), PRIOR, REF)["win_rate"] == pytest.approx(
+        history_parts(mixed, PRIOR, REF)["win_rate"])
 
 
 def test_each_signal_moves_the_value_up():
@@ -93,7 +118,7 @@ def test_value_is_the_weighted_sum_and_explained():
     value, why = history_reliability(x, PRIOR, REF)
     s = history_parts(x, PRIOR, REF)
     assert value == pytest.approx(sum(HISTORY_PARTS[k] * s[k] for k in HISTORY_PARTS))
-    assert "Побед 4 из 10 лотов" in why and "у похожих поставщиков 40%" in why
+    assert "Побед в ЭМ 4 из 10 лотов" in why and "в среднем по ЭМ 40%" in why and "АИС ГЗ" not in why
     assert "повторные победы у 1 из 3 заказчиков" in why and "всего заказчиков 5" in why
     _, why = history_reliability(h(lots=21, won=1, rep=0, wins=1), PRIOR, REF)
     assert "из 21 лота" in why and "у 0 из 1 заказчика" in why and "(ов)" not in why
@@ -149,12 +174,27 @@ def test_supplier_history_counts_only_before_as_of(fixture_processed):
     store = ParquetStore(fixture_processed)
     got = store.supplier_history(["7801000012", "4701000038", "0000000000"], CUTOFF)
     assert got["7801000012"] == History(lots=3, wins=3, customers=2, won_customers=2, repeat_customers=1,
-                                        active_months=3, first_seen=date(2024, 1, 20))
+                                        active_months=3, first_seen=date(2024, 1, 20), em_lots=3, em_wins=3)
     assert got["4701000038"] == History(lots=2, wins=1, customers=2, won_customers=1, repeat_customers=0,
-                                        active_months=2, first_seen=date(2024, 11, 5))
+                                        active_months=2, first_seen=date(2024, 11, 5), em_lots=2, em_wins=1)
     assert "0000000000" not in got
     full = store.supplier_history(["7801000012"], None)["7801000012"]
     assert (full.lots, full.wins, full.active_months) == (5, 3, 5)  # lots 6 and 7 after the cutoff
+    # 7801000020: lot 1 lost in ЭМ, lots 2 and 5 — АИС ГЗ, winners only
+    mixed = store.supplier_history(["7801000020"], CUTOFF)["7801000020"]
+    assert (mixed.lots, mixed.wins, mixed.em_lots, mixed.em_wins, mixed.aisgz) == (3, 2, 1, 0, 2)
+
+
+def test_prior_pools_every_supplier_before_as_of(fixture_processed):
+    """Store.reliability_prior = pool_prior over every supplier before as_of: one prior for every query, page and
+    export — a supplier's reliability does not depend on where it is shown."""
+    store = ParquetStore(fixture_processed)
+    inns = ["470100000088", "4701000038", "780100000090", "7801000012", "7801000013", "7801000020"]  # all of them
+    everyone = store.supplier_history(inns, CUTOFF)
+    p = store.reliability_prior(CUTOFF)
+    assert p == pool_prior(everyone.values())
+    assert p.win_rate == pytest.approx(4 / 9)  # ЭМ before the cutoff: 9 lots × supplier, 4 won; АИС ГЗ not counted
+    assert store.reliability_prior(None) != p  # lots after the cutoff count without as_of
 
 
 # --- the switch in search() ------------------------------------------------------------------------
@@ -189,12 +229,14 @@ def test_sanity_check_reads_the_store_up_to_the_holdout(search_data):
     from src.match.store import get_store
 
     rec = check(min_after=1, quantiles=1)
-    assert (rec["cutoff"], rec["outcome_until"]) == ("2025-07-01", "2025-10-01")
-    assert rec["suppliers_before"] == 5 and rec["with_min_lots_after"] == 2
+    assert (rec["cutoff"], rec["outcome_until"], rec["outcome"]) == ("2025-07-01", "2025-10-01", "ЭМ")
+    assert rec["suppliers_before"] == 5 and rec["with_min_em_lots_after"] == 2
     inns, after = outcomes(get_store(), CUTOFF, date(2025, 10, 1))
     assert len(inns) == 5 and "7801000012" in inns
-    assert after["7801000012"] == (1, 0)  # lot 6 lost; lot 7 is holdout
-    assert outcomes(get_store(), CUTOFF, date(2025, 12, 31))[1]["7801000012"] == (2, 0)  # it is in the data
+    a = after["7801000012"]
+    assert (a.lots, a.wins, a.em_lots, a.em_wins) == (1, 0, 1, 0)  # lot 6 lost in ЭМ; lot 7 is holdout
+    a = outcomes(get_store(), CUTOFF, date(2025, 12, 31))[1]["7801000012"]
+    assert (a.lots, a.em_lots) == (2, 2)  # lot 7 is in the data
 
 
 def _ranking(res):
@@ -202,19 +244,23 @@ def _ranking(res):
 
 
 def test_shadow_shows_value_but_keeps_score_and_order(search_data, mode):
-    """The product default: the learned ranker sets the order (D-103), shadow fills the shown top-k after it."""
+    """The product default: the learned ranker sets the order (D-103); search() leaves shadow alone, the page the
+    user sees gets it (shadow_reliability) — score and order as with off."""
     assert search_mod.load_config().get("ranker")
     q = Query(query_id="q", text="бумага офисная", as_of=CUTOFF)
     mode("off")
     off = search(q)
     assert all(rel(m).value == 0.0 and rel(m).explanation.startswith("Нет данных") for m in off)
     assert all(rel(m).explanation == search_mod.UNAVAILABLE["reliability"] for m in off)  # off = D-029, no history
+    assert shadow_reliability(off, CUTOFF) == off  # off: nothing to fill
     mode("shadow")
-    shadow = search(q)
+    found = search(q)
+    assert _ranking(found) == _ranking(off) and [rel(m) for m in found] == [rel(m) for m in off]
+    shadow = shadow_reliability(found, CUTOFF)
     assert _ranking(shadow) == _ranking(off)
     assert all(rel(m).weight == 0.0 and rel(m).explanation.endswith(SHADOW_NOTE) for m in shadow)
     top = next(m for m in shadow if m.counterparty.inn == "7801000012")
-    assert rel(top).value > 0 and "Побед 3 из 3" in rel(top).explanation  # lots 6, 7 are after as_of
+    assert rel(top).value > 0 and "Побед в ЭМ 3 из 3" in rel(top).explanation  # lots 6, 7 are after as_of
 
 
 def test_on_adds_the_weighted_component_to_the_score(search_data, v2_formula, mode):
@@ -238,7 +284,7 @@ def test_spearman_handles_ties():
 
 
 def test_months_count_to_the_day_before_as_of(search_data):
-    m = next(m for m in search(Query(query_id="q", text="бумага офисная", as_of=CUTOFF))
+    m = next(m for m in shadow_reliability(search(Query(query_id="q", text="бумага офисная", as_of=CUTOFF)), CUTOFF)
              if m.counterparty.inn == "7801000012")
     assert "в данных с 01.2024, активен 3 из 18 мес." in rel(m).explanation  # 01.2024 … 06.2025
 
@@ -256,7 +302,8 @@ def test_shadow_keeps_score_and_order_under_experiment_options(search_data, exp)
     base = load_method_config(exp)
     q = Query(query_id="q", text="бумага офисная", as_of=CUTOFF, customer_inn="7801000051")
     off = search(q, k=200, config={**base, "reliability": {"mode": "off"}})
-    shadow = search(q, k=200, config={**base, "reliability": {"mode": "shadow"}})
+    cfg = {**base, "reliability": {"mode": "shadow"}}
+    shadow = shadow_reliability(search(q, k=200, config=cfg), CUTOFF, cfg)
     assert off and _ranking(shadow) == _ranking(off)
     assert any(rel(m).value > 0 for m in shadow)  # the value is computed, only not weighted
 
@@ -282,17 +329,25 @@ def test_plural_forms():
 
 
 def test_shadow_reads_history_only_for_the_shown_top_k(search_data, mode, monkeypatch):
-    """#127 review: in shadow the history SQL covers the k shown suppliers, not all 200 candidates."""
+    """#127 review: in shadow search() reads no history at all (the API asks for ≤ 200 candidates); the history
+    SQL covers only the rows shown — and the prior is one query per data snapshot and as_of."""
     from src.match.store import ParquetStore
 
     calls: list[int] = []
-    real = ParquetStore.supplier_history
+    priors: list[object] = []
+    real, real_prior = ParquetStore.supplier_history, ParquetStore.reliability_prior
     monkeypatch.setattr(ParquetStore, "supplier_history", lambda self, inns, as_of: calls.append(len(inns))
                         or real(self, inns, as_of))
+    monkeypatch.setattr(ParquetStore, "reliability_prior", lambda self, as_of: priors.append(as_of)
+                        or real_prior(self, as_of))
+    monkeypatch.setattr(search_mod, "_priors", {})
     q = Query(query_id="q", text="бумага офисная", as_of=CUTOFF)
     mode("shadow")
-    res = search(q, k=2)
-    assert calls == [2] and len(res) == 2 and all(rel(m).value > 0 for m in res)
+    found = search(q, k=200)
+    assert calls == [] and len(found) > 2
+    page = shadow_reliability(found[:2], CUTOFF)
+    assert calls == [2] and all(rel(m).value > 0 for m in page)
+    assert shadow_reliability(found[2:4], CUTOFF) and calls == [2, 2] and priors == [CUTOFF]  # prior cached
     calls.clear()
     mode("on")
     assert len(search(q, k=2)) == 2 and calls and calls[0] > 2  # on: every candidate is scored with it
@@ -304,6 +359,20 @@ def test_shadow_reads_history_only_for_the_shown_top_k(search_data, mode, monkey
 
 def test_shadow_covers_suppliers_with_an_invalid_inn(search_data, mode):
     mode("shadow")
-    res = search(Query(query_id="q", text="бумага офисная", as_of=CUTOFF), k=200)
+    res = shadow_reliability(search(Query(query_id="q", text="бумага офисная", as_of=CUTOFF), k=200), CUTOFF)
     bad = [m for m in res if m.counterparty.inn is None]
     assert bad and all(rel(m).value > 0 and rel(m).explanation.startswith("Побед") for m in bad)
+
+
+def test_shadow_never_breaks_the_page(search_data, mode, monkeypatch):
+    """Reference only: the store failing leaves the rows as search() gave them («Нет данных»), no error."""
+    from src.match.store import ParquetStore
+
+    mode("shadow")
+    found = search(Query(query_id="q", text="бумага офисная", as_of=CUTOFF), k=3)
+
+    def down(self, inns, as_of):
+        raise OSError("disk")
+
+    monkeypatch.setattr(ParquetStore, "supplier_history", down)
+    assert shadow_reliability(found, CUTOFF) == found

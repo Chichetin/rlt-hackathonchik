@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "vitest";
 import type { CounterpartyMatch } from "./api";
-import { DEFAULT_WEIGHTS, PRESETS, activeWeights, loadWeights, normalize, rerank, reweight, saveWeights, STANDARD, UNAVAILABLE } from "./weights";
+import { DEFAULT_WEIGHTS, PRESETS, activeWeights, loadWeights, normalize, offNote, rerank, reweight, saveWeights, STANDARD, UNAVAILABLE } from "./weights";
 
 // server weights as in a real response: no-data components (reliability, price) come with weight 0
 const SERVER = { product_fit: 0.762, experience: 0.19, reliability: 0, activity: 0.048, geography: 0, price: 0 };
@@ -66,4 +66,9 @@ test("settings live in this browser only and survive a reload", () => {
   expect(loadWeights()).toEqual({ preset: "experience", custom: null, advanced: true });
   window.localStorage.setItem("mitrandir.weights", "{broken");
   expect(loadWeights()).toEqual(STANDARD);
+});
+
+test("reliability is for reference, price has no data — the slider rows say which (#72)", () => {
+  expect(offNote("reliability")).toBe("справочно — в оценку не входит");
+  expect(offNote("price")).toBe("нет данных — в оценку не входит");
 });

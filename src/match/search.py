@@ -11,7 +11,8 @@ v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
    activity    — days from the last participation to as_of (or to the end of the data);
    geography   — region of the KPP (78 / 47) against Query.region;
    reliability — quality of the supplier from its history before as_of (src/match/reliability.py, #72):
-                 `reliability.mode` off (as D-029: "нет данных"), shadow (shown, weight 0 — default),
+                 `reliability.mode` off (as D-029: "нет данных"), shadow (weight 0, default: filled only for
+                 the shown rows by shadow_reliability, never here),
                  on (weight from the config; confirmation of a human №3);
    price       — no data: value 0, weight 0, "нет данных" (D-029).
    score = Σ weight · value with weights from configs/search.yaml (D-004).
@@ -44,7 +45,7 @@ from src.ingest.okpd2 import label
 from src.match import candidates, fallback, ranker
 from src.match.index import LotIndex, get_index
 from src.match.profiles import profile_overrides, profile_weights
-from src.match.reliability import SHADOW_NOTE, History, Prior, history_reliability, pool_prior, reliability_mode
+from src.match.reliability import SHADOW_NOTE, History, Prior, history_reliability, reliability_mode
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
@@ -564,15 +565,12 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
                       "ladder": any(c.found_by for c in cands)})
     ref = as_of or idx.data_end
     last_day = as_of - timedelta(days=1) if as_of else idx.data_end  # history is strictly before as_of
-    # on: every candidate needs its history (the score depends on it); shadow: only the shown top-k (below) —
-    # the weight is 0, the order does not depend on it, and the query costs one SQL over k INNs, not 200.
+    # on: every candidate needs its history (the score depends on it); shadow: nothing here — the weight is 0, the
+    # order does not depend on it; shadow_reliability() fills only what the user sees (the page, the export rows)
     history = store.supplier_history([c.inn for c in cands], as_of) if rel_mode == "on" else {}
-    prior = pool_prior(history.values())
+    prior = reliability_prior(store, as_of) if rel_mode == "on" else Prior(0.0, 0.0)
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
-    # id(counterparty) -> the data's INN, also when it fails the checksum (counterparty.inn None); the counterparty
-    # object survives the ranker's model_copy (shallow), the match object does not
-    raw_inn: dict[int, str] = {}
     rows: list[list[float]] = []  # ranker features of each match (#198)
     target, target_note = customer_region(query)  # «География» against the customer's region (#218)
     for c in cands:
@@ -614,7 +612,6 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         out.append(CounterpartyMatch(counterparty=cp, score=round(sum(x.value * x.weight for x in comps), 4),
                                      components=comps, origin="history"))
         bm25_of.append(c.bm25)
-        raw_inn[id(cp)] = c.inn
         if ranked:
             rows.append(ranker.feature_row(c, top_bm25, {x.name: x.value for x in comps},
                                            incumbent.get(c.inn, 0) if query.customer_inn else None,
@@ -630,31 +627,68 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             why = "ранжировщик недоступен — порядок по формуле v2"
             fallback.set_note(f"{prev}; {why}" if prev else why)
         else:
-            return _shadow_top(rel_mode, store, ranker.rerank(model, out, rows, k), raw_inn, as_of, last_day, w)
+            return ranker.rerank(model, out, rows, k)
     if opts["tie_break"] == "bm25":
         sims = {id(m): s for m, s in zip(out, bm25_of, strict=True)}
         out.sort(key=lambda m: (-m.score, -sims[id(m)], m.counterparty.inn or "~"))
     else:
         out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
-    return _shadow_top(rel_mode, store, out[:k], raw_inn, as_of, last_day, w)
+    return out[:k]
 
 
-def _shadow_top(mode: str, store: Store, shown: list[CounterpartyMatch], raw_inn: dict[int, str],
-                as_of: date | None, last_day: date | None, w: dict[str, float]) -> list[CounterpartyMatch]:
-    """shadow: reliability of the shown top-k, after the order is set (v2 sort or the ranker) — it never moves it."""
-    if mode != "shadow" or not shown:
-        return shown
-    return _shadow_reliability(store, shown, [raw_inn[id(m.counterparty)] for m in shown], as_of, last_day, w)
+_priors: dict[tuple, Prior] = {}
+_priors_lock = threading.Lock()
 
 
-def _shadow_reliability(store: Store, shown: list[CounterpartyMatch], inns: list[str], as_of: date | None,
-                        last_day: date | None, w: dict[str, float]) -> list[CounterpartyMatch]:
-    """Fill reliability (weight 0) for the shown matches only; the prior pools the shown candidates."""
-    history = store.supplier_history(inns, as_of)
-    prior = pool_prior(history.values())
-    out = []
-    for m, inn in zip(shown, inns, strict=True):
-        rel = _reliability("shadow", history.get(inn), prior, last_day, w)
-        comps = [rel if c.name == "reliability" else c for c in m.components]
-        out.append(m.model_copy(update={"components": comps}))
+def reliability_prior(store: Store, as_of: date | None) -> Prior:
+    """The pooled ЭМ win rate and retention of every supplier before as_of (Store.reliability_prior): one query per
+    data snapshot and as_of in this process — the same prior for every query, page and export."""
+    key = (store.name, repr(store), str(store.built_at()), as_of)
+    with _priors_lock:
+        if key in _priors:
+            return _priors[key]
+    prior = store.reliability_prior(as_of)
+    with _priors_lock:
+        _priors[key] = prior
+    return prior
+
+
+_UNCONFIRMED = re.compile(r"ИНН не подтверждён \((\d+)\)")  # the name src/ingest/load.py gives a bad INN
+
+
+def _raw_inn(cp: Counterparty) -> str | None:
+    """The data's INN of a history match, also when it fails the checksum (counterparty.inn None): then the name
+    from src/ingest/load.py carries it («ИНН не подтверждён (<raw>)»)."""
+    if cp.inn:
+        return cp.inn
+    found = _UNCONFIRMED.fullmatch(cp.name)
+    return found.group(1) if found else None
+
+
+def shadow_reliability(matches: list[CounterpartyMatch], as_of: date | None,
+                       config: dict | None = None) -> list[CounterpartyMatch]:
+    """reliability.mode shadow (#72): the reliability component (weight 0) of the matches the user sees — the page
+    of /api/search, the rows of an export — one SQL over their INNs, never over all ≤ CANDIDATES candidates of
+    the query. Score and order do not change. Other modes, «Новые» and a stub pass unchanged."""
+    if IS_STUB or not matches:
+        return matches
+    cfg = config if config is not None else load_config()
+    if reliability_mode(cfg) != "shadow":
+        return matches
+    at = [(j, inn) for j, m in enumerate(matches) if m.origin == "history" and (inn := _raw_inn(m.counterparty))]
+    if not at:
+        return matches
+    try:
+        store = get_store()
+        history = store.supplier_history(sorted({inn for _, inn in at}), as_of)
+        prior = reliability_prior(store, as_of)
+        last_day = as_of - timedelta(days=1) if as_of else get_index(store, None).data_end
+    except Exception:  # noqa: BLE001 — a reference-only component never breaks the page (it stays «Нет данных»)
+        log.exception("reliability (shadow): не посчитана для %d строк", len(at))
+        return matches
+    out = list(matches)
+    for j, inn in at:
+        rel = _reliability("shadow", history.get(inn), prior, last_day, {})
+        out[j] = matches[j].model_copy(
+            update={"components": [rel if c.name == "reliability" else c for c in matches[j].components]})
     return out
