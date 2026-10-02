@@ -7,9 +7,12 @@ import { dropTestset, getTestset, PREDICT_CSV_URL, PREDICT_XLSX_URL, TEMPLATE_UR
 
 // The server predicts offline ≈ 0.6 s per procedure (review #216): the wait shown before the download.
 const TENTHS_PER_LOT = 6;
-const isSuppliers = (f: File) => f.name.normalize("NFC").toLowerCase().startsWith("поставщики");
-// the organizers' export is named Извещения*/ТРУ*; any other .xlsx / .csv is a list of purchases by the template (#501)
-const isExport = (f: File) => /^(извещения|тру)/.test(f.name.normalize("NFC").toLowerCase());
+// a word of the name starts with one of `words`, as on the server (#596): «Предзащита_Потоварка_4.csv» is ТРУ
+const named = (f: File, words: string) =>
+  new RegExp(`(^|[^\\p{L}\\p{N}])(${words})`, "u").test(f.name.normalize("NFC").toLowerCase());
+const isSuppliers = (f: File) => named(f, "поставщики");
+// the organizers' export is Извещения / ТРУ (Потоварка); any other .xlsx / .csv is a list of purchases by the template (#501)
+const isExport = (f: File) => named(f, "извещения|тру|потоварка");
 export const isTemplate = (f: File) => /\.xlsx$/i.test(f.name) || (/\.csv$/i.test(f.name) && !isExport(f) && !isSuppliers(f));
 
 function plural(n: number, one: string, few: string, many: string): string {
@@ -153,7 +156,7 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
             }}
           >
             <p>
-              CSV в формате организаторов: <strong>Извещения</strong> и, если есть, <strong>ТРУ</strong>. Файл «Поставщики» не нужен.
+              CSV в формате организаторов: <strong>Извещения</strong> и, если есть, <strong>ТРУ</strong> («Потоварка»). Файл «Поставщики» не нужен.
             </p>
             <p>
               Или свой список закупок: <a href={TEMPLATE_URL} download>скачайте шаблон</a>, заполните предмет, ОКПД2, ИНН заказчика

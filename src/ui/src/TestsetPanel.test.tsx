@@ -219,6 +219,32 @@ test("which files are a template", () => {
   expect(isTemplate(new File([""], "Извещения_24-25.csv"))).toBe(false);
   expect(isTemplate(new File([""], "ТРУ_24-25.csv"))).toBe(false);
   expect(isTemplate(new File([""], "Поставщики.csv"))).toBe(false);
+  // the defense export (#596): the kind is any word of the name, «Потоварка» is ТРУ
+  for (const name of ["Предзащита_Извещения_4.csv", "Предзащита_Потоварка_4.csv", "Предзащита_Поставщики_4.csv"]) {
+    expect(isTemplate(new File([""], name))).toBe(false);
+  }
+  expect(isTemplate(new File([""], "Структура.csv"))).toBe(true);
+});
+
+test("the defense export: notices and «Потоварка» are sent, «Поставщики» stays in the browser", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (!init?.method) return json({ detail: "нет" }, 404);
+    return json(SET);
+  });
+  render(<TestsetPanel onPick={vi.fn()} busyLot={null} />);
+  await userEvent.click(screen.getByRole("button", { name: "Тестовая выгрузка" }));
+  await userEvent.upload(screen.getByLabelText("Файлы тестовой выгрузки"), [
+    new File(["lot_id;subject\n9001;Бумага\n"], "Предзащита_Извещения_4.csv", { type: "text/csv" }),
+    new File(["lot_id;okpd2_code\n9001;17.12.14.110\n"], "Предзащита_Потоварка_4.csv", { type: "text/csv" }),
+    new File(["lot_id;supplier_inn\n9001;7801000012\n"], "Предзащита_Поставщики_4.csv", { type: "text/csv" }),
+  ]);
+  await screen.findByRole("list", { name: "Процедуры выгрузки" });
+  const post = calls.find((c) => c.init?.method === "POST");
+  expect(post?.url).toBe("/api/testset");
+  const sent = (JSON.parse(String(post?.init?.body)) as { files: { name: string }[] }).files.map((f) => f.name);
+  expect(sent).toEqual(["Предзащита_Извещения_4.csv", "Предзащита_Потоварка_4.csv"]);
 });
 
 test("a template picked together with the export is not sent, a note names it", async () => {

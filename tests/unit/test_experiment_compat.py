@@ -24,9 +24,11 @@ def test_legacy_saturation_experiment_keeps_its_recorded_formula(search_data):
 
 
 def test_product_without_customer_uses_the_measured_sat100_formula(search_data):
+    # the F-511-sat100 / F-511-v2 overrides over the current product formula: the entries themselves are pinned to
+    # the scoring defaults before D-197 / D-198 (#588), the product moved on
     product = search_mod.load_config()
-    measured = run.load_method_config("F-511-sat100")
-    baseline = run.load_method_config("F-511-v2")
+    measured = {**product, "ranker": None, "no_customer_options": {"sat_lots": 100, "sat_wins": 50}}
+    baseline = {**product, "ranker": None, "no_customer_options": None}
     expected = search_mod.search(FREE, config=measured)
     assert expected
     assert search_mod.search(FREE, config=product) == expected

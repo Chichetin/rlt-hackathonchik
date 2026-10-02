@@ -126,8 +126,9 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
 def _for_purchase(matches: list[CounterpartyMatch], query: Query) -> list[CounterpartyMatch]:
     """The role of every candidate for the purchase type of the query (role.for_purchase, #188)."""
     kind = purchase_type(query.okpd2)
-    if kind not in role.SERVICE_DATIVE:
-        return matches
+    if kind not in role.SERVICE_DATIVE:  # goods: the second basis of the role, by the history of purchases (#509)
+        return [m.model_copy(update={"counterparty": role.with_behavior(m.counterparty, kind)})
+                if m.origin == "history" else m for m in matches]
     return [m.model_copy(update={"counterparty": role.for_purchase(m.counterparty, kind)}) for m in matches]
 
 
