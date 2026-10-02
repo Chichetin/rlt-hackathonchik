@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     if warmed:
         body["warm"] = {"top": args.warm_top, **warmed}
     rec = {"exp_id": args.exp, "kind": "fns_coverage", "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-           "commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")), "cache": cache_info(), **body}
+           "commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain", "--untracked-files=no")), "cache": cache_info(), **body}
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
