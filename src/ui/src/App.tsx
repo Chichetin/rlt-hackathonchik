@@ -3,11 +3,14 @@ import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } 
 import { ExampleWheel, RollingNumber } from "./Micro";
 import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
 import { ResultInspector } from "./ResultInspector";
+import { SupplierAvatar, SupplierMetrics, supplierKey, recommendationSummary } from "./SupplierIdentity";
+import { SupplierScore } from "./SupplierScore";
+import { ResultGroupTransition } from "./ResultGroupTransition";
 import "./micro.css";
 import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
-import { easeOut, ScrollTools } from "./Motion";
+import { easeOut, glide, ScrollTools } from "./Motion";
 import { okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
@@ -43,7 +46,7 @@ import { reviewLinks } from "./reviews";
 import { ExternalReviews } from "./ExternalReviews";
 import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
-import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
+import { KINDS, LEVELS, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
 import "./filters.css";
 import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
@@ -154,14 +157,21 @@ const NEAR_LABEL: Record<NearChoice, string> = {
   any: "любой регион",
 };
 
-function NearSelect({ value, onChange, facets }: { value: NearChoice; onChange: (v: NearChoice) => void; facets?: Facets }) {
+const NEAR_COMPACT_LABEL: Record<NearChoice, string> = {
+  auto: "Автоматически — по типу закупки",
+  worked: "Регион или участие у его заказчиков",
+  near: "Регион заказчика и соседние",
+  any: "Любой регион",
+};
+
+function NearSelect({ value, onChange, facets, compact = false, describedBy }: { value: NearChoice; onChange: (v: NearChoice) => void; facets?: Facets; compact?: boolean; describedBy?: string }) {
   return (
-    <select aria-label="Может работать у заказчика" value={value} onChange={(e) => onChange(e.target.value as NearChoice)}>
+    <select aria-label="Может работать у заказчика" aria-describedby={describedBy} value={value} onChange={(e) => onChange(e.target.value as NearChoice)}>
       {(Object.keys(NEAR_LABEL) as NearChoice[]).map((k) => {
         const n = k === "worked" || k === "near" ? facetCount(facets, "near", k) : undefined;
         return (
           <option key={k} value={k}>
-            {NEAR_LABEL[k]}
+            {compact ? NEAR_COMPACT_LABEL[k] : NEAR_LABEL[k]}
             {n !== undefined ? ` (${n})` : ""}
           </option>
         );
@@ -175,8 +185,10 @@ function NearSelect({ value, onChange, facets }: { value: NearChoice; onChange: 
 function ContextLine({ context, facets, near, onNear }: { context?: SearchContext; facets?: Facets; near: NearChoice; onNear: (v: NearChoice) => void }) {
   const applied = context?.applied_near ?? context?.default_near;
   const hidden = nearHidden(context, facets);
+  const descriptionId = React.useId();
   return (
     <div className="search-context" role="group" aria-label="Заказчик и тип закупки">
+      <div className="context-facts">
       {context && (
         <span>
           Заказчик: <strong>{context.customer_region}</strong> <small>({context.customer_basis})</small>
@@ -188,11 +200,14 @@ function ContextLine({ context, facets, near, onNear }: { context?: SearchContex
           {context.type_basis.length > 0 && <small> (ОКПД2 {context.type_basis.join(", ")})</small>}
         </span>
       )}
-      <label>
-        Может работать у заказчика
-        <NearSelect value={near} onChange={onNear} facets={facets} />
-      </label>
-      {near === "auto" && applied && <small>авто: {NEAR_LABEL[applied]}</small>}
+      </div>
+      <div className="context-region-field">
+        <label>
+          Может работать у заказчика
+          <span className="context-region-control"><NearSelect value={near} onChange={onNear} facets={facets} compact describedBy={descriptionId} /></span>
+        </label>
+        <small id={descriptionId} className="context-region-help">{near === "auto" && applied ? `авто: ${NEAR_LABEL[applied]}` : NEAR_LABEL[near]}</small>
+      </div>
       {hidden && (
         <small role="note">
           скрыто {hidden.hidden} из {hidden.of}: другой регион или регион не известен
@@ -352,15 +367,6 @@ function OriginIcon({ origin }: { origin: "history" | "new" }) {
       ? <><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /><path d="M12 7v5l3 2" /></>
       : <><circle cx="12" cy="12" r="8" /><path d="M12 8v8M8 12h8" /></>}
   </svg>;
-}
-
-function OriginBadge({ m }: { m: CounterpartyMatch }) {
-  const st = m.counterparty.stats ?? {};
-  if (m.origin !== "history") return <span className="badge badge-new"><OriginIcon origin="new" />Новый · нет в АИС ГЗ</span>;
-  const lots = st.lots_participated;
-  if (typeof lots !== "number") return <span className="badge badge-history"><OriginIcon origin="history" />Участник закупок АИС ГЗ</span>;
-  const rate = typeof st.win_rate === "number" ? ` · побед ${formatStat("win_rate", st.win_rate)}` : "";
-  return <span className="badge badge-history"><OriginIcon origin="history" />{`${lots.toLocaleString("ru-RU")} лотов в АИС ГЗ всего${rate}`}</span>;
 }
 
 // the usual short legal forms: the list stays readable in a narrow column; the full name is in the tooltip and the card
@@ -693,10 +699,13 @@ export function App() {
   const selectedResult = activeRows.find(m => supplierKey(m) === selectedSuppliers[resultGroup]) ?? activeRows[0] ?? null;
   const selectedIndex = selectedResult ? activeRows.indexOf(selectedResult) : -1;
   const revealSelection = useRef(false);
-  const selectResult = (m: CounterpartyMatch) => {
-    revealSelection.current = true;
+  const mobileListY = useRef(0);
+  const selectResult = (m: CounterpartyMatch, reveal = false) => {
+    revealSelection.current = reveal;
     setSelectedSuppliers(prev => ({ ...prev, [resultGroup]: supplierKey(m) }));
     if (window.matchMedia("(max-width: 900px)").matches) {
+      if (mobileDetails) return;
+      mobileListY.current = window.scrollY;
       setMobileDetails(true);
       requestAnimationFrame(() => {
       const pane = document.getElementById("supplier-preview");
@@ -723,7 +732,7 @@ export function App() {
     requestAnimationFrame(() => {
     const row = document.querySelector<HTMLElement>('.result-list-scroll:not([hidden]) .item[aria-pressed="true"]');
     row?.focus({ preventScroll: true });
-    row?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "center" });
+    window.scrollTo({ top: mobileListY.current, behavior: "instant" });
     });
   }
 
@@ -734,7 +743,7 @@ export function App() {
     <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
-      {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
+      {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm={path !== "/results" && path !== "/search"} /></div>}
       <div className="content">
       {STATIC_DEMO && (
         <div className="stub" role="status" data-testid="static-demo">
@@ -960,12 +969,19 @@ export function App() {
           <div className="result-browser" data-mobile-details={mobileDetails && !!selectedResult}>
           <div className="result-list-pane">
             <div className="result-groups" role="group" aria-label="Группа поставщиков">
-              <button type="button" className="group-history" aria-pressed={resultGroup === "history"} onClick={() => setResultGroup("history")}>С опытом <span>{historyTotal}</span></button>
-              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span>
-                {res.discoveryError && <span className="group-alert" title={discoveryAlert(res.discoveryError)}>
-                  <span aria-hidden="true">!</span><span className="sr-only">список может быть неполным</span></span>}</button>
+              <button type="button" className="group-history" aria-pressed={resultGroup === "history"} onClick={() => setResultGroup("history")}>
+                {resultGroup === "history" && <motion.span className="result-group-indicator" layoutId="result-group-current" transition={reduced ? { duration: 0 } : glide} aria-hidden="true" />}
+                <span className="result-group-label">С опытом <span>{historyTotal}</span></span>
+              </button>
+              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>
+                {resultGroup === "new" && <motion.span className="result-group-indicator" layoutId="result-group-current" transition={reduced ? { duration: 0 } : glide} aria-hidden="true" />}
+                <span className="result-group-label">Новые <span>{newTotal}</span>
+                  {res.discoveryError && <span className="group-alert" title={discoveryAlert(res.discoveryError)}>
+                    <span aria-hidden="true">!</span><span className="sr-only">список может быть неполным</span></span>}
+                </span>
+              </button>
             </div>
-            <div className="result-list-scroll" hidden={resultGroup !== "history"}>
+            <ResultGroupTransition group={resultGroup} history={
           <Block
             customerRegion={res.context?.customer_region}
             selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
@@ -986,8 +1002,7 @@ export function App() {
                 : noteText(res.note)
             }
           />
-          </div>
-          <div className="result-list-scroll" hidden={resultGroup !== "new"}>
+          } discovered={
           <Block
             customerRegion={res.context?.customer_region}
             selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
@@ -1010,11 +1025,11 @@ export function App() {
                   : "Код ОКПД2 не указан и по тексту не определён — уточните запрос или загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
-          </div>
+          } />
           </div>
           <ResultInspector customerRegion={res.context?.customer_region} onBack={returnToList} loadingMore={more} onMore={resultGroup === "history" && selectedIndex === activeRows.length - 1 && activeRows.length < historyTotal ? (weights ? () => setShown(n => n + PAGE) : () => void showMore()) : undefined} match={selectedResult} weightsNote={weights ? presetTitle(weightSet) : undefined} onOpen={setOpen}
-            onPrevious={selectedIndex > 0 ? () => selectResult(activeRows[selectedIndex - 1]) : undefined}
-            onNext={selectedIndex >= 0 && selectedIndex + 1 < activeRows.length ? () => selectResult(activeRows[selectedIndex + 1]) : undefined} />
+            onPrevious={selectedIndex > 0 ? () => selectResult(activeRows[selectedIndex - 1], true) : undefined}
+            onNext={selectedIndex >= 0 && selectedIndex + 1 < activeRows.length ? () => selectResult(activeRows[selectedIndex + 1], true) : undefined} />
           </div>
         </motion.main>
       )}
@@ -1031,7 +1046,6 @@ export function App() {
   );
 }
 
-function supplierKey(m: CounterpartyMatch) { return `${m.origin}:${m.counterparty.inn ?? m.counterparty.name}`; }
 
 function Block(props: {
   title: string;
@@ -1067,36 +1081,36 @@ function Block(props: {
         <ol className="list">
           {props.rows.map((m) => {
             const cp = m.counterparty;
+            const selected = props.selectedKey === supplierKey(m);
             const top = [...m.components].sort((a, b) => b.value * b.weight - a.value * a.weight)[0];
             return (
-              <motion.li key={cp.inn ?? cp.name} layout={reduced ? false : "position"}
-                initial={false} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.12 }}>
-                <motion.button className="item" aria-controls="supplier-preview" aria-pressed={props.selectedKey === supplierKey(m)} onClick={() => props.onOpen(m)}>
-                  <Logo cp={cp} />
-                  <CompanyName name={cp.name} />
-                  <span className={`score score-level-${levelOf(m.score)}`} title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
-                    <span className="score-num">{m.score.toFixed(2)}</span>
-                    <RelevanceTag score={m.score} />
-                    <span className="score-meter" aria-hidden="true">
-                      <motion.span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%`, originX: 0 }} initial={reduced ? false : { scaleX: 0 }} whileInView={{ scaleX: 1 }} viewport={{ once: true }} transition={{ duration: reduced ? 0 : 0.7, ease: easeOut }} />
-                    </span>
+              <li key={supplierKey(m)}>
+                <motion.button type="button" className="item supplier-item" aria-controls="supplier-preview" aria-pressed={selected}
+                  initial={false} animate={{ x: !reduced && selected ? 6 : 0, scale: !reduced && selected ? 1.006 : 1 }}
+                  transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 40, mass: .8 }}
+                  onClick={() => props.onOpen(m)}>
+                  <span className="supplier-heading">
+                    <SupplierAvatar cp={cp} />
+                    <CompanyName name={cp.name} />
+                    <SupplierScore score={m.score} />
                   </span>
-                  <span className="meta">
-                    {regionLabel(cp)}
-                    {props.customerRegion && relationToCustomer(cp, props.customerRegion) && <> — {relationToCustomer(cp, props.customerRegion)}</>}
-                    {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
-                  </span>
-                  <span className="badges">
+                  <span className="supplier-meta">
                     <RoleBadge kind={cp.kind} />
-                    <OriginBadge m={m} />
-                    <WorkedWith cp={cp} customerRegion={props.customerRegion} />
+                    <span>{regionLabel(cp)}</span>
+                    <span className="supplier-inn">ИНН {cp.inn ? <strong>{cp.inn}</strong> : "не подтверждён"}</span>
                   </span>
-                  <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
-                  {nextReason(m) ? <span className="why" title={rankerReason(m) ?? m.rank_reason ?? ""}><span className="why-label">Выше следующего</span>{nextReason(m)}</span>
-                    : rankerShort(m) ? <span className="why" title={rankerReason(m) ?? ""}><span className="why-label">Почему на этом месте</span>{rankerShort(m)}</span>
-                    : top && <span className="why" title={componentText(top)}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{componentText(top)}</span>}
+                  <span className="supplier-reading">
+                  {nextReason(m) ? <span className="supplier-reason"><span className="why-label">Выше следующего</span><span className="why" title={rankerReason(m) ?? m.rank_reason ?? ""}>{nextReason(m)}</span></span>
+                    : rankerShort(m) ? <span className="supplier-reason"><span className="why-label">Почему на этом месте</span><span className="why" title={rankerReason(m) ?? ""}>{rankerShort(m)}</span></span>
+                    : top && <span className="supplier-reason"><span className="why-label">Почему подходит</span><span className="why" title={componentText(top)}>{recommendationSummary({ ...top, explanation: componentText(top) })}</span></span>}
+                  <SupplierMetrics cp={cp} />
+                  <span className="supplier-history-note">
+                    <WorkedWith cp={cp} customerRegion={props.customerRegion} />
+                    <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
+                  </span>
+                  </span>
                 </motion.button>
-              </motion.li>
+              </li>
             );
           })}
         </ol>
