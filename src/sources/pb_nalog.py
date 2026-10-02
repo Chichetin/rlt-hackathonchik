@@ -80,6 +80,8 @@ def _post(client: httpx.Client, path: str, data: dict[str, str]) -> httpx.Respon
 def _json(r: httpx.Response) -> dict[str, Any]:
     r.raise_for_status()
     j = r.json()
+    if not isinstance(j, dict):  # e.g. a JSON `null`: an answer we cannot read, not a crash (#357)
+        raise ValueError(f"pb.nalog.ru: неожиданный ответ {r.url.path}: {r.text[:80]!r}")
     if j.get("captchaRequired"):
         raise _captcha("pb.nalog.ru требует капчу — останавливаемся (не решаем)")
     return j
@@ -121,7 +123,8 @@ def fetch_raw(inn: str, client: httpx.Client | None = None) -> tuple[dict[str, A
         rid = _json(_post(client, "/company-proc.json", {"token": token, "method": "get-request"}))["id"]
         for attempt in range(POLL_TRIES):
             r = _post(client, "/company-proc.json", {"token": token, "id": rid, "method": "get-response"})
-            if r.status_code == 200:
+            # 200 with a JSON `null` (seen live 02.10, #357): the card is not ready yet — ask again
+            if r.status_code == 200 and r.text.strip() != "null":
                 card = _json(r)
                 return row, card.get("vyp") or {}
             time.sleep(1.0 + attempt)

@@ -43,7 +43,8 @@ CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
 # Code that defines the method (not UI/API): its committed tree enters the hash.
 METHOD_PATHS = ("src/contracts.py", "src/settings.py", "src/regions.py", "src/ingest", "src/match", "src/sources",
                 "src/enrich", "src/eval", "src/llm",
-                "src/db")  # src/db: normalization and the embedding model of retriever pg_hybrid
+                "src/db",  # src/db: normalization and the embedding model of retriever pg_hybrid
+                "models/ranker")  # the learned ranker the config names (D-103): retrained file = another method (#451)
 # settings.py parses the variables the method reads (tokenizer, data and index dirs), regions.py feeds the region
 # features; tests/unit/test_eval_seal.py checks that every module eval imports is here (#448, D-150)
 
@@ -65,6 +66,16 @@ def git(*args: str, root: Path | None = None, strict: bool = False) -> str:
             raise GitError(f"git {' '.join(args)}: {r.stderr.strip()}")
         return ""
     return r.stdout.strip()
+
+
+# What a result depends on besides its commit: an uncommitted edit here and the run is not the commit's — the eval-final
+# gate refuses it (final.py), a dev result records `dirty` (#451, #455): code, configs, ranker models, dependencies.
+FROZEN_PATHS = ("src", "configs", "models/ranker", "pyproject.toml", "uv.lock")
+
+
+def tree_dirty(root: Path | None = None) -> bool:
+    """An uncommitted (or untracked) file under FROZEN_PATHS: the result is not reproducible from its commit."""
+    return bool(git("status", "--porcelain", "--", *FROZEN_PATHS, root=root))
 
 
 def config_sha256(root: Path | None = None) -> str:
@@ -239,7 +250,7 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "part": part,
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": git("rev-parse", "HEAD"),
-        "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
+        "dirty": tree_dirty(),
         "config": cfg,
         "tokenizer_version": tokenizer_version(),
         "exact_docs": search_mod.EXACT_DOCS,  # P-02 switch (#349): 0 = vote only (P-01)

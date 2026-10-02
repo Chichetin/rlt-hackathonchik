@@ -131,12 +131,14 @@ def main(argv: list[str] | None = None) -> int:
     if (need := missing(args.processed, args.pool)) is not None:
         print(f"нет {need}: данные организаторов — make data, пул — make pool-load (#185)", file=sys.stderr)
         return 2
+    from src.eval.run import tree_dirty  # lazy: run imports the whole search pipeline
+
     cutoff, holdout_from = split_dates()
     body = evaluate(cutoff, holdout_from, args.processed, args.pool, min_lift=args.min_lift,
                     min_suppliers=args.min_suppliers, top=args.top)
     rec = {"exp_id": args.exp, "part": "dev (cold winners in the MSP pool)",
            "created_at": datetime.now(UTC).isoformat(timespec="seconds"), "commit": _git("rev-parse", "HEAD"),
-           "dirty": bool(_git("status", "--porcelain", "--", "src", "configs")),
+           "dirty": tree_dirty(),
            "config": {"cutoff": cutoff.isoformat(), "holdout_from": holdout_from.isoformat(), "min_lift": args.min_lift,
                       "min_suppliers": args.min_suppliers, "top": args.top, "regions": list(REGIONS)},
            **body}
