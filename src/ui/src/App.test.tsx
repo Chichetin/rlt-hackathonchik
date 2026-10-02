@@ -50,7 +50,7 @@ test("buildQuery keeps only enabled filters", () => {
 test("search shows two blocks, explanation and card with sources", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   expect(await screen.findByRole("region", { name: "С опытом госзакупок" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /^Новые/ }));
@@ -75,7 +75,7 @@ test("empty history block shows the server's reason from X-Search-Note (#166)", 
     new Response(JSON.stringify(empty), { status: 200, headers: { "X-Search-Note": encodeURIComponent(note) } }),
   );
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const block = await screen.findByRole("region", { name: "С опытом госзакупок" });
   expect(block).toHaveTextContent("По названию ничего не найдено; ОКПД2 не задан — уточните название или укажите код.");
@@ -90,7 +90,7 @@ test("a failed open source is shown in «Новые», not passed off as «nobod
     new Response(JSON.stringify(empty), { status: 200, headers: { "X-Discovery-Error": "TimeoutError" } }),
   );
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   // seen without opening the tab: the «Новые» button carries the mark (#287)
   expect(await screen.findByRole("button", { name: /^Новые.*список может быть неполным/ })).toBeInTheDocument();
@@ -110,7 +110,7 @@ test("a weak match is flagged above the history block (#281)", async () => {
     new Response(JSON.stringify(response), { status: 200, headers: { "X-Weak-Match": encodeURIComponent(warn) } }),
   );
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "вентиляция");
+  await userEvent.type(screen.getByLabelText("Название товара"), "вентиляция");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const block = await screen.findByRole("region", { name: "С опытом госзакупок" });
   expect(within(block).getByTestId("weak-match")).toHaveTextContent(warn);
@@ -119,7 +119,7 @@ test("a weak match is flagged above the history block (#281)", async () => {
 test("no weak-match warning when the server did not send one (#281)", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const clean = await screen.findByRole("region", { name: "С опытом госзакупок" });
   expect(within(clean).queryByTestId("weak-match")).toBeNull();
@@ -128,7 +128,7 @@ test("no weak-match warning when the server did not send one (#281)", async () =
 test("no alert in «Новые» when the sources answered", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   await screen.findByRole("region", { name: "Новые из открытых источников" });
@@ -146,7 +146,7 @@ test("a corrected query is said, and «искать как введено» repe
     return new Response(JSON.stringify(response), { status: 200, headers });
   });
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумвга");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумвга");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const note = await screen.findByTestId("query-corrected");
   expect(note).toHaveTextContent("Запрос исправлен (раскладка или опечатки): «бумвга» → «бумага».");
@@ -159,7 +159,7 @@ test("a corrected query is said, and «искать как введено» repe
 test("API error is shown, not swallowed", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 500 }));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось получить подбор");
 });
@@ -176,10 +176,9 @@ test("buildQuery adds optional budget, customer and lot context", () => {
 
 test("lot number fills the query from the notice", async () => {
   const lotQuery = { query_id: "lot-9", text: "Бумага из извещения", okpd2: ["17.12"], budget: 1000, customer_inn: "7804105239", channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(lotQuery), { status: 200 }));
+  vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).startsWith("/api/lot/") ? lotQuery : response), { status: 200 }));
+  window.history.replaceState(null, "", "/search?lot=9");
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
-  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
   expect(await screen.findByDisplayValue("Бумага из извещения")).toBeInTheDocument();
   expect(screen.getByLabelText("НМЦК, ₽")).toHaveValue("1000");
   expect(screen.getByText(/ОКПД2: 17.12/)).toBeInTheDocument();
@@ -187,12 +186,11 @@ test("lot number fills the query from the notice", async () => {
 
 test("lot 503 says data is not connected and falls back to free text", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ detail: "нет данных" }), { status: 503 }));
+  window.history.replaceState(null, "", "/search?lot=9");
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
-  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent("не подключены");
-  expect(alert).toHaveTextContent("текстом");
+  expect(alert).toHaveTextContent("в форме поиска");
 });
 
 test("card shows stats and the unconfirmed INN note", async () => {
@@ -200,7 +198,7 @@ test("card shows stats and the unconfirmed INN note", async () => {
   withStats.history[0].counterparty.stats = { lots_won: 7, win_rate: 0.35, custom_key: 1 };
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withStats), { status: 200 }));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
@@ -214,12 +212,11 @@ test("card shows stats and the unconfirmed INN note", async () => {
 
 test("editing the query text drops the lot context (okpd2, channel)", async () => {
   const lotQuery = { query_id: "lot-9", text: "Бумага", okpd2: ["17.12"], budget: null, customer_inn: null, channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(lotQuery), { status: 200 }));
+  vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).startsWith("/api/lot/") ? lotQuery : response), { status: 200 }));
+  window.history.replaceState(null, "", "/search?lot=9");
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
-  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
   expect(await screen.findByText(/ОКПД2: 17.12/)).toBeInTheDocument();
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), " другое");
+  await userEvent.type(screen.getByLabelText("Название товара"), " другое");
   expect(screen.queryByText(/ОКПД2: 17.12/)).not.toBeInTheDocument();
 });
 
@@ -295,7 +292,7 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
     return new Response(JSON.stringify(body.filters?.only_manufacturers ? filtered : base), { status: 200 });
   });
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
@@ -320,15 +317,15 @@ test("history is paged on the server: total from the header, «Показать 
     return new Response(JSON.stringify(body), { status: 200, headers: { "X-Total-History": "3", "X-Total-Discovered": "0" } });
   });
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const history = await screen.findByRole("region", { name: "С опытом госзакупок" });
   expect(within(history).getByText("Показаны 2 из 3")).toBeInTheDocument();
   const searches = () => urls.filter((u) => u.startsWith("/api/search")); // the form also asks /api/testset (#207)
-  expect(searches()[0]).toBe("/api/search?limit=20&offset=0");
+  expect(searches()[0]).toBe("/api/search?limit=10&offset=0");
   await userEvent.click(within(history).getByRole("button", { name: "Показать ещё" }));
   expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
-  expect(searches()[1]).toBe("/api/search?limit=20&offset=2");
+  expect(searches()[1]).toBe("/api/search?limit=10&offset=2");
   expect(within(history).getAllByRole("listitem")).toHaveLength(3);
   expect(within(history).queryByRole("button", { name: "Показать ещё" })).not.toBeInTheDocument();
 });
@@ -351,7 +348,7 @@ async function newBlockWith(filter: "only_manufacturers" | "near_customer", okpd
     return new Response(JSON.stringify(on ? filtered : base), { status: 200 });
   });
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
@@ -430,7 +427,7 @@ test("card keeps external reviews separate from customer ratings (#106, #251)", 
   withInn.history[0]!.counterparty.inn = "7804428656";
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(withInn), { status: 200 }));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
@@ -456,10 +453,9 @@ function okpd2Route(body: unknown) {
 
 test("lot chip names the OKPD2 class", async () => {
   const lotQuery = { query_id: "lot-9", text: "Бумага из извещения", okpd2: ["17.12"], budget: 1000, customer_inn: null, channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
-  vi.spyOn(globalThis, "fetch").mockImplementation(okpd2Route(lotQuery));
+  vi.spyOn(globalThis, "fetch").mockImplementation(async url => String(url).startsWith("/api/lot/") ? new Response(JSON.stringify(lotQuery)) : okpd2Route(response)(url));
+  window.history.replaceState(null, "", "/search?lot=9");
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
-  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
   expect(await screen.findByText("ОКПД2: 17.12 «Бумага и картон»")).toBeInTheDocument();
 });
 
@@ -472,7 +468,7 @@ test("«Новые» of a free-text query names the OKPD2 class determined from 
       ? new Response(JSON.stringify(LABELS), { status: 200 })
       : new Response(JSON.stringify(empty), { status: 200, headers: header(predicted) }));
   const { unmount } = render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const block = await screen.findByRole("region", { name: "Новые из открытых источников" });
@@ -484,8 +480,8 @@ test("«Новые» of a free-text query names the OKPD2 class determined from 
   predicted = false; // the class of the query itself (a loaded notice): no chip
   window.history.replaceState(null, "", "/search");
   render(<App />);
-  await userEvent.clear(screen.getByLabelText("Что нужно закупить"));
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.clear(screen.getByLabelText("Название товара"));
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const own = await screen.findByRole("region", { name: "Новые из открытых источников" });
@@ -498,7 +494,7 @@ test("card names the supplier's main OKPD2 classes", async () => {
   withStats.history[0].counterparty.stats = { top_okpd2: "17.12,26.20" };
   vi.spyOn(globalThis, "fetch").mockImplementation(okpd2Route(withStats));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
@@ -512,7 +508,7 @@ test("card falls back to bare OKPD2 codes when names fail", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
     String(url).startsWith("/api/okpd2") ? new Response("boom", { status: 500 }) : new Response(JSON.stringify(withStats), { status: 200 }));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   await userEvent.click(within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText("ООО Альфа"));
   await userEvent.click(screen.getByRole("button", { name: /Открыть полную карточку/ }));
@@ -527,7 +523,7 @@ test("company names retain exact supplied legal form in list and full card", asy
   res.history[0].counterparty.name = long;
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(res), { status: 200 }));
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const row = within(await screen.findByRole("region", { name: "С опытом госзакупок" })).getByText(long);
   expect(row).toHaveAttribute("title", long);
@@ -554,7 +550,7 @@ test("works: the line over the results names the customer, the type, what «ав
       "X-Search-Context": JSON.stringify(ctx).replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`), "X-Facets": JSON.stringify(facets), "X-Total-History": "1", "X-Total-Discovered": "1" } });
   });
   render(<App />);
-  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "ремонт кровли");
+  await userEvent.type(screen.getByLabelText("Название товара"), "ремонт кровли");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
   const line = await screen.findByRole("group", { name: "Заказчик и тип закупки" });
   expect(line).toHaveTextContent("Заказчик: Санкт-Петербург (ИНН 78…)");

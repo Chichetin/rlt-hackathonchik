@@ -19,7 +19,7 @@ test("меню сверху на телефоне; на подборе рёбр�
   expect((await nav.boundingBox())!.y).toBeLessThan(100);
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 2)).toBe(true);
   await nav.getByRole("link", { name: "Подбор", exact: true }).click();
-  await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
+  await expect(page.getByLabel("Название товара")).toBeVisible();
   await expect(page.locator(".wave-field-slats .micro-slats canvas")).toBeVisible();
   await expect(page.locator(".wave-patterns, .wave-control")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
