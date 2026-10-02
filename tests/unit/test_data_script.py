@@ -51,12 +51,17 @@ def release(tmp_path: Path) -> dict[str, str]:
     (assets / "sources-cache.sqlite").write_text("snapshot of the source cache\n", encoding="utf-8")
     snapshot = f"{sha(assets / 'sources-cache.sqlite')}  sources-cache.sqlite\n"
     (assets / "SHA256SUMS.cache").write_text(snapshot, encoding="utf-8")
+    (assets / "gisp-products.parquet").write_text("gisp products\n", encoding="utf-8")
+    (assets / "gisp-meta.json").write_text('{"rows": 1}\n', encoding="utf-8")
+    (assets / "SHA256SUMS.gisp").write_text(
+        "".join(f"{sha(assets / n)}  {n}\n" for n in ("gisp-products.parquet", "gisp-meta.json")), encoding="utf-8")
     gh = bin_dir / "gh"
     gh.write_text(FAKE_GH, encoding="utf-8")
     gh.chmod(0o755)
     return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_ASSETS": str(assets),
             "FAKE_LOG": str(tmp_path / "gh.log"), "DATA_PROCESSED_DIR": str(tmp_path / "out" / "processed"),
             "DATA_RAW_DIR": str(tmp_path / "out" / "raw dir"),
+            "GISP_DIR": str(tmp_path / "out" / "gisp dir"),
             "SOURCE_CACHE": str(tmp_path / "out" / "cache dir" / "sources.sqlite")}  # a space in the path on purpose
 
 
@@ -222,3 +227,27 @@ def test_cache_with_wrong_checksum_is_refused_and_not_part_of_all(release):
     res_all = run([], release)  # no part = all: the data, never the cache
     assert res_all.returncode == 0, res_all.stderr
     assert "sources-cache.sqlite" not in downloads(release) and not Path(release["SOURCE_CACHE"]).exists()
+
+
+def test_gisp_is_downloaded_under_directory_names_and_not_downloaded_twice(release):
+    out = Path(release["GISP_DIR"])
+    res = run(["gisp"], release)
+    assert res.returncode == 0, res.stderr
+    assert sorted(p.name for p in out.iterdir()) == ["meta.json", "products.parquet"]  # no .download.* left
+    assert (out / "products.parquet").read_text(encoding="utf-8") == "gisp products\n"
+    assert downloads(release) == ["SHA256SUMS.gisp", "gisp-products.parquet", "gisp-meta.json"]  # not SHA256SUMS
+    again = run(["gisp"], release)
+    assert again.returncode == 0 and again.stdout.count("уже на месте") == 2
+    assert downloads(release) == ["SHA256SUMS.gisp"]
+    (out / "products.parquet").write_text("damaged", encoding="utf-8")
+    assert run(["gisp"], release).returncode == 0
+    assert downloads(release) == ["SHA256SUMS.gisp", "gisp-products.parquet"]
+
+
+def test_gisp_with_wrong_checksum_is_refused_and_not_part_of_all(release):
+    (Path(release["FAKE_ASSETS"]) / "gisp-products.parquet").write_text("tampered", encoding="utf-8")
+    res = run(["gisp"], release)
+    assert res.returncode == 1 and "контрольная сумма gisp-products.parquet не сошлась" in res.stderr
+    assert not (Path(release["GISP_DIR"]) / "products.parquet").exists()
+    assert run([], release).returncode == 0 and "gisp-meta.json" not in downloads(release)
+    assert not any(Path(release["GISP_DIR"]).rglob("*"))  # nothing written, `all` did not touch the GISP directory
