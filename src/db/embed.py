@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 import time
 from collections.abc import Callable
@@ -31,6 +30,7 @@ from psycopg import sql
 
 from src.db.load import pg_dsn
 from src.db.norm import norm_sql
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 MODEL = "intfloat/multilingual-e5-small"
@@ -231,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         enc = model_encoder(prefix=spec(args.model).passage, name=args.model)
         print({"encoded": encode_file(args.encode, args.out, enc, model=args.model), "out": str(args.out)})
         return 0
-    url = os.environ.get("DATABASE_URL", "")
+    url = get_settings().database_url
     if not url.startswith("postgres"):
         print("нужен DATABASE_URL=postgresql://… (docker compose up -d db; make db-load)", file=sys.stderr)
         return 2

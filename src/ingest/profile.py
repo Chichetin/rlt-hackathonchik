@@ -14,12 +14,13 @@ not silently dropped).
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
 
 import duckdb
+
+from src.settings import get_settings
 
 FILES = {
     "n": "Извещения_24-25.csv",
@@ -687,7 +688,7 @@ def profile_backtest(con: duckdb.DuckDBPyConnection, dev_from: str, holdout_from
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--raw-dir", default=os.environ.get("DATA_RAW_DIR", "data/raw"))
+    ap.add_argument("--raw-dir", default=get_settings().data_raw_dir)
     ap.add_argument("--dev-from", default="2025-07-01")
     ap.add_argument("--holdout-from", default="2025-10-01")
     args = ap.parse_args(argv)

@@ -73,6 +73,12 @@ STOP_MS = 10_000  # latency: a larger N is not measured once p50 at a smaller on
 RERANKERS = {"BAAI/bge-reranker-v2-m3": "float16", "ARGA100/ru-reranker-modernbert-small": "float32"}
 
 
+
+def _loadavg() -> tuple[float, float, float]:
+    """os.getloadavg() where it exists (not on Windows): CLAUDE.md, checks pass on both."""
+    f = getattr(os, "getloadavg", None)
+    return f() if f else (0.0, 0.0, 0.0)
+
 def rank_scores(docs: Sequence[int]) -> list[tuple[int, float]]:
     """Documents in order -> (doc_id, 1/(1+rank)): only the order reaches the candidates."""
     return [(d, 1.0 / (1 + r)) for r, d in enumerate(docs)]
@@ -312,7 +318,7 @@ def cpu_latency(model: str, n_queries: int, seed: int, out_dir: Path, ns: Sequen
                  "device": "cpu", "cpu": _cpu_name(), "torch_threads": torch.get_num_threads(),
                  "max_length": CE_MAX_LEN, "batch_size": batch_size, "queries": len(cases), "seed": seed,
                  "commit": _commit(), "created": datetime.now(UTC).isoformat(timespec="seconds"),
-                 "loadavg_before": [round(x, 2) for x in os.getloadavg()], "ms": {}}
+                 "loadavg_before": [round(x, 2) for x in _loadavg()], "ms": {}}
     for kind in ("short", "lot"):
         raw = [short_text(c.query.text) if kind == "short" else c.query.text for c in cases]
         hits = [idx.retrieve(tokenize(t), max(ns)) for t in raw]
@@ -333,7 +339,7 @@ def cpu_latency(model: str, n_queries: int, seed: int, out_dir: Path, ns: Sequen
                                        "mean": round(float(np.mean(ms)), 1),
                                        "pairs_mean": round(float(np.mean(sizes)), 1)}
             log.info("%s CPU %s@%d: p50 %.0f ms, p95 %.0f ms", slug(model), kind, n, p50, p95)
-    res["loadavg_after"] = [round(x, 2) for x in os.getloadavg()]
+    res["loadavg_after"] = [round(x, 2) for x in _loadavg()]
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"E4-latency-{slug(model)}.json").write_text(json.dumps(res, ensure_ascii=False, indent=2),
                                                             encoding="utf-8")

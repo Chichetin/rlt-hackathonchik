@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import random
 import subprocess
 import sys
@@ -41,9 +40,10 @@ from src.match.index import get_index
 from src.match.pg_retriever import KNN, norm_map, rrf
 from src.match.store import ParquetStore, processed_dir
 from src.match.text import tokenize, tokenizer_name, tokenizer_version
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
-GPU_DIR = Path(os.environ.get("DATA_GPU_DIR") or ROOT / "data" / "gpu")
+GPU_DIR = get_settings().data_gpu_dir
 TEXTS = ("texts-e5-small.parquet", "texts-rest.parquet")  # 1 031 361 distinct normalized names
 TOP_DOCS = 500  # as search.TOP_DOCS
 CANDIDATES = 200  # as search.CANDIDATES
@@ -70,7 +70,7 @@ FINETUNED = {
     "e3/e5-small-okpd2": "intfloat/multilingual-e5-small",
 }
 PREFIX.update({ft: PREFIX[base] for ft, base in FINETUNED.items()})
-MODELS_DIR = Path(os.environ.get("MODELS_DIR") or ROOT / "models")
+MODELS_DIR = get_settings().models_dir
 # T5 encoders overflow in fp16 (inf/NaN activations): bf16 keeps the range at the same speed
 BF16 = {"ai-forever/FRIDA"}
 METRICS = ("cand_recall@200", "winner_hit@200", "recall@10", "mrr")

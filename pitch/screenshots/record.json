@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-10-02T04:38:04.917Z",
+  "recorded_at": "2026-10-02T07:15:07.874Z",
   "base": "http://127.0.0.1:8010",
   "lot": "5903085",
   "query": {
@@ -21,19 +21,21 @@
     "height": 1080
   },
   "seconds": {
-    "form": 4.1,
-    "results": 10.8,
-    "card": 32.2,
-    "filter": 51.1,
-    "export": 62.1,
-    "end": 67.2
+    "results": 1,
+    "new": 29.3,
+    "card": 50.8,
+    "filter": 59.3,
+    "near": 65.9,
+    "export": 75.1,
+    "end": 80.2
   },
   "health": {
     "status": "ok",
     "stub": false,
     "llm": "none",
     "queue": {
-      "pending": 177
+      "done": 210,
+      "pending": 74
     },
     "store": "parquet"
   },

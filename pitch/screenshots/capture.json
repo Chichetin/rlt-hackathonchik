@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-02T04:38:22.467Z",
+  "captured_at": "2026-10-02T07:15:33.617Z",
   "base": "http://127.0.0.1:8010",
   "lot": "5903085",
   "query": {
@@ -21,7 +21,8 @@
     "stub": false,
     "llm": "none",
     "queue": {
-      "pending": 177
+      "done": 210,
+      "pending": 74
     },
     "store": "parquet"
   },
