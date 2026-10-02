@@ -1,15 +1,17 @@
 """Would a registry contact confirm a 2GIS card? Coverage measure before building it (#357, step 1).
 
-    uv run python -m src.eval.review_contacts --exp R-contacts-v1 [--limit 40]
+    SOURCE_CACHE=<кеш> DATA_STORE=parquet uv run python -m src.eval.review_contacts --exp R-contacts-v1 [--limit 40]
 
-Sample: the top-10 of both blocks («С опытом», «Новые») of the queries of src/eval/fns_coverage.py (the e2e demo
-lot and the 8 real cases), legal entities only (2GIS reviews are not searched for an individual entrepreneur),
-first `--limit` distinct INNs. Per INN: the phone / email of the МСП registry quick search (src/sources/rmsp.py,
-cached), the name and region of the ФНС card (enrich, cached), then the product's own `find_reviews` with those
-contacts — the same comparison /api/reviews would make if enrich() returned contacts. Counted: with a registry
-contact, a 2GIS card found, a card confirmed by the contact (basis phone / email / site), by the unique legal name,
-by the brand only. Every request goes through SourceCache with the sources' own pacing; a second run is free.
-Writes eval/results/<exp>.json.
+Sample: the top-10 of both blocks («С опытом», «Новые») of the queries of src/eval/fns_coverage.py, query by
+query (the e2e demo lot, then the real cases), legal entities only (2GIS reviews are not searched for an
+individual entrepreneur), first `--limit` distinct INNs — with 40, the demo lot and the first two real cases.
+The blocks are read offline, so the sample depends on SOURCE_CACHE; each row records its query and block.
+Per INN: the phone / email of the МСП registry quick search (src/sources/rmsp.py, cached), the name and region
+of the ФНС card (enrich, cached), then the product's own `find_reviews` with those contacts — the same
+comparison /api/reviews would make if enrich() returned contacts. Counted: with a registry contact, a 2GIS card
+found, a card confirmed by the contact (basis phone / email / site), by the unique legal name, by the brand
+only. Every request goes through SourceCache with the sources' own pacing: on the same cache a second run makes
+no request, on another cache the sample and the live requests differ. Writes eval/results/<exp>.json.
 """
 
 from __future__ import annotations
