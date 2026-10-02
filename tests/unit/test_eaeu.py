@@ -33,7 +33,8 @@ def test_lead_file_holds_only_checked_identifiers():
     assert leads and all(lead.country in eaeu.COUNTRY_NAME for lead in leads)
     assert all(by_grp.unp_is_valid(lead.national_id) for lead in leads if lead.country == "BY")
     # every lead has the registry's recorded answer next to it: the demo shows it without the network
-    assert all((eaeu.RECORDED / f"{lead.national_id}.json").is_file() for lead in leads)
+    recorded = {"BY": eaeu.RECORDED, "AM": eaeu.RECORDED_AM}
+    assert all((recorded[lead.country] / f"{lead.national_id}.json").is_file() for lead in leads)
 
 
 def test_goods_query_gets_the_registry_company_after_the_block(cache):
@@ -50,6 +51,28 @@ def test_goods_query_gets_the_registry_company_after_the_block(cache):
     assert "Беларусь" in next(c for c in m.components if c.name == "geography").explanation
 
 
+def test_every_lead_is_confirmed_by_its_registry_and_passes_the_evidence_check(cache):
+    """The whole lead file on the recorded answers: every company is shown for its class with a verified identifier,
+    name and status, no role, score 0 — and no company is shown twice for one class."""
+    leads = eaeu.load()
+    shown: set[str] = set()
+    for cls in sorted({lead.okpd2_class for lead in leads}):
+        mine = [lead for lead in leads if lead.okpd2_class == cls]
+        for lead in mine:  # one by one: MAX_SHOWN cuts a class with more leads
+            (m,) = eaeu.matches([cls], [cls], cache, WEIGHTS, False, leads=[lead])[0]
+            cp = m.counterparty
+            assert cp.foreign_id == f"{lead.country}:{lead.national_id}" and cp.country == lead.country
+            assert check_counterparty(cp, cache.page_text) == [], cp.foreign_id
+            assert {"foreign_id", "name", "status"} <= {e.field for e in cp.evidence}
+            assert cp.kind is None and m.score == 0.0
+            shown.add(cp.foreign_id)
+        rows = eaeu.matches([cls], [cls], cache, WEIGHTS, False)[0]
+        assert len(rows) == min(len(mine), eaeu.MAX_SHOWN)
+        assert len({m.counterparty.foreign_id for m in rows}) == len(rows)
+    assert len(shown) == len({(lead.country, lead.national_id) for lead in leads}) >= 20
+    assert {lead.country for lead in leads} == {"BY", "AM"}
+
+
 @pytest.mark.parametrize(("codes", "classes"), [
     (["81.21.10"], ["81.21"]),  # a service: geography matters, the EAEU row is not offered
     (["17.12.14", "81.21.10"], ["17.12", "81.21"]),  # a mixed lot is not «goods only»
@@ -61,7 +84,7 @@ def test_no_row_for_services_or_other_classes(cache, codes, classes):
 
 def test_lead_without_a_cached_registry_answer_is_not_shown(cache, tmp_path: Path):
     lead = eaeu.Lead("17.12", "BY", UNP, "как показал поиск", "https://example.by/")
-    rows, line = eaeu.matches(["17.12"], ["17.12"], cache, WEIGHTS, False, leads=[lead], recorded=None)
+    rows, line = eaeu.matches(["17.12"], ["17.12"], cache, WEIGHTS, False, leads=[lead], recorded=False)
     assert rows == [] and line is not None and "без ответа реестра в кеше 1" in line
     kz = eaeu.Lead("17.12", "KZ", "123456789012", "x", "https://example.kz/")  # no registry connected: never shown
     assert eaeu.matches(["17.12"], ["17.12"], cache, WEIGHTS, False, leads=[kz])[0] == []
