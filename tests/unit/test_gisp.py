@@ -39,7 +39,7 @@ FETCHED = 1_790_914_838.0  # the download of the export, 02.10.2026 04:20 UTC
 def gdir(tmp_path, monkeypatch) -> Path:
     out = tmp_path / "gisp"
     gisp.build(XLSX, out, fetched_at=FETCHED)
-    monkeypatch.setenv("GISP_DIR", str(out))
+    monkeypatch.setattr(gisp, "DIR", out)
     return out
 
 
@@ -94,7 +94,7 @@ def test_build_marks_a_bad_checksum_and_never_returns_it(tmp_path):
 
 
 def test_without_the_export_nothing_is_available(tmp_path, monkeypatch):
-    monkeypatch.setenv("GISP_DIR", str(tmp_path / "absent"))
+    monkeypatch.setattr(gisp, "DIR", tmp_path / "absent")
     assert gisp.available() is False
     assert gisp.by_okpd2(["17.23.13.130"]) == {} and gisp.by_inn([EKO]) == {}
 
@@ -282,7 +282,7 @@ def test_discover_raises_a_wholesale_candidate_that_makes_the_product(gdir, cach
 
 
 def test_discover_without_the_export_is_unchanged(cache, tmp_path, monkeypatch):
-    monkeypatch.setenv("GISP_DIR", str(tmp_path / "absent"))
+    monkeypatch.setattr(gisp, "DIR", tmp_path / "absent")
     rows = {"rowCount": 1, "data": [{**RMSP_ANSWER["data"][0], "inn": EKO, "okved1": "17.23",
                                      "okved1name": "Производство бумажных канцелярских принадлежностей"}]}
     cache.put(rmsp.search_url("17.23", "78"), rmsp.flatten("17.23", "78", "UL", rows))

@@ -2,7 +2,7 @@
 of industrial products appears — before (no export) and after (the export of src/sources/gisp.py).
 
 Both runs are offline and read the same things: the source cache (a temporary copy — registry pages written by
-discovery do not touch the original) and organizers' data (DATA_PROCESSED_DIR). Only GISP_DIR differs.
+discovery do not touch the original) and organizers' data (DATA_PROCESSED_DIR). Only the export directory differs.
 Per lot: «Новые» non-empty, any product_fit 1.0, a registry-confirmed product (`Discovery.gisp_backed` in the
 top-10), a company added by the registry alone, the Evidence check of every registry-confirmed candidate.
 
@@ -34,7 +34,7 @@ from src.sources.cache import SourceCache  # noqa: E402
 
 
 def _run(query: Query, cache: SourceCache, gisp_dir: Path) -> dict:
-    os.environ["GISP_DIR"] = str(gisp_dir)
+    gisp.DIR = gisp_dir
     res = D.discover(query, cache=cache, offline=True)
     shown = res.matches
     backed = [m for m in shown if (m.counterparty.inn or "") in res.gisp_backed]

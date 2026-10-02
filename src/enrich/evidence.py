@@ -34,6 +34,7 @@ PageText = Callable[[str], str | None]  # url -> cached page text or None
 FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region",
           "rnp"}
 FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/sources/fns_opendata.py
+FIELDS |= {"review"}  # a quote of a public review (src/enrich/reviews.py), a normalized substring of the page
 FIELDS |= {"product"}  # src/sources/gisp.py: a product of the company in the registry of industrial products
 ROLE_FIELDS = ("okved", "product")  # Evidence that may hold the basis of the role (src/sources/role.py)
 MIN_TEXT = 6

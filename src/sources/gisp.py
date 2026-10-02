@@ -12,12 +12,13 @@ download per run of `scripts/gisp_download.mjs`, not a crawl; then everything is
 (src/sources/msp_dump.py):
 
     node scripts/gisp_download.mjs /mnt/storage/rlt236/gisp/pp719_valid.xlsx
-    uv run python -m src.sources.gisp build /mnt/storage/rlt236/gisp/pp719_valid.xlsx --out <GISP_DIR>
+    uv run python -m src.sources.gisp build /mnt/storage/rlt236/gisp/pp719_valid.xlsx   # → data/external/gisp
     uv run python -m src.sources.gisp stats
 
 `build` keeps every row of the export (`inn_valid` marks a bad checksum, such rows are never returned) in
 `<GISP_DIR>/products.parquet` and the export stamp («Время выгрузки»), the download time and the URL in
-`meta.json`. GISP_DIR — env, default data/external/gisp (not in git).
+`meta.json` of `DIR` = data/external/gisp (not in git; a symlink to a larger disk is fine). No environment
+variable: the environment is read only in src/settings.py (#290); `--out` / `--dir` of the CLI, `DIR` in tests.
 
 Facts: a product record becomes a cached page (`page_url(inn, reg_number)`, the registry URL with `#inn=…&reg=…`,
 `page()`: flat `gisp.<inn>.<key>: <value>` lines, values as in the export with whitespace collapsed), put into
@@ -31,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 from collections.abc import Iterable, Sequence
@@ -52,6 +52,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = "Минпромторг: реестр российской промышленной продукции (ГИСП)"
 REGISTRY_URL = "https://gisp.gov.ru/pp719v2/pub/prod/"
 DOWNLOAD_URL = "https://gisp.gov.ru/pp719v2/mptapp/view/dl/production_res_valid_only/"
+DIR = ROOT / "data" / "external" / "gisp"
 PRODUCTS = "products.parquet"
 META = "meta.json"
 SHEET = "Продукция"
@@ -87,7 +88,7 @@ class Product:
 
 
 def gisp_dir() -> Path:
-    return Path(os.environ.get("GISP_DIR") or ROOT / "data" / "external" / "gisp")
+    return DIR  # read at the call: tests and the coverage script point it elsewhere
 
 
 def _text(v: object) -> str | None:
@@ -342,8 +343,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="command", required=True)
     b = sub.add_parser("build", help="XLSX выгрузки → products.parquet + meta.json")
     b.add_argument("xlsx", type=Path)
-    b.add_argument("--out", type=Path, default=None, help="каталог (по умолчанию GISP_DIR)")
-    sub.add_parser("stats", help="сколько продукции и компаний в выгрузке")
+    b.add_argument("--out", type=Path, default=None, help="каталог (по умолчанию data/external/gisp)")
+    st = sub.add_parser("stats", help="сколько продукции и компаний в выгрузке")
+    st.add_argument("--dir", type=Path, default=None, help="каталог (по умолчанию data/external/gisp)")
     args = ap.parse_args(argv)
     if args.command == "build":
         if not args.xlsx.is_file():
@@ -351,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(build(args.xlsx, args.out or gisp_dir()), ensure_ascii=False))
         return 0
-    print(json.dumps({**stats(), **(meta() or {})}, ensure_ascii=False))
+    print(json.dumps({**stats(args.dir), **(meta(args.dir) or {})}, ensure_ascii=False))
     return 0
 
 

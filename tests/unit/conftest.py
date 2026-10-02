@@ -20,7 +20,6 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
     monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources-default.sqlite"))
     monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(tmp_path / "no-fns-opendata.parquet"))  # not the dev machine's
-    monkeypatch.setenv("GISP_DIR", str(tmp_path / "no-gisp"))  # the registry export of the dev machine neither (#74)
     # a test export uploaded in the UI (cache/testsets/active) must not answer /api/lot in tests (#207)
     monkeypatch.setenv("TESTSETS_DIR", str(tmp_path / "testsets-default"))
     # no real network: only httpx.MockTransport answers (a request to a source in a test is a bug)
@@ -41,6 +40,10 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     from src.sources import web_leads
 
     monkeypatch.setattr(web_leads, "LEADS_DIR", tmp_path / "leads-default")
+    # the registry export of industrial products (#74): not the dev machine's; tests/unit/test_gisp.py builds its own
+    from src.sources import gisp
+
+    monkeypatch.setattr(gisp, "DIR", tmp_path / "gisp-default")
     yield
     for pacer in pacers:
         pacer.reset()
