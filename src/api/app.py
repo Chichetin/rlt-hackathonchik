@@ -54,7 +54,6 @@ from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import strip_unverified
-from src.enrich.role import LABEL as ROLE_LABEL
 from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
 from src.match import pipeline
@@ -65,6 +64,7 @@ from src.match.store import get_store
 from src.settings import get_settings
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired, card_url
+from src.sources.role import LABEL as ROLE_LABEL
 from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
