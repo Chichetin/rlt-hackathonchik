@@ -91,7 +91,7 @@ eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-час�
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
 	$(PY) python -m src.eval.run --exp $(EXP)
 
-parity:            ## побитовое сравнение выдач (ranked) двух прогонов eval; 0 — совпали, 1 — различаются, 2 — не сравнить: make parity A=<id> B=<id>
+parity:            ## побитовое сравнение выдач (ranked) двух прогонов eval: make parity A=<id> B=<id>; коды 0/1/2 (совпали / различаются / не сравнить) — у python -m src.eval.parity, у make — Error 1 / Error 2
 	$(PY) python -m src.eval.parity "$(A)" "$(B)"
 
 predict:           ## тестовая выгрузка организаторов → eval/predict/<папка>.csv: make predict CSV_DIR=<папка> [TOP=10] [OFFLINE=1]

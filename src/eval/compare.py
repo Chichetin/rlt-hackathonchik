@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from src.eval.metrics import METRICS, bootstrap_ci
+from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.run import RESULTS, slice_names
 
 
@@ -39,11 +39,15 @@ def paired(a: dict, b: dict) -> dict:
     out = {}
     for name, pairs in sorted(groups.items(), key=lambda kv: (kv[0] != "all", kv[0])):
         metrics = {}
-        for m in METRICS:
-            diffs = [x[m] - y[m] for x, y in pairs]
+        for m in (*METRICS, *WINNER_METRICS):
+            # winner metrics (#280): only cases with a winner in both runs; a result from before #280 has none
+            used = [(x, y) for x, y in pairs if x.get(m) is not None and y.get(m) is not None]
+            if not used:
+                continue
+            diffs = [x[m] - y[m] for x, y in used]
             lo, hi = bootstrap_ci(diffs)
-            metrics[m] = {"delta": sum(diffs) / len(diffs), "ci95": [lo, hi],
-                          "a": sum(x[m] for x, _ in pairs) / len(pairs), "b": sum(y[m] for _, y in pairs) / len(pairs)}
+            metrics[m] = {"delta": sum(diffs) / len(diffs), "ci95": [lo, hi], "n": len(used),
+                          "a": sum(x[m] for x, _ in used) / len(used), "b": sum(y[m] for _, y in used) / len(used)}
         out[name] = {"n_queries": len(pairs), "metrics": metrics}
     return out
 
@@ -60,11 +64,18 @@ def main(argv: list[str] | None = None, results: Path = RESULTS) -> int:
         print(e, file=sys.stderr)
         return 2
     print(f"Δ = {args.a} − {args.b} | part={a['part']} | парный bootstrap по запросам")
-    print(f"{'slice':<32} {'n':>6}  " + "  ".join(f"{n + ' b → a, Δ [95% CI]':<42}" for n in METRICS))
-    for name, s in table.items():
-        cells = (f"{m['b']:.3f} → {m['a']:.3f}, {m['delta']:+.3f} [{m['ci95'][0]:+.3f}, {m['ci95'][1]:+.3f}]"
-                 for m in s["metrics"].values())
-        print(f"{name:<32} {s['n_queries']:>6}  " + "  ".join(f"{c:<42}" for c in cells))
+    for group in (list(METRICS), list(WINNER_METRICS)):  # winner metrics: own block, n = cases with a winner (#280)
+        names = [n for n in group if n in table["all"]["metrics"]]
+        if not names:
+            continue
+        print(f"{'slice':<32} {'n':>6}  " + "  ".join(f"{n + ' b → a, Δ [95% CI]':<42}" for n in names))
+        for name, s in table.items():
+            if names[0] not in s["metrics"]:
+                continue
+            cells = (f"{s['metrics'][m]['b']:.3f} → {s['metrics'][m]['a']:.3f}, {s['metrics'][m]['delta']:+.3f} "
+                     f"[{s['metrics'][m]['ci95'][0]:+.3f}, {s['metrics'][m]['ci95'][1]:+.3f}]" for m in names)
+            print(f"{name:<32} {s['metrics'][names[0]].get('n', s['n_queries']):>6}  "
+                  + "  ".join(f"{c:<42}" for c in cells))
     return 0
 
 
