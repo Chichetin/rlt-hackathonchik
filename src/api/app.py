@@ -60,7 +60,15 @@ from src.api.ratings import router as ratings_router
 from src.api.reviews import router as reviews_router
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
-from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
+from src.contracts import (
+    Counterparty,
+    CounterpartyMatch,
+    Query,
+    SearchResponse,
+    SupplierLot,
+    SupplierLots,
+    inn_is_valid,
+)
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import strip_unverified
@@ -493,6 +501,24 @@ def api_counterparty(inn: str) -> Counterparty:
     # A fact without a verified source is not shown (CLAUDE.md, «Проверки кодом»).
     return strip_unverified(cp, SourceCache().page_text)
 
+
+
+@app.get("/api/counterparty/{inn}/lots", response_model=SupplierLots)
+def api_counterparty_lots(inn: str, offset: int = Param(0, ge=0), limit: int = Param(20, ge=1, le=100),
+                          won_only: bool = False) -> SupplierLots:
+    """Past lots of a supplier in organizers' data, newest first, paged on the server (#652)."""
+    if not inn_is_valid(inn):
+        raise HTTPException(422, "ИНН не проходит контрольные цифры")
+    try:
+        rows = get_store().supplier_lots(inn, offset, limit, won_only)
+    except FileNotFoundError as e:
+        log.warning("supplier lots: %s", e)
+        raise HTTPException(503, "данные организаторов недоступны: не загружены или база не отвечает") from e
+    items = [SupplierLot(lot_id=r[0], procedure_id=r[1], reqnum=r[2], publish_date=r[3], subject=r[4],
+                         start_price=r[5], customer_inn=r[6], channel=r[7], won=bool(r[8]), participants=r[9],
+                         okpd2=sorted(r[10].split(",")) if r[10] else [], url=f"data:participants#lot_id={r[0]}")
+             for r in rows]
+    return SupplierLots(total=rows[0][11] if rows else 0, items=items)
 
 @app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202,
           dependencies=[Depends(guard.require_api_key)], responses=_LIMITED)

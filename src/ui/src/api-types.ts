@@ -317,6 +317,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/counterparty/{inn}/lots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Counterparty Lots
+         * @description Past lots of a supplier in organizers' data, newest first, paged on the server (#652).
+         */
+        get: operations["api_counterparty_lots_api_counterparty__inn__lots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/enrich/{inn}": {
         parameters: {
             query?: never;
@@ -734,6 +754,43 @@ export interface components {
              * @default false
              */
             stub: boolean;
+        };
+        /**
+         * SupplierLot
+         * @description One past lot of a supplier in organizers' data (#652): Извещения × Поставщики × ТРУ.
+         */
+        SupplierLot: {
+            /** Lot Id */
+            lot_id: number;
+            /** Procedure Id */
+            procedure_id?: number | null;
+            /** Reqnum */
+            reqnum?: string | null;
+            /** Publish Date */
+            publish_date?: string | null;
+            /** Subject */
+            subject?: string | null;
+            /** Start Price */
+            start_price?: number | null;
+            /** Customer Inn */
+            customer_inn?: string | null;
+            /** Channel */
+            channel?: string | null;
+            /** Won */
+            won: boolean;
+            /** Participants */
+            participants: number;
+            /** Okpd2 */
+            okpd2?: string[];
+            /** Url */
+            url: string;
+        };
+        /** SupplierLots */
+        SupplierLots: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["SupplierLot"][];
         };
         /** UploadTemplateRequest */
         UploadTemplateRequest: {
@@ -1464,6 +1521,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    api_counterparty_lots_api_counterparty__inn__lots_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+                won_only?: boolean;
+            };
+            header?: never;
+            path: {
+                inn: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierLots"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

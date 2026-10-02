@@ -83,6 +83,7 @@ class Store(Protocol):
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
     def lot_names(self, lot_id: int) -> list[str]: ...
+    def supplier_lots(self, inn: str, offset: int, limit: int, won_only: bool) -> list[tuple]: ...
     def top_suppliers(self, limit: int) -> list[str]: ...
     def participations(self, as_of: date | None) -> pa.Table: ...
     def cobid(self, inns: list[str], as_of: date | None) -> list[tuple]: ...
@@ -381,6 +382,25 @@ GROUP BY product_name ORDER BY product_name{c} LIMIT 5
 """
 
 
+# Past lots of one supplier, newest first (#652): the row and `total` — all its lots under the filter.
+_SUPPLIER_LOTS = """
+WITH mine AS (
+    SELECT lot_id, bool_or(is_winner) AS won FROM {t[participants]}
+    WHERE supplier_inn = %(inn)s AND (NOT %(won_only)s OR is_winner) GROUP BY lot_id
+), page AS (
+    SELECT n.lot_id, n.procedure_id, n.reqnum, n.publish_date, n.subject, n.start_price, n.customer_inn, n.channel,
+           m.won, count(*) OVER () AS total
+    FROM mine m JOIN {t[notices]} n ON n.lot_id = m.lot_id
+    ORDER BY n.publish_date DESC, n.lot_id DESC LIMIT %(limit)s OFFSET %(offset)s
+)
+SELECT p.lot_id, p.procedure_id, p.reqnum, p.publish_date, p.subject, p.start_price, p.customer_inn, p.channel, p.won,
+       (SELECT count(DISTINCT x.supplier_inn) FROM {t[participants]} x WHERE x.lot_id = p.lot_id) AS rivals,
+       (SELECT string_agg(DISTINCT i.okpd2_code, ',') FROM {t[items]} i
+        WHERE i.lot_id = p.lot_id AND i.okpd2_code IS NOT NULL AND i.okpd2_code <> '') AS okpd2,
+       p.total
+FROM page p ORDER BY p.publish_date DESC, p.lot_id DESC
+"""
+
 # The most active suppliers first (src/worker/prefetch.py warms the source cache in this order, D-056).
 _TOP_SUPPLIERS = """
 SELECT inn FROM {t[suppliers]} WHERE inn_valid
@@ -567,6 +587,10 @@ class ParquetStore:
     def lot_names(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_NAMES, {"lot_id": lot_id})[1]]
 
+    def supplier_lots(self, inn: str, offset: int, limit: int, won_only: bool) -> list[tuple]:
+        params = {"inn": inn, "offset": offset, "limit": limit, "won_only": won_only}
+        return self._fetch(_SUPPLIER_LOTS, params)[1]
+
     def top_suppliers(self, limit: int) -> list[str]:
         return [r[0] for r in self._fetch(_TOP_SUPPLIERS, {"limit": limit}, suppliers=self._suppliers(None))[1]]
 
@@ -734,6 +758,10 @@ class PgStore:
 
     def lot_names(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_NAMES, {"lot_id": lot_id})[1]]
+
+    def supplier_lots(self, inn: str, offset: int, limit: int, won_only: bool) -> list[tuple]:
+        params = {"inn": inn, "offset": offset, "limit": limit, "won_only": won_only}
+        return self._fetch(_SUPPLIER_LOTS, params)[1]
 
     def top_suppliers(self, limit: int) -> list[str]:
         return [r[0] for r in self._fetch(_TOP_SUPPLIERS, {"limit": limit})[1]]
