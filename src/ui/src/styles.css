@@ -669,3 +669,10 @@ html { scroll-padding-top: 80px; }
   .live-radar span:first-child { opacity: .6; transform: scale(.9); }
   .live-bar span { left: 30%; }
 }
+
+/* #635: requisites under the supplier's name in the reading pane — labelled, readable in both themes */
+.requisites { margin: 14px 0 8px; padding: 12px 16px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 8px; }
+.requisites h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.requisites .facts { grid-template-columns: max-content minmax(0,1fr); gap: 6px 18px; }
+.requisites .facts dt { color: var(--muted); font-size: 13px; }
+.requisites .facts dd { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
