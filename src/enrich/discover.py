@@ -35,7 +35,7 @@ import argparse
 import logging
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -127,6 +127,7 @@ class Discovery:
     candidates: list[CounterpartyMatch] = field(default_factory=list)
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
     leads: list[str] = field(default_factory=list)  # web leads (#108): what happened to them, one line
+    relation: dict[str, str] = field(default_factory=dict)  # INN → why it matched: class / wholesale (STEP)
     notes: list[str] = field(default_factory=list)
     # product_fit_new (#77, src/match/new_fit.py): off — not computed; shadow — computed here only;
     # on — it IS product_fit of every match (experiment only, confirmation №3 to make it the default)
@@ -504,6 +505,21 @@ def _np_types() -> list[str]:
     return [t for t in (x.strip().upper() for x in raw.split(",")) if t in rmsp.NP_TYPES] or ["UL"]
 
 
+PAGE_ROWS = 10  # rows on one registry page: fewer → the last page
+
+
+def _pages(jobs: list[tuple[Channel, str, str]], pages: int,
+           last_rows: dict[tuple[str, str, str], int]) -> Iterator[tuple[tuple[Channel, str, str], int | None]]:
+    """(job, page number) in order: page 1 of every job, then pages 2..N of a job whose previous page
+    was full (`last_rows`, filled lazily by the caller's loop); None — skip, the job has no more rows."""
+    for job in jobs:
+        yield job, 1
+    for n in range(2, pages + 1):
+        for job in jobs:
+            full = last_rows.get((job[0].okved, job[1], job[2]), 0) >= PAGE_ROWS
+            yield job, (n if full else None)
+
+
 def discover(
     query: Query,
     history: Sequence[CounterpartyMatch] = (),
@@ -515,11 +531,18 @@ def discover(
     offline: bool | None = None,
     budget_s: float = LIVE_BUDGET_S,
     client: httpx.Client | None = None,
+    max_requests: int | None = MAX_REQUESTS,
+    pages: int = 1,
+    predicted_class: bool | None = None,
     fit_mode: str | None = None,
     predicted_code: str | None = None,
 ) -> Discovery:
     """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data.
 
+    `/api/search` uses the defaults (budget, MAX_REQUESTS, the first page). `make predict` (#229) lifts
+    them: `max_requests=None` — every (OKVED, region, type), `pages` — registry pages per request,
+    `predicted_class=True` — build the block by the predicted class whatever DISCOVERY_PREDICTED_CLASS says
+    (the caller decided the text is more reliable than the code).
     `fit_mode` (off | shadow | on) overrides new_fit.mode() — for the off/on comparison (#77).
     `predicted_code` — the OKPD2 code search() predicted from the text of this query (search.predicted_code());
     used only when the query has no OKPD2 of its own, and then its full code picks the wholesale row.
@@ -535,7 +558,8 @@ def discover(
     classes = okpd_classes(query.okpd2)
     codes: list[str] = [c.strip() for c in query.okpd2]
     if not classes:
-        if not predicted_class_allowed():  # #394: on by default, DISCOVERY_PREDICTED_CLASS=0 switches it off
+        allowed = predicted_class_allowed() if predicted_class is None else predicted_class
+        if not allowed:  # #394: on by default, DISCOVERY_PREDICTED_CLASS=0 switches it off
             res.notes.append("ОКПД2 в запросе не указан — блок «Новые» не строится "
                              "(DISCOVERY_PREDICTED_CLASS выключен)")
             return res
@@ -549,18 +573,22 @@ def discover(
     res.okpd_classes = classes[:MAX_CLASSES]
 
     jobs = [(ch, region, np) for region in _regions(query) for ch in okved_plan(codes)
-            for np in _np_types()][:MAX_REQUESTS]
+            for np in _np_types()][:max_requests]
     deadline = time.monotonic() + budget_s  # every live request of this query ends before it
     net_ok = True  # False after the first network failure: the rest of the query is cache only
     found: dict[str, tuple[dict[str, str], Channel, CachedPage]] = {}
-    for ch, region, np_type in jobs:
-        label = f"ОКВЭД {ch.okved}, регион {region}, {np_type}"
-        url = rmsp.search_url(ch.okved, region, np_type)
+    last_rows: dict[tuple[str, str, str], int] = {}
+    for (ch, region, np_type), page_no in _pages(jobs, pages, last_rows):
+        if page_no is None:  # the previous page was the last one
+            continue
+        label = f"ОКВЭД {ch.okved}, регион {region}, {np_type}" + (f", стр. {page_no}" if page_no > 1 else "")
+        url = rmsp.search_url(ch.okved, region, np_type, page_no)
         # no time left before the deadline → the client raises Paused without a request
         live = not offline and net_ok and cache.get(url) is None and not rmsp.blocked()
         paused_source = not offline and rmsp.blocked()  # the source is resting after a failure (#287)
         try:
-            page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live, deadline=deadline)
+            page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live, deadline=deadline,
+                                     page=page_no)
         except rmsp.Paused:  # no request was made: pause of the source or no time left
             net_ok, page = False, None
         except rmsp.Blocked as e:
@@ -583,6 +611,7 @@ def discover(
         if live and cache.get(url) is None:  # the request failed and an outdated answer was used
             net_ok, live = False, False
         answer = rmsp.parse(page.body)
+        last_rows[(ch.okved, region, np_type)] = len(answer.rows)
         active = [r for r in answer.rows if r.get("is_active") == "1"]
         res.inactive += len(answer.rows) - len(active)
         count = answer.meta.get("answer.rowCount", "")
@@ -647,6 +676,7 @@ def discover(
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
     matches.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
     res.pool = matches
+    res.relation = dict(relation)
     res.matches = _mix(matches, relation)
     if res.fit_new:
         log.info("discovery %s: product_fit_new (%s), профиль ОКПД2 %s: %s", query.query_id, res.fit_mode,
@@ -664,6 +694,80 @@ def discover(
                 log.exception("discovery: лид %s не поставлен в очередь", inn)
                 break
     return res
+
+
+# Step of product_fit by the basis of a «Новые» match (#186, human decision 01.10; v0): the name of the query
+# literally on the company's site 1.0, the goods in a catalog / marketplace 0.8, the main OKVED of the class
+# 0.6, an additional OKVED of the class 0.5 (decision 22), a wholesale OKVED 0.4. `make predict` shows by it.
+STEP = {"site": 1.0, "catalog": 0.8, "class": 0.6, "extra": 0.5, "wholesale": 0.4}
+POOL_LIMIT = 400  # pool candidates per region read for one query (main OKVED first)
+POOL_EXTRA_FIT = 0.5  # an additional OKVED of the class (decision 22 of IR630): below the 0.6 step of «Новые»
+
+
+def pool_source() -> tuple[str | None, Path | None]:
+    """(Postgres url, parquet dir) of the pool (#185, D-090): the parquet when built, else Postgres when
+    DATABASE_URL is one; (None, None) — the pool is not loaded."""
+    from src.db import pool as pool_mod
+
+    if (pool_mod.POOL / "okved.parquet").exists():
+        return None, pool_mod.POOL
+    url = get_settings().database_url
+    return (url, None) if url.startswith("postgres") else (None, None)
+
+
+def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: dict[str, float],
+              processed: Path, cache: SourceCache, url: str | None = None, pool_dir: Path | None = None,
+              limit: int = POOL_LIMIT) -> tuple[list[CounterpartyMatch], dict[str, str], bool | None]:
+    """«Новые» from the offline МСП pool (#185) by the same OKVED plan as the live registry search: the
+    class (product_fit 1.0 for the main OKVED, POOL_EXTRA_FIT for an additional one) and the wholesale codes
+    (0.6). Regions: the query's, then the neighbour. Organizers' suppliers are dropped. The third value:
+    organizers' data checked (None — the pool is not loaded, nothing was searched)."""
+    from src.db import pool as pool_mod
+
+    if url is None and pool_dir is None:
+        url, pool_dir = pool_source()
+        if url is None and pool_dir is None:
+            return [], {}, None
+    plan = okved_plan(codes)
+    if not plan:
+        return [], {}, False
+    rows: dict[str, dict] = {}
+    for region in _regions(query):  # the query's region first: its rows win the limit
+        for r in pool_mod.candidates([ch.okved for ch in plan], regions=[region], limit=limit, url=url,
+                                     pool_dir=pool_dir or pool_mod.POOL):
+            rows.setdefault(r["inn"], r)
+    known = known_inns(list(rows), query.as_of, processed)
+    if known is None:
+        return [], {}, False
+    fresh = [inn for inn in rows if inn not in known]
+    cps = pool_mod.counterparties(fresh, cache, url=url, pool_dir=pool_dir or pool_mod.POOL)
+    target, target_note = search_mod.customer_region(query)
+    out: list[CounterpartyMatch] = []
+    relation: dict[str, str] = {}
+    for inn in fresh:
+        cp = cps.get(inn)
+        if cp is None:
+            continue
+        code, main = rows[inn]["code"], bool(rows[inn]["main"])
+        ch = max((c for c in plan if code.startswith(c.okved)), key=lambda c: len(c.okved), default=plan[0])
+        rc = next(((e.value or "").rsplit(": ", 1)[-1] for e in cp.evidence if e.field == "region"), "")
+        name = next((e.value or "" for e in cp.evidence if e.field == "okved" and main and ": " not in (e.value or "")),
+                    "")
+        row = {"okved1": code, "okved1name": name, "regioncode": rc}
+        comps = _components(cp, row, ch, predicted, False, target, weights, target_note)
+        if not main:
+            fit = POOL_EXTRA_FIT if ch.relation == "class" else min(FIT[ch.relation], POOL_EXTRA_FIT)
+            comps = [c.model_copy(update={"value": fit, "explanation": (
+                f"Дополнительный ОКВЭД {code} (реестр МСП) — класс ОКПД2 {ch.okpd_class}; основной вид деятельности "
+                "другой, поэтому ниже основного")}) if c.name == "product_fit" else c for c in comps]
+        comps = [c.model_copy(update={"explanation": c.explanation.replace("Реестр МСП", "Выгрузка реестра МСП")})
+                 if c.name == "geography" else c for c in comps]
+        relation[inn] = ch.relation if main or ch.relation == "wholesale" else "extra"
+        out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
+                                     score=round(sum(c.value * c.weight for c in comps), 4)))
+    out = apply_filters(out, query)
+    out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
+    return out, relation, True
 
 
 def _report(query: Query, res: Discovery, cache: SourceCache) -> None:
