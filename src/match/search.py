@@ -158,11 +158,19 @@ def routed(cfg: dict, text: str) -> dict:
     return {**cfg, "retriever": "pg_hybrid", "embedding_model": hs["model"], "hybrid_scores": hs["scores"]}
 
 
+def no_customer_options(cfg: dict) -> dict:
+    """Scoring options of the path without a customer and without the ranker (#511): `no_customer_options:` of the
+    config over `options:`. The ranker reads the components as features (#198) and was trained on `options:`, so
+    these apply only where the formula itself orders the answer: free text without a customer (#490)."""
+    return scoring_options({"options": {**(cfg.get("options") or {}), **(cfg.get("no_customer_options") or {})}})
+
+
 def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     hybrid_short(cfg)  # short queries to pg_hybrid (#485), off by default
     scoring_options(cfg)
+    no_customer_options(cfg)
     candidates.sizes(cfg)
     ranker.spec(cfg)  # learned ranker (#198): on by default since D-103
     profile_overrides(cfg)  # weights by procurement type (#104), off by default
@@ -608,6 +616,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if rk is not None and rk.get("customer_only") and not query.customer_inn:  # #490: learned only on queries
         rk = None  # with a customer; free text without one goes in the v2 order
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
+    if not query.customer_inn and not ranked:  # #511: the formula orders free text without a customer
+        opts = no_customer_options(cfg)
     w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}
     if (shares["incumbent"] > 0 or ranked) and query.customer_inn:

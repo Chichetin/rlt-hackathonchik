@@ -415,6 +415,25 @@ def test_saturation_caps_spread_experience_of_active_suppliers(search_data):
     assert base and all(capped[i] <= base[i] for i in base) and any(capped[i] < base[i] for i in base)
 
 
+def test_no_customer_options_apply_only_without_customer_and_ranker(search_data):
+    """#511: `no_customer_options` reach the formula only for free text without a customer and without the ranker —
+    the ranker reads the components as features and was trained on `options:` (#198)."""
+    cfg = {**search_mod.load_config(), "ranker": None, "no_customer_options": {}}
+    capped = {**cfg, "no_customer_options": {"sat_lots": 500, "sat_wins": 250}}
+
+    def exp(q, c, **kw):
+        return {m.counterparty.inn: comp(m, "experience").value for m in search(q, config=c, **kw)}
+
+    free = Query(query_id="q", text="бумага офисная")
+    base, low = exp(free, cfg), exp(free, capped)
+    assert base and all(low[i] <= base[i] for i in base) and any(low[i] < base[i] for i in base)
+    with_customer = free.model_copy(update={"customer_inn": "4700000003"})
+    assert exp(with_customer, capped) == exp(with_customer, cfg)
+    assert exp(free, capped, features_out=[]) == base  # ranker features wanted: options: as trained
+    with pytest.raises(ValueError, match="sat_lots"):
+        search_mod.check_config({**cfg, "no_customer_options": {"sat_lots": 0}})
+
+
 def test_query_from_a_notice_does_not_find_that_notice(search_data):
     """#249 (review #145 F-13): a query built from notice 6 (`/api/lot` → `lot-6`) does not get lot 6 back — its own
     positions would put its own participants on top. 780100000090 stays, found by its other paper lot 1."""
