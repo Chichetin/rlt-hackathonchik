@@ -131,10 +131,11 @@
   const objects = {
     s1:'.brand-title, .hero .lead, .hero-result',
     s3:'.decision-track article, .decision-measure',
-    s2:'.candidate-track article, .pipeline-conclusion',
+    s2:'.prep-chain article, .index-split article',
     s4:'.lane-label, .prep .node, .query-flow .node, .architecture-foot',
     s5:'.filter-track article, .pipeline-conclusion',
     s6:'.chart, .eval-context, .eval-boundary',
+    s8:'.team-card',
     s7:'.final-route > div, .next-step, .qa-links',
     b1:'.formula-main, .backup-grid .node, .backup-note',
     b2:'.timeline > div, .eval-detail > *',
@@ -168,7 +169,7 @@
       animate(mark.querySelector('.jewel-rim'),[{'--rim-angle':'205deg'},{'--rim-angle':'380deg'}],{duration:2200});
     }
     if(slide.id==='s4')startCurrent(slide);
-    if(slide.id==='s2')slide.querySelectorAll('.relation-lines path').forEach((el,i)=>{const length=el.getTotalLength();animate(el,[{strokeDasharray:`${length}`,strokeDashoffset:length},{strokeDasharray:`${length}`,strokeDashoffset:0}],{duration:1000,delay:250+i*110});});
+    if(slide.id==='s2')slide.querySelectorAll('.overview-links g > path').forEach((el,i)=>{const length=el.getTotalLength();animate(el,[{strokeDasharray:`${length}`,strokeDashoffset:length},{strokeDasharray:`${length}`,strokeDashoffset:0}],{duration:1000,delay:250+i*110});});
     if(slide.id==='s5')slide.querySelectorAll('.meter i').forEach((el,i)=>animate(el,[{transform:'scaleX(0)'},{transform:'scaleX(1)'}],{duration:850,delay:180+i*90}));
     if(slide.id==='s6') {
       const line=slide.querySelector('.hill-line');

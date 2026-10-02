@@ -1,9 +1,9 @@
 {
-  "checked_at": "2026-10-02T12:42:51.242Z",
+  "checked_at": "2026-10-02T13:48:10.393Z",
   "browser": "153.0.8010.12",
   "checks": [
     {
-      "name": "7 main slides",
+      "name": "8 main slides",
       "passed": true
     },
     {
@@ -92,6 +92,10 @@
     },
     {
       "name": "s7/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s8/0: all text within safe area",
       "passed": true
     },
     {
@@ -321,6 +325,11 @@
     },
     {
       "id": "s7",
+      "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s8",
       "step": 0,
       "issues": []
     },
