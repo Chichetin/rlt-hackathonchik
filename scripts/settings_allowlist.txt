@@ -12,16 +12,9 @@ src/eval/final.py
 src/ingest/build.py
 src/ingest/profile.py
 src/llm/provider.py
-src/sources/bo_nalog.py
-src/sources/cache.py
-src/sources/eis_rnp.py
-src/sources/pb_nalog.py
-src/sources/rmsp.py
 
 # Появились на main, пока #290 была в ревью ; переводятся в #297.
 src/api/lots.py
 src/eval/judge_hist.py
 src/eval/pool_recall.py
 src/match/ranker_train.py
-src/sources/fns_opendata.py
-src/sources/yandex_search.py
