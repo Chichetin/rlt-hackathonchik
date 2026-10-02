@@ -57,7 +57,7 @@ test("оценка заказчика обновляет список и кар�
   const ratings = preview.getByRole("region", { name: "Оценки заказчиков" });
   const row = page.locator('.result-list-scroll:not([hidden]) .item[aria-pressed="true"]');
   const relevance = await preview.locator(".inspector-score").innerText();
-  const inn = (await preview.locator(".inspector-inn").innerText()).match(/\d{10,12}/)?.[0];
+  const inn = (await preview.locator(".inspector-inn, .requisites").first().innerText()).match(/\d{10,12}/)?.[0];
   expect(inn).toBeTruthy();
   await expect(ratings.getByLabel("Ваш отзыв", { exact: true })).toBeHidden();
   await ratings.getByRole("button", { name: "Оставить отзыв" }).click();
@@ -106,7 +106,7 @@ test("черновик привязан к компании; ошибка сет
   await page.getByRole("button", { name: /^Новые/ }).click();
   await page.getByRole("region", { name: "Новые из открытых источников" }).locator(".item").first().click();
   await expect(preview.locator(".inspector-meta")).toContainText("Дистрибьютор");
-  const inn = (await preview.locator(".inspector-inn").innerText()).match(/\d{10,12}/)?.[0];
+  const inn = (await preview.locator(".inspector-inn, .requisites").first().innerText()).match(/\d{10,12}/)?.[0];
   const relevance = await preview.locator(".inspector-score").innerText();
   await ratings.getByRole("button", { name: "Оставить отзыв" }).click();
   await ratings.getByRole("radio", { name: "4 из 5" }).click();

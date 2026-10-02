@@ -148,3 +148,13 @@ html[data-theme="light"] .preset-title, html[data-theme="light"] .page-workspace
 html[data-theme="light"] .relevance-high, html[data-theme="light"] .relevance.relevance-high { color: #fff; }
 html[data-theme="light"] .card .close, html[data-theme="light"] button.close { background: #fff; color: #14233f; border: 1px solid #14233f40; }
 html[data-theme="light"] input[type="checkbox"] { accent-color: #1b4b91; }
+/* #642: на узком экране переключатель — круглая кнопка-иконка (имя — в aria-label): до 760px помещается в ряд с меню,
+   до 620px (логотип и меню в два ряда) — в ряду логотипа справа; иначе он занимал лишний ряд шапки и главная
+   переставала помещаться в экран 390×844 (e2e glass.spec.ts:15) */
+@media (max-width: 760px) {
+  .appbar .theme-toggle { width: 40px; height: 40px; min-height: 0; padding: 0; justify-content: center; flex: none; }
+  .appbar .theme-toggle span { display: none; }
+}
+@media (max-width: 620px) {
+  .appbar .theme-toggle { position: absolute; top: 7px; right: 12px; }
+}
