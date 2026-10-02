@@ -340,3 +340,12 @@ def test_lost_main_uses_the_recorded_config_and_rejects_an_unknown_config_of(tmp
     assert h15f is not None and h15f["weights"]["geography"] == 0.0 and h15f["options"]["tie_break"] == "bm25"
     assert L.main(["A", "B", "--config-of", "no-such-id"], results=tmp_path) == 2
     assert "no-such-id" in capsys.readouterr().err
+
+
+def test_history_is_one_per_data_not_per_store_object(hist, search_data):
+    """DATA_STORE=auto with Postgres down re-creates the parquet store every 30 s: no rebuild, no copy (review #367)."""
+    from src.match.store import ParquetStore
+
+    a = B.history(CUTOFF, ParquetStore(search_data))
+    assert B.history(CUTOFF, ParquetStore(search_data)) is a
+    assert B.history(None, ParquetStore(search_data)) is not a
