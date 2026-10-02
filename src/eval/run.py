@@ -253,7 +253,8 @@ def print_table(rec: dict) -> None:
         for name, n, metrics in rows:
             if names[0] not in metrics:
                 continue
-            cells = (f"{metrics[m]['value']:.3f} [{metrics[m]['ci95'][0]:.3f}, {metrics[m]['ci95'][1]:.3f}]" for m in names)
+            cells = (f"{metrics[m]['value']:.3f} [{metrics[m]['ci95'][0]:.3f}, {metrics[m]['ci95'][1]:.3f}]"
+                     for m in names)
             print(f"{name:<32} {metrics[names[0]].get('n', n):>6}  " + "  ".join(f"{c:<22}" for c in cells))
 
 
