@@ -1075,7 +1075,7 @@ def _pool_rows(prefixes: Sequence[str], region: str, limit: int, url: str | None
     key = (tuple(prefixes), region, limit, url, pool_dir.as_posix(), stamp)
     hit = _POOL_ROWS.get(key)
     if hit is None:
-        hit = (pool_mod.candidates(prefixes, regions=[region], limit=limit, url=url, pool_dir=pool_dir),
+        hit = (pool_mod.candidates(prefixes, regions=[region], limit=limit, url=url, pool_dir=pool_dir, by_size=True),
                pool_mod.large_candidates(prefixes, regions=[region], pool_dir=pool_dir))
         if len(_POOL_ROWS) >= _POOL_ROWS_MAX:
             _POOL_ROWS.clear()
@@ -1151,7 +1151,9 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                      score=round(sum(c.value * c.weight for c in comps), 4)))
     out = apply_filters(out, query)
-    out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
+    # equal scores within a basis: larger headcount first (N-order-size, #377: winner@10 +0.018), then INN (#518)
+    size = {inn: r.get("employees") or 0 for inn, r in rows.items()}
+    out.sort(key=lambda m: (-m.score, -size.get(m.counterparty.inn or "", 0), m.counterparty.inn or "~"))
     return out, relation, True
 
 
