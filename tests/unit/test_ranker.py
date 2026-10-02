@@ -63,12 +63,20 @@ def test_model_reorders_and_explains(search_data, tmp_path):
     assert all(m.score == plain[m.counterparty.inn] for m in res)
     assert all(m.score == round(sum(c.value * c.weight for c in m.components), 4) for m in res)
     # why above the next one: n_lots is the only feature with a weight, so it is the reason whenever it differs
+    ties = 0
     for a, b in zip(res, res[1:], strict=False):
         la, lb = round(math.expm1(lots[a.counterparty.inn])), round(math.expm1(lots[b.counterparty.inn]))
         if la != lb:
-            assert a.rank_reason == f"главное отличие от следующего: лоты с похожими позициями — {la} против {lb}"
-        else:
-            assert a.rank_reason is not None and a.rank_reason.startswith("модель")
+            assert a.rank_reason == f"выше следующего: лоты с похожими позициями — {la} против {lb}"
+        else:  # equal for the model: the formula decides (#278), and the reason says so truthfully
+            ties += 1
+            assert a.score >= b.score
+            if a.score > b.score:
+                assert a.rank_reason == (f"модель оценила одинаково со следующим; выше по релевантности — "
+                                         f"{a.score:.4f} против {b.score:.4f}")
+            else:
+                assert a.rank_reason == "модель и релевантность одинаковы со следующим — порядок условный (по ИНН)"
+    assert ties > 0  # the fixture has suppliers with equal matched lots: the tie order is exercised
     assert res[-1].rank_reason is None
     fit = next(c for c in res[0].components if c.name == "product_fit")
     assert "почему на этом месте — модель логистическая регрессия, обученная на истории закупок" in fit.explanation
@@ -110,8 +118,8 @@ def test_reasons_follow_the_visible_neighbour(search_data, tmp_path):
     lots = {m.counterparty.inn: int(re.findall(r"(\d+) лот\(ов\)", next(
         c for c in m.components if c.name == "experience").explanation)[0]) for m in res}
     a, c = lots[res[0].counterparty.inn], lots[res[2].counterparty.inn]
-    if a != c:
-        assert shown[0].rank_reason == f"главное отличие от следующего: лоты с похожими позициями — {a} против {c}"
+    assert a != c  # precondition: otherwise the reason would not name the lots
+    assert shown[0].rank_reason == f"выше следующего: лоты с похожими позициями — {a} против {c}"
     plain_cfg = {k: v for k, v in cfg.items() if k != "ranker"}
     assert all(m.rank_reason is None for m in ranker.reasons(search(Q, config=plain_cfg)))
 
@@ -130,17 +138,39 @@ def test_reason_names_a_feature_the_customer_can_check():
     # fit is equal (1.00 and 1.00): its contribution differs only by interaction — skipped for n_wins
     a = _ranked(1.0, 0.9996, wins, {"fit": 0.9, "n_wins": 0.5})
     b = _ranked(0.2, 0.9996, {"n_wins": math.log1p(515), "fit": 1.0}, {"fit": 0.3, "n_wins": 0.1})
-    assert ranker.reason(a, b) == "главное отличие от следующего: победы в лотах с похожими позициями — 771 против 515"
+    assert ranker.reason(a, b) == "выше следующего: победы в лотах с похожими позициями — 771 против 515"
     # a missing value is not a reason either
     a2 = _ranked(1.0, 0.9, {"cust_lots": math.nan, "act": 0.99}, {"cust_lots": 0.8, "act": 0.2})
     b2 = _ranked(0.5, 0.9, {"cust_lots": math.log1p(3), "act": 0.5}, {"cust_lots": 0.0, "act": 0.1})
-    assert ranker.reason(a2, b2) == "главное отличие от следующего: компонента «активность» — 0.99 против 0.50"
+    assert ranker.reason(a2, b2) == "выше следующего: компонента «активность» — 0.99 против 0.50"
     same = _ranked(0.4, 0.9996, wins, {})
     assert ranker.reason(same, _ranked(0.4, 0.9993, wins, {})) == (
         "модель оценила одинаково со следующим; выше по релевантности — 0.9996 против 0.9993")
     assert ranker.reason(same, _ranked(0.4, 0.9996, wins, {})).endswith("порядок условный (по ИНН)")
     assert "по совокупности признаков" in ranker.reason(_ranked(1.0, 0.9, wins, {"fit": 0.5}),
                                                          _ranked(0.5, 0.9, wins, {"fit": 0.1}))
+    # raw equal within SAME, but the formula of the upper is lower: no false «выше по релевантности»
+    assert ranker.reason(_ranked(0.4 + 1e-12, 0.9993, wins, {}), _ranked(0.4, 0.9996, wins, {})) == (
+        "модель оценила почти одинаково со следующим — порядок условный")
+
+
+def test_reason_never_reads_as_a_minus_or_as_equal_values():
+    """Review of #309: «стаж 313 дн. против 722 дн.» under «Выше следующего» reads as «less tenure is a plus»,
+    «1.00 против 1.00» explains nothing, a feature without a reading (share of one customer) is no reason."""
+    wins = {"n_wins": math.log1p(555), "days_first": math.log1p(313), "act": 0.9996, "top_customer_share": 0.9}
+    nxt = {"n_wins": math.log1p(97), "days_first": math.log1p(722), "act": 0.9993, "top_customer_share": 0.2}
+    contrib = {"days_first": 0.9, "act": 0.7, "top_customer_share": 0.6, "n_wins": 0.3}
+    a, b = _ranked(1.0, 1.0, wins, contrib), _ranked(0.1, 1.0, nxt, {})
+    assert ranker.reason(a, b) == "выше следующего: победы в лотах с похожими позициями — 555 против 97"
+    # less is better for the days since the last participation
+    a = _ranked(1.0, 1.0, {"days_last": math.log1p(3)}, {"days_last": 0.4})
+    b = _ranked(0.1, 1.0, {"days_last": math.log1p(240)}, {})
+    assert ranker.reason(a, b) == "выше следующего: давность последнего участия — 3 дн. против 240 дн."
+    # nothing the customer can read in a's favour
+    only_worse = _ranked(1.0, 1.0, {"days_first": math.log1p(313)}, {"days_first": 0.9})
+    longer = _ranked(0.1, 1.0, {"days_first": math.log1p(722)}, {})
+    assert "по совокупности признаков" in ranker.reason(only_worse, longer)
+    assert set(ranker.BETTER) <= set(ranker.NAMES)
 
 
 def test_value_text_reads_like_a_card():

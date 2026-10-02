@@ -322,22 +322,42 @@ def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float
     return reasons(out)
 
 
+# How a customer reads a feature: +1 — more is better, −1 — less is better. «Выше следующего» names only a
+# feature where the upper supplier is better by this reading (review of #309): «стаж в данных — 313 дн. против
+# 722 дн.» under «Выше следующего» reads as «less tenure is a plus». Features without a reading (breadth of
+# assortment, share of one customer, properties of the query) are never named there; the card keeps the
+# model's own «за / против» with all of them.
+BETTER: dict[str, int] = {
+    "fit": 1, "exp": 1, "act": 1, "geo": 1, "bm25": 1, "bm25_rel": 1, "n_lots": 1, "n_wins": 1, "okpd_level": 1,
+    "class_lots": 1, "class_wins": 1, "cust_lots": 1, "days_last": -1, "days_first": 1, "region_kpp": 1,
+    "region_inn": 1, "win_rate": 1, "lots": 1, "wins": 1, "customers": 1, "spb_share": 1, "price_gap": -1,
+    "active_months": 1, "lots_last_90d": 1, "em_offers": 1, "em_wins": 1, "aisgz_contracts": 1, "smp_contracts": 1,
+    "class_match": 1, "channel_share": 1,
+}
+
+
 def reason(a: Ranked, b: Ranked) -> str:
-    """Why the model put `a` right above `b`: the feature whose contribution differs the most in a's favour,
-    among those where the two really differ (a known value each); exact for trees and w·z alike."""
+    """Why the model put `a` right above `b`: among the features where `a` is better by the customer's reading
+    (BETTER) and the two values differ as shown, the one whose contribution differs the most in a's favour
+    (exact for trees and w·z alike); none — «по совокупности признаков»."""
     if a.raw - b.raw <= SAME:
-        if a.score != b.score:
+        if a.score > b.score:
             return f"модель оценила одинаково со следующим; выше по релевантности — {a.score:.4f} против {b.score:.4f}"
-        return "модель и релевантность одинаковы со следующим — порядок условный (по ИНН)"
+        if a.score == b.score:
+            return "модель и релевантность одинаковы со следующим — порядок условный (по ИНН)"
+        return "модель оценила почти одинаково со следующим — порядок условный"
     diff = a.contrib - b.contrib
     for f in np.argsort(-diff, kind="stable"):
         if diff[f] <= 0:
             break
-        va, vb = float(a.row[f]), float(b.row[f])
-        if math.isnan(va) or math.isnan(vb) or abs(va - vb) <= SAME:
-            continue  # an interaction, or a missing value: not a reason a customer can check
         name = NAMES[f]
-        return f"главное отличие от следующего: {FEATURES[name]} — {_value(name, va)} против {_value(name, vb)}"
+        va, vb = float(a.row[f]), float(b.row[f])
+        if math.isnan(va) or math.isnan(vb) or name not in BETTER:
+            continue  # a missing value or a feature without a reading: not a reason a customer can check
+        shown_a, shown_b = _value(name, va), _value(name, vb)
+        if shown_a == shown_b or (va - vb) * BETTER[name] <= 0:
+            continue  # «1.00 против 1.00» (an interaction, or a difference below the shown precision) or a worse value
+        return f"выше следующего: {FEATURES[name]} — {shown_a} против {shown_b}"
     return "модель оценила выше следующего по совокупности признаков — подробно в карточке"
 
 

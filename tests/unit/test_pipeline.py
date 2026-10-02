@@ -100,3 +100,33 @@ def test_evaluate_records_the_today_audit_outside_the_metrics(no_cache):
     audit = body["today_filters"]
     assert audit["checked"] == min(10, len(top)) and audit["cached"] == 0 and audit["legal_dropped"] == 0
     assert "today_filters" not in body["metrics"]
+
+
+def test_rank_reason_compares_with_the_neighbour_left_after_the_filters(no_cache, monkeypatch, tmp_path):
+    """#278: «выше следующего» names the supplier the customer sees next — after the hard filters removed
+    the one in between, not the model's neighbour before them."""
+    import json
+    import math
+
+    import numpy as np
+
+    from src.match import ranker
+
+    n = len(ranker.NAMES)
+    coef = np.zeros(n)
+    coef[ranker.NAMES.index("n_lots")] = 1.0  # rank by matched lots only
+    model = tmp_path / "lr.json"
+    model.write_text(json.dumps({"features": ranker.NAMES, "fill": [0.0] * n, "mean": [0.0] * n, "std": [1.0] * n,
+                                 "coef": coef.tolist(), "intercept": 0.0}), encoding="utf-8")
+    cfg = {**search_mod.load_config(), "ranker": {"kind": "logreg", "model": str(model)}}
+    got: list = []
+    search_mod.search(_query(), k=search_mod.CANDIDATES, config={k: v for k, v in cfg.items() if k != "ranker"},
+                      features_out=got)
+    lots = {inn: round(math.expm1(r[ranker.NAMES.index("n_lots")])) for inn, r in got}
+    before = pipeline.pick(_query(), config=cfg).history
+    first, second, third = (m.counterparty.inn for m in before[:3])
+    assert first and second and third and lots[first] != lots[third]  # preconditions of the fixture
+    monkeypatch.setattr(pipeline.enrich_mod, "enrich", _liquidated(second))
+    after = pipeline.pick(_query(), config=cfg).history
+    assert [m.counterparty.inn for m in after[:2]] == [first, third]
+    assert after[0].rank_reason == f"выше следующего: лоты с похожими позициями — {lots[first]} против {lots[third]}"
