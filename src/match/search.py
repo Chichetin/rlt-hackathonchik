@@ -621,8 +621,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     as_of = query.as_of
     idx = get_index(store, as_of)
     lot_date = as_of  # activity is counted up to the lot's date (#589)
-    if as_of is not None and idx.data_end is not None and as_of > idx.data_end:
-        as_of = None  # a lot after the data (defense export): its history is all of it — the prebuilt snapshot
+    if as_of is not None and idx.as_of is None:
+        # get_index gave the full index: the lot is after the data (defense export), its history is all of it.
+        # An index built for as_of ends before as_of by construction — its data_end says nothing (#605: leak).
+        as_of = None
     if idx.n_docs == 0:
         fallback.set_note(fallback.no_history(as_of))
         return []
@@ -710,7 +712,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
         if profile_note:
             geo_why = f"{geo_why}; {profile_note}"
-        wc = _without_price(w) if price is None else w
+        wc = _without_price(w) if price is None and opts["price"] == "scale" else w
         no_price = NO_PRICE if opts["price"] == "scale" else UNAVAILABLE["price"]
         comps = [
             _component("product_fit", fit, wc, fit_why),

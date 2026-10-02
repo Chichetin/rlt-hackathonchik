@@ -119,8 +119,14 @@ def test_search_rejects_client_as_of_without_building_an_index(search_client, se
     for path in ("/api/search", "/api/export"):
         r = search_client.post(path, json={"query_id": "q", "text": "бумага", "as_of": "2025-03-01"})
         assert r.status_code == 422 and "as_of" in r.json()["detail"]
+    import json
+
     built = Path(os.environ["INDEX_DIR"])
-    assert not built.exists() or not any(built.iterdir())  # nothing was built for the client's date
+    # nothing was built for the client's date; the full index (as_of None) is the product's own — #589 reads its
+    # data_end to accept a lot after the data (#605)
+    dirs = built.glob("bm25-*") if built.exists() else []
+    metas = [json.loads((d / "meta.json").read_text(encoding="utf-8")) for d in dirs]
+    assert all(m.get("as_of") is None for m in metas), metas
 
 
 
@@ -208,8 +214,11 @@ def test_enqueue(client):
 def test_reliability_is_read_for_the_shown_page_and_the_export_rows_only(search_client, monkeypatch):
     """#127 review: shadow reliability is one history SQL over the page (≤ limit INNs) — not over the ≤ 200
     candidates the pipeline scores; the export reads it for its own rows."""
+    from src.match import search as search_mod
     from src.match.store import ParquetStore
 
+    cfg = search_mod.load_config()
+    monkeypatch.setattr(search_mod, "load_config", lambda: {**cfg, "reliability": {"mode": "shadow"}})  # on since #585
     calls: list[int] = []
     real = ParquetStore.supplier_history
     monkeypatch.setattr(ParquetStore, "supplier_history", lambda self, inns, as_of: calls.append(len(inns))

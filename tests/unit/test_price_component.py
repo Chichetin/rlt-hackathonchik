@@ -40,17 +40,17 @@ def test_price_not_computed_without_data(median, budget):
     assert _price(_cp(median), budget, CUTOFF) is None
 
 
-def test_option_validates_and_is_off_by_default():
-    assert scoring_options(search_mod.load_config())["price"] == "none"
+def test_option_validates_and_is_scale_by_default():
+    assert scoring_options(search_mod.load_config())["price"] == "scale"  # #585, D-198
     with pytest.raises(ValueError):
         scoring_options({"options": {"price": "bogus"}})
 
 
 def test_search_price_component_only_with_option(search_data, monkeypatch):
     q = Query(query_id="q", text="бумага офисная", budget=40_000.0, as_of=CUTOFF)
-    off = search(q)
-    assert off and all(_comp(m, "price").weight == 0.0 and "Нет данных" in _comp(m, "price").explanation for m in off)
     cfg = search_mod.load_config()
+    off = search(q, config={**cfg, "options": {**cfg["options"], "price": "none"}})
+    assert off and all(_comp(m, "price").weight == 0.0 and "Нет данных" in _comp(m, "price").explanation for m in off)
     on_cfg = {**cfg, "weights": {**cfg["weights"], "price": 0.1}, "options": {**cfg["options"], "price": "scale"}}
     on = search(q, config=on_cfg)
     priced = [m for m in on if "НМЦК запроса" in _comp(m, "price").explanation]
