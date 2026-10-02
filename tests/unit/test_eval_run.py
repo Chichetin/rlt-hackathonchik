@@ -146,12 +146,23 @@ def test_free_text_bare_keeps_only_the_subject_and_region():
     c = c.model_copy(update={"query": c.query.model_copy(update={
         "okpd2": ["17.12.14.110"], "customer_inn": "7802084569", "budget": 1000.0, "channel": "ЭМ",
         "region": "Санкт-Петербург"})})
-    (got,) = R.free_text_bare([c])
+    (got,) = R.free_text([c])
     q = got.query
     assert q.text == "Поставка бумаги для нужд школы" and q.okpd2 == []
     assert q.customer_inn is None and q.budget is None and q.channel is None
     assert q.region == "Санкт-Петербург" and got.relevant_inns == c.relevant_inns
     assert c.query.customer_inn == "7802084569"  # the input is not mutated
+
+
+def test_free_text_is_the_subject_without_lot_context():
+    c = case("Поставка бумаги; Бумага для офисной техники", ["7801000012"])
+    c = c.model_copy(update={"query": c.query.model_copy(update={
+        "okpd2": ["17.12.14.110"], "customer_inn": "7800000010", "budget": 45000.0, "channel": "ЭМ"})})
+    (got,) = R.free_text([c])
+    q = got.query
+    assert q.text == "Поставка бумаги" and q.okpd2 == [] and got.relevant_inns == c.relevant_inns
+    assert q.customer_inn is None and q.budget is None and q.channel is None
+    assert c.query.customer_inn == "7800000010"  # the input is not mutated
 
 
 def test_result_records_the_data_snapshot(search_data, monkeypatch):
