@@ -21,7 +21,7 @@ import yaml
 
 from src.contracts import Query
 from src.eval import baselines
-from src.eval.metrics import METRICS, bootstrap_ci
+from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import pipeline
 from src.match import search as search_mod
@@ -106,6 +106,11 @@ def _summary(rows: list[dict]) -> dict:
         vals = [q[name] for q in rows]
         lo, hi = bootstrap_ci(vals)
         metrics[name] = {"value": sum(vals) / len(vals) if vals else 0.0, "ci95": [lo, hi]}
+    for name in WINNER_METRICS:  # over the cases with a winner only; "n" says how many (#280)
+        vals = [q[name] for q in rows if q.get(name) is not None]
+        if vals:
+            lo, hi = bootstrap_ci(vals)
+            metrics[name] = {"value": sum(vals) / len(vals), "ci95": [lo, hi], "n": len(vals)}
     return metrics
 
 
@@ -168,10 +173,12 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             query = with_cutoff(case.query, cutoff)
             ranked = _rank_search(query, cfg) if method == "search" else baselines.rank(query, cfg)
             rel = set(case.relevant_inns)
+            winners = {inn for inn, g in case.grades.items() if g >= 2}
             if audit is not None:
                 audit.add(ranked, rel)
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
                          "channel": case.query.channel, "type": procurement_type(case.query.okpd2) or "unknown"}
+            row.update({name: fn(ranked, winners) if winners else None for name, fn in WINNER_METRICS.items()})
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:
@@ -236,13 +243,19 @@ def _safe_sha() -> str | None:
 def print_table(rec: dict) -> None:
     print(f"EXP {rec['exp_id']} | part={rec['part']} | n={rec['n_queries']} | commit={rec['commit'][:8]}"
           f"{' (dirty)' if rec['dirty'] else ''}{' | STUB' if rec['stub'] else ''}")
-    names = list(rec["metrics"])
-    print(f"{'slice':<32} {'n':>6}  " + "  ".join(f"{n + ' [95% CI]':<22}" for n in names))
     rows = [("all", rec["n_queries"], rec["metrics"]),
             *((name, s["n_queries"], s["metrics"]) for name, s in rec.get("slices", {}).items())]
-    for name, n, metrics in rows:
-        cells = (f"{m['value']:.3f} [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}]" for m in metrics.values())
-        print(f"{name:<32} {n:>6}  " + "  ".join(f"{c:<22}" for c in cells))
+    for group in (list(METRICS), list(WINNER_METRICS)):  # winner metrics: own block, n = cases with a winner (#280)
+        names = [n for n in group if n in rec["metrics"]]
+        if not names:
+            continue
+        print(f"{'slice':<32} {'n':>6}  " + "  ".join(f"{n + ' [95% CI]':<22}" for n in names))
+        for name, n, metrics in rows:
+            if names[0] not in metrics:
+                continue
+            cells = (f"{metrics[m]['value']:.3f} [{metrics[m]['ci95'][0]:.3f}, {metrics[m]['ci95'][1]:.3f}]"
+                     for m in names)
+            print(f"{name:<32} {metrics[names[0]].get('n', n):>6}  " + "  ".join(f"{c:<22}" for c in cells))
 
 
 def dump_record(rec: dict) -> str:
