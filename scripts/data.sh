@@ -26,7 +26,7 @@ CACHE_ASSET="sources-cache.sqlite"  # public answers of the registries (url, bod
 CACHE_SUMS="SHA256SUMS.cache"       # its own checksum list: the SHA256SUMS of the data stay untouched
 CACHE_TARGET="${SOURCE_CACHE:-$ROOT/cache/sources.sqlite}"
 GISP_SUMS="SHA256SUMS.gisp"         # its own checksum list as well
-GISP_TARGET="${GISP_DIR:-$ROOT/data/external/gisp}"  # = gisp.DIR in src/sources/gisp.py
+GISP_TARGET="${GISP_DIR:-$(dirname "$PROCESSED")/external/gisp}"  # = gisp_dir() in src/sources/gisp.py (next to DATA_PROCESSED_DIR); GISP_DIR is for tests only
 GISP_ASSETS=(gisp-products.parquet:products.parquet gisp-meta.json:meta.json)  # <asset>:<file name in the directory>; meta last
 PROCESSED_FILES=(notices.parquet participants.parquet items.parquet suppliers.parquet
                  suppliers_2025-07-01.parquet manifest.json)
