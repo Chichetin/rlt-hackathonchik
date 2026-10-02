@@ -1,0 +1,11 @@
+# Ночной режим обогащения (#20, D-155) — поверх docker-compose.yml, `make up` его не включает:
+#   docker compose -f docker-compose.yml -f docker-compose.night.yml up -d --build db worker
+# После капчи без запасных источников worker спит 15 мин и продолжает, а не выходит; restart поднимает worker и db
+# после сбоя (worker ждёт БД и повторяет подключение). Кеш источников (./cache) — только в файловой системе Linux:
+# SQLite на bind-mount Windows (/mnt/c) повредился при записи из контейнера и Windows (D-155).
+services:
+  db:
+    restart: unless-stopped
+  worker:
+    command: ["python", "-m", "src.worker.worker", "--captcha-sleep", "900"]
+    restart: unless-stopped
