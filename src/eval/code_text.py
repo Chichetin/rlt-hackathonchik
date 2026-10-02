@@ -65,7 +65,7 @@ def evaluate(cases: list[EvalCase], processed: Path, cutoff: date, seed: int = 0
         rel = set(case.relevant_inns)
         by_text = search_mod.search(q.model_copy(update={"okpd2": []}), k=K)
         shares = predict_mod.section_shares(by_text, processed)
-        text_class = discover_mod.predict_class(by_text, processed)
+        text_class = discover_mod.predict_class(by_text)  # the store search() read
         text_ranked = [m.counterparty.inn or "" for m in by_text]
         row: dict = {"query_id": q.query_id, "text": q.text[:120], "codes": q.okpd2, "swap": swap[q.query_id]}
         for kind, codes in (("real", q.okpd2), ("swap", swap[q.query_id])):

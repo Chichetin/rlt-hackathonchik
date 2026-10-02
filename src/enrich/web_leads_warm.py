@@ -19,7 +19,6 @@ import httpx
 
 from src.enrich.discover import known_inns
 from src.enrich.enrich import enrich
-from src.match.index import processed_dir
 from src.sources import pb_nalog, web_leads
 from src.sources.cache import SourceCache
 from src.sources.web_leads import Lead
@@ -30,7 +29,7 @@ log = logging.getLogger(__name__)
 def _new_inns(leads: list[Lead]) -> tuple[list[str], set[str] | None]:
     """All lead INNs and those already in organizers' data (None: the data is absent)."""
     inns = sorted({lead.inn for lead in leads if lead.inn})
-    return inns, known_inns(inns, None, processed_dir())
+    return inns, known_inns(inns, None)
 
 
 def stats(leads: list[Lead]) -> dict[str, Counter[str]]:

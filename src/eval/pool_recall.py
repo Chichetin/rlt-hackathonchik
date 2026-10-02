@@ -46,11 +46,10 @@ from src.db.pool import POOL
 from src.enrich import discover, okved_link
 from src.eval.metrics import BOOTSTRAP_N, BOOTSTRAP_SEED, bootstrap_ci
 from src.eval.split import EvalCase
-from src.ingest.load import suppliers_path
 from src.match import search as search_mod
 from src.match.filters import REGION_CODE
 from src.match.profiles import procurement_type
-from src.match.store import processed_dir
+from src.match.store import get_store, processed_dir
 from src.settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -202,10 +201,7 @@ class Pool:
 
 def _known(as_of: date | None) -> frozenset[str]:
     """INNs in organizers' data before as_of — the product drops them from «Новые» (discover.known_inns)."""
-    inns = discover._all_inns(suppliers_path(as_of, processed_dir()))  # the product's own reader
-    if inns is None:
-        raise FileNotFoundError(f"данные организаторов на {as_of} не прочитаны — uv run python -m src.ingest.build")
-    return inns
+    return get_store().supplier_inns(as_of)  # the product's own reader; StoreUnavailable names the build command
 
 
 def _summary(rows: list[dict]) -> dict:
