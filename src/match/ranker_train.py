@@ -134,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.from_cache:
         d = np.load(args.cache)
         x, y, q = d["x"], d["y"], d["q"]
+        if x.shape[1] != len(ranker.NAMES):
+            raise SystemExit(f"{args.cache}: {x.shape[1]} признаков, в ranker.NAMES {len(ranker.NAMES)} — "
+                             "соберите кеш заново (без --from-cache)")
         n_cases = int(d["n_cases"])
     else:
         processed = processed_dir()

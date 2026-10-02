@@ -217,6 +217,8 @@ def _cols(path: Path, features: list[str]) -> list[int] | None:
     A model trained before a feature was added (#105: days_similar) keeps working on its own columns."""
     if features == NAMES:
         return None
+    if not features:
+        raise ValueError(f"{path}: в файле модели нет списка признаков — переобучите")
     if unknown := [f for f in features if f not in NAMES]:
         raise ValueError(f"{path}: признаков модели нет в ranker.NAMES ({', '.join(unknown)}) — переобучите")
     return [NAMES.index(f) for f in features]
