@@ -283,3 +283,12 @@ def test_lookup_many_is_safe_across_threads(built):
     with ThreadPoolExecutor(8) as pool:
         got = list(pool.map(lambda _: F.lookup_many([BRASS, OFFICEMAG], cache, parquet=out), range(64)))
     assert all(g == want for g in got)
+
+
+def test_backtest_verified_has_no_open_data_facts(built, monkeypatch):
+    from src.match import pipeline
+    out, _, _ = built
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(out))
+    fields = lambda ms: {e.field for m in ms for e in m.counterparty.evidence}  # noqa: E731
+    assert "employees" in fields(pipeline.verified([_match(BRASS)]))
+    assert "employees" not in fields(pipeline.verified([_match(BRASS)], open_data=False))

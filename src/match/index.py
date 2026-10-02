@@ -206,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     import duckdb
 
     from src.eval.split import split_config
+    from src.match import speller
     from src.match.search import prebuild_doc_codes
 
     for as_of in (None, date.fromisoformat(str(split_config()["cutoff"]))):
@@ -222,7 +223,11 @@ def main(argv: list[str] | None = None) -> int:
                      else f"ВНЕ индекса ({codes}): контейнер его не увидит")
         except (OSError, ValueError, duckdb.Error) as e:  # search falls back to the lot vote (D-045)
             where = f"НЕ построены ({e}) — запрос без кода определит класс по лотам"
-        print(f"as_of={as_of}: {idx.n_docs} документов из {store.name}, {idx.path}; коды позиций {where} "
+        try:  # the query speller's dictionary (#282): next to the index, read-only for the API in make up
+            words = f"словарь запроса {len(speller.for_index(idx.path).freq)} словоформ"
+        except (OSError, ValueError) as e:
+            words = f"словарь запроса НЕ построен ({e}) — построится при первом запросе"
+        print(f"as_of={as_of}: {idx.n_docs} документов из {store.name}, {idx.path}; коды позиций {where}; {words} "
               f"({time.time() - t0:.1f} с)")
     return 0
 

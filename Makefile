@@ -90,9 +90,9 @@ demo:              ## всё одной командой с чистого кл�
 e2e: ui-build      ## e2e демо-сценария (Playwright), свой порт: E2E_PORT=8766
 	cd $(UI) && npx playwright test
 
-eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-часть)
+eval:              ## make eval EXP=<id> [SAMPLE=N] [CORRUPT=typo|layout] → eval/results/<id>.json (dev-часть)
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
-	$(PY) python -m src.eval.run --exp $(EXP)
+	$(PY) python -m src.eval.run --exp $(EXP) $(if $(CORRUPT),--corrupt $(CORRUPT)) $(if $(SAMPLE),--sample $(SAMPLE))
 
 parity:            ## побитовое сравнение выдач (ranked) двух прогонов eval: make parity A=<id> B=<id>; коды 0/1/2 (совпали / различаются / не сравнить) — у python -m src.eval.parity, у make — Error 1 / Error 2
 	$(PY) python -m src.eval.parity "$(A)" "$(B)"
