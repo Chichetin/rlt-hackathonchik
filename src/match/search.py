@@ -10,7 +10,11 @@ v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
    experience  — lots and wins in the query's OKPD2 group (level 4) before as_of;
    activity    — days from the last participation to as_of (or to the end of the data);
    geography   — region of the KPP (78 / 47) against Query.region;
-   reliability, price — no data yet: value 0, weight 0, "нет данных" (D-029).
+   reliability — quality of the supplier from its history before as_of (src/match/reliability.py, #72):
+                 `reliability.mode` off (as D-029: "нет данных"), shadow (weight 0, default: filled only for
+                 the shown rows by shadow_reliability, never here),
+                 on (weight from the config; confirmation of a human №3);
+   price       — no data: value 0, weight 0, "нет данных" (D-029).
    score = Σ weight · value with weights from configs/search.yaml (D-004).
 Candidates found only in open sources (`origin="discovered"`) are #16: the block is empty here.
 """
@@ -26,7 +30,7 @@ import threading
 from collections import defaultdict
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import duckdb
@@ -41,6 +45,7 @@ from src.ingest.okpd2 import label
 from src.match import candidates, fallback, ranker
 from src.match.index import LotIndex, get_index
 from src.match.profiles import profile_overrides, profile_weights
+from src.match.reliability import SHADOW_NOTE, History, Prior, history_reliability, reliability_mode
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
@@ -123,6 +128,7 @@ def check_config(cfg: dict) -> dict:
     candidates.sizes(cfg)
     ranker.spec(cfg)  # learned ranker (#198): on by default since D-103
     profile_overrides(cfg)  # weights by procurement type (#104), off by default
+    reliability_mode(cfg)  # supplier quality (#72): shadow by default
     return cfg
 
 
@@ -432,6 +438,17 @@ def _geography(cp: Counterparty, region: str, inn_share: float = 0.0) -> tuple[f
     return 0.0, f"КПП {cp.kpp}: на учёте {where}, регион запроса — {region}"
 
 
+def _reliability(mode: str, h: History | None, prior: Prior, ref: date | None,
+                 weights: dict[str, float]) -> ScoreComponent:
+    if mode == "off" or ref is None:
+        return ScoreComponent(name="reliability", value=0.0, weight=0.0,  # type: ignore[arg-type]
+                              explanation=UNAVAILABLE["reliability"])
+    value, why = history_reliability(h, prior, ref)
+    weight = float(weights.get("reliability", 0.0)) if mode == "on" else 0.0
+    return ScoreComponent(name="reliability", value=round(min(1.0, max(0.0, value)), 4),  # type: ignore[arg-type]
+                          weight=weight, explanation=why if mode == "on" else why + SHADOW_NOTE)
+
+
 def _component(name: str, value: float, weights: dict[str, float], explanation: str) -> ScoreComponent:
     return ScoreComponent(name=name, value=round(min(1.0, max(0.0, value)), 4),  # type: ignore[arg-type]
                           weight=float(weights.get(name, 0.0)), explanation=explanation)
@@ -491,6 +508,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
+    rel_mode = reliability_mode(cfg)  # #72: off | shadow | on
     opts = scoring_options(cfg)  # experiment options (#22), v1 by default
     store = get_store()
     as_of = query.as_of
@@ -547,6 +565,11 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     _fit_signals.set({"top_bm25": top_bm25, "tokens": len(set(tokens)), "retriever": cfg["retriever"],
                       "ladder": any(c.found_by for c in cands)})
     ref = as_of or idx.data_end
+    last_day = as_of - timedelta(days=1) if as_of else idx.data_end  # history is strictly before as_of
+    # on: every candidate needs its history (the score depends on it); shadow: nothing here — the weight is 0, the
+    # order does not depend on it; shadow_reliability() fills only what the user sees (the page, the export rows)
+    history = store.supplier_history([c.inn for c in cands], as_of) if rel_mode == "on" else {}
+    prior = reliability_prior(store, as_of) if rel_mode == "on" else Prior(0.0, 0.0)
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
     rows: list[list[float]] = []  # ranker features of each match (#198)
@@ -574,9 +597,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         comps = [
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),
-            *(ScoreComponent(name=n, value=0.0, weight=0.0, explanation=why)  # type: ignore[arg-type]
-              for n, why in UNAVAILABLE.items() if not (n == "price" and price is not None)),
-            *([_component("price", price[0], w, price[1])] if price is not None else []),
+            _reliability("off" if rel_mode == "shadow" else rel_mode, history.get(c.inn), prior, last_day, w),
+            _component("price", price[0], w, price[1]) if price is not None else ScoreComponent(
+                name="price", value=0.0, weight=0.0, explanation=UNAVAILABLE["price"]),
             _component("activity", act, w, act_why),
             _component("geography", geo, w, geo_why),
         ]
@@ -612,3 +635,61 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     else:
         out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
     return out[:k]
+
+
+_priors: dict[tuple, Prior] = {}
+_priors_lock = threading.Lock()
+
+
+def reliability_prior(store: Store, as_of: date | None) -> Prior:
+    """The pooled ЭМ win rate and retention of every supplier before as_of (Store.reliability_prior): one query per
+    data snapshot and as_of in this process — the same prior for every query, page and export."""
+    key = (store.name, repr(store), str(store.built_at()), as_of)
+    with _priors_lock:
+        if key in _priors:
+            return _priors[key]
+    prior = store.reliability_prior(as_of)
+    with _priors_lock:
+        _priors[key] = prior
+    return prior
+
+
+_UNCONFIRMED = re.compile(r"ИНН не подтверждён \((\d+)\)")  # the name src/ingest/load.py gives a bad INN
+
+
+def _raw_inn(cp: Counterparty) -> str | None:
+    """The data's INN of a history match, also when it fails the checksum (counterparty.inn None): then the name
+    from src/ingest/load.py carries it («ИНН не подтверждён (<raw>)»)."""
+    if cp.inn:
+        return cp.inn
+    found = _UNCONFIRMED.fullmatch(cp.name)
+    return found.group(1) if found else None
+
+
+def shadow_reliability(matches: list[CounterpartyMatch], as_of: date | None,
+                       config: dict | None = None) -> list[CounterpartyMatch]:
+    """reliability.mode shadow (#72): the reliability component (weight 0) of the matches the user sees — the page
+    of /api/search, the rows of an export — one SQL over their INNs, never over all ≤ CANDIDATES candidates of
+    the query. Score and order do not change. Other modes, «Новые» and a stub pass unchanged."""
+    if IS_STUB or not matches:
+        return matches
+    cfg = config if config is not None else load_config()
+    if reliability_mode(cfg) != "shadow":
+        return matches
+    at = [(j, inn) for j, m in enumerate(matches) if m.origin == "history" and (inn := _raw_inn(m.counterparty))]
+    if not at:
+        return matches
+    try:
+        store = get_store()
+        history = store.supplier_history(sorted({inn for _, inn in at}), as_of)
+        prior = reliability_prior(store, as_of)
+        last_day = as_of - timedelta(days=1) if as_of else get_index(store, None).data_end
+    except Exception:  # noqa: BLE001 — a reference-only component never breaks the page (it stays «Нет данных»)
+        log.exception("reliability (shadow): не посчитана для %d строк", len(at))
+        return matches
+    out = list(matches)
+    for j, inn in at:
+        rel = _reliability("shadow", history.get(inn), prior, last_day, {})
+        out[j] = matches[j].model_copy(
+            update={"components": [rel if c.name == "reliability" else c for c in matches[j].components]})
+    return out

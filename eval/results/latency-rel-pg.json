@@ -1,0 +1,86 @@
+{
+  "exp_id": "latency-rel-pg",
+  "kind": "latency",
+  "part": "dev",
+  "n_per_variant": 200,
+  "limit": 20,
+  "commit": "9cbdf7e",
+  "command": "DATA_STORE=postgres DATABASE_URL=postgresql+psycopg://app:app@127.0.0.1:5432/app DISCOVERY_OFFLINE=1 ENRICH_OFFLINE=1 SOURCE_CACHE=<пустой файл> PYTHONPATH=. uv run python script.py 200 (текст — поле script)",
+  "variants": {
+    "B-off": "reliability не считается (pipeline.with_reliability — тождество)",
+    "A-page": "эта ветка: shadow только для страницы /api/search (≤ 20 ИНН)",
+    "C-all": "как до ревью #127: shadow по всем ≤ 200 кандидатам на каждый запрос (pipeline.pick оборачивается shadow_reliability)"
+  },
+  "conditions": {
+    "env": {
+      "DISCOVERY_OFFLINE": "1",
+      "ENRICH_OFFLINE": "1",
+      "SOURCE_CACHE": "пустой файл"
+    },
+    "store": "Postgres w-98-db-1 (pgvector/pgvector:pg16, /mnt/storage/rlt236/pgdata, fsync=off, shared_buffers=10GB), схема data от 2026-10-01 21:37 UTC БЕЗ supplier_items (до D-135) — абсолютные цифры не сравнимы с latency-pg-v3, сравнимы B/A/C между собой",
+    "machine": "стенд M1hairu, 16 CPU; соседние сессии нагружали машину (load average в каждом варианте ниже)",
+    "queue": "очередь обогащения отключена в замере Postgres (_queue_uncached — no-op), в parquet — sqlite во временном каталоге",
+    "caveat": "в окне замера (10:13–10:27 МСК 02.10) на том же контейнере шёл замер соседней сессии (#98) — варианты B/A/C снимались последовательно и могли получить разную стороннюю нагрузку; контейнер поднят и остановлен этой сессией (остановка прервала замер #98 — см. #98)"
+  },
+  "B-off": {
+    "latency_ms": {
+      "p50": 1256.49,
+      "p95": 2322.29,
+      "mean": 1283.22,
+      "max": 3549.3
+    },
+    "n_queries": 200,
+    "store": "postgres",
+    "load_before": [
+      "7.02",
+      "7.67",
+      "5.33"
+    ],
+    "load_after": [
+      "4.41",
+      "6.44",
+      "5.47"
+    ]
+  },
+  "A-page": {
+    "latency_ms": {
+      "p50": 1311.28,
+      "p95": 2506.05,
+      "mean": 1337.99,
+      "max": 3950.79
+    },
+    "n_queries": 200,
+    "store": "postgres",
+    "load_before": [
+      "4.41",
+      "6.44",
+      "5.47"
+    ],
+    "load_after": [
+      "3.68",
+      "4.80",
+      "5.02"
+    ]
+  },
+  "C-all": {
+    "latency_ms": {
+      "p50": 1687.03,
+      "p95": 3109.32,
+      "mean": 1654.21,
+      "max": 3495.59
+    },
+    "n_queries": 200,
+    "store": "postgres",
+    "load_before": [
+      "3.68",
+      "4.80",
+      "5.02"
+    ],
+    "load_after": [
+      "5.17",
+      "5.08",
+      "5.02"
+    ]
+  },
+  "script": "\"\"\"A/B/C latency of POST /api/search on parquet in one process (#127 review): reliability shadow\nB — off (no reliability at all), A — this branch (the shown page only), C — the old way (every candidate).\"\"\"\nimport json, os, sys\nfrom src.eval import latency\nfrom src.match import pipeline, search as search_mod\nfrom src.api import app as app_mod\napp_mod._queue_uncached = lambda page, uncached: None  # no writes to the neighbour's Postgres queue\n\nn = int(sys.argv[1]) if len(sys.argv) > 1 else 200\norig_with, orig_pick = pipeline.with_reliability, pipeline.pick\nout = {}\ndef load():\n    return open('/proc/loadavg').read().split()[:3]\n\ndef off(matches, as_of):\n    return matches\n\ndef pick_all(query, **kw):\n    res = orig_pick(query, **kw)\n    res.matches = search_mod.shadow_reliability(res.matches, query.as_of)\n    return res\n\nfor label in (\"B-off\", \"A-page\", \"C-all\"):\n    pipeline.with_reliability = off if label != \"A-page\" else orig_with\n    pipeline.pick = pick_all if label == \"C-all\" else orig_pick\n    l0 = load()\n    r = latency.measure(n)\n    out[label] = {\"latency_ms\": r[\"latency_ms\"], \"n_queries\": r[\"n_queries\"], \"store\": r[\"store\"],\n                  \"load_before\": l0, \"load_after\": load()}\n    print(label, out[label], flush=True)\nprint(json.dumps(out, ensure_ascii=False))\n"
+}

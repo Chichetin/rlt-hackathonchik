@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 
 from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
@@ -130,6 +131,12 @@ def _spelled(query: Query, config: dict | None) -> speller.Correction | None:
         log.exception("speller: запрос %s ищется как введён", query.query_id)
         return None
     return fixed if fixed.changed else None
+
+
+def with_reliability(matches: list[CounterpartyMatch], as_of: date | None) -> list[CounterpartyMatch]:
+    """The reliability of what the user sees (#72, shadow): the page of /api/search, the rows of an export — not
+    every candidate pick() scored. Weight 0: score and order stay."""
+    return search_mod.shadow_reliability(matches, as_of)
 
 
 def verified(matches: list[CounterpartyMatch], open_data: bool = True) -> list[CounterpartyMatch]:
