@@ -10,8 +10,9 @@ What goes to the cache (src/sources/cache.py):
   src/enrich/evidence.py can check every extracted value against this text (D-028);
 - `raw_url(inn)` → the raw JSON answers, for audit.
 
-`captchaRequired: true` or HTTP 400 with a captcha error → CaptchaRequired: we stop, never solve
-captchas (research/SOURCES.md).
+HTTP 400 with a captcha error → CaptchaRequired: we stop. With PB_CAPTCHA_SOLVE=1 and the extra `captcha`
+the captcha is solved first (src/sources/pb_captcha.py, #532, D-085) and the request is repeated with
+`pbCaptchaToken`; a `captchaRequired: true` answer then only announces that the next request will be refused.
 Requests are paced (MIN_INTERVAL_S between any two requests to the host, src/sources/pacing.py).
 """
 
@@ -24,6 +25,7 @@ from typing import Any
 import httpx
 
 from src.settings import get_settings
+from src.sources import pb_captcha
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.pacing import HostPacer
 
@@ -52,6 +54,10 @@ def blocked() -> bool:
     return get_settings().pb_disabled or PACER.blocked()
 
 
+def _solving() -> bool:
+    return get_settings().pb_captcha_solve and pb_captcha.available()
+
+
 def _captcha(msg: str) -> CaptchaRequired:
     PACER.block()
     return CaptchaRequired(msg)
@@ -73,7 +79,13 @@ def _post(client: httpx.Client, path: str, data: dict[str, str]) -> httpx.Respon
     # not `captchaRequired` in a 200 body. Without this the worker would count it as a failed
     # task and keep knocking.
     if r.status_code == 400 and "captcha" in r.text.lower():
-        raise _captcha("pb.nalog.ru требует капчу (HTTP 400) — останавливаемся (не решаем)")
+        token = pb_captcha.solve(client, BASE, PACER.slot) if _solving() else None
+        if token is None:
+            raise _captcha("pb.nalog.ru требует капчу (HTTP 400) — стоп (решатель выключен или не справился)")
+        with PACER.slot():
+            r = client.post(BASE + path, data={**data, "pbCaptchaToken": token})
+        if r.status_code == 400 and "captcha" in r.text.lower():
+            raise _captcha("pb.nalog.ru требует капчу и после решения — останавливаемся")
     return r
 
 
@@ -82,7 +94,7 @@ def _json(r: httpx.Response) -> dict[str, Any]:
     j = r.json()
     if not isinstance(j, dict):  # e.g. a JSON `null`: an answer we cannot read, not a crash (#357)
         raise ValueError(f"pb.nalog.ru: неожиданный ответ {r.url.path}: {r.text[:80]!r}")
-    if j.get("captchaRequired"):
+    if j.get("captchaRequired") and not _solving():
         raise _captcha("pb.nalog.ru требует капчу — останавливаемся (не решаем)")
     return j
 
