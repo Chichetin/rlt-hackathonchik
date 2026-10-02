@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { SearchLoadingState } from "./SearchLoadingState";
 
 /** #550, #583: the button «Искать в реальном времени» in «Новые» — its state, the loader while Yandex and the sites
- * are asked, one short line of the result (the funnel of the server — under «Подробнее»). */
+ * are asked (the scene of the search, #623), one short line of the result (the funnel of the server — under «Подробнее»). */
 export type LiveState = { state: "idle" | "loading" | "done" | "error"; text: string; note: string; inns: Set<string> };
 
 export const LIVE_IDLE: LiveState = { state: "idle", text: "", note: "", inns: new Set() };
@@ -10,7 +11,15 @@ export const LIVE_IDLE: LiveState = { state: "idle", text: "", note: "", inns: n
 export const LIVE_STEPS = ["Спрашиваем Яндекс", "Открываем сайты компаний", "Ищем ИНН на сайтах", "Сверяем с реестром ФНС"];
 const STEP_MS = 2600;
 
-export function LiveSearch({ live, onRun }: { live: LiveState; onRun: () => void }) {
+/** The Yandex «Я» on the button (#623): the search goes to Yandex, the user sees it before pressing. */
+function YandexMark() {
+  return <svg className="live-yandex" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+    <circle cx="12" cy="12" r="12" fill="#FC3F1D" />
+    <text x="12" y="17.2" textAnchor="middle" fontSize="15" fontWeight="700" fill="#fff" fontFamily="Arial, sans-serif">Я</text>
+  </svg>;
+}
+
+export function LiveSearch({ live, onRun, query = "" }: { live: LiveState; onRun: () => void; query?: string }) {
   const [step, setStep] = useState(0);
   useEffect(() => {
     if (live.state !== "loading") {
@@ -24,15 +33,9 @@ export function LiveSearch({ live, onRun }: { live: LiveState; onRun: () => void
     <div className="live-search" data-testid="live-search">
       <button type="button" className="live-button" onClick={onRun} disabled={live.state === "loading"}
         title="Яндекс Поиск → сайт компании → ИНН на сайте → карточка ФНС; сниппет выдачи фактом не становится">
-        <span className="live-dot" aria-hidden="true" />Искать в реальном времени
+        <YandexMark />Искать в реальном времени
       </button>
-      {live.state === "loading" && (
-        <div className="live-loader" role="status" aria-live="polite">
-          <span className="live-radar" aria-hidden="true"><span /><span /><span /></span>
-          <span className="live-step" key={step}>{LIVE_STEPS[step]}…</span>
-          <span className="live-bar" aria-hidden="true"><span /></span>
-        </div>
-      )}
+      {live.state === "loading" && <SearchLoadingState query={query} title="Ищем в реальном времени" stage={`${LIVE_STEPS[step]}…`} />}
       {live.state !== "loading" && live.text && (
         <div className={live.state === "error" ? "stub block-alert" : "live-result"} role="status">
           {live.text}

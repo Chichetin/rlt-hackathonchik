@@ -27,7 +27,9 @@ function useDocumentVisible(): boolean {
 /** The waiting state of a search (#598): a turning board with the product chip, binary orbits and captions on the
  *  Option Wheel. Mounted while the search request runs and unmounted with its answer, error or cancel — every timer
  *  dies with it. No stages, percents or counters: the backend does not report them. */
-export function SearchLoadingState({ query, seed }: { query: string; seed?: number }) {
+/** `title` and `stage` — the live Yandex search (#623): its own heading and the step of the server shown now. */
+export function SearchLoadingState({ query, seed, title = "Подбираем поставщиков", stage }:
+  { query: string; seed?: number; title?: string; stage?: string }) {
   const reduced = useReducedMotion() ?? false;
   const visible = useDocumentVisible();
   const [shown, setShown] = useState(false);
@@ -47,7 +49,7 @@ export function SearchLoadingState({ query, seed }: { query: string; seed?: numb
     try { window.localStorage.setItem(STILL_KEY, next ? "1" : "0"); } catch { /* a private window keeps the choice for this page only */ }
   }
 
-  const status = calm ? CALM_TEXT : "Подбираем поставщиков";
+  const status = stage ? `${title}. ${stage}` : calm ? CALM_TEXT : title;
   return <motion.div className="search-progress search-loading" initial={false}
     exit={{ opacity: 0, height: 0, marginTop: 0, marginBottom: 0, transition: { duration: reduced ? 0 : 0.18, ease: "easeOut" } }}>
     <p className="sr-only" role="status" aria-live="polite">{query ? `${status}: ${query}` : status}</p>
@@ -56,8 +58,9 @@ export function SearchLoadingState({ query, seed }: { query: string; seed?: numb
         initial={reduced ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduced ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}>
         <header className="loading-head">
-          <h2>Подбираем поставщиков</h2>
+          <h2>{title}</h2>
           {query && <p className="loading-query">по запросу <q>{query}</q></p>}
+          {stage && <p className="loading-stage" key={stage}>{stage}</p>}
         </header>
         <div className="loading-body">
           <ChipScene />

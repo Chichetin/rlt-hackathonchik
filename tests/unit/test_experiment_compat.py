@@ -27,7 +27,7 @@ def test_product_without_customer_uses_the_measured_sat100_formula(search_data):
     # the F-511-sat100 / F-511-v2 overrides over the current product formula: the entries themselves are pinned to
     # the scoring defaults before D-197 / D-198 (#588), the product moved on
     product = search_mod.load_config()
-    measured = {**product, "ranker": None, "no_customer_options": {"sat_lots": 100, "sat_wins": 50}}
+    measured = {**product, "ranker": None, "no_customer_options": product["no_customer_options"]}
     baseline = {**product, "ranker": None, "no_customer_options": None}
     expected = search_mod.search(FREE, config=measured)
     assert expected
@@ -62,3 +62,75 @@ def test_recorded_routing_experiments_keep_the_original_formula(name):
     recorded = json.loads((run.RESULTS / f"{name}.json").read_text(encoding="utf-8"))["config"]
     assert search_mod.no_customer_options(cfg) == search_mod.scoring_options(recorded)
     assert cfg["no_customer_options"] is None
+
+
+def test_product_without_customer_orders_as_f511_sat100_and_scores_by_the_product_formula(search_data):
+    """#612: free text without a customer goes in the order of F-511-sat100 (weights before #576 + sat100, the best
+    measured order of this path); the score and the card stay the product formula (D-198)."""
+    product = search_mod.load_config()
+    got = search_mod.search(FREE, config=product)
+    assert len(got) > 2
+    measured = search_mod.search(FREE, config=run.load_method_config("F-511-sat100"))
+    # equal order keys go by the card's score (#612), F-511 had them by BM25: the same set, keys never go up
+    keys = {m.counterparty.inn: m.score for m in measured}
+    assert {m.counterparty.inn for m in got} == set(keys)
+    assert [keys[m.counterparty.inn] for m in got] == sorted(keys.values(), reverse=True)
+    pairs = zip(got, got[1:], strict=False)
+    assert all(a.score >= b.score for a, b in pairs if keys[a.counterparty.inn] == keys[b.counterparty.inn])
+    by_activity_only = {**product, "no_customer_options": {**product["no_customer_options"],
+                                                           "order_weights": {"activity": 1.0}}}
+    # eval (pipeline.pick with a config) passes the config's own weights: the same order as the product
+    assert search_mod.search(FREE, config=by_activity_only, weights=product["weights"]) == search_mod.search(
+        FREE, config=by_activity_only)
+    plain = {**product, "no_customer_options": {k: v for k, v in product["no_customer_options"].items()
+                                                if k != "order_weights"}}
+    by_score = {m.counterparty.inn: m for m in search_mod.search(FREE, config=plain)}
+    assert all(m == by_score[m.counterparty.inn] for m in got if m.counterparty.inn in by_score)
+    by_activity = {**product, "no_customer_options": {**product["no_customer_options"],
+                                                      "order_weights": {"activity": 1.0}}}
+    acts = [next(c.value for c in m.components if c.name == "activity")
+            for m in search_mod.search(FREE, config=by_activity)]
+    assert acts == sorted(acts, reverse=True) and len(set(acts)) > 1
+    with pytest.raises(ValueError, match="order_weights"):
+        search_mod.check_config({**product, "no_customer_options": {"order_weights": {"bm25": 1.0}}})
+
+
+def test_order_weights_explain_a_row_above_a_higher_score(search_data):
+    """#612: «Выше следующего» names what put a row above a higher score — only there."""
+    got = sorted(search_mod.search(FREE, config=search_mod.load_config()), key=lambda m: m.score)[:3]
+    assert len(got) == 3 and got[0].score < got[1].score
+    w = {"product_fit": 0.762, "experience": 0.19, "activity": 0.048}
+    vals = [{"product_fit": 1.0, "experience": 0.9, "activity": 0.5}, {"product_fit": 1.0, "experience": 0.4,
+                                                                         "activity": 0.5}, dict.fromkeys(w, 0.0)]
+    ranker.set_order(got, [0.9, 0.5, 0.1], vals, [3.0, 2.0, 1.0], w)
+    shown = ranker.reasons(got)
+    assert shown[0].rank_reason == "выше следующего: компонента «опыт» по шкале порядка — 0.90 против 0.40"
+    assert shown[-1].rank_reason is None
+    ranker.forget()
+    assert ranker.reasons(got) == got
+
+
+def test_order_reason_names_the_tie_break_and_values_that_differ_as_shown():
+    """Review of #613: never «1.00 против 1.00» — a lead hidden by rounding is skipped; equal keys go by the score."""
+    w = {"product_fit": 0.762, "experience": 0.19, "activity": 0.048}
+    same = dict.fromkeys(w, 1.0)
+    assert ranker.order_reason(ranker.Ordered(1.0, same, 7.5), ranker.Ordered(1.0, same, 6.25), w) == (
+        "ключ порядка равен — порядок условный")
+    near = ranker.Ordered(0.9512, {"product_fit": 0.9301, "experience": 1.0, "activity": 0.6}, 1.0)
+    far = ranker.Ordered(0.9480, {"product_fit": 0.9298, "experience": 1.0, "activity": 0.5}, 1.0)
+    assert ranker.order_reason(near, far, w) == (
+        "выше следующего: компонента «активность» по шкале порядка — 0.60 против 0.50")
+    tiny = ranker.Ordered(0.9481, {"product_fit": 0.9299, "experience": 1.0, "activity": 0.5}, 1.0)
+    assert ranker.order_reason(tiny, far, w) == "по совокупности компонент порядка — 0.9481 против 0.9480"
+
+
+def test_weights_other_than_the_config_order_by_the_score(search_data):
+    """#612: order_weights only with the config's own weights; other weights order by the score."""
+    product = search_mod.load_config()
+    other = {**product["weights"], "activity": 0.5}
+    got = search_mod.search(FREE, config=product, weights=other)
+    assert got and [m.score for m in got] == sorted((m.score for m in got), reverse=True)
+    with pytest.raises(ValueError, match="order_weights"):
+        search_mod.check_config({**product, "no_customer_options": {"order_weights": {"activity": 0.0}}})
+    with pytest.raises(ValueError, match="order_weights"):
+        search_mod.check_config({**product, "no_customer_options": {"order_weights": {"activity": float("nan")}}})

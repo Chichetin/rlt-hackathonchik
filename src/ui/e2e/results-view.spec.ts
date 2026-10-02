@@ -293,7 +293,10 @@ test("фон различим, шкала релевантности видна,
   const motion = await rows.nth(1).evaluate(async el => {
     const row = el as HTMLButtonElement;
     const sibling = row.closest('li')!.nextElementSibling;
-    const siblingTop = sibling?.getBoundingClientRect().top;
+    // against the list itself: a status line above it that goes away meanwhile moves the whole list, not the sibling
+    const list = row.closest('li')!.parentElement!;
+    const inList = (el: Element) => el.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    const siblingTop = sibling ? inList(sibling) : undefined;
     const start = performance.now();
     const samples: number[] = [];
     row.click();
@@ -303,7 +306,7 @@ test("фон различим, шкала релевантности видна,
       samples.push(new DOMMatrix(getComputedStyle(row).transform).m41);
       if (samples.length > 3 && samples.slice(-3).every(x => Math.abs(x - 6) < .05)) break;
     }
-    return { samples, siblingShift: sibling && siblingTop !== undefined ? sibling.getBoundingClientRect().top - siblingTop : 0 };
+    return { samples, siblingShift: sibling && siblingTop !== undefined ? inList(sibling) - siblingTop : 0 };
   });
   expect(motion.samples.some(x => x > .1 && x < 5.8)).toBe(true);
   expect(motion.samples.at(-1)).toBeCloseTo(6, 0);
