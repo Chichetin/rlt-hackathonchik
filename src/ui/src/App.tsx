@@ -913,7 +913,7 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets, res.context?.purchase_type).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
@@ -967,7 +967,7 @@ export function App() {
             loadingMore={more}
             onOpen={selectResult}
             empty={
-              filterNotes(base, filters, res.facets).length
+              filterNotes(base, filters, res.facets, res.context?.purchase_type).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
                 : noteText(res.note)
             }
