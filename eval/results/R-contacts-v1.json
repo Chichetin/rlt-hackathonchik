@@ -1,0 +1,554 @@
+{
+  "exp_id": "R-contacts-v1",
+  "kind": "review_contacts",
+  "created_at": "2026-10-02T07:16:14+00:00",
+  "commit": "8ea915b",
+  "limit": 40,
+  "n": 40,
+  "registry_answered": 39,
+  "by_query": {
+    "demo-e2e": 18,
+    "lot-5761234": 20,
+    "lot-5779719": 2
+  },
+  "by_block": {
+    "history": 20,
+    "discovered": 20
+  },
+  "with_registry_contact": 1,
+  "card_found": 16,
+  "card_found_with_contact": 1,
+  "confirmed_by_contact": 0,
+  "confirmed_share": 0.0,
+  "outcomes": {
+    "name_only": 11,
+    "unsupported": 4,
+    "not_found": 20,
+    "legal_name": 5
+  },
+  "rows": [
+    {
+      "inn": "7805820841",
+      "query_id": "demo-e2e",
+      "block": "history",
+      "name": "ООО \"СКАЙ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [
+        "email",
+        "phone"
+      ],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name",
+        "name",
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7820324037",
+      "query_id": "demo-e2e",
+      "block": "history",
+      "name": "ООО \"ОФИСМАГ СПБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "1001058990",
+      "query_id": "demo-e2e",
+      "block": "history",
+      "name": "ООО \"СТРЕЛКОВ И СЫН\"",
+      "region": null,
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "unsupported",
+      "bases": [],
+      "outcome": "unsupported"
+    },
+    {
+      "inn": "7811756312",
+      "query_id": "demo-e2e",
+      "block": "history",
+      "name": "ООО \"ПРО100СНАБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7842387810",
+      "query_id": "demo-e2e",
+      "block": "history",
+      "name": "ООО \"КАНЦПЛАСТ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7802924730",
+      "query_id": "demo-e2e",
+      "block": "history",
+      "name": "ООО \"ЭЙПИДЖИ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7816279649",
+      "query_id": "demo-e2e",
+      "block": "history",
+      "name": "ООО \"НИНЕВИЯ ГРАНД\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7811662431",
+      "query_id": "demo-e2e",
+      "block": "history",
+      "name": "ООО \"ПРОФ-СНАБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4704052806",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"ВЦ-ПЕРЕРАБОТКА\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4705084470",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"ЦБП ТС\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4706042352",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"ОТРАДНЕНСКАЯ БКФ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "legal_name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "4706083983",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"ПКЛ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "legal_name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "6679148914",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"РОЛПАК\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "1101160235",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"ЛИКОР\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "4702019352",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"ЛЕСБУМТОРГ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4703083199",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"КАРЕЛЬСКИЙ ПЕРЕШЕЕК\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "legal_name",
+        "name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "4703165420",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"ПК \"ТЕРМОСФЕРА\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "unsupported",
+      "bases": [],
+      "outcome": "unsupported"
+    },
+    {
+      "inn": "4703184246",
+      "query_id": "demo-e2e",
+      "block": "discovered",
+      "name": "ООО \"НПК\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7801575469",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "ООО \"ЛАБСТАР\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "legal_name",
+        "name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "7801695773",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "ООО \"АЗБУКАЛАБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7801332931",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "ООО \"ОПЦИЯ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7810639197",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "ООО \"НПФ \"АБРИС+\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7810410350",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "ООО \"ЛАБСТРИМ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7811553672",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "ООО \"МИНСЕПТИКА\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7810118490",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "АО \"ВЕКТОР-БЕСТ-БАЛТИКА\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 0,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7820046277",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "ООО \"ЛСР\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "9701292189",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "АО \"ВИП ЛАБ\"",
+      "region": null,
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "unsupported",
+      "bases": [],
+      "outcome": "unsupported"
+    },
+    {
+      "inn": "7813219553",
+      "query_id": "lot-5761234",
+      "block": "history",
+      "name": "ООО \"ТРАНСБИОСИСТЕМС\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4703008794",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ЗАО \"ФП \"МЕЛИГЕН\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "unsupported",
+      "bases": [],
+      "outcome": "unsupported"
+    },
+    {
+      "inn": "4703148463",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"МИРУМЕД\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4706062743",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"МАПО \"КОСМЕДИА\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4706088893",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"ДОЛ ЖИЗНЬ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4706089375",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"ЭСКОФАРМ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4703093006",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"СТЕЛЛИТ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "4703117627",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"МЕДИРАМА\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "4703147759",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"НИКА\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "legal_name",
+        "name",
+        "name"
+      ],
+      "outcome": "legal_name"
+    },
+    {
+      "inn": "4703157595",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"МОЛОДОСТЬ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name",
+        "name",
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "4703167096",
+      "query_id": "lot-5761234",
+      "block": "discovered",
+      "name": "ООО \"НН СТАР ТАЙМ\"",
+      "region": "Ленинградская область",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    },
+    {
+      "inn": "7814108542",
+      "query_id": "lot-5779719",
+      "block": "history",
+      "name": "ООО \"ЛИЗОФОРМ - СПБ\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "ok",
+      "bases": [
+        "name"
+      ],
+      "outcome": "name_only"
+    },
+    {
+      "inn": "7806514090",
+      "query_id": "lot-5779719",
+      "block": "history",
+      "name": "ООО \"АЛЬФА-МЕД\"",
+      "region": "Санкт-Петербург",
+      "contacts": [],
+      "registry_rows": 1,
+      "status": "not_found",
+      "bases": [],
+      "outcome": "not_found"
+    }
+  ]
+}
