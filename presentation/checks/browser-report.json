@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T00:57:03.323Z",
+  "checked_at": "2026-10-02T01:12:26.763Z",
   "browser": "153.0.8010.12",
   "checks": [
     {
@@ -11,7 +11,11 @@
       "passed": true
     },
     {
-      "name": "300 seconds",
+      "name": "285 seconds of content",
+      "passed": true
+    },
+    {
+      "name": "15 seconds of reserve, no extra slide",
       "passed": true
     },
     {
@@ -35,15 +39,15 @@
       "passed": true
     },
     {
+      "name": "s2/1: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s2/2: all text within safe area",
+      "passed": true
+    },
+    {
       "name": "s3/0: all text within safe area",
-      "passed": true
-    },
-    {
-      "name": "s3/1: all text within safe area",
-      "passed": true
-    },
-    {
-      "name": "s3/2: all text within safe area",
       "passed": true
     },
     {
@@ -83,7 +87,7 @@
       "passed": true
     },
     {
-      "name": "S3 begins with input",
+      "name": "S2 begins with input",
       "passed": true
     },
     {
@@ -99,7 +103,7 @@
       "passed": true
     },
     {
-      "name": "Next arrow leaves completed scenario",
+      "name": "Next arrow leaves completed scenario for data sources",
       "passed": true
     },
     {
@@ -139,7 +143,7 @@
       "passed": true
     },
     {
-      "name": "Score aligned to top of factors",
+      "name": "Explanation has no formula or numeric score; details stay in reserve",
       "passed": true
     },
     {
@@ -211,18 +215,18 @@
       "issues": []
     },
     {
-      "id": "s3",
-      "step": 0,
-      "issues": []
-    },
-    {
-      "id": "s3",
+      "id": "s2",
       "step": 1,
       "issues": []
     },
     {
-      "id": "s3",
+      "id": "s2",
       "step": 2,
+      "issues": []
+    },
+    {
+      "id": "s3",
+      "step": 0,
       "issues": []
     },
     {

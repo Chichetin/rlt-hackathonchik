@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T00:53:19.229Z",
+  "checked_at": "2026-10-02T01:13:13.396Z",
   "checks": [
     {
       "name": "Scenario animates on arrow",
@@ -50,7 +50,7 @@
       "passed": true
     },
     {
-      "name": "Score preserved",
+      "name": "Score preserved in reserve",
       "passed": true
     },
     {
