@@ -105,8 +105,8 @@ def _encoder(model: str | None = None) -> Encoder:
     if name not in _encoders:
         try:
             _encoders[name] = model_encoder(prefix=spec(model).query, name=name)
-        except Exception as e:  # no torch / no weights offline: remembered for RETRY_S, not reloaded per query
-            raise _down(f"модель {name} недоступна: {e}") from e
+        except Exception as e:  # no torch / no weights offline
+            raise VectorsUnavailable(f"модель {name} недоступна: {e}") from e
     return _encoders[name]
 
 
