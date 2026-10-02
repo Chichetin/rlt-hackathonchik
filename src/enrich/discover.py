@@ -538,7 +538,8 @@ def yandex_matches(
     strong = 0 if force else web_discover.strong_count([*apply_legal(list(history)), *apply_legal(list(current))])
     fb = web_discover.lot_leads(query.query_id, query.text, classes[0], strong, okpd2=codes, cache=cache,
                                 offline=offline, deadline=deadline, force=force, client=client,
-                                site_client=site_client)
+                                site_client=site_client,
+                                known={*skip, *(m.counterparty.inn or "" for m in history)})
     head = f"Яндекс ({'в реальном времени' if force else 'запасной путь'}): {fb.reason}"
     if not fb.used:
         return [], {}, [], head

@@ -120,7 +120,7 @@ def build_record(exp_id: str, thin_id: str, results: list[GroupResult], *, offli
         "commit": git("rev-parse", "HEAD"),
         "dirty": tree_dirty(),
         "config": {"thin_result": thin_id,
-                   "block_cap_lifted": f"в блоке /api/search не более {D.MAX_SHOWN}, здесь считаются все",
+                   "block_cap_lifted": "в блоке /api/search — все найденные после фильтров (D-193), здесь — все",
                    "groups": [r.okpd2 for r in results], "offline": offline,
                    "max_live_requests": max_live, "source": "rmsp.nalog.ru (D-036, D-037)",
                    "regions": "СПб и соседний регион запроса (ЛО), только ЮЛ"},

@@ -350,3 +350,11 @@ def test_history_strong_beyond_ten_counts_for_the_trigger(cache, tmp_path):
     strong = [_fit(1.0, i) for i in ("7810400592", "7811777270", "7805336905", "7806602902", "7707049388")]
     res = _discover(cache, _processed(tmp_path, []), history=[*weak, *strong])
     assert res.leads == ["Яндекс (запасной путь): не нужен: сильных кандидатов из бесплатных источников 5 ≥ 5"]
+
+
+def test_a_lead_already_shown_does_not_count_toward_the_top_up(cache):
+    """#558 review: 4 strong and the sites state only INNs already shown → the top-up goes on to the next query."""
+    api = Api()
+    fb = W.lot_leads("lot-1", LOT_TEXT, "21.20", 4, cache=cache, client=api.client(), site_client=_sites(),
+                     known={MAKER, KNOWN, OTHER}, cfg={**W.load_config(), "max_sites": 50})
+    assert fb.used and len(api.queries) > 1
