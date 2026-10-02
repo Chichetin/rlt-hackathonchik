@@ -545,8 +545,15 @@ GISP_MIN_SHARED = {"code": 1, "kind": 2}  # a neighbour code needs two words of 
 MIN_STEM = 4  # a stem of ≤ 3 letters («при», «лот», «мнн») is not a word of the product
 
 
+PLURAL_ENDINGS = ("ами", "ями", "ов", "ев", "ей", "ых", "их", "ях")  # genitive/instrumental plural: «шкафов» → «шкаф»
+
+
 def _stem(word: str) -> str:
-    """Up to 5 letters, one ending letter dropped from a short word: «папки» → «папк» meets «папка»."""
+    """Up to 5 letters. A plural ending (PLURAL_ENDINGS) is cut when ≥ 4 letters stay («шкафов» → «шкаф» meets
+    «шкафы»); otherwise one ending letter is dropped from a short word: «папки» → «папк» meets «папка»."""
+    for end in PLURAL_ENDINGS:
+        if word.endswith(end) and len(word) - len(end) >= MIN_STEM:
+            return word[:len(word) - len(end)][:new_fit.PREFIX]
     return word[:max(3, min(new_fit.PREFIX, len(word) - 1))]
 
 

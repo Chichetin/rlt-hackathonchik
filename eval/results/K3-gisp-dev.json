@@ -1,7 +1,7 @@
 {
  "experiment": "K3-gisp",
  "issue": 74,
- "commit": "7b7a610",
+ "commit": "c9ab6bd",
  "cases": "eval/cases/dev.jsonl",
  "gisp_meta": {
   "exported": "02.10.2026, 01:00:20",
@@ -13,7 +13,7 @@
  },
  "source_cache": "/mnt/storage/rlt236/cache/sources.sqlite",
  "offline": true,
- "seconds": 231.2,
+ "seconds": 226.1,
  "summary": {
   "lots": 2000,
   "lots_with_okpd2": 2000,
@@ -32,7 +32,7 @@
   "lots_with_gisp_step_1_0": 434,
   "lots_with_gisp_step_0_8": 56,
   "lots_with_gisp_only_company": 434,
-  "gisp_candidates_in_top10": 1301,
+  "gisp_candidates_in_top10": 1302,
   "gisp_candidates_evidence_fail": 0
  },
  "per_lot": [
@@ -27191,11 +27191,11 @@
    },
    "after": {
     "new": 10,
-    "fit1": 1,
-    "gisp": 1,
-    "gisp_1_0": 1,
+    "fit1": 2,
+    "gisp": 2,
+    "gisp_1_0": 2,
     "gisp_0_8": 0,
-    "gisp_only": 1,
+    "gisp_only": 2,
     "evidence_fail": 0
    }
   },
@@ -50030,10 +50030,9 @@
   }
  ],
  "pairs": {
-  "shown": 1301,
+  "shown": 1302,
   "sampled": 30,
   "seed": 74,
-  "file": "eval/labels/gisp_pairs_after.csv",
-  "note": "the same seeded sample as eval/labels/gisp_pairs_after.csv (written by the run at a89bf45); labels there"
+  "file": "/tmp/claude-1000/rec/pairs2.csv"
  }
 }
