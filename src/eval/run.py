@@ -200,6 +200,12 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     return {**out, "per_query": per_query}
 
 
+def first_words(cases: list[EvalCase], n: int) -> list[EvalCase]:
+    """The same cases with the query text cut to its first `n` words: a short query as a user types it (#281)."""
+    return [c.model_copy(update={"query": c.query.model_copy(update={"text": " ".join(c.query.text.split()[:n])})})
+            for c in cases]
+
+
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
     from src.match.text import tokenizer_name, tokenizer_version
 
@@ -306,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
+    ap.add_argument("--words", type=int, default=None,
+                    help="cut every query text to its first N words — short queries as users type them (#281)")
     ap.add_argument("--sample", type=int, default=None,
                     help="first screen on N cases of the part (fixed seed): winners only go to the full run")
     args = ap.parse_args(argv)
@@ -326,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
         keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
         cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
         part = f"{args.part}-s{args.sample}"
+    if args.words:
+        cases, part = first_words(cases, args.words), f"{part}-w{args.words}"
     rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"

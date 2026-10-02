@@ -54,3 +54,17 @@ def test_eval_slice_by_weak_match():
     assert "weak=yes" in slice_names({"channel": "ЭМ", "weak": True})
     assert "weak=no" in slice_names({"channel": "ЭМ", "weak": False})
     assert not [n for n in slice_names({"channel": "ЭМ"}) if n.startswith("weak")]  # an older result has no field
+
+
+def test_first_words_cuts_the_text_and_keeps_the_case():
+    from datetime import date
+
+    from src.eval.run import first_words
+    from src.eval.split import EvalCase
+
+    c = EvalCase(query=Query(query_id="q", text="бумага офисная белая А4 500 листов", okpd2=["17.12"]),
+                 relevant_inns=["7801000012"], date=date(2025, 7, 10), grades={"7801000012": 2})
+    (short,) = first_words([c], 3)
+    assert short.query.text == "бумага офисная белая" and short.query.okpd2 == ["17.12"]
+    assert short.relevant_inns == c.relevant_inns and short.grades == c.grades
+    assert c.query.text.endswith("листов")  # the input is not changed
