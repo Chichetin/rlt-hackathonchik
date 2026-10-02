@@ -177,6 +177,28 @@ class SearchResponse(_Model):
     stub: bool = False  # true while any part of the path is a # STUB — shown in UI
 
 
+
+class SupplierLot(_Model):
+    """One past lot of a supplier in organizers' data (#652): Извещения × Поставщики × ТРУ."""
+
+    lot_id: int
+    procedure_id: int | None = None
+    reqnum: str | None = None  # Извещения.reqnum — EIS notice number, when the lot was published there
+    publish_date: date | None = None
+    subject: str | None = None
+    start_price: float | None = None  # НМЦК, ₽; the data has no contract price
+    customer_inn: str | None = None
+    channel: str | None = None
+    won: bool  # Поставщики.is_winner of this supplier
+    participants: int  # distinct supplier INNs of the lot
+    okpd2: list[str] = Field(default_factory=list)
+    url: str  # data:participants#lot_id=<lot_id> — where the row comes from
+
+
+class SupplierLots(_Model):
+    total: int  # all lots of the supplier under the filter, not just this page
+    items: list[SupplierLot]
+
 # def search(query: Query, k: int = 20, weights: dict | None = None) -> list[CounterpartyMatch]
 #   -> src/match/search.py
 # def enrich(inn: str) -> Counterparty

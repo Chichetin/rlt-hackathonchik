@@ -15,6 +15,7 @@ import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
 import { Requisites } from "./Requisites";
+import { SupplierLots } from "./SupplierLots";
 import { lookupOkpd2Name, okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
@@ -1321,6 +1322,8 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
           </dl>
         </>
       )}
+
+      <SupplierLots inn={cp.inn} />
 
       <Ratings inn={cp.inn} />
       <ReviewsBlock cp={cp} />

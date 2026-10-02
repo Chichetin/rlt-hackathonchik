@@ -445,3 +445,12 @@ export function relationToCustomer(cp: Pick<Counterparty, "region" | "kpp"> & { 
   if (NEIGHBOUR[customerRegion] === where) return `соседний регион${basis}`;
   return `другой регион${basis}`;
 }
+
+export type SupplierLots = components["schemas"]["SupplierLots"];
+
+// Все сделки поставщика в данных организаторов, новые сверху, постранично на сервере (#652).
+export async function fetchSupplierLots(inn: string, offset: number, wonOnly: boolean): Promise<SupplierLots> {
+  const r = await fetch(`/api/counterparty/${encodeURIComponent(inn)}/lots?offset=${offset}&limit=20&won_only=${wonOnly}`);
+  if (r.ok) return r.json();
+  throw new Error(await detail(r));
+}
