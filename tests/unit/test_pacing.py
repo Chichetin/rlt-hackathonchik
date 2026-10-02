@@ -352,6 +352,8 @@ def test_bo_refusal_blocks_the_host_and_the_next_call_sends_nothing(fake_time, s
     assert bo_nalog.blocked()
     with pytest.raises(bo_nalog.Blocked):
         bo_nalog.fetch_raw(INN, _client(lambda r: pytest.fail("request to a blocked host")))
+    fake_time.now = bo_nalog.BLOCK_COOLDOWN_S - 1
+    assert bo_nalog.blocked()  # a second before the end of the cooldown the host is still left alone
     fake_time.now = bo_nalog.BLOCK_COOLDOWN_S
     assert not bo_nalog.blocked()
 
