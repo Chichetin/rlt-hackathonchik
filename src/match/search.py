@@ -33,6 +33,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from typing import get_args
 
 import duckdb
 import numpy as np
@@ -40,7 +41,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
 
-from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
+from src.contracts import ComponentName, Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
 from src.ingest.okpd2 import label
 from src.match import candidates, fallback, ranker
@@ -119,6 +120,11 @@ OPTIONS: dict[str, tuple] = {
     # experience (#105): count — 0.5·sat(lots) + 0.5·sat(wins); rate — the wins half is the smoothed win rate
     # (wins + 1) / (lots + 2), so 1 win of 20 lots is not «experienced winner»
     "experience_wins": ("count", ("count", "rate", "rate_aisgz")),  # rate_aisgz: rate only for channel АИС ГЗ
+    # order of the formula path (#612): {component: weight} over the values the ranker reads (product_fit without
+    # the name match, experience with fixed saturation, geography without the INN region) instead of the card's
+    # score; {} — by the score. The score and the card stay the formula of `weights:`; custom weights of a query
+    # (the UI sliders) order by the score as before.
+    "order_weights": ({}, None),
 }
 PRICE_DECADES = 2.0  # price = 1 − |log10(budget / median)| / 2: 0 at a 100× difference
 
@@ -144,6 +150,12 @@ def scoring_options(cfg: dict) -> dict:
     for name in ("sat_lots", "sat_wins"):
         if isinstance(out[name], bool) or not isinstance(out[name], int) or out[name] < 1:
             raise ValueError(f"options.{name} = {out[name]!r}: ожидается целое число ≥ 1")
+    ow = out["order_weights"]
+    if not isinstance(ow, dict) or set(ow) - set(get_args(ComponentName)) or any(
+            isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v) or v < 0
+            for v in ow.values()) or (ow and sum(ow.values()) <= 0):
+        raise ValueError(f"options.order_weights = {ow!r}: ожидается {{критерий: вес ≥ 0}}")
+    out["order_weights"] = {name: float(v) for name, v in ow.items()}
     return out
 
 
@@ -659,6 +671,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
     if not query.customer_inn and not ranked:  # #511: the formula orders free text without a customer
         opts = no_customer_options(cfg)
+    # #612: the order of the formula path by options.order_weights; weights other than the config's order by the score.
+    # A weight profile (weights_by_type, off in the product) changes the score only, not this order
+    order_w = opts["order_weights"] if w == cfg["weights"] and not ranked else {}
     w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}
     if (shares["incumbent"] > 0 or ranked) and query.customer_inn:
@@ -684,6 +699,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     prior = reliability_prior(store, as_of) if rel_mode == "on" else Prior(0.0, 0.0)
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
+    order_of: list[float] = []  # order key of each match under options.order_weights (#612)
+    order_vals: list[dict[str, float]] = []  # the values of its components, for «Выше следующего»
     rows: list[list[float]] = []  # ranker features of each match (#198)
     target, target_note = customer_region(query)  # «География» against the customer's region (#218)
     for c in cands:
@@ -733,10 +750,11 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         out.append(CounterpartyMatch(counterparty=cp, score=round(sum(x.value * x.weight for x in comps), 4),
                                      components=comps, origin="history"))
         bm25_of.append(c.bm25)
-        if ranked:
+        if ranked or order_w:
             # the ranker was trained on product_fit without the name match, experience with fixed saturation and
             # geography without the INN region:
-            # it gets those values, so its order does not move with the display formula (#576)
+            # it gets those values, so its order does not move with the display formula (#576);
+            # options.order_weights (#612) orders by the same values — the formula before #576
             feats = {x.name: x.value for x in comps}
             feats["experience"] = round(min(1.0, max(0.0, exp_rank)), 4)
             if opts["name_share"] > 0:
@@ -744,9 +762,13 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
                                                                    opts["fit_bm25_share"])[0]), 4)
             if shares["inn_region"] > 0:
                 feats["geography"] = round(_geography(cp, target)[0], 4)
-            rows.append(ranker.feature_row(c, top_bm25, feats,
-                                           incumbent.get(c.inn, 0) if query.customer_inn else None,
-                                           cp, query, ref, codes, predicted))
+            if order_w:
+                order_of.append(round(sum(feats[name] * v for name, v in order_w.items()), 4))
+                order_vals.append({name: feats[name] for name in order_w})
+            if ranked:
+                rows.append(ranker.feature_row(c, top_bm25, feats,
+                                               incumbent.get(c.inn, 0) if query.customer_inn else None,
+                                               cp, query, ref, codes, predicted))
     if features_out is not None:
         features_out.extend(zip((m.counterparty.inn for m in out), rows, strict=True))
     if rk is not None:
@@ -759,11 +781,16 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             fallback.set_note(f"{prev}; {why}" if prev else why)
         else:
             return ranker.rerank(model, out, rows, k)
+    # #612: an equal order key goes by the score the card shows, then as options.tie_break says
+    keys = ({id(m): (o, m.score) for m, o in zip(out, order_of, strict=True)} if order_w
+            else {id(m): (m.score, m.score) for m in out})
+    if order_w:
+        ranker.set_order(out, order_of, order_vals, bm25_of, order_w)
     if opts["tie_break"] == "bm25":
         sims = {id(m): s for m, s in zip(out, bm25_of, strict=True)}
-        out.sort(key=lambda m: (-m.score, -sims[id(m)], m.counterparty.inn or "~"))
+        out.sort(key=lambda m: (-keys[id(m)][0], -keys[id(m)][1], -sims[id(m)], m.counterparty.inn or "~"))
     else:
-        out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
+        out.sort(key=lambda m: (-keys[id(m)][0], -keys[id(m)][1], m.counterparty.inn or "~"))
     return out[:k]
 
 

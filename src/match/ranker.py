@@ -353,8 +353,33 @@ _ranked: ContextVar[dict[str, Ranked] | None] = ContextVar("ranked", default=Non
 SAME = 1e-9
 
 
+@dataclass(frozen=True)
+class Ordered:
+    """A formula answer ordered by options.order_weights (#612, src/match/search.py): its order key, the values of
+    the key's components and BM25 (the tie-break) — what «Выше следующего» names."""
+    key: float
+    values: dict[str, float]
+    bm25: float
+
+
+# key -> Ordered of the last set_order() in this context: a row above a higher score says what put it there
+_ordered: ContextVar[tuple[dict[str, float], dict[str, Ordered]] | None] = ContextVar("ordered", default=None)
+# the components of the order key named as the model's features are (FEATURES)
+ORDER_NAMES: dict[str, str] = {"product_fit": "компонента «соответствие предмету»", "experience": "компонента «опыт»",
+                               "activity": "компонента «активность»", "geography": "компонента «география»",
+                               "reliability": "компонента «надёжность»", "price": "компонента «цена»"}
+
+
 def forget() -> None:
     _ranked.set(None)
+    _ordered.set(None)
+
+
+def set_order(matches: list[CounterpartyMatch], keys: list[float], values: list[dict[str, float]],
+              bm25: list[float], weights: dict[str, float]) -> None:
+    """The order keys of a formula answer ordered not by its score (#612): reasons() explains them."""
+    _ordered.set((weights, {_key(m): Ordered(k, v, b)
+                            for m, k, v, b in zip(matches, keys, values, bm25, strict=True)}))
 
 
 def _key(m: CounterpartyMatch) -> str:
@@ -447,11 +472,45 @@ def reason(a: Ranked, b: Ranked) -> str:
 def reasons(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     """rank_reason of each supplier the model ordered, against the next such supplier of THIS list — after the
     filters it is the neighbour the customer sees. Others («Новые», v2 without a model) pass unchanged."""
+    if not _ranked.get() and (ordered := _ordered.get()):
+        return _order_reasons(matches, ordered)
     seen = _ranked.get() or {}
     at = [j for j, m in enumerate(matches) if m.origin == "history" and _key(m) in seen]
     out = list(matches)
     for n, a in enumerate(at):
         b = at[n + 1] if n + 1 < len(at) else None
         why = None if b is None else reason(seen[_key(matches[a])], seen[_key(matches[b])])
+        out[a] = matches[a].model_copy(update={"rank_reason": why})
+    return out
+
+
+def order_reason(a: Ordered, b: Ordered, weights: dict[str, float]) -> str:
+    """Why the order key put `a` right above `b` (#612) when `b` has the higher score: the component with the largest
+    weighted lead whose values differ as shown; none — the keys themselves. Equal keys go by the score in
+    search() — a row reaching here with an equal key is a defensive case (the score rounded the same)."""
+    if a.key - b.key <= SAME:
+        return "ключ порядка равен — порядок условный"
+    for _, name in sorted(((w * (a.values[n] - b.values[n]), n) for n, w in weights.items()), reverse=True):
+        va, vb = a.values[name], b.values[name]
+        if weights[name] * (va - vb) <= 0:
+            break
+        if f"{va:.2f}" != f"{vb:.2f}":
+            # the order's scale (fit without the name match, experience saturated at sat100), not the card's value
+            return f"выше следующего: {ORDER_NAMES[name]} по шкале порядка — {va:.2f} против {vb:.2f}"
+    return f"по совокупности компонент порядка — {a.key:.4f} против {b.key:.4f}"
+
+
+def _order_reasons(matches: list[CounterpartyMatch],
+                   ordered: tuple[dict[str, float], dict[str, Ordered]]) -> list[CounterpartyMatch]:
+    """rank_reason of a formula answer ordered by options.order_weights (#612): only where the next supplier of THIS
+    list has a higher score — there the number does not explain the order; elsewhere it does, no reason."""
+    weights, seen = ordered
+    at = [j for j, m in enumerate(matches) if m.origin == "history" and _key(m) in seen]
+    out = list(matches)
+    for n, a in enumerate(at):
+        b = at[n + 1] if n + 1 < len(at) else None
+        why = None
+        if b is not None and matches[b].score > matches[a].score:
+            why = order_reason(seen[_key(matches[a])], seen[_key(matches[b])], weights)
         out[a] = matches[a].model_copy(update={"rank_reason": why})
     return out

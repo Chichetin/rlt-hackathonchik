@@ -84,7 +84,8 @@ def test_default_scoring_is_h15f_normalized(search_data):
                                                "sat_lots": 20, "sat_wins": 10,  # caps: the default, #196 is opt-in
                                                "price": "scale", "activity_by": "all",
                                                # #105 options are opt-in
-                                               "experience_wins": "count", "price_decades": 2.0}
+                                               "experience_wins": "count", "price_decades": 2.0,
+                                               "order_weights": {}}  # #612: only on the no-customer path
     m = search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]))[0]
     assert "с похожими позициями" in comp(m, "experience").explanation
     assert comp(m, "geography").weight > 0.0 and comp(m, "geography").explanation
@@ -287,9 +288,10 @@ def test_scoring_options_default_is_v1_and_unknown_is_an_error():
                                               "tie_break": "inn", "sat_lots": search_mod.SAT_LOTS,
                                               "sat_wins": search_mod.SAT_WINS, "price": "none", "activity_by": "all",
                                               "experience_wins": "count", "price_decades": 2.0,
-                                              "name_share": 0.0, "exp_scale": "fixed"}
+                                              "name_share": 0.0, "exp_scale": "fixed", "order_weights": {}}
     for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"},
-                {"sat_lots": 0}, {"sat_wins": 2.5}, {"sat_lots": True}):
+                {"sat_lots": 0}, {"sat_wins": 2.5}, {"sat_lots": True}, {"order_weights": {"fit": 1}},
+                {"order_weights": {"activity": -1}}, {"order_weights": [1]}):
         with pytest.raises(ValueError):
             search_mod.scoring_options({"options": bad})
     with pytest.raises(ValueError, match="retriever"):
