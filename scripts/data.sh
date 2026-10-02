@@ -132,7 +132,7 @@ if [ "$PART" = cache ]; then
       # the local cache (even an empty one that `make demo` creates on the first search) keeps its newer rows:
       # the snapshot only adds the keys it lacks
       if command -v uv >/dev/null 2>&1; then py=(uv run --frozen python); else py=(python3); fi
-      "${py[@]}" -c '
+      PYTHONUTF8=1 "${py[@]}" -c '
 import sqlite3, sys
 con = sqlite3.connect(sys.argv[1])
 con.execute("CREATE TABLE IF NOT EXISTS pages (key TEXT PRIMARY KEY, url TEXT NOT NULL, "
