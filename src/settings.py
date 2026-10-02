@@ -101,8 +101,9 @@ class Settings:
     gis2_down_cooldown_s = _Var("GIS2_DOWN_COOLDOWN_S", lambda v: float(v or 90.0))  # pause after a timeout
     gis2_disabled = _Var("GIS2_DISABLED", lambda v: (v or "").strip().lower() in {"1", "true", "yes"})
     reviews_live_max = _Var("REVIEWS_LIVE_MAX", _limit(REVIEWS_LIVE_MAX_DEFAULT))  # reads of 2gis.ru at once, ≥ 1
-    # open sources (src/sources). Pauses and timeouts, s, are read once, at import of the source module; SOURCE_CACHE —
-    # when a SourceCache is created; PB_DISABLED, FNS_OPENDATA_* and YANDEX_* — at every call (tests set them later)
+    # open sources (src/sources). Pauses, timeouts and cache ages, s (SOURCE_CACHE_TTL_S, RNP_MAX_AGE_S too), are read
+    # once, at import of the source module; SOURCE_CACHE — when a SourceCache is created; PB_DISABLED, FNS_OPENDATA_*
+    # and YANDEX_* — at every call (tests set them later)
     source_cache = _Var("SOURCE_CACHE", lambda v: Path(v or "cache/sources.sqlite"))  # as given: relative to the cwd
     source_cache_ttl_s = _Var("SOURCE_CACHE_TTL_S", lambda v: int(v or 7 * 24 * 3600))
     pb_min_interval_s = _Var("PB_MIN_INTERVAL_S", lambda v: float(v or 1.0))
