@@ -8,12 +8,13 @@ experiment, not part of v1. Numbers stay whole ("80", "a4" -> "a4").
 
 from __future__ import annotations
 
-import os
 import re
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
+
+from src.settings import get_settings
 
 # Bump when tokenization changes: it is part of the cached index key (src/match/index.py).
 TOKENIZER_VERSION = "prefix5-v1"
@@ -36,7 +37,7 @@ def _config_tokenizer() -> str:
 
 def tokenizer_name() -> str:
     """BM25_TOKENIZER (benchmarks) overrides `tokenizer:` of configs/search.yaml."""
-    name = os.environ.get("BM25_TOKENIZER") or _config_tokenizer()
+    name = get_settings().bm25_tokenizer or _config_tokenizer()
     if name not in TOKENIZERS:
         raise ValueError(f"tokenizer {name!r} не поддерживается (есть: {', '.join(TOKENIZERS)})")
     return name

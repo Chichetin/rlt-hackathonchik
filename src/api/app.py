@@ -32,10 +32,8 @@ from __future__ import annotations
 import io
 import json
 import logging
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -63,16 +61,16 @@ from src.match import search as search_mod
 from src.match.filters import entity_of, kind_of, near_of, parse_filters
 from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
 from src.match.store import get_store
+from src.settings import get_settings
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired, card_url
 from src.sources.role import LABEL as ROLE_LABEL
 from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
-if os.environ.get("DEMO_FIXTURE") == "1":
+if get_settings().demo_fixture:
     log.warning("DEMO_FIXTURE=1: synthetic fixture, not the organizers' data")
-ROOT = Path(__file__).resolve().parents[2]
-UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
+UI_DIST = get_settings().ui_dist
 # «Роль» of the xlsx: the captions of the role chips (KIND_LABEL in src/ui/src/api.ts), from D-057 (#232)
 KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Роль не определена"}
 ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or a natural person (DATA_DICTIONARY)
@@ -121,7 +119,7 @@ def _queue():
 
 def _is_stub() -> bool:
     # DEMO_FIXTURE=1 (scripts/demo.sh without organizers' data) serves the synthetic fixture (D-050).
-    if os.environ.get("DEMO_FIXTURE") == "1":
+    if get_settings().demo_fixture:
         return True
     return bool(getattr(search_mod, "IS_STUB", False) or getattr(enrich_mod, "IS_STUB", False))
 
@@ -318,7 +316,7 @@ _LIMITED: dict[int | str, dict[str, Any]] = {
 
 def _answers_from_cache(inn: str) -> bool:
     """True when enrich() needs no network: offline mode, or a fresh pb card in the cache (its first branch)."""
-    return os.environ.get("ENRICH_OFFLINE") == "1" or SourceCache().get(card_url(inn)) is not None
+    return get_settings().enrich_offline or SourceCache().get(card_url(inn)) is not None
 
 
 @app.get("/api/counterparty/{inn}", response_model=Counterparty, dependencies=[Depends(guard.require_api_key)],
