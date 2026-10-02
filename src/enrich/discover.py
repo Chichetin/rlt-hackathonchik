@@ -47,10 +47,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import duckdb
 import httpx
+import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.enrich import eaeu, web_discover
@@ -70,7 +71,7 @@ from src.sources.rmsp import MSP_CATEGORY
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 
-MAX_SHOWN = 10  # companies in the block and INNs sent to enrichment per query
+MAX_SHOWN = 10  # producers / distributors mixed at the top of the block; INNs sent to enrichment per query
 MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wholesale codes × 2 regions
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
@@ -412,16 +413,31 @@ def _order(backed: set[str]) -> Callable[[CounterpartyMatch], tuple[float, bool,
 
 
 def _mix(ranked: list[CounterpartyMatch], relation: dict[str, Relation],
-         backed: set[str] | None = None) -> list[CounterpartyMatch]:
+         backed: set[str] | None = None, min_score: float | None = None,
+         max_shown: int = MAX_SHOWN) -> list[CounterpartyMatch]:
     """Top MAX_SHOWN with both kinds present: producers and distributors take slots in turn (best
-    first within a kind), so ten producers do not hide every distributor; shown in score order."""
+    first within a kind), so ten producers do not hide every distributor; shown in score order.
+    `min_score` (#549) — after them every other candidate scoring at least it, best first, up to `max_shown`
+    in all; None — the top MAX_SHOWN only."""
     queues = [[m for m in ranked if relation[m.counterparty.inn or ""] == r] for r in ("class", "wholesale")]
     picked: list[CounterpartyMatch] = []
     while len(picked) < MAX_SHOWN and any(queues):
         for q in queues:
             if q and len(picked) < MAX_SHOWN:
                 picked.append(q.pop(0))
-    return sorted(picked, key=_order(backed or set()))
+    order = _order(backed or set())
+    head = sorted(picked, key=order)[:max_shown]
+    if min_score is None:
+        return head
+    taken = {id(m) for m in head}
+    rest = sorted((m for m in ranked if id(m) not in taken and m.score >= min_score), key=order)
+    return [*head, *rest][:max_shown]
+
+
+def block_config(path: Path = new_fit.CONFIG) -> dict[str, Any]:
+    """`block` of configs/discover.yaml (#549): the size of «Новые» in /api/search and the limits of its live
+    registry requests."""
+    return dict(yaml.safe_load(path.read_text(encoding="utf-8"))["block"])
 
 
 def leads_enabled() -> bool:
@@ -504,7 +520,7 @@ def lead_matches(
 def yandex_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], history: Sequence[CounterpartyMatch],
     current: Sequence[CounterpartyMatch], cache: SourceCache, weights: dict[str, float], predicted: bool,
-    store: Store, region: str, region_note: str | None, *, offline: bool, deadline: float,
+    store: Store, region: str, region_note: str | None, *, offline: bool, deadline: float | None,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """The paid fallback (#194, src/enrich/web_discover.py): Yandex → company site → INN → the road of a web lead.
 
@@ -768,7 +784,7 @@ def discover(
     processed: Path | None = None,
     enqueue: Callable[[str], object] | None = None,
     offline: bool | None = None,
-    budget_s: float = LIVE_BUDGET_S,
+    budget_s: float | None = LIVE_BUDGET_S,
     client: httpx.Client | None = None,
     max_requests: int | None = MAX_REQUESTS,
     pages: int = 1,
@@ -776,6 +792,9 @@ def discover(
     fit_mode: str | None = None,
     predicted_code: str | None = None,
     pool: bool = False,
+    pool_limit: int | None = None,
+    min_score: float | None = None,
+    max_shown: int = MAX_SHOWN,
 ) -> Discovery:
     """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data.
 
@@ -787,7 +806,9 @@ def discover(
     `predicted_code` — the OKPD2 code search() predicted from the text of this query (search.predicted_code());
     used only when the query has no OKPD2 of its own, and then its full code picks the wholesale row.
     `pool` — add the offline pool of companies (#185, #219) to the block, as `make predict` does (#518): offline,
-    after the history check; a company another channel found keeps that channel's row.
+    after the history check; a company another channel found keeps that channel's row; `pool_limit` — pool rows
+    per region (POOL_API_LIMIT by default).
+    `min_score` / `max_shown` — the block beyond its mixed top MAX_SHOWN (_mix, #549); `budget_s=None` — no deadline.
     """
     cache = cache or SourceCache()
     store = store_for(processed)  # organizers' data: the store search() read unless a parquet dir is given
@@ -817,7 +838,7 @@ def discover(
 
     jobs = [(ch, region, np) for region in _regions(query) for ch in okved_plan(codes)
             for np in _np_types()][:max_requests]
-    deadline = time.monotonic() + budget_s  # every live request of this query ends before it
+    deadline = None if budget_s is None else time.monotonic() + budget_s  # every live request ends before it
     net_ok = True  # False after the first network failure: the rest of the query is cache only
     found: dict[str, tuple[dict[str, str], Channel, CachedPage]] = {}
     last_rows: dict[tuple[str, str, str], int] = {}
@@ -918,7 +939,7 @@ def discover(
     pool_step: dict[str, str] = {}  # INN → STEP key of a pool company (class / extra / wholesale)
     if pool and res.history_checked:
         found_pool, pool_step = pool_matches(query, codes, {m.counterparty.inn or "" for m in matches} | set(found),
-                                             res, weights, cache, store)
+                                             res, weights, cache, store, pool_limit or POOL_API_LIMIT)
         matches.extend(found_pool)
         # an additional OKVED of the class takes a producer's slot of _mix; its own step stays in res.relation
         relation.update({inn: "wholesale" if r == "wholesale" else "class" for inn, r in pool_step.items()})
@@ -978,7 +999,7 @@ def discover(
     res.relation = dict(relation)
     res.relation.update(pool_step)  # extra: an additional OKVED of the class (STEP 0.5)
     res.relation.update(gisp_step)  # the registry's step for make predict (STEP), over the OKVED one
-    res.matches = _mix(matches, relation, res.gisp_backed)
+    res.matches = _mix(matches, relation, res.gisp_backed, min_score, max_shown)
     if res.history_checked and res.okpd_classes and eaeu.enabled():  # EAEU (#200): goods only, cache only
         try:
             abroad, line = eaeu.matches(codes, res.okpd_classes, cache, weights, res.predicted)
@@ -996,7 +1017,7 @@ def discover(
                  "; ".join(f"{m.counterparty.inn} {res.fit_new[m.counterparty.inn or ''].value:.2f}"
                            for m in res.matches if (m.counterparty.inn or "") in res.fit_new))
     if enqueue is not None:
-        for m in res.matches:
+        for m in res.matches[:MAX_SHOWN]:  # the first screen only: rows 11+ are not queued (no flood of the registries)
             if m.counterparty.inn in no_card:
                 enqueue(m.counterparty.inn)
         for inn in lead_no_card[:MAX_SHOWN]:  # a lead is shown only with a card: get it for the next search

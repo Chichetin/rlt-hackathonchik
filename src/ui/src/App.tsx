@@ -539,7 +539,7 @@ export function App() {
       setBase(b ?? r);
       setState("idle");
       // weights switched on while this page-sized answer was in flight
-      if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
+      if (weightsRef.current && (r.history.length < r.total.history || r.discovered.length < r.total.discovered)) void loadAll(q, seq);
       save(ready
         ? { okpd2: ready.extra.okpd2, text: ready.text, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
         : { okpd2: okpd2Input, text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
@@ -561,14 +561,14 @@ export function App() {
   }
 
   // the next page of the history block from the server, for the same query and filters
-  async function showMore() {
+  async function showMore(group: "history" | "discovered" = "history") {
     if (!res || !shownQuery) return;
     const seq = runSeq.current;
     setMore(true);
     try {
-      const next = await search(shownQuery, { offset: res.history.length });
+      const next = await search(shownQuery, { offset: res[group].length });
       if (seq !== runSeq.current) return;
-      setRes({ ...res, history: [...res.history, ...next.history], total: next.total });
+      setRes({ ...res, [group]: [...res[group], ...next[group]], total: next.total });
     } catch (e) {
       if (seq !== runSeq.current) return; // a new search replaced this page
       setError(String(e));
@@ -679,7 +679,7 @@ export function App() {
     weightsRef.current = nextWeights;
     if (!res || !shownQuery) return;
     // a page-sized answer cannot be re-ranked as a whole: fetch every candidate once
-    if (nextWeights && res.history.length < res.total.history) void loadAll(shownQuery, runSeq.current);
+    if (nextWeights && (res.history.length < res.total.history || res.discovered.length < res.total.discovered)) void loadAll(shownQuery, runSeq.current);
     // back to the standard: the server order, page by page again
     if (!nextWeights && res.history.length > PAGE) {
       setRes({ ...res, history: res.history.slice(0, PAGE) });
@@ -1002,6 +1002,8 @@ export function App() {
             chip={res.discoveryClass?.predicted ? `ОКПД2 определён по тексту: ${okpd2Text(res.discoveryClass.classes, discoveryLabels)}` : undefined}
             rows={newRows}
             total={newTotal}
+            onMore={weights ? undefined : () => void showMore("discovered")}
+            loadingMore={more}
             onOpen={selectResult}
             empty={
               hiddenNew(res, base, shownQuery) ??
