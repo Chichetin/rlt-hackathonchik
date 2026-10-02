@@ -64,7 +64,7 @@ seal-check:        ## holdout читают только src/eval/split.py и fin
 layers:            ## импорты в src/ идут вниз по слоям, не вверх (D-106); допущенные нарушения - scripts/layers_allowlist.txt
 	$(PY) python scripts/check_layers.py
 
-settings-check:    ## окружение читает только src/settings.py (остальные файлы — scripts/settings_allowlist.txt)
+settings-check:    ## окружение читает только src/settings.py, исключений нет (#297)
 	$(PY) python scripts/check_settings.py
 
 check: lint typecheck test test-ui hooks-test openapi-check seal-check layers settings-check stubs   ## всё целиком: общие файлы, freeze, сдача
@@ -104,9 +104,9 @@ eval:              ## make eval EXP=<id> [SAMPLE=N] [CORRUPT=typo|layout] → ev
 parity:            ## побитовое сравнение выдач (ranked) двух прогонов eval: make parity A=<id> B=<id>; коды 0/1/2 (совпали / различаются / не сравнить) — у python -m src.eval.parity, у make — Error 1 / Error 2
 	$(PY) python -m src.eval.parity "$(A)" "$(B)"
 
-predict:           ## тестовая выгрузка организаторов → eval/predict/<папка>.csv: make predict CSV_DIR=<папка> [TOP=10] [OFFLINE=1]
+predict:           ## тестовая выгрузка организаторов → eval/predict/<папка>.csv: make predict CSV_DIR=<папка> [TOP=10] [OFFLINE=1] [MODE=full|demo] [NO_RNP=1]
 	@[ -n "$(CSV_DIR)" ] || { echo "нужен CSV_DIR=<папка с Извещения*.csv и ТРУ*.csv>"; exit 2; }
-	$(PY) python -m src.ingest.predict --csv-dir "$(CSV_DIR)" --top $(or $(TOP),10) $(if $(OFFLINE),--offline)
+	$(PY) python -m src.ingest.predict --csv-dir "$(CSV_DIR)" --top $(or $(TOP),10) $(if $(OFFLINE),--offline) --mode $(or $(MODE),full) $(if $(NO_RNP),--no-rnp)
 
 okpd2:             ## справочник ОКПД2 код → наименование → data/processed/okpd2.parquet; обновить снимок: make okpd2 IMPORT=<zip с data.mos.ru>
 	$(PY) python -m src.ingest.okpd2 $(if $(IMPORT),--import "$(IMPORT)")

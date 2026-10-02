@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 
@@ -121,3 +122,108 @@ def test_ablate_feeds_features_as_missing():
     assert np.allclose(ablated.raw(x), full.raw(missing))
     assert not np.allclose(ablated.raw(x), full.raw(x))
     assert np.allclose(ablated.contrib(x)[:, i], 0.5 * i)  # missing -> fill, the same as for any NaN
+
+
+def _lr_body(features: list[str]) -> dict:
+    k = len(features)
+    return {"features": features, "fill": [0.0] * k, "mean": [0.0] * k, "std": [1.0] * k,
+            "coef": [float(i + 1) for i in range(k)], "intercept": 0.5}
+
+
+def test_older_model_with_fewer_features_runs_on_its_columns(tmp_path):
+    """A model trained before a feature was added (R-198: 43 of 44) keeps working (#105)."""
+    old = ranker.NAMES[:-1]
+    f = tmp_path / "old.json"
+    f.write_text(json.dumps(_lr_body(old)), encoding="utf-8")
+    model = ranker.load({"kind": "logreg", "model": str(f)})
+    assert model.cols == list(range(len(old)))
+    x = np.arange(len(ranker.NAMES), dtype=float).reshape(1, -1) + 1
+    want = float(x[0, :len(old)] @ np.arange(1, len(old) + 1) + 0.5)
+    assert model.raw(x)[0] == pytest.approx(want)
+    c = model.contrib(x)
+    assert c.shape == (1, len(ranker.NAMES))
+    assert c[0, ranker.NAMES.index(ranker.NAMES[-1])] == 0.0
+    assert c[0, 0] == pytest.approx(1.0 * x[0, 0])
+
+
+def test_model_columns_errors(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(_lr_body([*ranker.NAMES[:3], "no_such_feature"])), encoding="utf-8")
+    with pytest.raises(ValueError, match="no_such_feature"):
+        ranker.load({"kind": "logreg", "model": str(bad)})
+    empty = tmp_path / "empty.json"
+    body = _lr_body([])
+    body.pop("features")
+    empty.write_text(json.dumps(body), encoding="utf-8")
+    with pytest.raises(ValueError, match="списка признаков"):
+        ranker.load({"kind": "logreg", "model": str(empty)})
+
+
+def test_default_ranker_model_loads_and_ranks(search_data):
+    """The product default (R-198, 43 of the 44 features) loads and orders the result, no fallback note."""
+    from src.match import fallback
+
+    cfg = search_mod.load_config()
+    sp = ranker.spec(cfg)
+    assert sp is not None
+    model = ranker.load(sp)
+    assert model.cols is None or [ranker.NAMES[i] for i in model.cols] == model.booster.feature_name()
+    res = search(Q, config=cfg)
+    assert res
+    assert any(ranker.MARKER in c.explanation for m in res for c in m.components)
+    assert "ранжировщик недоступен" not in (fallback.search_note() or "")
+
+
+def test_data_without_supplier_profile_is_counted_and_warned_once(monkeypatch, caplog):
+    """Data built before the profile (#114; the release data-2026-10-01) leaves its 16 features NaN for every
+    candidate: the ranker then loses quality silently (dev recall@10 0.503 against 0.572, #421) — count and warn."""
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    full = np.ones((3, len(ranker.NAMES)))
+    ranker._check_profile(full)
+    bare = full.copy()
+    bare[:, ranker.PROFILE_IDX] = np.nan
+    one = bare.copy()
+    one[1, ranker.PROFILE_IDX[-1]] = 0.0  # one candidate with one profile key: the data has the profile
+    with caplog.at_level(logging.WARNING, logger=ranker.__name__):
+        ranker._check_profile(bare)
+        ranker._check_profile(bare)
+        ranker._check_profile(one)
+    assert ranker.without_profile == 2
+    assert sum("нет профиля поставщика" in r.getMessage() for r in caplog.records) == 1
+    assert {ranker.NAMES[i] for i in ranker.PROFILE_IDX} == {*ranker.PROFILE_LOG, *ranker.PROFILE_RAW}
+
+
+def test_fixture_data_has_the_supplier_profile(search_data, monkeypatch):
+    """The current ingest (the fixture is built by it) gives every ranked query a profile: nothing is counted."""
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    assert search(Q, config=search_mod.load_config())
+    assert ranker.without_profile == 0
+
+
+# the 12 columns of suppliers*.parquet in the release data-2026-10-01 (ingest before the profile, #114)
+RELEASE_COLUMNS = ["inn", "kpp", "inn_valid", "lots_participated", "lots_won", "win_rate", "customers", "customers_spb",
+                   "first_seen", "last_seen", "median_start_price", "top_okpd2"]
+
+
+def test_search_on_data_built_before_the_profile_is_counted(fixture_processed, tmp_path, monkeypatch, caplog):
+    """The whole chain on the release's columns: store → stats without the profile → features → rerank (#421)."""
+    import shutil
+
+    import pyarrow.parquet as pq
+
+    from src.match import index
+
+    old = tmp_path / "processed"
+    shutil.copytree(fixture_processed, old)
+    for f in old.glob("suppliers*.parquet"):
+        pq.write_table(pq.read_table(f, columns=RELEASE_COLUMNS), f)
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(old))
+    monkeypatch.setenv("DATA_STORE", "parquet")
+    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "indexes"))
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    index.clear_memory_cache()
+    with caplog.at_level(logging.WARNING, logger=ranker.__name__):
+        assert search(Q, config=search_mod.load_config())
+    index.clear_memory_cache()
+    assert ranker.without_profile == 1
+    assert sum("нет профиля поставщика" in r.getMessage() for r in caplog.records) == 1

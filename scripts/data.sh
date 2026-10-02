@@ -5,8 +5,8 @@
 #   bash scripts/data.sh processed    # only data/processed (enough for make demo / make eval)
 #   bash scripts/data.sh raw          # only data/raw (needed to re-run src.ingest)
 #   bash scripts/data.sh cache        # the snapshot of the source cache (names, roles, «Новые» of the demo lots);
-#                                     # NOT part of `all`: it is a cache, not data. Not over an existing different
-#                                     # cache unless CACHE_FORCE=1 (the local one may be newer)
+#                                     # NOT part of `all`: it is a cache, not data. An existing local cache
+#                                     # is merged (INSERT OR IGNORE by key: its newer rows stay); CACHE_FORCE=1 replaces it
 #
 # The data never goes to git (.gitignore, check-data-files.sh); the release assets are the storage.
 # Every file is checked against SHA256SUMS of the release; a file that already matches is not
@@ -14,7 +14,7 @@
 # and is renamed in only after the check, so an interrupted run leaves no truncated file.
 set -euo pipefail
 
-TAG="${DATA_TAG:-data-2026-10-01}"
+TAG="${DATA_TAG:-data-2026-10-02}"  # data-2026-10-01: ingest before the supplier profile (#435)
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROCESSED="${DATA_PROCESSED_DIR:-$ROOT/data/processed}"
 RAW="${DATA_RAW_DIR:-$ROOT/data/raw}"
@@ -122,15 +122,31 @@ if [ "$PART" = cache ]; then
   dir="$(dirname "$CACHE_TARGET")"
   if [ -f "$CACHE_TARGET" ] && [ "$(sha "$CACHE_TARGET")" = "$want" ]; then
     echo "ok        $CACHE_ASSET (уже на месте)"
-  elif [ -f "$CACHE_TARGET" ] && [ "${CACHE_FORCE:-}" != 1 ]; then
-    echo "cache: $CACHE_TARGET уже есть и отличается от снимка — не перезаписываю (CACHE_FORCE=1 заменит)" >&2
   else
     echo "download  $CACHE_ASSET"
     tmp_in "$dir"
     tmp="$NEW_TMP"
     download "$CACHE_ASSET" "$tmp" || fail "не скачался $CACHE_ASSET"
     [ "$(sha "$tmp/$CACHE_ASSET")" = "$want" ] || fail "контрольная сумма $CACHE_ASSET не сошлась — файл не записан"
-    mv -f "$tmp/$CACHE_ASSET" "$CACHE_TARGET"
+    if [ -f "$CACHE_TARGET" ] && [ "${CACHE_FORCE:-}" != 1 ]; then
+      # the local cache (even an empty one that `make demo` creates on the first search) keeps its newer rows:
+      # the snapshot only adds the keys it lacks
+      if command -v uv >/dev/null 2>&1; then py=(uv run --frozen python); else py=(python3); fi
+      "${py[@]}" -c '
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("CREATE TABLE IF NOT EXISTS pages (key TEXT PRIMARY KEY, url TEXT NOT NULL, "
+            "body TEXT NOT NULL, status INTEGER NOT NULL, fetched_at REAL NOT NULL)")
+con.execute("ATTACH DATABASE ? AS snap", (sys.argv[2],))
+before = con.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+con.execute("INSERT OR IGNORE INTO pages (key, url, body, status, fetched_at) "
+            "SELECT key, url, body, status, fetched_at FROM snap.pages")
+con.commit()
+print("cache: добавлено из снимка записей:", con.execute("SELECT COUNT(*) FROM pages").fetchone()[0] - before)
+' "$CACHE_TARGET" "$tmp/$CACHE_ASSET" || fail "снимок не влит в $CACHE_TARGET (CACHE_FORCE=1 заменит файл целиком)"
+    else
+      mv -f "$tmp/$CACHE_ASSET" "$CACHE_TARGET"
+    fi
   fi
   echo "cache: готово ($CACHE_TARGET)"
 fi

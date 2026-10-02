@@ -23,9 +23,10 @@ from src.contracts import Query
 from src.eval import baselines, corrupt
 from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
-from src.match import pipeline
+from src.match import pipeline, ranker
 from src.match import search as search_mod
 from src.match.profiles import procurement_type
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
@@ -40,8 +41,11 @@ RESULTS = ROOT / "eval" / "results"
 # Files whose bytes define the evaluated configuration (sha256 for eval-final).
 CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
 # Code that defines the method (not UI/API): its committed tree enters the hash.
-METHOD_PATHS = ("src/contracts.py", "src/ingest", "src/match", "src/sources", "src/enrich", "src/eval", "src/llm",
+METHOD_PATHS = ("src/contracts.py", "src/settings.py", "src/regions.py", "src/ingest", "src/match", "src/sources",
+                "src/enrich", "src/eval", "src/llm",
                 "src/db")  # src/db: normalization and the embedding model of retriever pg_hybrid
+# settings.py parses the variables the method reads (tokenizer, data and index dirs), regions.py feeds the region
+# features; tests/unit/test_eval_seal.py checks that every module eval imports is here (#448, D-150)
 
 
 class GitError(RuntimeError):
@@ -76,6 +80,10 @@ def config_sha256(root: Path | None = None) -> str:
         data = (root / rel).read_bytes().replace(b"\r\n", b"\n")
         h.update(rel.encode() + b"\0" + data + b"\0")
     h.update(b"method-tree\0" + git("ls-tree", "-r", "HEAD", "--", *METHOD_PATHS, root=root, strict=True).encode())
+    # The environment overrides the method too (#440): BM25_TOKENIZER replaces `tokenizer:` of the YAML. Only a set
+    # override enters the hash, so every signature computed without one stays valid.
+    if tok := get_settings().bm25_tokenizer:
+        h.update(b"env:BM25_TOKENIZER\0" + tok.encode() + b"\0")
     return h.hexdigest()
 
 
@@ -170,6 +178,7 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     """
     cutoff = cutoff or date.fromisoformat(str(split_config()["cutoff"]))
     method = cfg.get("method", "search")
+    ranker.reset_without_profile()  # result_record reports this run's queries only (D-144)
     novelty = winner_novelty(cases, cutoff)
     per_query = []
     audit = pipeline.TodayAudit() if method == "search" else None
@@ -238,6 +247,7 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "stub": bool(getattr(search_mod, "IS_STUB", False)) and cfg.get("method", "search") == "search",
         "vectors": _vectors(cfg),
         "store": _store(),
+        "data": _data(),
         **body,
     }
 
@@ -256,6 +266,19 @@ def _store() -> str:
     from src.match.store import get_store
 
     return get_store().name
+
+
+def _data() -> dict:
+    """The ingest snapshot the run read and how many queries the ranker scored without the supplier profile:
+    a metric level compares only between runs on the same data (#421 — the release data predates the profile)."""
+    from src.match.store import StoreUnavailable, get_store
+
+    try:
+        manifest = get_store().manifest()
+    except StoreUnavailable:
+        manifest = {}
+    return {"built_at": manifest.get("built_at"), "rows": manifest.get("rows"),
+            "queries_without_profile": ranker.without_profile}
 
 
 def _safe_sha() -> str | None:
@@ -383,6 +406,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         body = evaluate(cases, cfg)
     rec = result_record(args.exp, part, cfg, body)
+    if n := rec["data"]["queries_without_profile"]:
+        print(f"ВНИМАНИЕ: {n} запросов ранжированы без профиля поставщиков — данные {rec['data']['built_at']} "
+              "собраны до #114, уровень метрик не сравним с прогонами на полных данных (#421)", file=sys.stderr)
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(dump_record(rec), encoding="utf-8")
