@@ -1,4 +1,4 @@
-"""Reviews of a supplier from 2ГИС, on demand: a quote, its date and a link — or nothing (#234, D-112). Owner: SOURCES.
+"""Reviews of a supplier from 2ГИС, on demand: a quote, its date and a link — or nothing (#234, D-113). Owner: SOURCES.
 
 2GIS does not publish the INN. A card found by the brand is therefore NOT «the company» by itself: the
 company «САТУРН» of the МСП register (stationery) and the building-materials chain «Сатурн» share a name and a

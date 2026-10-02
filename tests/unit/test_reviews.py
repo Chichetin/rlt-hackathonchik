@@ -1,4 +1,4 @@
-"""Reviews of a supplier from 2GIS on demand (#234, D-112): who the card is, what is shown, what is not.
+"""Reviews of a supplier from 2GIS on demand (#234, D-113): who the card is, what is shown, what is not.
 
 2GIS does not publish the INN, so a card is matched by the brand and then trusted only as far as it can be
 checked: a phone / site of the card equal to the company's own (from the registry, with its Evidence) —
