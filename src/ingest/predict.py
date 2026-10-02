@@ -36,9 +36,9 @@ from pathlib import Path
 import duckdb
 
 from src.contracts import Counterparty, CounterpartyMatch, Query
-from src.enrich.role import LABEL as ROLE_LABEL
 from src.enrich.verify import Verdict
 from src.ingest.testset import TestDataError, TestLot, load_testset
+from src.sources.role import LABEL as ROLE_LABEL
 
 log = logging.getLogger("predict")
 ROOT = Path(__file__).resolve().parents[2]

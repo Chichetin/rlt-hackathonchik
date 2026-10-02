@@ -711,7 +711,7 @@ def pool_source() -> tuple[str | None, Path | None]:
 
     if (pool_mod.POOL / "okved.parquet").exists():
         return None, pool_mod.POOL
-    url = os.environ.get("DATABASE_URL") or ""
+    url = get_settings().database_url
     return (url, None) if url.startswith("postgres") else (None, None)
 
 
