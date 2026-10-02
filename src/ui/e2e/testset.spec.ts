@@ -23,10 +23,12 @@ test("тестовая выгрузка: загрузка CSV → процеду
   await lots.first().click();
   await expect(page).toHaveURL(/\/search(\?.*)?$/);
   await expect(page.getByRole("region", { name: "С опытом госзакупок" })).toBeVisible();
-  await expect(page.getByLabel("Что нужно закупить")).not.toHaveValue("");
+  await expect(page.getByLabel("Название товара")).not.toHaveValue("");
 
   // the list survives a reload: the server keeps the active set
   await page.goto("/search");
+  await expect(page.locator("#results")).toHaveAttribute("aria-busy", "false");
+  await page.locator(".query-options > summary").click();
   await expect(page.getByRole("region", { name: "Тестовая выгрузка" }).getByRole("status")).toContainText("Процедур: 3");
 
   expect((await request.get("/api/testset/predict.csv?offline=0")).status()).toBe(422); // a live run is a mass crawl
@@ -35,7 +37,6 @@ test("тестовая выгрузка: загрузка CSV → процеду
   expect(csv.headers()["content-disposition"]).toContain("attachment");
   expect(await csv.text()).toContain("lot_id;reqnum;query_text");
 
-  await page.locator(".query-options > summary").click();
   // a broken file: a readable message, not a stack trace
   await page.getByRole("region", { name: "Тестовая выгрузка" }).getByRole("button", { name: "Убрать" }).click();
   await page.getByLabel("Файлы тестовой выгрузки").setInputFiles({ name: "Извещения.csv", mimeType: "text/csv", buffer: Buffer.from("a,b\n1,2\n") });

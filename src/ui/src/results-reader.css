@@ -106,3 +106,16 @@
   .page-workspace :is(.result-list-scroll,.result-inspector,.results-reader) { scrollbar-color: auto; }
 }
 .page-workspace .query:has(.query-options:not([open])) > :is(.notice-import,.testset) { display: none; }
+.page-workspace .product-code-field { display: grid; gap: 8px; margin: 12px 0; color: #ccc; }
+.page-workspace .product-code-field small { color: #aaa; font-size: 13px; font-weight: 400; }
+.page-workspace .product-code-field input { width: 100%; max-width: 360px; }
+.page-workspace[data-route="/results"] .query-main { grid-template-columns: minmax(0,1fr) minmax(210px,.35fr) auto; }
+.page-workspace[data-route="/results"] .query-main > label:not(.product-code-field) { grid-column: 1; }
+.page-workspace[data-route="/results"] .query-main > .product-code-field { grid-column: 2; grid-row: 1 / 4; align-self: start; margin: 0; }
+.page-workspace[data-route="/results"] .query-main > .product-search-action { grid-column: 3; }
+.page-workspace[data-route="/results"] .query-main > .hint { grid-column: 1; }
+@media (max-width: 760px) {
+  .page-workspace[data-route="/results"] .query-main { grid-template-columns: minmax(0,1fr); }
+  .page-workspace[data-route="/results"] .query-main > .product-code-field,
+  .page-workspace[data-route="/results"] .query-main > .product-search-action { grid-column: 1; grid-row: auto; }
+}

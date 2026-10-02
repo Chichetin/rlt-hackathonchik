@@ -2,17 +2,15 @@ import { expect, test } from "@playwright/test";
 
 async function search(page: import("@playwright/test").Page) {
   await page.goto("/search");
-  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
-  await page.getByLabel("Номер закупки (необязательно)").fill("6");
-  await page.getByRole("button", { name: "Заполнить по номеру" }).click();
-  await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага/);
+  await page.goto(`/search?lot=${"6"}`);
+  await expect(page.getByLabel("Название товара")).toHaveValue(/Бумага/);
   await page.getByRole("button", { name: "Найти поставщиков", exact: true }).click();
   await expect(page.locator("#results")).toHaveAttribute("aria-busy", "false");
 }
 
 test("просмотр без модального окна сохраняет выбор и место в каждой группе", async ({ page }) => {
   await search(page);
-  await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
+  await expect(page.getByLabel("Название товара")).toBeVisible();
   const list = page.locator('.result-list-scroll:not([hidden])');
   const rows = list.locator(".item");
   const preview = page.getByRole("complementary", { name: "Просмотр поставщика" });
@@ -33,7 +31,7 @@ test("просмотр без модального окна сохраняет �
   await expect(preview.locator("h2")).toHaveText(selectedName);
 
   await page.getByRole("navigation").getByRole("link", { name: "Подбор", exact: true }).click();
-  await page.getByLabel("Что нужно закупить").fill("Новая закупка — мебель");
+  await page.getByLabel("Название товара").fill("Новая закупка — мебель");
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: "Может работать у заказчика" })).toBeVisible(); // #242: instead of the region
   await page.locator(".query-options > summary").click();
@@ -43,7 +41,7 @@ test("просмотр без модального окна сохраняет �
   await expect(page.getByRole("combobox", { name: /Регион|Может работать у заказчика/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
   await expect(page).toHaveURL(/\/search(\?.*)?$/);
-  await expect(page.getByLabel("Что нужно закупить")).toHaveValue("Новая закупка — мебель");
+  await expect(page.getByLabel("Название товара")).toHaveValue("Новая закупка — мебель");
 });
 
 test("на телефоне можно перейти от компании к деталям и вернуться в список", async ({ page }) => {

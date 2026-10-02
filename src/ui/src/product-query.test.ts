@@ -9,3 +9,7 @@ test.each(['Бумага А4 80 г/м²', 'Монитор 27', 'Шины 225/45 
   const q = buildQuery(text, NO_FILTERS);
   expect(q.text).toBe(text); expect(q.okpd2).toBeUndefined();
 });
+
+test('separate product name and category are both retained', () => {
+  expect(buildQuery('Стол письменный', NO_FILTERS, { okpd2: '31.01', budget: '', customer_inn: '', lot: null })).toMatchObject({ text: 'Стол письменный', okpd2: ['31.01'] });
+});

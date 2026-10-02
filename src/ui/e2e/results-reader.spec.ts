@@ -2,10 +2,8 @@ import { expect, test } from '@playwright/test';
 
 async function results(page: import('@playwright/test').Page) {
   await page.goto('/search');
-  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
-  await page.getByLabel('Номер закупки (необязательно)').fill('6');
-  await page.getByRole('button', { name: /Заполнить по номеру|Заполнить по номеру/ }).click();
-  await expect(page.getByLabel('Что нужно закупить')).toHaveValue(/Бумага/);
+  await page.goto(`/search?lot=${'6'}`);
+  await expect(page.getByLabel('Название товара')).toHaveValue(/Бумага/);
   await page.getByRole('button', { name: 'Найти поставщиков', exact: true }).click();
   await expect(page.locator('#results')).toHaveAttribute('aria-busy', 'false');
 }
@@ -54,14 +52,16 @@ test('раскрытие и вся длина сохраняют компани�
 
 test('основной сценарий — название товара или ОКПД2 без номера извещения', async ({ page }) => {
   await page.goto('/search');
-  await expect(page.getByLabel('Номер закупки (необязательно)')).toBeHidden();
-  const input = page.getByLabel('Что нужно закупить');
-  for (const text of ['Бумага', '17.12']) {
+  await expect(page.getByLabel('Номер закупки (необязательно)')).toHaveCount(0);
+  const input = page.getByLabel('Название товара');
+  for (const [text, code] of [['Бумага', ''], ['', '17.12'], ['Бумага А4', '17.12']]) {
     await input.fill(text);
+    await page.getByLabel('Код ОКПД2', { exact: true }).fill(code);
     const request = page.waitForRequest(r => new URL(r.url()).pathname === '/api/search' && r.method() === 'POST');
     await page.getByRole('button', { name: 'Найти поставщиков', exact: true }).click();
     const body = (await request).postDataJSON();
-    if (text === '17.12') { expect(body.okpd2).toEqual(['17.12']); expect(body.text).toMatch(/Бумага/); }
+    if (code) expect(body.okpd2).toEqual([code]);
+    if (!text) expect(body.text).toMatch(/Бумага/);
     else expect(body.text).toBe(text);
     await expect(page.locator('.result-list-scroll:not([hidden]) .item').first()).toBeVisible();
     await expect(input).toBeVisible(); // edit and search again directly above the results
@@ -74,7 +74,7 @@ test('при долгом поиске показан знак ожидания,
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   await page.route('**/api/search?*', async route => { await held; await route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"Временная ошибка"}' }); });
-  await page.getByLabel('Что нужно закупить').fill('Бумага');
+  await page.getByLabel('Название товара').fill('Бумага');
   await page.getByRole('button', { name: 'Найти поставщиков', exact: true }).click();
   const status = page.locator('.search-progress');
   await expect(status).toContainText('Подбираем поставщиков');
@@ -102,7 +102,7 @@ test('на телефоне раскрытие, карточка и возвра
   await expect(row).toHaveAttribute('aria-pressed', 'true');
   await expect(row).toBeInViewport();
   await page.getByRole('button', { name: 'Свернуть', exact: true }).click();
-  await expect(page.getByLabel('Что нужно закупить')).toBeVisible();
+  await expect(page.getByLabel('Название товара')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -112,12 +112,14 @@ test('подбор — единственная вкладка поиска, с�
   await expect(page).toHaveURL(/\/search\?q=/);
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Результаты', exact: true })).toHaveCount(0);
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Подбор', exact: true })).toHaveAttribute('aria-current', 'page');
-  await page.getByLabel('Что нужно закупить').fill('17.12');
+  await page.getByLabel('Название товара').fill('');
+  await page.getByLabel('Код ОКПД2', { exact: true }).fill('17.12');
   await page.getByRole('button', { name: 'Найти поставщиков', exact: true }).click();
   await expect(page.locator('#results')).toHaveAttribute('aria-busy', 'false');
-  await expect(page).toHaveURL(/\/search\?q=17.12/);
+  await expect(page).toHaveURL(/\/search\?okpd2=17.12/);
   await page.reload();
-  await expect(page.getByLabel('Что нужно закупить')).toHaveValue('17.12');
+  await expect(page.getByLabel('Название товара')).toHaveValue('');
+  await expect(page.getByLabel('Код ОКПД2', { exact: true })).toHaveValue('17.12');
   await expect(page.locator('.result-list-scroll:not([hidden]) .item').first()).toBeVisible();
 });
 
@@ -125,8 +127,22 @@ test('неизвестный ОКПД2 не превращается в поис
   await page.goto('/search');
   const queries: string[] = [];
   page.on('request', r => { if (new URL(r.url()).pathname === '/api/search') queries.push(r.url()); });
-  await page.getByLabel('Что нужно закупить').fill('99.99');
+  await page.getByLabel('Код ОКПД2', { exact: true }).fill('99.99');
   await page.getByRole('button', { name: 'Найти поставщиков', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('не найден в справочнике');
   expect(queries).toHaveLength(0);
+});
+
+test('ссылка только с ОКПД2 не наследует закупку предыдущего поиска', async ({ page }) => {
+  await results(page);
+  const request = page.waitForRequest(r => new URL(r.url()).pathname === '/api/search' && r.method() === 'POST');
+  await page.goto('/search?okpd2=17.12');
+  const body = (await request).postDataJSON();
+  expect(body.okpd2).toEqual(['17.12']);
+  expect(body.budget).toBeUndefined();
+  expect(body.customer_inn).toBeUndefined();
+  expect(body.query_id).not.toBe('lot-6');
+  await expect(page.locator('#results')).toHaveAttribute('aria-busy', 'false');
+  await expect(page).toHaveURL(/\/search\?okpd2=17.12$/);
+  await expect(page.getByLabel('Название товара')).toHaveValue('');
 });

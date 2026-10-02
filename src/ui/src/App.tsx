@@ -303,7 +303,7 @@ function usePath(): [Path, (next: Path) => void] {
 
 // the last query survives a reload of /results; storage may be unavailable — the page works without it
 const STORE = "mitrandir.query";
-type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string; customerRegion?: string };
+type Saved = { okpd2?: string; text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string; customerRegion?: string };
 function loadSaved(): Partial<Saved> {
   try {
     return JSON.parse(window.sessionStorage.getItem(STORE) ?? "{}") as Partial<Saved>;
@@ -387,7 +387,9 @@ export function App() {
   const [path, go] = usePath();
   const filterReturn = useRef<Path>("/search");
   useEffect(() => { if (path === "/search" || path === "/results") filterReturn.current = path; }, [path]);
-  const [text, setText] = useState(saved.text ?? "");
+  const urlParams = new URLSearchParams(window.location.search);
+  const [text, setText] = useState(urlParams.has("okpd2") && !urlParams.has("q") ? "" : saved.text ?? "");
+  const [okpd2Input, setOkpd2Input] = useState(() => urlParams.has("q") || urlParams.has("lot") || urlParams.has("okpd2") ? urlParams.get("okpd2") ?? "" : saved.okpd2 ?? "");
   const [filters, setFilters] = useState<Filters>(() => normalizeFilters(saved.filters));
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
@@ -410,23 +412,22 @@ export function App() {
   // #242: the customer's region when the INN is not given (goes to Query.region); with an INN the server takes it from there
   const [customerRegion, setCustomerRegion] = useState(saved.customerRegion ?? "Санкт-Петербург");
   const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  const [lotBusy, setLotBusy] = useState(false);
   const resetLot = () => {
     setLot(null);
     setLotQueryId(undefined);
   };
-  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId, customer_region: customerRegion });
+  const extra = (): Extra => ({ okpd2: okpd2Input, budget, customer_inn: customerInn, lot, query_id: lotQueryId, customer_region: customerRegion });
 
   // the query of a loaded lot, for a search that must not wait for the form state to update
   type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
 
   async function loadLot(id: string = lotId, auto = false): Promise<Ready | null> {
     if (!id.trim()) return null;
-    setLotBusy(true);
     setLotMsg(null);
     try {
       const q = await fetchLot(id);
       setText(q.text);
+      setOkpd2Input("");
       setBudget(q.budget ? String(q.budget) : "");
       setCustomerInn(q.customer_inn ?? "");
       setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
@@ -453,10 +454,8 @@ export function App() {
             : st === 422
               ? "Номер закупки — только цифры (lot_id или реестровый номер)."
               : `Не удалось загрузить закупку: ${String(e)}.`;
-      setLotMsg({ kind: "err", text: `${why} Введите название товара или ОКПД2 в основное поле.` });
+      setLotMsg({ kind: "err", text: `${why} Введите название товара или код ОКПД2 в форме поиска.` });
       return null;
-    } finally {
-      setLotBusy(false);
     }
   }
 
@@ -503,16 +502,19 @@ export function App() {
   // asTyped: «искать как введено» (#282) — this exact text, the server's correction off
   async function run(nextFilters: Filters = filters, ready?: Ready, asTyped?: string) {
     // the query of this run: a picked test lot (#207), the shown query as typed, or the form
-    const qText = asTyped ?? ready?.text ?? text;
+    const qText = asTyped ?? ready?.text ?? (text.trim() || okpd2Input);
     if (asTyped !== undefined) asTypedFor.current = asTyped.trim();
     const qExtra = ready ? () => ready.extra : extra;
-    if (!qText.trim()) return;
+    if (!qText.trim() && !qExtra().okpd2?.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
     setState("loading");
     setOpen(null);
     try {
-      const code = enteredOkpd2(qText);
-      const categoryName = code ? await lookupOkpd2Name(code) : undefined;
+      const manualCode = qExtra().okpd2?.trim();
+      const code = manualCode ? enteredOkpd2(manualCode) : enteredOkpd2(qText);
+      if (manualCode && !code) throw new Error("Проверьте формат ОКПД2: например, 31.01.11.150.");
+      const category = code ? await lookupOkpd2Name(code) : undefined;
+      const categoryName = !qText.trim() || enteredOkpd2(qText) ? category : undefined;
       if (seq !== runSeq.current) return;
       const active = filtersActive(nextFilters);
       const none: Filters = NO_FILTERS;
@@ -539,13 +541,16 @@ export function App() {
       // weights switched on while this page-sized answer was in flight
       if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
       save(ready
-        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
-        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
+        ? { okpd2: ready.extra.okpd2, text: ready.text, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
+        : { okpd2: okpd2Input, text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
       if (window.location.pathname === "/results") go("/search");
       // the address bar keeps a link that repeats this search (#395): a copied URL opens the same query
       if (window.location.pathname === "/search") {
         const loaded = ready ? ready.extra.lot != null : lot != null;
-        const link = deepLinkSearch(ready ? ready.lotId : lotId, loaded, qText);
+        const submittedText = ready?.text ?? text;
+        const codeParam = qExtra().okpd2?.trim();
+        const link = (!loaded && !submittedText.trim() ? "" : deepLinkSearch(ready ? ready.lotId : lotId, loaded, submittedText))
+          + (codeParam ? `${submittedText.trim() || loaded ? "&" : "?"}okpd2=${encodeURIComponent(codeParam)}` : "");
         window.history.replaceState(null, "", `/search${link}${window.location.hash}`);
       }
     } catch (e) {
@@ -584,14 +589,14 @@ export function App() {
       const nav = (window.performance?.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
       if (nav !== "reload" && nav !== "back_forward") return d;
       if (d.lot && saved.lotId === d.lot && saved.lot) return {};
-      if (d.q && !d.lot && saved.text === d.q && !saved.lot) return {};
+      if ((d.q || d.okpd2) && !d.lot && (saved.text ?? "") === (d.q ?? "") && (saved.okpd2 ?? "") === (d.okpd2 ?? "") && !saved.lot) return {};
       return d;
     })(),
   );
   const deepDone = useRef(false);
   useEffect(() => {
     const d = deepAtMount.current;
-    if ((!d.lot && !d.q) || deepDone.current) return;
+    if ((!d.lot && !d.q && !d.okpd2) || deepDone.current) return;
     deepDone.current = true;
     setState("loading");
     setFilters(NO_FILTERS); // a shared link is a plain search, not the filters left in this browser
@@ -604,12 +609,13 @@ export function App() {
           setState("idle");
           go("/search"); // not found: the form with the reason
         }
-      } else if (d.q) {
+      } else if (d.q || d.okpd2) {
         resetLot();
         setBudget("");
         setCustomerInn("");
-        setText(d.q);
-        await run(NO_FILTERS, { text: d.q, lotId: "", budget: "", customerInn: "", extra: { budget: "", customer_inn: "", lot: null, query_id: undefined, customer_region: customerRegion } });
+        setText(d.q ?? "");
+        setOkpd2Input(d.okpd2 ?? "");
+        await run(NO_FILTERS, { text: d.q ?? "", lotId: "", budget: "", customerInn: "", extra: { budget: "", customer_inn: "", lot: null, okpd2: d.okpd2, query_id: undefined, customer_region: customerRegion } });
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -617,7 +623,7 @@ export function App() {
 
   // a reload of /results repeats the saved query
   useEffect(() => {
-    if ((path === "/search" || path === "/results") && !deepAtMount.current.lot && !deepAtMount.current.q && !res && state === "idle" && text.trim()) void run();
+    if ((path === "/search" || path === "/results") && !deepAtMount.current.lot && !deepAtMount.current.q && !deepAtMount.current.okpd2 && !res && state === "idle" && (text.trim() || okpd2Input.trim())) void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
@@ -634,6 +640,7 @@ export function App() {
     runSeq.current++; // drop an answer still in flight
     setFilters(NO_FILTERS);
     setText("");
+    setOkpd2Input("");
     setLotId("");
     setBudget("");
     setCustomerInn("");
@@ -761,7 +768,7 @@ export function App() {
       : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => {
         // back to the results keeps the link of their search (#395)
         const s = loadSaved();
-        go(s.text ? `/search${deepLinkSearch(s.lotId ?? "", !!s.lot, s.text)}` : "/search");
+        go((s.text || s.okpd2) ? `/search${s.text ? deepLinkSearch(s.lotId ?? "", !!s.lot, s.text) : ""}${s.okpd2 ? `${s.text ? "&" : "?"}okpd2=${encodeURIComponent(s.okpd2)}` : ""}` : "/search");
       }} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
@@ -792,24 +799,30 @@ export function App() {
             <p>Введите название товара, описание или код ОКПД2 — найдём подходящих поставщиков и объясним рекомендации.</p>
           </div>
         </div>
-        <label htmlFor="q">Что нужно закупить</label>
+        <label htmlFor="q">Название товара</label>
         <textarea
           id="q"
           aria-describedby="query-help"
           rows={3}
           value={text}
-          placeholder="Например: офисная мебель или 31.01.11.150"
+          placeholder="Например: офисная мебель, столы для переговорной"
           onChange={(e) => {
             setText(e.target.value);
             resetLot();
           }}
         />
-        <p id="query-help" className="hint">Название товара или ОКПД2. Можно добавить характеристики: размер, материал, назначение.</p>
+        <p id="query-help" className="hint">Можно добавить характеристики: размер, материал, назначение.</p>
+        <label className="product-code-field" htmlFor="product-code">Код ОКПД2
+          <input id="product-code" aria-label="Код ОКПД2" value={okpd2Input} placeholder="Например: 31.01.11.150" aria-describedby="product-code-help"
+            onChange={e => { setOkpd2Input(e.target.value); resetLot(); }} />
+          <small id="product-code-help">Заполните название, код или оба поля.</small>
+        </label>
         <div className="actions product-search-action">
-          <button type="submit" disabled={!text.trim() || state === "loading"}><SearchIcon />{state === "loading" ? "Ищем…" : "Найти поставщиков"}</button>
+          <button type="submit" disabled={(!text.trim() && !okpd2Input.trim()) || state === "loading"}><SearchIcon />{state === "loading" ? "Ищем…" : "Найти поставщиков"}</button>
         </div>
         <ExampleWheel onConfirm={() => document.getElementById("q")?.focus()} options={EXAMPLES} value={lot ? "" : text} onChange={example => {
           setText(example);
+          setOkpd2Input("");
           resetLot();
         }} />
         </div>
@@ -858,43 +871,11 @@ export function App() {
 
         </div>
         </details>
-        <details className="notice-import" open={lotMsg?.kind === "err" || undefined}><summary>Заполнить из готового извещения</summary>
-        <div className="lot-section">
-          <label htmlFor="lot">Номер закупки (необязательно)</label>
-          <div className="lotrow">
-            <input
-              id="lot"
-              aria-describedby="lot-help"
-              inputMode="numeric"
-              value={lotId}
-              placeholder="Введите номер извещения"
-              onChange={(e) => {
-                setLotId(e.target.value);
-                resetLot();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void loadLot();
-                }
-              }}
-            />
-            <button type="button" className="secondary" disabled={!lotId.trim() || lotBusy} onClick={() => void loadLot()}>
-              {lotBusy ? "Загружаем…" : "Заполнить по номеру"}
-            </button>
-          </div>
-          <p id="lot-help" className="hint">Номер конкретного объявления в АИС ГЗ или Электронном магазине, а не код ОКПД2. ОКПД2 обозначает категорию товара — например, 31.01 «Мебель для офисов и предприятий торговли». Если номера нет, оставьте поле пустым и введите название товара в основное поле.</p>
-          {lotMsg && (
-            <p className={lotMsg.kind === "ok" ? "lotmsg" : "lotmsg lotmsg-err"} role={lotMsg.kind === "ok" ? "status" : "alert"}>
-              {lotMsg.text}
-            </p>
-          )}
-          {lot && lotMsg?.kind === "ok" && <BacktestPanel key={lotQueryId} ident={lotId} />}
-        </div>
-        </details>
         <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
       </form>
       <div className="output">
+      {lotMsg?.kind === "err" && <p className="lotmsg lotmsg-err" role="alert">{lotMsg.text}</p>}
+      {lot && lotQueryId && <BacktestPanel key={lotQueryId} ident={lotId} />}
       {state === "loading" && <SearchProgress />}
       {res && <div className="results-commandbar">
         <p><span>Закупка</span><strong>{res.query.text}</strong></p>

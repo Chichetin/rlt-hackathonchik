@@ -40,7 +40,7 @@ export function filtersActive(f: Filters): boolean {
 // Дополнительный контекст готового извещения. ОКПД2 также можно ввести в строку поиска.
 export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "budget">;
 // customer_region: the customer's region when there is no customer INN (#242) — goes to Query.region
-export type Extra = { budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
+export type Extra = { okpd2?: string; budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
 
 export function enteredOkpd2(text: string): string | undefined {
   const code = text.trim().replace(/^ОКПД2\s*[:—-]?\s*/i, "");
@@ -65,7 +65,7 @@ export function buildQuery(text: string, filters: Filters, extra?: Extra): Query
   };
   // A code-only query goes through the existing OKPD2 search path. Product
   // dimensions/model numbers inside prose must not become category filters.
-  const enteredCode = enteredOkpd2(text);
+  const enteredCode = extra?.okpd2?.trim() ? enteredOkpd2(extra.okpd2) : enteredOkpd2(text);
   if (enteredCode) q.okpd2 = [enteredCode];
   else if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
   if (extra?.lot?.channel) q.channel = extra.lot.channel;

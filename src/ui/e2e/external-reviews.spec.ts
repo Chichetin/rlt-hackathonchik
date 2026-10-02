@@ -34,10 +34,8 @@ const ANSWER = {
 async function openCard(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/search");
-  await page.locator(".notice-import > summary").evaluate(e => { const options = e.closest("form")?.querySelector<HTMLDetailsElement>(".query-options"); if (options && !options.open) options.querySelector<HTMLElement>("summary")!.click(); if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
-  await page.getByLabel("Номер закупки (необязательно)").fill("6");
-  await page.getByRole("button", { name: "Заполнить по номеру" }).click();
-  await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага/);
+  await page.goto(`/search?lot=${"6"}`);
+  await expect(page.getByLabel("Название товара")).toHaveValue(/Бумага/);
   await page.getByRole("button", { name: "Найти поставщиков", exact: true }).click();
   await page.locator(".result-list-scroll:not([hidden]) .item").first().click();
   await page.getByRole("button", { name: /Открыть полную карточку/ }).click();
