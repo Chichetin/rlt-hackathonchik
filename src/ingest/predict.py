@@ -16,7 +16,7 @@ Mode `demo` — the old behaviour (cache, the budget of /api/search).
 One CSV (`;`, UTF-8 BOM for Excel): per lot the top-N suppliers from organizers' history
 (block «История») and the companies from open sources (block «Новые»), score and every component
 (value × weight, explanation). `rank` is the order within the block («История» — the ranker's, D-103);
-`score` is the relevance — the formula of the components, the card's sum (D-151), so in «История» a lower
+`score` is the relevance — the formula of the components, the card's sum (D-156), so in «История» a lower
 rank may have a higher score.
 A lot without candidates gets one row with the reason — never a silent gap. Idempotent: lots already in the
 output are skipped (resume after a crash); progress goes to the log. Exit 2 on a broken export (message, no
