@@ -35,6 +35,7 @@ SKIP_DIRS = frozenset({"node_modules", "dist", "__pycache__", ".venv"})
 LAYERS: dict[str, int] = {
     # L0: types and settings every layer may read
     "src.contracts": 0,
+    "src.split_config": 0,  # configs/split.yaml: the cutoff the ingest and the index prebuild need (#294)
     "src.regions": 0,  # not there yet (#292)
     "src.settings": 0,  # not there yet (#290)
     # L1: external sources, storage, the ingest core, the task queue

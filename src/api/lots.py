@@ -91,4 +91,3 @@ def find_lot(ident: str) -> Query:
     if row is None:
         raise LotNotFound(ident)
     return notice_query(*row, okpd2=okpd2, names=names)
-

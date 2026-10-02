@@ -138,7 +138,7 @@ def load_testset(folder: Path) -> TestSet:
             notes.append(f"НМЦК «{row.get('start_price')}» не число — не учитывается")
             price = ""
         q = notice_query(lot_id, subject or None, pname or None, price or None, row.get("customer_inn") or None,
-                   row.get("is_eshop_or_aisgz") or None, okpd2=okpd2)
+                         row.get("is_eshop_or_aisgz") or None, okpd2=okpd2)
         lots.append(TestLot(lot_id=lot_id, reqnum=row.get("reqnum") or None, query=q, notes=notes))
     if not lots:
         raise TestDataError(f"{n_path.name}: ни одного лота с lot_id")

@@ -67,8 +67,8 @@ scripts/              # issues.sh, download-models.sh, check_stubs.py, check_lay
 
 | Слой | Что | Модули `src/` |
 |---|---|---|
-| L0 | типы и настройки | `contracts.py`; `regions`, `settings` — когда появятся (#292, #290) |
-| L1 | внешний мир и хранение | `sources/`, `db/`, `llm/`, `ingest/` (build, load, okpd2, profile, testset), `worker/queue.py` |
+| L0 | типы и настройки | `contracts.py`, `split_config.py` (`configs/split.yaml`, #294); `regions`, `settings` — когда появятся (#292, #290) |
+| L1 | внешний мир и хранение | `sources/`, `db/`, `llm/`, `ingest/` (build, load, notice, okpd2, profile, testset), `worker/queue.py` |
 | L2 | ядро match | `match/` — store, index, search, fallback, filters, signals, profiles, purchase_type, text, pg_retriever |
 | L3 | обогащение | `enrich/` — enrich, discover, evidence, role |
 | L4 | сценарии поверх ядра | `match/pipeline.py`, `ingest/predict.py` |
