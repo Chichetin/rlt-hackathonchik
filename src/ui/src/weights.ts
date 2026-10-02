@@ -20,8 +20,14 @@ export const DEFAULT_WEIGHTS: Weights = {
   price: 0.0,
 };
 
-/** No data yet: the server scores them with weight 0 (UNAVAILABLE in src/match/search.py, D-029). */
+/** Out of the score: the server gives them weight 0 — price: no data (UNAVAILABLE in src/match/search.py, D-029);
+ * reliability: computed for the shown rows, for reference only (reliability.mode shadow, #72). */
 export const UNAVAILABLE: ComponentName[] = ["reliability", "price"];
+
+/** Why a component is out of the score — the text of its row in the advanced mode. */
+export function offNote(c: ComponentName): string {
+  return c === "reliability" ? "справочно — в оценку не входит" : "нет данных — в оценку не входит";
+}
 export const AVAILABLE: ComponentName[] = COMPONENTS.filter((c) => !UNAVAILABLE.includes(c));
 
 export const COMPONENT_COLOR: Record<ComponentName, string> = {

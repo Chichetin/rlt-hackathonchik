@@ -360,6 +360,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="dev sample (default), all dev cases or the 5–10 real cases; never holdout")
     ap.add_argument("--baseline", default=None,
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
+    ap.add_argument("--every", type=int, default=1,
+                    help="every N-th case (cases[::N]): a deterministic subsample when the part is too slow")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
     ap.add_argument("--words", type=int, default=None,
@@ -382,12 +384,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.sample is not None and args.sample <= 0:
         print("--sample: нужно число кейсов > 0", file=sys.stderr)
         return 2
+    if args.every < 1:
+        print("--every должен быть ≥ 1", file=sys.stderr)
+        return 2
     try:
         cfg = load_method_config(args.exp, args.baseline, args.config_of)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    cases = load_cases(args.part, split_config())
+    cases = load_cases(args.part, split_config())[::args.every]
     part = args.part
     if args.sample and args.sample < len(cases):
         keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
@@ -417,6 +422,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         body = evaluate(cases, cfg)
     rec = result_record(args.exp, part, cfg, body)
+    if args.every > 1:
+        rec["every"] = args.every  # the subsample is part of the result: n_queries alone does not say which
     if n := rec["data"]["queries_without_profile"]:
         print(f"ВНИМАНИЕ: {n} запросов ранжированы без профиля поставщиков — данные {rec['data']['built_at']} "
               "собраны до #114, уровень метрик не сравним с прогонами на полных данных (#421)", file=sys.stderr)

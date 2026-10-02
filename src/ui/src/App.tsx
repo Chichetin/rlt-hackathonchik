@@ -48,7 +48,7 @@ import "./filters.css";
 import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
 import { componentText, nextReason, rankerReason, rankerShort } from "./ranker";
-import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
+import { activeWeights, COMPONENT_COLOR, COMPONENTS, offNote, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 import { STATIC_DEMO } from "./staticApi";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
@@ -1389,7 +1389,7 @@ function WeightsSettings({ value, onChange }: { value: WeightSettings; onChange:
                 <i style={{ background: COMPONENT_COLOR[c] }} aria-hidden="true" />
                 {COMPONENT_LABEL[c]}
               </span>
-              <span className="slider-off">нет данных — в оценку не входит</span>
+              <span className="slider-off">{offNote(c)}</span>
               <span className="slider-share">0 %</span>
             </div>
           ) : (

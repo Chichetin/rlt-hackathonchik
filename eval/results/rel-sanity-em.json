@@ -1,0 +1,104 @@
+{
+  "exp_id": "rel-sanity-em",
+  "kind": "sanity",
+  "command": "DATA_STORE=parquet uv run python -m src.match.reliability",
+  "commit_base": "9cbdf7e",
+  "dirty": true,
+  "note": "снято на рабочем дереве ветки #72; src/match/reliability.py и src/match/store.py на момент прогона совпадают с коммитом 9cbdf7e (правки ревью #127: доля побед только по ЭМ, prior по всем поставщикам); код проверки — src/match/reliability.py check()",
+  "store": "parquet",
+  "data": "data/processed основной копии (DATA_PROCESSED_DIR)",
+  "cutoff": "2025-07-01",
+  "outcome_until": "2025-10-01",
+  "outcome": "ЭМ",
+  "prior": {
+    "win_rate": 0.3627,
+    "retention": 0.3096
+  },
+  "suppliers_before": 38411,
+  "with_min_em_lots_after": 2524,
+  "min_after": 3,
+  "win_rate_after_by_quantile": [
+    {
+      "q": 1,
+      "n": 504,
+      "reliability_min": 0.249,
+      "reliability_max": 0.442,
+      "outcome": 0.2149
+    },
+    {
+      "q": 2,
+      "n": 505,
+      "reliability_min": 0.442,
+      "reliability_max": 0.514,
+      "outcome": 0.2693
+    },
+    {
+      "q": 3,
+      "n": 505,
+      "reliability_min": 0.514,
+      "reliability_max": 0.594,
+      "outcome": 0.423
+    },
+    {
+      "q": 4,
+      "n": 505,
+      "reliability_min": 0.594,
+      "reliability_max": 0.719,
+      "outcome": 0.6571
+    },
+    {
+      "q": 5,
+      "n": 505,
+      "reliability_min": 0.719,
+      "reliability_max": 0.987,
+      "outcome": 0.8425
+    }
+  ],
+  "spearman_win_after": {
+    "reliability": 0.6435,
+    "raw_em_win_rate": 0.769,
+    "n_raw": 2464
+  },
+  "survival_by_quantile": [
+    {
+      "q": 1,
+      "n": 7682,
+      "reliability_min": 0.209,
+      "reliability_max": 0.322,
+      "outcome": 0.1673
+    },
+    {
+      "q": 2,
+      "n": 7682,
+      "reliability_min": 0.322,
+      "reliability_max": 0.337,
+      "outcome": 0.0945
+    },
+    {
+      "q": 3,
+      "n": 7682,
+      "reliability_min": 0.337,
+      "reliability_max": 0.417,
+      "outcome": 0.2183
+    },
+    {
+      "q": 4,
+      "n": 7682,
+      "reliability_min": 0.417,
+      "reliability_max": 0.475,
+      "outcome": 0.2571
+    },
+    {
+      "q": 5,
+      "n": 7683,
+      "reliability_min": 0.475,
+      "reliability_max": 0.987,
+      "outcome": 0.6294
+    }
+  ],
+  "spearman_survival": {
+    "reliability": 0.3683,
+    "raw_em_win_rate": 0.009,
+    "n_raw": 15841
+  }
+}
