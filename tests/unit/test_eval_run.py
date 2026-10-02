@@ -138,3 +138,14 @@ def test_drop_okpd2_keeps_text_and_everything_else():
     (got,) = R.drop_okpd2([c])
     assert got.query.okpd2 == [] and got.query.text == c.query.text and got.relevant_inns == c.relevant_inns
     assert c.query.okpd2 == ["17.12.14.110", "17.12"]  # the input is not mutated
+
+
+def test_result_records_the_data_snapshot(search_data, monkeypatch):
+    """A metric level compares only between runs on the same data (#421): the result names the ingest snapshot
+    and how many queries the ranker scored without the supplier profile."""
+    from src.match import ranker
+
+    monkeypatch.setattr(ranker, "without_profile", 3)
+    manifest = json.loads((search_data / "manifest.json").read_text(encoding="utf-8"))
+    rec = R.result_record("x", "dev", {}, {})
+    assert rec["data"] == {"built_at": manifest["built_at"], "rows": manifest["rows"], "queries_without_profile": 3}

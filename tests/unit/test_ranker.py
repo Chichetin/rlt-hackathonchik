@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 
@@ -171,3 +172,29 @@ def test_default_ranker_model_loads_and_ranks(search_data):
     assert res
     assert any(ranker.MARKER in c.explanation for m in res for c in m.components)
     assert "ранжировщик недоступен" not in (fallback.search_note() or "")
+
+
+def test_data_without_supplier_profile_is_counted_and_warned_once(monkeypatch, caplog):
+    """Data built before the profile (#114; the release data-2026-10-01) leaves its 16 features NaN for every
+    candidate: the ranker then loses quality silently (dev recall@10 0.503 against 0.572, #421) — count and warn."""
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    full = np.ones((3, len(ranker.NAMES)))
+    ranker._check_profile(full)
+    bare = full.copy()
+    bare[:, ranker.PROFILE_IDX] = np.nan
+    one = bare.copy()
+    one[1, ranker.PROFILE_IDX[-1]] = 0.0  # one candidate with one profile key: the data has the profile
+    with caplog.at_level(logging.WARNING, logger=ranker.__name__):
+        ranker._check_profile(bare)
+        ranker._check_profile(bare)
+        ranker._check_profile(one)
+    assert ranker.without_profile == 2
+    assert sum("нет профиля поставщика" in r.getMessage() for r in caplog.records) == 1
+    assert {ranker.NAMES[i] for i in ranker.PROFILE_IDX} == {*ranker.PROFILE_LOG, *ranker.PROFILE_RAW}
+
+
+def test_fixture_data_has_the_supplier_profile(search_data, monkeypatch):
+    """The current ingest (the fixture is built by it) gives every ranked query a profile: nothing is counted."""
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    assert search(Q, config=search_mod.load_config())
+    assert ranker.without_profile == 0

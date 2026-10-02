@@ -90,6 +90,13 @@ FEATURES: dict[str, str] = {
     "days_similar": "давность последней закупки с похожими позициями",  # #105; a model may lack it (cols)
 }
 NAMES = list(FEATURES)
+# The supplier profile (#114, D-064) is NaN for EVERY candidate only when data/processed was built before the profile
+# existed (e.g. the release data-2026-10-01, ingest of 01.10 11:45 UTC): a supplier with any participation has at
+# least smp_contracts. The model then ranks without these inputs and quality drops — dev recall@10 0.503 against
+# 0.572 on the same code (#421). Counted per rerank and warned once; make eval writes the count to the result.
+PROFILE_IDX = [NAMES.index(n) for n in (*PROFILE_LOG, *PROFILE_RAW)]
+without_profile = 0
+_profile_lock = threading.Lock()
 
 
 def _log(v: Any) -> float:
@@ -302,6 +309,20 @@ def explain(model: Model, contrib: np.ndarray, row: np.ndarray, pro: int = 3, co
     return f"{MARKER}модель {KIND_TEXT[model.kind]}, обученная на истории закупок (критерии — её входы): {why}"
 
 
+def _check_profile(x: np.ndarray) -> None:
+    """No candidate has a supplier profile → the data predates #114: count it, warn once per process."""
+    global without_profile
+    if not np.isnan(x[:, PROFILE_IDX]).all():
+        return
+    with _profile_lock:
+        without_profile += 1
+        first = without_profile == 1
+    if first:
+        log.warning("ранжировщик: ни у одного кандидата нет профиля поставщика (#114, D-064) — data/processed "
+                    "собран ingest до профиля (релиз data-2026-10-01?): %d признаков пусты, качество ниже (#421); "
+                    "пересоберите: make data PART=raw && uv run python -m src.ingest.build", len(PROFILE_IDX))
+
+
 def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
     """Top-k in the model's order; the product_fit explanation gets the model's reason.
 
@@ -312,6 +333,7 @@ def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float
     if not matches:
         return []
     x = np.asarray(rows, dtype=float)
+    _check_profile(x)
     raw = model.raw(x)
     order = sorted(range(len(matches)), key=lambda i: (-raw[i], matches[i].counterparty.inn or "~"))[:k]
     contrib = model.contrib(x[order])
