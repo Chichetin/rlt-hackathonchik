@@ -25,6 +25,9 @@ Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error h
 discover() failed (no message, no path), `source_unavailable` when a registry request was refused or failed and
 discover() went on with the rest, or `history_unchecked` when the companies were found but could not be checked
 against organizers' data (so none is called «новая»). Absent — the block is what the sources gave.
+The OKPD2 classes «Новые» searched by are the X-Discovery-Class header, ASCII JSON `{"classes": ["17.12"],
+"predicted": true | false}`: `predicted` — the query had no OKPD2 and the class was predicted from its text by
+search() (#394), so the UI says so. Absent — no class, the block was not searched.
 """
 
 from __future__ import annotations
@@ -32,10 +35,8 @@ from __future__ import annotations
 import io
 import json
 import logging
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -51,12 +52,12 @@ from src.api import guard
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.api.ratings import router as ratings_router
+from src.api.reviews import router as reviews_router
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import strip_unverified
-from src.enrich.role import LABEL as ROLE_LABEL
 from src.ingest.okpd2 import label as okpd2_label
 from src.llm.provider import get_provider
 from src.match import pipeline
@@ -64,15 +65,16 @@ from src.match import search as search_mod
 from src.match.filters import entity_of, kind_of, near_of, parse_filters
 from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
 from src.match.store import get_store
+from src.settings import get_settings
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired, card_url
+from src.sources.role import LABEL as ROLE_LABEL
 from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
 
 log = logging.getLogger(__name__)
-if os.environ.get("DEMO_FIXTURE") == "1":
+if get_settings().demo_fixture:
     log.warning("DEMO_FIXTURE=1: synthetic fixture, not the organizers' data")
-ROOT = Path(__file__).resolve().parents[2]
-UI_DIST = Path(os.environ.get("UI_DIST", ROOT / "src" / "ui" / "dist"))
+UI_DIST = get_settings().ui_dist
 # «Роль» of the xlsx: the captions of the role chips (KIND_LABEL in src/ui/src/api.ts), from D-057 (#232)
 KIND_LABEL = {**{k: v.capitalize() for k, v in ROLE_LABEL.items()}, "unknown": "Роль не определена"}
 ENTITY_LABEL = {"ul": "ЮЛ", "ip": "ИП/ФЛ"}  # 12 digits: a sole trader or a natural person (DATA_DICTIONARY)
@@ -109,6 +111,7 @@ app = FastAPI(
 app.add_middleware(UploadLimit)  # 413 on an oversized test export before the body is read (#207)
 app.include_router(testset_router)  # /api/testset: the test export uploaded in the UI (#207), before the SPA route
 app.include_router(ratings_router)  # /api/ratings: customer ratings 1–5★, not in the score (#233)
+app.include_router(reviews_router)  # /api/reviews: 2GIS reviews of one supplier on demand (#234)
 _engine = None
 
 
@@ -121,7 +124,7 @@ def _queue():
 
 def _is_stub() -> bool:
     # DEMO_FIXTURE=1 (scripts/demo.sh without organizers' data) serves the synthetic fixture (D-050).
-    if os.environ.get("DEMO_FIXTURE") == "1":
+    if get_settings().demo_fixture:
         return True
     return bool(getattr(search_mod, "IS_STUB", False) or getattr(enrich_mod, "IS_STUB", False))
 
@@ -253,6 +256,9 @@ def api_search(query: Query, response: Response,
         response.headers["X-Query-Corrected"] = quote(json.dumps(pairs, ensure_ascii=False, separators=(",", ":")))
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
     response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
+    if res.discovery is not None and res.discovery.okpd_classes:  # the class «Новые» searched by (#394)
+        response.headers["X-Discovery-Class"] = json.dumps(
+            {"classes": res.discovery.okpd_classes, "predicted": res.discovery.predicted}, separators=(",", ":"))
     if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
         response.headers["X-Excluded-Lot"] = str(own)
     history = [m for m in matches if m.origin == "history"]
@@ -318,7 +324,7 @@ _LIMITED: dict[int | str, dict[str, Any]] = {
 
 def _answers_from_cache(inn: str) -> bool:
     """True when enrich() needs no network: offline mode, or a fresh pb card in the cache (its first branch)."""
-    return os.environ.get("ENRICH_OFFLINE") == "1" or SourceCache().get(card_url(inn)) is not None
+    return get_settings().enrich_offline or SourceCache().get(card_url(inn)) is not None
 
 
 @app.get("/api/counterparty/{inn}", response_model=Counterparty, dependencies=[Depends(guard.require_api_key)],

@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -29,8 +28,9 @@ import duckdb
 import numpy as np
 import pyarrow as pa
 
+from src.settings import get_settings
+
 log = logging.getLogger(__name__)
-ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = ("manifest.json", "notices.parquet", "participants.parquet", "items.parquet", "suppliers.parquet")
 
 
@@ -108,7 +108,8 @@ texts AS (
 SELECT t, array_agg(DISTINCT lot_id ORDER BY lot_id) FROM texts GROUP BY t ORDER BY t{c}
 """
 
-# Per supplier: best BM25 of its lots, matched lots and wins; the best lot = max (score, date, lot_id).
+# Per supplier: best BM25 of its lots, matched lots and wins; the best lot = max (score, date, lot_id);
+# the date of its latest matched lot (#105, options.activity_by: similar).
 _CANDIDATES = """
 WITH j AS (
     SELECT p.supplier_inn, p.lot_id, p.is_winner, p.publish_date, l.score, l.doc_id
@@ -116,7 +117,7 @@ WITH j AS (
 ),
 agg AS (
     SELECT supplier_inn, max(score) AS bm25, count(DISTINCT lot_id) AS n_lots,
-           count(DISTINCT lot_id) FILTER (WHERE is_winner) AS n_wins
+           count(DISTINCT lot_id) FILTER (WHERE is_winner) AS n_wins, max(publish_date) AS last_similar
     FROM j GROUP BY supplier_inn
     ORDER BY bm25 DESC, n_lots DESC, supplier_inn{c} LIMIT %(limit)s
 ),
@@ -125,7 +126,8 @@ best AS (
     FROM j JOIN agg USING (supplier_inn)
     ORDER BY j.supplier_inn, j.score DESC, j.publish_date DESC NULLS LAST, j.lot_id DESC
 )
-SELECT agg.supplier_inn, agg.bm25, agg.n_lots, agg.n_wins, best.lot_id, best.doc_id, best.publish_date
+SELECT agg.supplier_inn, agg.bm25, agg.n_lots, agg.n_wins, best.lot_id, best.doc_id, best.publish_date,
+       agg.last_similar
 FROM agg JOIN best USING (supplier_inn)
 ORDER BY agg.bm25 DESC, agg.n_lots DESC, agg.supplier_inn{c}
 """
@@ -606,8 +608,7 @@ class PgStore:
 
 def processed_dir() -> Path:
     """DATA_PROCESSED_DIR, default data/processed."""
-    d = Path(os.environ.get("DATA_PROCESSED_DIR") or ROOT / "data/processed")
-    return d if d.is_absolute() else ROOT / d
+    return get_settings().data_processed_dir
 
 
 MANIFEST_TTL_S = 30.0  # a new `make db-load` is seen by search within this time
@@ -621,9 +622,8 @@ def get_store() -> Store:
 
     auto without Postgres falls back to parquet for RETRY_PG_S: a refused connection costs seconds
     (≈ 10 s on Windows), it must not be paid on every request; a later `make db-load` is picked up."""
-    mode = (os.environ.get("DATA_STORE") or "auto").strip().lower()
-    url = os.environ.get("DATABASE_URL") or ""
-    schema = os.environ.get("DATA_SCHEMA") or "data"
+    cfg = get_settings()
+    mode, url, schema = cfg.data_store, cfg.database_url, cfg.data_schema
     key = (mode, url, schema, str(processed_dir()))
     with _lock:
         if key in _stores and _stores[key][1] > time.monotonic():
