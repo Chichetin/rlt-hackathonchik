@@ -84,6 +84,16 @@ def test_gate_refuses_stub_search(repo, monkeypatch):
         F.gate(R.config_sha256(repo), repo, repo / "log.md")
 
 
+def test_gate_refuses_a_tokenizer_override_but_not_an_empty_one(repo, monkeypatch):
+    """BM25_TOKENIZER replaces the tokenizer of configs/search.yaml, so eval-final refuses it. An empty value is
+    «not set» for search() too (src/settings.py), so it no longer blocks the gate (#297)."""
+    monkeypatch.setenv("BM25_TOKENIZER", "snowball")
+    with pytest.raises(PermissionError, match="BM25_TOKENIZER"):
+        F.gate(R.config_sha256(repo), repo, repo / "log.md")
+    monkeypatch.setenv("BM25_TOKENIZER", "")
+    assert F.gate(R.config_sha256(repo), repo, repo / "log.md") == R.config_sha256(repo)
+
+
 def test_gate_passes_frozen_clean_config(repo):
     assert F.gate(R.config_sha256(repo), repo, repo / "log.md") == R.config_sha256(repo)
 
@@ -218,3 +228,48 @@ def test_the_cutoff_reader_is_in_the_hashed_method_code():
     rel = Path(sc.__file__).resolve().relative_to(R.ROOT).as_posix()
     assert any(rel == p or rel.startswith(p + "/") for p in R.METHOD_PATHS), rel
     assert split_config is sc.split_config  # the eval tools read the very same function
+
+
+def test_tokenizer_override_changes_the_signature(repo, monkeypatch):
+    """#440: BM25_TOKENIZER changes the method, so it changes the signature; without it the hash is as before."""
+    monkeypatch.delenv("BM25_TOKENIZER", raising=False)
+    plain = R.config_sha256(repo)
+    monkeypatch.setenv("BM25_TOKENIZER", "snowball")
+    snowball = R.config_sha256(repo)
+    monkeypatch.setenv("BM25_TOKENIZER", "prefix5")
+    assert len({plain, snowball, R.config_sha256(repo)}) == 3
+    monkeypatch.delenv("BM25_TOKENIZER")
+    assert R.config_sha256(repo) == plain
+
+
+def test_every_module_the_evaluation_imports_is_in_the_hashed_method_code():
+    """A module the backtest runs but the eval-final hash does not cover lets a changed method pass the gate under
+    the old sha (#448: src/settings.py and src/regions.py were outside). Walk the import graph from src.eval.run —
+    all imports, lazy ones too (scripts/check_layers.py) — and require every reached file under METHOD_PATHS."""
+    import importlib.util
+    import sys
+
+    name = "check_layers_for_seal"
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / "check_layers.py")
+    assert spec and spec.loader
+    layers = importlib.util.module_from_spec(spec)
+    sys.modules[name] = layers  # @dataclass looks its module up here
+    try:
+        spec.loader.exec_module(layers)
+        modules = layers.find_modules(ROOT)
+        graph: dict[str, set[str]] = {}
+        for e in layers.collect_edges(ROOT, modules):
+            graph.setdefault(e.src, set()).add(e.dst)
+    finally:
+        del sys.modules[name]
+    reached, todo = set(), ["src.eval.run", "src.eval.final"]  # make eval and make eval-final
+    while todo:
+        m = todo.pop()
+        if m not in reached:
+            reached.add(m)
+            todo.extend(graph.get(m, ()))
+    files = {modules[m].relative_to(ROOT).as_posix() for m in reached}
+    outside = sorted(f for f in files if f != "src/__init__.py"
+                     and not any(f == p or f.startswith(p + "/") for p in R.METHOD_PATHS))
+    assert not outside, f"eval импортирует код вне METHOD_PATHS: {outside}"
+    assert {"src/settings.py", "src/regions.py", "src/match/search.py"} <= files  # the walk really went through

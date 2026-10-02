@@ -18,19 +18,19 @@ Requests are paced (MIN_INTERVAL_S between any two requests to the host, src/sou
 from __future__ import annotations
 
 import json
-import os
 import time
 from typing import Any
 
 import httpx
 
+from src.settings import get_settings
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.pacing import HostPacer
 
 BASE = "https://pb.nalog.ru"
 SOURCE = "ФНС «Прозрачный бизнес»"
 UA = "Mozilla/5.0 (compatible; RLTHack-Enrich/0.1; hackathon, cached, paced)"
-MIN_INTERVAL_S = float(os.environ.get("PB_MIN_INTERVAL_S", "1.0"))
+MIN_INTERVAL_S = get_settings().pb_min_interval_s
 TIMEOUT_S = 20.0
 POLL_TRIES = 5
 BLOCK_COOLDOWN_S = 900.0
@@ -49,7 +49,7 @@ class NotFound(KeyError):
 
 def blocked() -> bool:
     """True after a captcha demand (or PB_DISABLED=1): no request goes to the host — every one extends the block."""
-    return os.environ.get("PB_DISABLED") == "1" or PACER.blocked()
+    return get_settings().pb_disabled or PACER.blocked()
 
 
 def _captcha(msg: str) -> CaptchaRequired:

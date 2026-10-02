@@ -23,7 +23,7 @@ test("результаты и запрос сохраняются при пер�
   await page.goto("/search");
   await page.getByLabel("Что нужно закупить").fill("Бумага офисная А4");
   await page.getByRole("button", { name: "Найти поставщиков", exact: true }).click();
-  await expect(page).toHaveURL(/\/results$/);
+  await expect(page).toHaveURL(/\/results(\?.*)?$/);
   const first = page.locator(".results .item .name").first();
   await expect(first).toBeVisible();
   const name = await first.innerText();

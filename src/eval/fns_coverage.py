@@ -1,7 +1,12 @@
-"""FNS status coverage of the top-10 (#147): how many shown candidates have a checked legal status.
+"""Enrichment coverage of the top-10 (#147, #396): status, name, role with basis, fact with its fetch date per shown candidate.
 
     uv run python -m src.eval.fns_coverage --exp C-fns-v1            # cache only, no network
     uv run python -m src.eval.fns_coverage --exp C-fns-v1 --enqueue  # + queue the unchecked INNs (worker, paced)
+    SOURCE_CACHE=<copy>.sqlite ENRICH_OFFLINE=1 DISCOVERY_OFFLINE=1 \\
+        uv run python -m src.eval.fns_coverage --exp C-fns-v2 --lots 5903085,5875992,6050858  # reproducible offline
+
+Coverage is a property of the source cache: measure a frozen copy (SOURCE_CACHE), without --warm-top.
+`--warm-top N` first enriches the unchecked INNs of the top-N over the network (paced) and so CHANGES the cache.
 
 Liveness is the FNS card status from the cache only (D-059): no card -> status None, the candidate is kept and
 shown as «не проверено» (src/match/filters.py). Queries: the real cases `eval/cases/real.jsonl` + the e2e demo
@@ -16,6 +21,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from collections import Counter
 from datetime import UTC, datetime
 
 from src.contracts import CounterpartyMatch, Query
@@ -54,6 +60,11 @@ def _has_dated_fact(m: CounterpartyMatch) -> bool:
     return any(e.fetched_at is not None and not e.url.startswith("data:") for e in m.counterparty.evidence)
 
 
+def _name_source(m: CounterpartyMatch) -> str | None:
+    """Source of the `name` fact (Evidence.source), None when the name is the «ИНН …» placeholder."""
+    return next((e.source for e in m.counterparty.evidence if e.field == "name"), None)
+
+
 def count(rows: list[CounterpartyMatch]) -> dict:
     """Checked / active / unchecked among the rows (+ named, role with basis, dated fact); unchecked INNs listed."""
     checked = [m for m in rows if m.counterparty.status]
@@ -62,6 +73,8 @@ def count(rows: list[CounterpartyMatch]) -> dict:
     return {"n": len(rows), "checked": len(checked), "active": len(active), "unchecked": len(unchecked),
             "named": sum(_has_name(m) for m in rows), "role_basis": sum(_has_role_basis(m) for m in rows),
             "dated": sum(_has_dated_fact(m) for m in rows),
+            "roles": dict(Counter(m.counterparty.kind or "none" for m in rows)),
+            "name_sources": dict(Counter(_name_source(m) or "none" for m in rows)),
             "unchecked_inn": [i for i in unchecked if i]}
 
 
@@ -85,7 +98,7 @@ def measure(top: int = 10, lots: list[str] | None = None) -> dict:
     from src.match import pipeline
 
     per_query: list[dict] = []
-    totals = {b: {"n": 0, "unchecked": 0, **{k: 0 for k in FIELDS}} for b in BLOCKS}
+    totals: dict = {b: {"n": 0, "unchecked": 0, **{k: 0 for k in FIELDS}} for b in BLOCKS}
     for q in queries(lots):
         res = pipeline.pick(q, offline=True)
         row: dict = {"query_id": q.query_id}
@@ -95,6 +108,12 @@ def measure(top: int = 10, lots: list[str] | None = None) -> dict:
             for k in totals[block]:
                 totals[block][k] += c[k]
         per_query.append(row)
+    for b in BLOCKS:
+        for key in ("roles", "name_sources"):
+            c: Counter = Counter()
+            for row in per_query:
+                c.update(row[b][key])
+            totals[b][key] = dict(c)
     summary: dict = {b: {**t, **{f"{k}_share": share(t[k], t["n"]) for k in FIELDS}} for b, t in totals.items()}
     n = sum(t["n"] for t in totals.values())
     total: dict = {"n": n}
@@ -126,12 +145,13 @@ def warm(body: dict, pause_s: float) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="покрытие статуса ФНС в топ-10 (#147)")
+    ap = argparse.ArgumentParser(description="покрытие обогащения в топ-10 (#147, #396): статус, название, роль с основанием, дата факта; "
+                                 "для воспроизведения — офлайн по копии кеша (SOURCE_CACHE), без --warm-top")
     ap.add_argument("--exp", required=True, help="id результата, например C-fns-v1")
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--enqueue", action="store_true", help="поставить непроверенные ИНН в очередь обогащения")
     ap.add_argument("--lots", default="", help="номера закупок через запятую (демо-лоты): ещё запросы к 8 реальным")
-    ap.add_argument("--warm-top", type=int, default=0, help="сначала обогатить непроверенные из топ-N (с паузами)")
+    ap.add_argument("--warm-top", type=int, default=0, help="сначала обогатить непроверенные из топ-N по сети (с паузами): МЕНЯЕТ кеш; 0 — не обогащать")
     ap.add_argument("--pause", type=float, default=1.0, help="секунд между живыми вызовами источников при --warm-top")
     args = ap.parse_args(argv)
     lots = [x.strip() for x in args.lots.split(",") if x.strip()]
@@ -140,14 +160,15 @@ def main(argv: list[str] | None = None) -> int:
     if warmed:
         body["warm"] = {"top": args.warm_top, **warmed}
     rec = {"exp_id": args.exp, "kind": "fns_coverage", "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-           "commit": git("rev-parse", "HEAD"), "cache": cache_info(), **body}
+           "commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")), "cache": cache_info(), **body}
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     for b, name in BLOCKS.items():
         s = body["summary"][b]
         print(f"{name}: статус {s['checked']}/{s['n']} ({s['checked_share']}), действующих {s['active']}, "
-              f"название {s['named']}, роль с основанием {s['role_basis']}, дата факта {s['dated']}")
+              f"название {s['named']}, роль с основанием {s['role_basis']}, дата получения факта {s['dated']}, "
+              f"роли {s['roles']}, источники названий {s['name_sources']}")
     if args.enqueue:
         print(f"в очередь обогащения: {enqueue_unchecked(body)} ИНН")
     print(f"→ {out}")
