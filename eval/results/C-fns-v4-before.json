@@ -1,0 +1,507 @@
+{
+  "exp_id": "C-fns-v4-before",
+  "kind": "fns_coverage",
+  "created_at": "2026-10-02T13:13:33+00:00",
+  "commit": "3ee8298f740e0f4ee44ba6e5e02e91f0faa3ff3b",
+  "dirty": false,
+  "cache": {
+    "path": "/tmp/claude-1000/-home-ir6-my-rlt-hackathonchik/36fb95ce-96f7-4bfe-9e6e-0d720c7c5058/scratchpad/before.sqlite",
+    "pages": 1306
+  },
+  "top": 10,
+  "n_queries": 9,
+  "summary": {
+    "history": {
+      "n": 90,
+      "unchecked": 33,
+      "checked": 57,
+      "active": 57,
+      "named": 90,
+      "role_basis": 57,
+      "dated": 90,
+      "roles": {
+        "distributor": 44,
+        "dealer": 10,
+        "unknown": 33,
+        "manufacturer": 3
+      },
+      "name_sources": {
+        "ФНС: единый реестр субъектов МСП": 73,
+        "ФНС «Прозрачный бизнес»": 4,
+        "ФНС: ГИР БО (бухгалтерская отчётность)": 13
+      },
+      "checked_share": 0.6333,
+      "active_share": 0.6333,
+      "named_share": 1.0,
+      "role_basis_share": 0.6333,
+      "dated_share": 1.0
+    },
+    "discovered": {
+      "n": 59,
+      "unchecked": 57,
+      "checked": 2,
+      "active": 2,
+      "named": 59,
+      "role_basis": 43,
+      "dated": 59,
+      "roles": {
+        "manufacturer": 25,
+        "distributor": 25,
+        "unknown": 9
+      },
+      "name_sources": {
+        "ФНС: единый реестр субъектов МСП": 52,
+        "Минпромторг: реестр российской промышленной продукции (ГИСП)": 7
+      },
+      "checked_share": 0.0339,
+      "active_share": 0.0339,
+      "named_share": 1.0,
+      "role_basis_share": 0.7288,
+      "dated_share": 1.0
+    },
+    "all": {
+      "n": 149,
+      "checked": 59,
+      "checked_share": 0.396,
+      "active": 59,
+      "active_share": 0.396,
+      "named": 149,
+      "named_share": 1.0,
+      "role_basis": 100,
+      "role_basis_share": 0.6711,
+      "dated": 149,
+      "dated_share": 1.0
+    }
+  },
+  "per_query": [
+    {
+      "query_id": "demo-e2e",
+      "history": {
+        "n": 10,
+        "checked": 6,
+        "active": 6,
+        "unchecked": 4,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "roles": {
+          "distributor": 7,
+          "dealer": 3
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 8,
+          "ФНС «Прозрачный бизнес»": 2
+        },
+        "unchecked_inn": [
+          "4703044961",
+          "471504580206",
+          "471700135593",
+          "7820070223"
+        ]
+      },
+      "discovered": {
+        "n": 10,
+        "checked": 1,
+        "active": 1,
+        "unchecked": 9,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "roles": {
+          "manufacturer": 5,
+          "distributor": 5
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 10
+        },
+        "unchecked_inn": [
+          "6679148914",
+          "7802471014",
+          "7802955424",
+          "7806136264",
+          "7806542555",
+          "4703165420",
+          "5074086925",
+          "6165244610",
+          "7801248119"
+        ]
+      }
+    },
+    {
+      "query_id": "lot-5761234",
+      "history": {
+        "n": 10,
+        "checked": 9,
+        "active": 9,
+        "unchecked": 1,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "roles": {
+          "distributor": 10
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 9,
+          "ФНС: ГИР БО (бухгалтерская отчётность)": 1
+        },
+        "unchecked_inn": [
+          "6165103256"
+        ]
+      },
+      "discovered": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 8,
+        "dated": 10,
+        "roles": {
+          "manufacturer": 5,
+          "distributor": 5
+        },
+        "name_sources": {
+          "Минпромторг: реестр российской промышленной продукции (ГИСП)": 2,
+          "ФНС: единый реестр субъектов МСП": 8
+        },
+        "unchecked_inn": [
+          "7801486628",
+          "7804699568",
+          "5003127396",
+          "5445265272",
+          "7604319970",
+          "4703117627",
+          "5258111473",
+          "6025039466",
+          "4703093006",
+          "4703147759"
+        ]
+      }
+    },
+    {
+      "query_id": "lot-5779719",
+      "history": {
+        "n": 10,
+        "checked": 7,
+        "active": 7,
+        "unchecked": 3,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "roles": {
+          "distributor": 8,
+          "dealer": 2
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 10
+        },
+        "unchecked_inn": [
+          "780700972749",
+          "780443398976",
+          "7842184231"
+        ]
+      },
+      "discovered": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 5,
+        "dated": 10,
+        "roles": {
+          "manufacturer": 5,
+          "distributor": 5
+        },
+        "name_sources": {
+          "Минпромторг: реестр российской промышленной продукции (ГИСП)": 5,
+          "ФНС: единый реестр субъектов МСП": 5
+        },
+        "unchecked_inn": [
+          "7805459008",
+          "7806078710",
+          "7810681706",
+          "7811075176",
+          "7826741774",
+          "2537070574",
+          "2901234505",
+          "3123379137",
+          "4700001039",
+          "4706067406"
+        ]
+      }
+    },
+    {
+      "query_id": "lot-5786484",
+      "history": {
+        "n": 10,
+        "checked": 1,
+        "active": 1,
+        "unchecked": 9,
+        "named": 10,
+        "role_basis": 0,
+        "dated": 10,
+        "roles": {
+          "unknown": 10
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 9,
+          "ФНС «Прозрачный бизнес»": 1
+        },
+        "unchecked_inn": [
+          "470901054448",
+          "054606381441",
+          "470315299245",
+          "471909491522",
+          "530401077109",
+          "780716816209",
+          "471911136677",
+          "890104290688",
+          "780722097552"
+        ]
+      },
+      "discovered": {
+        "n": 9,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 9,
+        "named": 9,
+        "role_basis": 0,
+        "dated": 9,
+        "roles": {
+          "unknown": 9
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 9
+        },
+        "unchecked_inn": [
+          "4217178540",
+          "4703054046",
+          "4701000052",
+          "4702004660",
+          "4703008963",
+          "4703050482",
+          "4703063280",
+          "4703066122",
+          "4703074677"
+        ]
+      }
+    },
+    {
+      "query_id": "lot-5798959",
+      "history": {
+        "n": 10,
+        "checked": 8,
+        "active": 8,
+        "unchecked": 2,
+        "named": 10,
+        "role_basis": 0,
+        "dated": 10,
+        "roles": {
+          "unknown": 10
+        },
+        "name_sources": {
+          "ФНС: ГИР БО (бухгалтерская отчётность)": 1,
+          "ФНС: единый реестр субъектов МСП": 9
+        },
+        "unchecked_inn": [
+          "782700410398",
+          "7841346465"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "roles": {},
+        "name_sources": {},
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5802116",
+      "history": {
+        "n": 10,
+        "checked": 3,
+        "active": 3,
+        "unchecked": 7,
+        "named": 10,
+        "role_basis": 8,
+        "dated": 10,
+        "roles": {
+          "distributor": 5,
+          "dealer": 3,
+          "unknown": 2
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 10
+        },
+        "unchecked_inn": [
+          "780622594367",
+          "780435345748",
+          "781901739462",
+          "781303506542",
+          "780725317936",
+          "601701699402",
+          "781800055723"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "roles": {},
+        "name_sources": {},
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5804197",
+      "history": {
+        "n": 10,
+        "checked": 9,
+        "active": 9,
+        "unchecked": 1,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "roles": {
+          "distributor": 9,
+          "dealer": 1
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 8,
+          "ФНС: ГИР БО (бухгалтерская отчётность)": 2
+        },
+        "unchecked_inn": [
+          "784806800176"
+        ]
+      },
+      "discovered": {
+        "n": 10,
+        "checked": 1,
+        "active": 1,
+        "unchecked": 9,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "roles": {
+          "manufacturer": 5,
+          "distributor": 5
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 10
+        },
+        "unchecked_inn": [
+          "7709968323",
+          "7801088899",
+          "7801111900",
+          "7801170102",
+          "7801422769",
+          "4703179292",
+          "4705089397",
+          "4725011920",
+          "5902043763"
+        ]
+      }
+    },
+    {
+      "query_id": "lot-5809419",
+      "history": {
+        "n": 10,
+        "checked": 4,
+        "active": 4,
+        "unchecked": 6,
+        "named": 10,
+        "role_basis": 9,
+        "dated": 10,
+        "roles": {
+          "distributor": 5,
+          "manufacturer": 3,
+          "unknown": 1,
+          "dealer": 1
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 9,
+          "ФНС «Прозрачный бизнес»": 1
+        },
+        "unchecked_inn": [
+          "030802079276",
+          "781393985551",
+          "511201370324",
+          "590420542141",
+          "330406868701",
+          "6000002440"
+        ]
+      },
+      "discovered": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "roles": {
+          "manufacturer": 5,
+          "distributor": 5
+        },
+        "name_sources": {
+          "ФНС: единый реестр субъектов МСП": 10
+        },
+        "unchecked_inn": [
+          "4703175570",
+          "4703181277",
+          "6027180577",
+          "6671018222",
+          "7801122282",
+          "6027048177",
+          "7801095504",
+          "7801290390",
+          "7801291636",
+          "7801297902"
+        ]
+      }
+    },
+    {
+      "query_id": "lot-5860547",
+      "history": {
+        "n": 10,
+        "checked": 10,
+        "active": 10,
+        "unchecked": 0,
+        "named": 10,
+        "role_basis": 0,
+        "dated": 10,
+        "roles": {
+          "unknown": 10
+        },
+        "name_sources": {
+          "ФНС: ГИР БО (бухгалтерская отчётность)": 9,
+          "ФНС: единый реестр субъектов МСП": 1
+        },
+        "unchecked_inn": []
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "roles": {},
+        "name_sources": {},
+        "unchecked_inn": []
+      }
+    }
+  ]
+}
