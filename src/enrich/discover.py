@@ -50,8 +50,9 @@ from src.enrich.evidence import check_counterparty, strip_unverified, value_in_p
 from src.ingest.load import suppliers_path
 from src.match import new_fit
 from src.match import search as search_mod
-from src.match.filters import REGION_CODE, apply_filters, apply_legal
+from src.match.filters import apply_filters, apply_legal
 from src.match.index import processed_dir
+from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_NAME
 from src.sources import pb_nalog, rmsp, role, web_leads
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
@@ -65,9 +66,6 @@ MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
 FIT = {"class": 1.0, "wholesale": 0.6}  # product_fit of a discovered company (D-036)
-NEIGHBOUR = {"78": "47", "47": "78"}
-NEIGHBOUR_VALUE = 0.8  # as in src/match/search.py
-REGION_NAME = {v: k for k, v in REGION_CODE.items()}
 COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geography", "price")
 
 # OKPD2 prefix (longest wins) → OKVED2 wholesale codes for these goods, the main one first. A hand-made
