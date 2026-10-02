@@ -40,6 +40,8 @@ from src.sources.pacing import HostPacer, NoTimeLeft
 
 BASE = "https://rmsp.nalog.ru"
 SOURCE = "ФНС: единый реестр субъектов МСП"
+# the registry's category codes (the card, the dump, the open data): enrich, discover and msp_dump read it here (#294)
+MSP_CATEGORY = {"1": "микропредприятие", "2": "малое предприятие", "3": "среднее предприятие"}
 UA = "Mozilla/5.0 (compatible; RLTHack-Discovery/0.1; hackathon, cached, paced)"
 MIN_INTERVAL_S = float(os.environ.get("RMSP_MIN_INTERVAL_S", "1.0"))
 TIMEOUT_S = float(os.environ.get("RMSP_TIMEOUT_S", "3.0"))

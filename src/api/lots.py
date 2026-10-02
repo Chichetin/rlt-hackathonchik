@@ -21,6 +21,7 @@ from pathlib import Path
 import duckdb
 
 from src.contracts import Query
+from src.ingest.notice import notice_query
 from src.match.store import StoreUnavailable, get_store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,12 +40,6 @@ class LotNotFound(KeyError):
 def _dir(env: str, default: str) -> Path:
     d = Path(os.environ.get(env, ROOT / default))
     return d if d.is_absolute() else ROOT / d
-
-
-def _is_template(subject: str | None) -> bool:
-    # DATA_DICTIONARY: in АИС ГЗ subject is sometimes «Закупка … частью 12 статьи 93» instead of the item
-    s = (subject or "").lower()
-    return not s.strip() or ("закупка" in s and "статьи 93" in s)
 
 
 def _test_lot(ident: str) -> Query | None:
@@ -95,28 +90,4 @@ def find_lot(ident: str) -> Query:
         raise LotDataUnavailable(f"не удалось прочитать данные: {e}") from e
     if row is None:
         raise LotNotFound(ident)
-    return _query(*row, okpd2=okpd2, names=names)
-
-
-def _query(lot_id, subject, procedure_name, price, customer_inn, channel, *, okpd2: list[str],
-           names: list[str] | None = None) -> Query:
-    # subject, else procedure_name, else the lot's position names (both are «ч. 12 ст. 93» templates in ~840 lots)
-    if _is_template(subject):
-        if not _is_template(procedure_name):
-            subject = procedure_name
-        elif names:
-            subject = "; ".join(names)
-        elif procedure_name and str(procedure_name).strip():
-            subject = procedure_name
-    try:
-        budget = float(price) if price not in (None, "") else None
-    except ValueError:
-        budget = None
-    return Query(
-        query_id=f"lot-{lot_id}",
-        text=(subject or "").strip() or f"Закупка {lot_id}",
-        okpd2=okpd2,
-        budget=budget,
-        customer_inn=customer_inn or None,
-        channel=channel if channel in ("ЭМ", "АИС ГЗ") else None,  # type: ignore[arg-type]
-    )
+    return notice_query(*row, okpd2=okpd2, names=names)

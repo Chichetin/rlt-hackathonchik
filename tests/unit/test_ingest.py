@@ -8,9 +8,10 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from src.contracts import Counterparty
 from src.enrich.evidence import check_counterparty, strip_unverified
 from src.ingest.build import build
-from src.ingest.load import counterparties, suppliers_path
+from src.ingest.load import from_rows, suppliers_path
 from src.match.store import ParquetStore
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ingest"
@@ -23,6 +24,11 @@ def processed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("processed")
     build(FIXTURE, out, as_of=None, cutoff=CUTOFF)
     return out
+
+
+def counterparties(inns: list[str], as_of: date | None = None, *, store: ParquetStore) -> dict[str, Counterparty]:
+    """Counterparty per INN of the history before as_of — as search() builds them (store rows -> from_rows)."""
+    return from_rows(store.supplier_rows(inns, as_of), store.built_at())
 
 
 def _rows(path: Path, sql: str) -> list[tuple]:

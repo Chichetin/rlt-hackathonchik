@@ -304,3 +304,23 @@ def test_open_data_is_not_added_twice_to_a_card_that_has_it(built, monkeypatch):
     keys = [(e.url, e.field, e.value) for e in got]
     assert any(e.field == "employees" for e in got)
     assert len(keys) == len(set(keys))
+
+
+def test_lookup_command_prints_facts_with_a_passed_check(built, monkeypatch, capsys):
+    """`python -m src.enrich.fns_lookup <inn>` (#294: moved out of the source with its evidence check)."""
+    from src.enrich import fns_lookup
+
+    out, _, cache = built
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(out))
+    monkeypatch.setenv("SOURCE_CACHE", str(cache.path))
+    assert fns_lookup.main([BRASS]) == 0
+    printed = capsys.readouterr().out
+    assert printed.count("проверка: OK") == len(F.lookup(BRASS, cache, parquet=out)) > 0
+    assert "проверка: [" not in printed
+    # «OK» is the check's verdict, not a label: a fact whose value is not on its page is reported with the errors
+    good = F.lookup(BRASS, cache, parquet=out)[0]
+    monkeypatch.setattr(fns_lookup, "lookup", lambda inn, c: [good.model_copy(update={"value": "999999999"})])
+    assert fns_lookup.main([BRASS]) == 0
+    assert "проверка: [" in capsys.readouterr().out
+    assert F.main(["lookup", BRASS]) == 2  # the old command names the new one
+    assert "src.enrich.fns_lookup" in capsys.readouterr().err

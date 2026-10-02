@@ -79,7 +79,7 @@ def test_import_idempotent_and_scored(env):
     assert len(rows) == 2 and {r["labeled_by"] for r in rows} == {"llm:m"}
     assert ln.resolve(rows)[("q1", "ООО Б")] == (0, ln.LLM)
     assert ln.resolve(rows)[("q1", "7701000001")] == (1, ln.LLM)
-    assert ln.precision_body(rows)["labeled"] == 0  # not trusted yet: < 20 pairs
+    assert ln.precision_body(rows)["labeled"] == 0  # LLM labels are ignored by default (D-133)
 
 
 def test_human_rows_untouched(env):
