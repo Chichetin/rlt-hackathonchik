@@ -3,9 +3,10 @@
     DATABASE_URL=postgresql://app:app@127.0.0.1:5432/app uv run python -m src.db.load   # make db-load
 
 Tables of data/processed are copied as is into schema `data_new`, indexed for the server-side
-filters and pagination (D-024), row counts are checked against the parquet files, then one
-transaction replaces schema `data` with `data_new`. A rerun is idempotent and readers never see a
-half-loaded schema. Nothing outside `data` may reference it: the swap drops it with CASCADE.
+filters and pagination (D-024) and extended with `supplier_items` derived from them (D-135, the read path of
+`class_history`); row counts are checked against the parquet files, then one transaction replaces schema `data`
+with `data_new`. A rerun is idempotent and readers never see a half-loaded schema. Nothing outside `data` may
+reference it: the swap drops it with CASCADE.
 """
 
 from __future__ import annotations
@@ -36,7 +37,19 @@ INDEXES = [
     ("participants_supplier_inn", "participants", "(supplier_inn, publish_date)"),
     ("participants_customer_inn", "participants", "(customer_inn)"),
     ("suppliers_inn", "suppliers", "(inn)"),
+    ("supplier_items_inn", "supplier_items", "(supplier_inn, lot_id)"),
 ]
+
+# (supplier, lot, OKPD2 code) of every participation, physically ordered by supplier: PgStore.class_history reads the
+# candidates' own rows instead of joining each of their lots to `items` (D-135). A lot with several positions of one
+# code is one row, so the class counts stay per lot.
+SUPPLIER_ITEMS = """
+CREATE TABLE {new}.supplier_items AS
+SELECT DISTINCT p.supplier_inn, p.lot_id, p.publish_date, p.is_winner,
+       i.okpd2_code, i.okpd2_l6, i.okpd2_l4, i.okpd2_l2
+FROM {new}.participants p JOIN {new}.items i USING (lot_id)
+ORDER BY p.supplier_inn, p.lot_id, i.okpd2_code
+"""
 
 
 def pg_dsn(url: str) -> str:
@@ -85,6 +98,7 @@ def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
         log.info("%s: %d строк", name, got)
 
     pg(f"ALTER TABLE {new}.notices ADD CONSTRAINT notices_pkey PRIMARY KEY (lot_id)")
+    pg(SUPPLIER_ITEMS.format(new=new))
     for idx, table, cols in INDEXES:
         pg(f"CREATE INDEX {idx} ON {new}.{table} {cols}")
     for name in tables:
@@ -92,7 +106,7 @@ def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
             pg(f"CREATE INDEX {name}_inn ON {new}.{name} (inn)")
     pg(f"CREATE TABLE {new}.manifest (built_at timestamptz, body jsonb)")
     pg(f"INSERT INTO {new}.manifest VALUES ({_lit(manifest['built_at'])}, {_lit(json.dumps(manifest))})")
-    for name in tables:
+    for name in (*tables, "supplier_items"):
         pg(f"ANALYZE {new}.{name}")  # statistics survive the rename
     # DROP and RENAME run in one transaction (DuckDB's on the attached database): readers see the old or the new schema.
     pg(f"DROP SCHEMA IF EXISTS {schema} CASCADE; ALTER SCHEMA {new} RENAME TO {schema}")

@@ -1,9 +1,9 @@
 """Lot lookup: notice number (lot_id or reqnum) -> Query built from organizers' data.
 
-Reads the Postgres store when search uses it (src/match/store.py, schema `data`), else ingest parquet
-(data/processed/notices.parquet + items.parquet) when present, else `Извещения*.csv`
-(and `ТРУ*.csv` for OKPD2) from DATA_RAW_DIR (default data/raw), `;`-separated (research/DATA_DICTIONARY.md).
-Data absent -> LotDataUnavailable (API answers 503, the UI falls back
+Reads the store search() reads (src/match/store.py): Postgres schema `data` or ingest parquet — one SQL for
+both (#293: no second copy of the lookup on raw CSV — `make demo` builds the ingest, `make up` reads Postgres
+loaded from it by `make db-load`; without them search answers 503 as well).
+Data absent -> LotDataUnavailable (API answers 503 with the command that builds it, the UI falls back
 to free text); lot absent -> LotNotFound (404). Nothing is invented.
 
 Lookup order: the test export uploaded in the UI (#207, src/api/testset.py) -> TEST_DATA_DIR (#121): a
@@ -21,6 +21,7 @@ from pathlib import Path
 import duckdb
 
 from src.contracts import Query
+from src.ingest.notice import notice_query
 from src.match.store import StoreUnavailable, get_store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,32 +40,6 @@ class LotNotFound(KeyError):
 def _dir(env: str, default: str) -> Path:
     d = Path(os.environ.get(env, ROOT / default))
     return d if d.is_absolute() else ROOT / d
-
-
-def _lit(path: Path) -> str:
-    return "'" + path.as_posix().replace("'", "''") + "'"
-
-
-def _sources() -> tuple[str, str | None]:
-    """SQL table expressions for notices and items: ingest parquet if both exist, else raw CSV."""
-    proc = _dir("DATA_PROCESSED_DIR", "data/processed")
-    n_pq, i_pq = proc / "notices.parquet", proc / "items.parquet"
-    if n_pq.exists() and i_pq.exists():
-        return f"read_parquet({_lit(n_pq)})", f"read_parquet({_lit(i_pq)})"
-    raw = _dir("DATA_RAW_DIR", "data/raw")
-    notices = sorted(raw.glob("Извещения*.csv"))
-    if not notices:
-        raise LotDataUnavailable("данные организаторов не подключены (нет parquet и Извещения*.csv в data/raw)")
-    # all_varchar: reqnum has leading zeros, ids are compared as text
-    csv = "read_csv({}, delim=';', header=true, all_varchar=true)"
-    tru = sorted(raw.glob("ТРУ*.csv"))
-    return csv.format(_lit(notices[0])), (csv.format(_lit(tru[0])) if tru else None)
-
-
-def _is_template(subject: str | None) -> bool:
-    # DATA_DICTIONARY: in АИС ГЗ subject is sometimes «Закупка … частью 12 статьи 93» instead of the item
-    s = (subject or "").lower()
-    return not s.strip() or ("закупка" in s and "статьи 93" in s)
 
 
 def _test_lot(ident: str) -> Query | None:
@@ -106,77 +81,13 @@ def find_lot(ident: str) -> Query:
             return test
     try:
         store = get_store()
-    except StoreUnavailable as e:  # DATA_STORE=postgres and the schema is not loaded
+        row = store.lot(ident)
+        okpd2 = store.lot_okpd2(row[0]) if row else []
+        names = store.lot_names(row[0]) if row else []
+    except StoreUnavailable as e:  # not loaded (the message names the command), or the database went down
         raise LotDataUnavailable(str(e)) from e
-    if store.name == "postgres":
-        try:
-            row = store.lot(ident)
-            okpd2 = store.lot_okpd2(row[0]) if row else []
-            names = store.lot_names(row[0]) if row else []
-        except StoreUnavailable as e:  # the database went down after it was chosen
-            raise LotDataUnavailable(str(e)) from e
-        if row is None:
-            raise LotNotFound(ident)
-        return _query(*row, okpd2=okpd2, names=names)
-    n_src, i_src = _sources()
-    con = duckdb.connect(":memory:")
-    try:
-        cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {n_src}").fetchall()}
-        chan = "channel" if "channel" in cols else "is_eshop_or_aisgz"
-        pname = "procedure_name" if "procedure_name" in cols else "NULL"
-        row = con.execute(
-            f"SELECT CAST(lot_id AS VARCHAR), subject, {pname}, start_price, customer_inn, {chan} "
-            f"FROM {n_src} WHERE CAST(lot_id AS VARCHAR) = ? OR CAST(reqnum AS VARCHAR) = ? LIMIT 1",
-            [ident, ident],
-        ).fetchone()
-        if row is None:
-            raise LotNotFound(ident)
-        lot_id, subject, procedure_name, price, customer_inn, channel = row
-        okpd2: list[str] = []
-        names: list[str] = []
-        if i_src:
-            okpd2 = [
-                r[0]
-                for r in con.execute(
-                    f"SELECT DISTINCT okpd2_code FROM {i_src} "
-                    f"WHERE CAST(lot_id AS VARCHAR) = ? AND okpd2_code IS NOT NULL AND okpd2_code <> '' ORDER BY 1",
-                    [lot_id],
-                ).fetchall()
-            ]
-            names = [
-                r[0]
-                for r in con.execute(
-                    f"SELECT product_name FROM {i_src} WHERE CAST(lot_id AS VARCHAR) = ? AND product_name IS NOT NULL "
-                    "AND trim(product_name) <> '' GROUP BY 1 ORDER BY 1 LIMIT 5",
-                    [lot_id],
-                ).fetchall()
-            ]
-    except duckdb.Error as e:
+    except duckdb.Error as e:  # a broken parquet: 503, not a crash
         raise LotDataUnavailable(f"не удалось прочитать данные: {e}") from e
-    finally:
-        con.close()
-    return _query(lot_id, subject, procedure_name, price, customer_inn, channel, okpd2=okpd2, names=names)
-
-
-def _query(lot_id, subject, procedure_name, price, customer_inn, channel, *, okpd2: list[str],
-           names: list[str] | None = None) -> Query:
-    # subject, else procedure_name, else the lot's position names (both are «ч. 12 ст. 93» templates in ~840 lots)
-    if _is_template(subject):
-        if not _is_template(procedure_name):
-            subject = procedure_name
-        elif names:
-            subject = "; ".join(names)
-        elif procedure_name and str(procedure_name).strip():
-            subject = procedure_name
-    try:
-        budget = float(price) if price not in (None, "") else None
-    except ValueError:
-        budget = None
-    return Query(
-        query_id=f"lot-{lot_id}",
-        text=(subject or "").strip() or f"Закупка {lot_id}",
-        okpd2=okpd2,
-        budget=budget,
-        customer_inn=customer_inn or None,
-        channel=channel if channel in ("ЭМ", "АИС ГЗ") else None,  # type: ignore[arg-type]
-    )
+    if row is None:
+        raise LotNotFound(ident)
+    return notice_query(*row, okpd2=okpd2, names=names)

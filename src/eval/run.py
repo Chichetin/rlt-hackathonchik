@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from src.contracts import Query
-from src.eval import baselines
+from src.eval import baselines, corrupt
 from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import pipeline
@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 # Baselines (T-08): experiment id -> method and its parameters; configs/search.yaml stays the product method.
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
+SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 # Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
 SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
@@ -90,14 +91,19 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
     return query
 
 
-def _rank_search(query: Query, cfg: dict) -> list[str]:
+def _picked_search(query: Query, cfg: dict) -> tuple[list[str], bool]:
     """What the user sees: the history block of /api/search — the same pipeline (src/match/pipeline.py, #220)
     in its backtest mode: user filters on organizers' data and the Evidence check, top-k as on screen; no
     «Новые» (never relevant) and nothing from the cache — status, РНП, МСП, role there are today's facts,
-    a leak in a backtest (D-097)."""
+    a leak in a backtest (D-097). Also: whether the user would see the weak-match warning (#281)."""
     picked = pipeline.pick(query, config=cfg, backtest=True)
-    shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
-    return [m.counterparty.inn for m in shown if m.counterparty.inn]
+    # a row without an INN takes its slot, as on screen
+    shown = pipeline.verified(picked.history[: cfg.get("k", 20)], open_data=False)
+    return [m.counterparty.inn for m in shown if m.counterparty.inn], picked.weak_match is not None
+
+
+def _rank_search(query: Query, cfg: dict) -> list[str]:
+    return _picked_search(query, cfg)[0]
 
 
 def _summary(rows: list[dict]) -> dict:
@@ -143,7 +149,8 @@ def slice_names(q: dict) -> list[str]:
     ch = f"channel={q['channel']}" if q.get("channel") else None
     nov = {True: "winner=new", False: "winner=known"}.get(q.get("winner_new"))  # type: ignore[arg-type]
     kind = f"type={q['type']}" if q.get("type") else None
-    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind) if name]
+    weak = {True: "weak=yes", False: "weak=no"}.get(q.get("weak"))  # type: ignore[arg-type]  # #281
+    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind, weak) if name]
 
 
 def slices(per_query: list[dict]) -> dict:
@@ -171,7 +178,11 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     try:
         for i, case in enumerate(cases):
             query = with_cutoff(case.query, cutoff)
-            ranked = _rank_search(query, cfg) if method == "search" else baselines.rank(query, cfg)
+            weak: bool | None = None
+            if method == "search":
+                ranked, weak = _picked_search(query, cfg)
+            else:
+                ranked = baselines.rank(query, cfg)
             rel = set(case.relevant_inns)
             winners = {inn for inn, g in case.grades.items() if g >= 2}
             if audit is not None:
@@ -179,6 +190,8 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
                          "channel": case.query.channel, "type": procurement_type(case.query.okpd2) or "unknown"}
             row.update({name: fn(ranked, winners) if winners else None for name, fn in WINNER_METRICS.items()})
+            if weak is not None:  # the weak-match warning the user would see (#281): measured, not assumed
+                row["weak"] = weak
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:
@@ -197,6 +210,17 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     return {**out, "per_query": per_query}
 
 
+def first_words(cases: list[EvalCase], n: int) -> list[EvalCase]:
+    """The same cases with the query text cut to its first `n` words: a short query as a user types it (#281)."""
+    return [c.model_copy(update={"query": c.query.model_copy(update={"text": " ".join(c.query.text.split()[:n])})})
+            for c in cases]
+
+
+def drop_okpd2(cases: list[EvalCase]) -> list[EvalCase]:
+    """The same cases without the query's ОКПД2: free text as a user types it, the class is predicted (P-02, #349)."""
+    return [c.model_copy(update={"query": c.query.model_copy(update={"okpd2": []})}) for c in cases]
+
+
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
     from src.match.text import tokenizer_name, tokenizer_version
 
@@ -209,6 +233,7 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
         "config": cfg,
         "tokenizer_version": tokenizer_version(),
+        "exact_docs": search_mod.EXACT_DOCS,  # P-02 switch (#349): 0 = vote only (P-01)
         "config_sha256": _safe_sha(),
         "stub": bool(getattr(search_mod, "IS_STUB", False)) and cfg.get("method", "search") == "search",
         "vectors": _vectors(cfg),
@@ -303,14 +328,25 @@ def main(argv: list[str] | None = None) -> int:
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
+    ap.add_argument("--words", type=int, default=None,
+                    help="cut every query text to its first N words — short queries as users type them (#281)")
     ap.add_argument("--sample", type=int, default=None,
                     help="first screen on N cases of the part (fixed seed): winners only go to the full run")
+    ap.add_argument("--corrupt", default=None, choices=corrupt.MODES,
+                    help="spoil the query texts (typos / Latin layout) to measure the speller (#282)")
+    ap.add_argument("--no-okpd2", action="store_true",
+                    help="drop the ОКПД2 of every query: the class is predicted from the text (P-02, #349)")
+    ap.add_argument("--exact-docs", type=int, default=None,
+                    help="experiment only: search.EXACT_DOCS (0 — vote only, P-01; default — P-02), #349")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
         return 2
     if args.baseline and args.config_of:
         print("--baseline и --config-of вместе не задаются", file=sys.stderr)
+        return 2
+    if args.sample is not None and args.sample <= 0:
+        print("--sample: нужно число кейсов > 0", file=sys.stderr)
         return 2
     try:
         cfg = load_method_config(args.exp, args.baseline, args.config_of)
@@ -323,11 +359,37 @@ def main(argv: list[str] | None = None) -> int:
         keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
         cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
         part = f"{args.part}-s{args.sample}"
-    rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
+    if args.words is not None:
+        if args.words < 1:
+            print("--words: ожидается целое число ≥ 1", file=sys.stderr)
+            return 2
+        cases, part = first_words(cases, args.words), f"{part}-w{args.words}"
+    if args.no_okpd2:
+        cases, part = drop_okpd2(cases), f"{part}-nocode"
+    if args.exact_docs is not None:
+        if args.exact_docs < 0:
+            print("--exact-docs: ожидается целое число ≥ 0", file=sys.stderr)
+            return 2
+        search_mod.EXACT_DOCS = args.exact_docs
+        part = f"{part}-x{args.exact_docs}"
+    if args.corrupt:  # the text only, deterministic per query: every experiment sees the same spoiled queries
+        cases = [c.model_copy(update={"query": corrupt.spoil(c.query, args.corrupt)}) for c in cases]
+        part = f"{part}-{args.corrupt}"
+    pool = cfg.get("method") == "pool_recall"  # recall of the «Новые» pool, its own metrics (#187)
+    if pool:
+        from src.eval import pool_recall
+
+        body = pool_recall.evaluate(cases, cfg, date.fromisoformat(str(split_config()["cutoff"])))
+    else:
+        body = evaluate(cases, cfg)
+    rec = result_record(args.exp, part, cfg, body)
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(dump_record(rec), encoding="utf-8")
-    print_table(rec)
+    if pool:
+        pool_recall.print_table(rec)
+    else:
+        print_table(rec)
     print(f"-> {out.relative_to(ROOT)}")
     return 0
 

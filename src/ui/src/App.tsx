@@ -46,6 +46,7 @@ import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } f
 import "./testset.css";
 import { componentText, formulaScore, rankerReason, rankerShort } from "./ranker";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
+import { STATIC_DEMO } from "./staticApi";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
@@ -457,6 +458,8 @@ export function App() {
   }
 
   const runSeq = useRef(0);
+  // «искать как введено» (#282): the text for which the user turned the correction off; another text — on again
+  const asTypedFor = useRef<string | null>(null);
   // local scoring weights (#179): only in this browser; the server and the export keep the standard ones
   const [weightSet, setWeightSet] = useState<WeightSettings>(loadWeights);
   const weights = activeWeights(weightSet);
@@ -481,9 +484,11 @@ export function App() {
     }
   }
 
-  async function run(nextFilters: Filters = filters, ready?: Ready) {
-    // the query of this run: a picked test lot (#207) or the form
-    const qText = ready?.text ?? text;
+  // asTyped: «искать как введено» (#282) — this exact text, the server's correction off
+  async function run(nextFilters: Filters = filters, ready?: Ready, asTyped?: string) {
+    // the query of this run: a picked test lot (#207), the shown query as typed, or the form
+    const qText = asTyped ?? ready?.text ?? text;
+    if (asTyped !== undefined) asTypedFor.current = asTyped.trim();
     const qExtra = ready ? () => ready.extra : extra;
     if (!qText.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
@@ -494,11 +499,15 @@ export function App() {
       const none: Filters = NO_FILTERS;
       // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
       const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
+      const spellOff = asTypedFor.current === q.text;
+      if (spellOff) q.filters = { ...q.filters, spell: "off" };
+      const baseQuery = buildQuery(qText, none, qExtra());
+      if (spellOff) baseQuery.filters = { ...baseQuery.filters, spell: "off" }; // counts by the same text as the answer
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
-        active ? search(buildQuery(qText, none, qExtra()), { limit: ALL }) : Promise.resolve(null),
+        active ? search(baseQuery, { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
@@ -660,6 +669,12 @@ export function App() {
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
       {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
       <div className="content">
+      {STATIC_DEMO && (
+        <div className="stub" role="status" data-testid="static-demo">
+          Демонстрационные данные: статический стенд без сервера — заранее посчитанная выдача по трём примерам и
+          реальным закупкам; фильтры, выгрузка и оценки здесь не работают.
+        </div>
+      )}
       <AnimatePresence mode="wait" initial={false}>
       <motion.div className={path === "/" ? undefined : "interior-route"} key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -684,9 +699,9 @@ export function App() {
         <p><span>Закупка</span><strong>{res.query.text}</strong></p>
         <div className="results-commands">
           <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
-          <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
+          {!STATIC_DEMO && <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
             setError(`выгрузка в Excel: ${String(e)}`); setState("error");
-          })}>Выгрузить в Excel</button>
+          })}>Выгрузить в Excel</button>}
         </div>
         <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
         {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
@@ -847,6 +862,17 @@ export function App() {
         </p>
       ))}
 
+      {path === "/results" && res?.corrections && shownQuery && state !== "loading" && (
+        <p className="lotmsg spell-note" role="note" data-testid="query-corrected">
+          Запрос исправлен (раскладка или опечатки):{" "}
+          {res.corrections.map(([typed, searched], i) => <span key={i}>{i > 0 && ", "}«{typed}» → «{searched}»</span>)}.{" "}
+          <button type="button" className="spell-undo" title={shownQuery.text}
+            onClick={() => void run(filters, undefined, shownQuery.text)}>
+            Искать как введено
+          </button>
+        </p>
+      )}
+
       {path === "/results" && res?.excludedLot && state !== "loading" && (
         <p className="lotmsg own-lot-note" role="note">
           Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
@@ -877,6 +903,7 @@ export function App() {
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
+            alert={res.weakMatch}
             rows={historyRows}
             total={historyTotal}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
@@ -943,7 +970,7 @@ function Block(props: {
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
-  alert?: string; // the block may be incomplete and why (#287)
+  alert?: string; // «Новые»: the block may be incomplete and why (#287); history: weak match with past lots (#281)
   variant: "history" | "new";
   tag: string;
   customerRegion?: string;
@@ -957,7 +984,7 @@ function Block(props: {
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
-      {props.alert && <p className="stub block-alert" role="status" data-testid="discovery-error">{props.alert}</p>}
+      {props.alert && <p className="stub block-alert" role="status" data-testid={props.variant === "new" ? "discovery-error" : "weak-match"}>{props.alert}</p>}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
