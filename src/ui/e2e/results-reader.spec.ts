@@ -78,11 +78,11 @@ test('при долгом поиске показан знак ожидания,
   await page.getByRole('button', { name: 'Найти поставщиков', exact: true }).click();
   const status = page.locator('.search-progress');
   await expect(status).toContainText('Подбираем поставщиков');
-  const trace = status.locator('.sigil-trace');
-  const first = await trace.evaluate(e => getComputedStyle(e).strokeDashoffset);
-  await expect.poll(() => trace.evaluate(e => getComputedStyle(e).strokeDashoffset)).not.toBe(first);
+  const board = status.locator('.chip-spin');
+  const first = await board.evaluate(e => getComputedStyle(e).transform);
+  await expect.poll(() => board.evaluate(e => getComputedStyle(e).transform)).not.toBe(first);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  expect(await trace.evaluate(e => getComputedStyle(e).animationName)).toBe('none');
+  await expect.poll(() => board.evaluate(e => getComputedStyle(e).animationName)).toBe('none');
   release();
   await expect(page.getByRole('alert')).toContainText('Не удалось получить подбор');
   await expect(status).toHaveCount(0);

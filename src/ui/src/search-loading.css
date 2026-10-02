@@ -1,0 +1,132 @@
+/* Search loading scene (#598): graphite board with the product chip, binary orbits, Option Wheel captions.
+   Black, graphite, smoked glass, metal and thin outlines — no neon, no matrix, no HUD. */
+.search-loading { overflow: hidden; }
+.loading-scene { --pcb: 240px; --pcb-t: 12px; --ic: 92px; --ic-h: 14px; --metal: #c9ced4; --graphite: #121417;
+  position: relative; display: grid; gap: 18px; padding: 8px 0 18px; color: #f2f2f2; }
+.loading-head h2 { margin: 0; font: 500 clamp(22px, 2.2vw, 28px)/1.2 "Tektur", Arial, sans-serif; letter-spacing: -.4px; }
+.loading-query { margin: 6px 0 0; color: #b9bec4; font-size: 14px; line-height: 1.45; max-width: 70ch;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.loading-query q { color: #e8e8e8; quotes: "«" "»"; }
+.loading-body { display: grid; grid-template-columns: 440px minmax(0, 1fr); align-items: center; gap: clamp(16px, 4vw, 56px); }
+.loading-captions { display: grid; gap: 6px; min-width: 0; }
+.loading-caption-label { font: 11px/1.4 var(--mono); letter-spacing: .8px; text-transform: uppercase; color: #8d939a; }
+.loading-wheel { height: calc(var(--ow-row) * 5); --ow-row: 46px; --ow-font-size: clamp(18px, 1.7vw, 23px);
+  --ow-text-color: #6f757c; --ow-active-color: #f4f4f1; --ow-inset: 26px; font-family: "Tektur", Arial, sans-serif;
+  mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent); }
+.loading-wheel .quip-short { display: none; }
+.loading-still-line { margin: 0; padding-left: 26px; min-height: calc(46px * 5); display: flex; align-items: center;
+  font: 400 clamp(18px, 1.7vw, 23px)/1.2 "Tektur", Arial, sans-serif; color: #f4f4f1; }
+.loading-still-toggle { justify-self: end; font: 12px var(--mono); color: #aab0b6; background: transparent;
+  border: 1px solid #ffffff22; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.loading-still-toggle:hover { color: #f2f2f2; border-color: #ffffff44; }
+.loading-still-toggle:focus-visible { outline: 2px solid #eee; outline-offset: 2px; }
+
+/* ── stage: one perspective, one preserve-3d chain down to every face and digit ── */
+.chip-scene-box { position: relative; width: 440px; height: 340px; }
+.chip-scene { position: absolute; left: 50%; top: 50%; width: 440px; height: 340px; perspective: 1100px;
+  transform: translate(-50%, -50%) scale(var(--scene-scale, 1)); }
+.chip-shadow { position: absolute; left: 50%; bottom: 14px; width: 230px; height: 26px; margin-left: -115px; border-radius: 50%;
+  background: radial-gradient(closest-side, #000c, #0000); filter: blur(6px); opacity: .7;
+  animation: chip-shadow 7.4s ease-in-out infinite; }
+.chip-float, .chip-world, .chip-spin, .ic, .orbit, .orb, .orb-face { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; }
+.chip-float { animation: chip-float 7.4s ease-in-out infinite; }
+.chip-world { transform: rotateX(-11deg); }
+.chip-spin { transform: rotateY(-28deg); animation: chip-spin 16s linear infinite; }
+
+/* board: two faces and four edges of a thin slab */
+.pcb-face, .pcb-edge, .ic-face, .ic-side { position: absolute; left: 0; top: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.pcb-face { width: var(--pcb); height: var(--pcb); margin: calc(var(--pcb) / -2) 0 0 calc(var(--pcb) / -2); border-radius: 8px; overflow: hidden;
+  background: radial-gradient(120% 90% at 30% 20%, #1d2025, var(--graphite) 60%, #0a0b0d);
+  box-shadow: inset 0 0 0 1px #ffffff1c, inset 0 0 0 4px #00000066; }
+.pcb-front { transform: translateZ(calc(var(--pcb-t) / 2)); }
+.pcb-back { transform: rotateY(180deg) translateZ(calc(var(--pcb-t) / 2)); background: linear-gradient(160deg, #16181c, #0b0c0e); }
+.pcb-edge { background: linear-gradient(90deg, #2b2f35, #50565e 45%, #23262b); }
+.pcb-edge-r, .pcb-edge-l { width: var(--pcb-t); height: calc(var(--pcb) - 8px); margin: calc((var(--pcb) - 8px) / -2) 0 0 calc(var(--pcb-t) / -2); }
+.pcb-edge-r { transform: rotateY(90deg) translateZ(calc(var(--pcb) / 2)); }
+.pcb-edge-l { transform: rotateY(-90deg) translateZ(calc(var(--pcb) / 2)); }
+.pcb-edge-t, .pcb-edge-b { width: calc(var(--pcb) - 8px); height: var(--pcb-t); margin: calc(var(--pcb-t) / -2) 0 0 calc((var(--pcb) - 8px) / -2);
+  background: linear-gradient(180deg, #2b2f35, #50565e 45%, #23262b); }
+.pcb-edge-t { transform: rotateX(90deg) translateZ(calc(var(--pcb) / 2)); }
+.pcb-edge-b { transform: rotateX(-90deg) translateZ(calc(var(--pcb) / 2)); }
+
+.pcb-art { display: block; width: 100%; height: 100%; fill: none; }
+.pcb-traces path { stroke: #9aa2ab; stroke-opacity: .5; stroke-width: 1.1; stroke-linejoin: round; }
+.pcb-pads circle { fill: #0d0e10; stroke: var(--metal); stroke-opacity: .75; stroke-width: 1; }
+.pcb-leads path { stroke: var(--metal); stroke-width: 3; stroke-opacity: .85; }
+.pcb-holes circle { stroke: #ffffff30; stroke-width: 1.2; fill: #050506; }
+.pcb-vias circle { fill: #ffffff22; }
+.pcb-back-frame { stroke: #ffffff1f; stroke-dasharray: 3 4; }
+.pcb-silk { font: 7px var(--mono); letter-spacing: 1.4px; fill: #ffffff55; }
+.pcb-pulse { stroke: #eef4ff; stroke-width: 1.6; stroke-linecap: round; stroke-dasharray: 9 191; stroke-dashoffset: 9; opacity: 0;
+  filter: drop-shadow(0 0 2px #dfe9ff99); animation: pcb-pulse 7.3s ease-in-out infinite; }
+.pcb-pulse-1 { animation-duration: 9.7s; animation-delay: -3.1s; }
+.pcb-pulse-2 { animation-duration: 12.1s; animation-delay: -6.4s; }
+.pcb-glint { position: absolute; inset: -40%; background: linear-gradient(115deg, transparent 42%, #ffffff14 49%, #ffffff05 54%, transparent 60%);
+  transform: translateX(-60%); animation: pcb-glint 11.3s ease-in-out infinite; pointer-events: none; }
+
+/* chip: a raised package on the front face */
+.ic { transform: translateZ(calc(var(--pcb-t) / 2 + var(--ic-h) / 2)); }
+.ic-face { width: var(--ic); height: var(--ic); margin: calc(var(--ic) / -2) 0 0 calc(var(--ic) / -2); border-radius: 5px;
+  display: grid; place-items: center; transform: translateZ(calc(var(--ic-h) / 2));
+  background: linear-gradient(145deg, #2a2d33, #121418 55%, #1b1e22); box-shadow: inset 0 0 0 1px #ffffff2a, inset 0 1px 0 #ffffff26; }
+.ic-mark { width: 46px; height: 46px; color: #e6e9ec; opacity: .92; }
+.ic-side { background: linear-gradient(90deg, #1a1c20, #3a3f46 50%, #16181b); }
+.ic-side-r, .ic-side-l { width: var(--ic-h); height: calc(var(--ic) - 6px); margin: calc((var(--ic) - 6px) / -2) 0 0 calc(var(--ic-h) / -2); }
+.ic-side-r { transform: rotateY(90deg) translateZ(calc(var(--ic) / 2 - 1px)); }
+.ic-side-l { transform: rotateY(-90deg) translateZ(calc(var(--ic) / 2 - 1px)); }
+.ic-side-t, .ic-side-b { width: calc(var(--ic) - 6px); height: var(--ic-h); margin: calc(var(--ic-h) / -2) 0 0 calc((var(--ic) - 6px) / -2);
+  background: linear-gradient(180deg, #1a1c20, #3a3f46 50%, #16181b); }
+.ic-side-t { transform: rotateX(90deg) translateZ(calc(var(--ic) / 2 - 1px)); }
+.ic-side-b { transform: rotateX(-90deg) translateZ(calc(var(--ic) / 2 - 1px)); }
+
+/* orbits: a tilted ring turns; every digit counter-turns, so it always faces the viewer and never mirrors */
+.orbit { transform: rotateZ(var(--tz)) rotateX(var(--tx)) rotateZ(0deg);
+  animation: orbit-turn var(--dur) linear infinite; animation-delay: var(--delay); }
+.orb { transform: rotateZ(var(--a)) translateX(var(--r)) rotateZ(calc(-1 * var(--a))); }
+.orb-face { transform: rotateZ(0deg) rotateX(calc(-1 * var(--tx))) rotateZ(calc(-1 * var(--tz)));
+  animation: orb-face var(--dur) linear infinite; animation-delay: var(--delay); }
+.orb-glyph { position: absolute; transform: translate(-50%, -50%); font: 15px/1 var(--mono); color: #dde2e7; opacity: .5;
+  animation: orb-depth var(--dur) linear infinite; }
+.orbit-1 .orb-glyph { font-size: 13px; }
+.orbit-2 .orb-glyph { font-size: 14px; }
+
+@keyframes chip-spin { from { transform: rotateY(-28deg); } to { transform: rotateY(332deg); } }
+@keyframes chip-float { 0%, 100% { transform: translateY(-4px); } 50% { transform: translateY(5px); } }
+@keyframes chip-shadow { 0%, 100% { transform: scaleX(.94); opacity: .55; } 50% { transform: scaleX(1.04); opacity: .75; } }
+@keyframes orbit-turn { from { transform: rotateZ(var(--tz)) rotateX(var(--tx)) rotateZ(0deg); } to { transform: rotateZ(var(--tz)) rotateX(var(--tx)) rotateZ(360deg); } }
+@keyframes orb-face { from { transform: rotateZ(0deg) rotateX(calc(-1 * var(--tx))) rotateZ(calc(-1 * var(--tz))); }
+  to { transform: rotateZ(-360deg) rotateX(calc(-1 * var(--tx))) rotateZ(calc(-1 * var(--tz))); } }
+/* the digit's own angle on the ring: brightest and largest at the near side (25 %), faint at the far side (75 %) */
+@keyframes orb-depth {
+  0%, 50%, 100% { opacity: .5; transform: translate(-50%, -50%) scale(1); }
+  25% { opacity: .95; transform: translate(-50%, -50%) scale(1.18); }
+  75% { opacity: .16; transform: translate(-50%, -50%) scale(.84); }
+}
+@keyframes pcb-pulse { 0%, 62% { stroke-dashoffset: 9; opacity: 0; } 66% { opacity: .9; } 84% { opacity: .9; } 88%, 100% { stroke-dashoffset: -100; opacity: 0; } }
+@keyframes pcb-glint { 0%, 78% { transform: translateX(-60%); } 92%, 100% { transform: translateX(60%); } }
+
+/* after ~13 s: no pulses or glints, quieter digits */
+.loading-scene.is-calm :is(.pcb-pulse, .pcb-glint) { animation: none; opacity: 0; }
+.loading-scene.is-calm .orb-glyph { color: #8f959b; transition: color .8s ease; }
+/* a hidden tab pauses the motion */
+.loading-scene.is-paused * { animation-play-state: paused !important; }
+/* reduced motion or «Без анимации»: the board at rest, three-quarter view */
+.loading-scene.is-still :is(.chip-float, .chip-spin, .chip-shadow, .orbit, .orb-face, .orb-glyph, .pcb-pulse, .pcb-glint) { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .loading-scene :is(.chip-float, .chip-spin, .chip-shadow, .orbit, .orb-face, .orb-glyph, .pcb-pulse, .pcb-glint) { animation: none; }
+}
+
+@media (max-width: 900px) {
+  .loading-body { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .chip-scene-box { width: 100%; height: 280px; --scene-scale: .8; }
+}
+@media (max-width: 560px) {
+  .chip-scene-box { height: 236px; --scene-scale: .66; }
+  .orb[data-phone="off"] { display: none; }
+  .loading-wheel { --ow-row: 38px; --ow-font-size: 17px; --ow-inset: 20px; }
+  .loading-wheel .quip-full { display: none; }
+  .loading-wheel .quip-short { display: inline; }
+  .loading-still-line { min-height: calc(38px * 5); font-size: 17px; }
+  .loading-still-toggle { justify-self: start; }
+}
