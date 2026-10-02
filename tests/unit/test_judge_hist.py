@@ -49,7 +49,8 @@ def test_score_pairs_systems_by_query_and_ignores_unlabelled_queries():
     got = J.score_records(labels, records)
     assert got["n_queries"] == 2 and {r["query_id"] for r in got["per_query"]} == {"q1", "q2"}
     assert got["precision_at_10"]["A"]["mean"] == 1.0 and got["precision_at_10"]["B"]["mean"] == 0.25
-    assert got["paired"]["A - B"]["mean"] == 0.75 and got["null_labels"] == 0  # nulls of an uncounted query are not reported
+    assert got["paired"]["A - B"]["mean"] == 0.75
+    assert got["null_labels"] == 0  # nulls of an uncounted query are not reported
 
 
 def test_import_rejects_an_answer_that_does_not_match_the_packet(tmp_path):
