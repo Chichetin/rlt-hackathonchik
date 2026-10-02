@@ -65,7 +65,7 @@ def test_every_lead_is_confirmed_by_its_registry_and_passes_the_evidence_check(c
             assert check_counterparty(cp, cache.page_text) == [], cp.foreign_id
             assert {"foreign_id", "name", "status"} <= {e.field for e in cp.evidence}
             assert cp.kind is None and m.score == 0.0
-            shown.add(cp.foreign_id)
+            shown.add(f"{lead.country}:{lead.national_id}")  # == cp.foreign_id (asserted above)
         rows = eaeu.matches([cls], [cls], cache, WEIGHTS, False)[0]
         assert len(rows) == min(len(mine), eaeu.MAX_SHOWN)
         assert len({m.counterparty.foreign_id for m in rows}) == len(rows)
