@@ -1,11 +1,14 @@
-"""Yandex Search API client (#344): the cache pays once, offline reads the cache, the daily cap holds."""
+"""Yandex Search API client (#344): the cache pays once, offline reads the cache, every cap holds (#438)."""
 
 from __future__ import annotations
 
 import base64
 import json
 import os
+import sqlite3
 import threading
+import time
+from contextlib import closing
 from pathlib import Path
 
 import httpx
@@ -36,6 +39,10 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ENRICH_OFFLINE", raising=False)
     monkeypatch.setenv("YANDEX_SEARCH_DAILY_MAX", "100")
     monkeypatch.setenv("YANDEX_SEARCH_MIN_INTERVAL_S", "0")
+    monkeypatch.delenv("YANDEX_SEARCH_MAX_REQUESTS", raising=False)
+    monkeypatch.setenv("YANDEX_MAX_PER_LOT", "100")  # the ceilings of the human (D-149): set, high
+    monkeypatch.setenv("YANDEX_MAX_PER_RUN", "100")
+    ys.reset_run_caps()
 
 
 class Api:
@@ -156,7 +163,7 @@ def test_dotenv_does_not_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     env = tmp_path / ".env"
     env.write_text('# comment\nYANDEX_SEARCH_API_KEY=from-file\nYANDEX_SEARCH_REGION="2"\n', encoding="utf-8")
     monkeypatch.delenv("YANDEX_SEARCH_REGION", raising=False)
-    ys._load_dotenv(env)
+    ys.load_dotenv(env)  # src/settings.py since #297; the CLI calls it
     assert ys.api_key() == "test-key"
     assert os.environ["YANDEX_SEARCH_REGION"] == "2"
 
@@ -256,3 +263,86 @@ def test_error_32_spends_the_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     with pytest.raises(ys.BudgetExceeded):
         ys.search("второй", 3, cache=cache, client=api.client())
     assert api.calls == 1 and ys.spent_today(cache) == 1
+
+
+# --- D-149 ceilings (#438): all-time, off without ceilings, per lot, per run ------------------------------
+
+def test_all_time_cap_counts_every_day(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml)
+    monkeypatch.setenv("YANDEX_SEARCH_MAX_REQUESTS", "2")
+    with closing(sqlite3.connect(cache.path)) as c, c:  # a request of a past day: not today, still spent
+        ys._ledger(cache).close()
+        c.execute("INSERT INTO spend (sent_at, url, outcome) VALUES (?, 'old', 'ok')", (time.time() - 3 * 86400,))
+    ys.search("первый", 3, cache=cache, client=api.client())
+    with pytest.raises(ys.BudgetExceeded, match="YANDEX_SEARCH_MAX_REQUESTS"):
+        ys.search("второй", 3, cache=cache, client=api.client())
+    assert api.calls == 1 and ys.spent_today(cache) == 1 and ys.spent_total(cache) == 2
+
+
+def test_default_all_time_cap_is_2500() -> None:
+    assert ys.max_requests() == 2500
+
+
+@pytest.mark.parametrize("unset", ["YANDEX_MAX_PER_LOT", "YANDEX_MAX_PER_RUN"])
+@pytest.mark.parametrize("value", [None, "0", "-1", "много"])
+def test_off_without_ceilings(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch, unset: str,
+                              value: str | None) -> None:
+    if value is None:
+        monkeypatch.delenv(unset)
+    else:
+        monkeypatch.setenv(unset, value)
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml)
+    with pytest.raises(ys.Disabled, match=unset):
+        ys.search(QUERY, 3, cache=cache, client=api.client())
+    assert api.calls == 0 and ys.spent_total(cache) == 0
+    assert unset in (ys.disabled_reason() or "")
+
+
+def test_per_lot_ceiling(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YANDEX_MAX_PER_LOT", "1")
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml)
+    ys.search("первый", 3, cache=cache, client=api.client(), lot="101")
+    with pytest.raises(ys.BudgetExceeded, match="лот 101"):
+        ys.search("второй", 3, cache=cache, client=api.client(), lot="101")
+    ys.search("второй", 3, cache=cache, client=api.client(), lot="102")  # another lot has its own ceiling
+    assert ys.search("первый", 3, cache=cache, client=api.client(), lot="101") is not None  # cache: free
+    assert api.calls == 2 and ys.spent_total(cache) == 2  # the refused one left no ledger row
+
+
+def test_per_run_ceiling_and_a_new_run(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YANDEX_MAX_PER_RUN", "2")
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml)
+    ys.search("первый", 3, cache=cache, client=api.client(), lot="1")
+    ys.search("второй", 3, cache=cache, client=api.client())
+    with pytest.raises(ys.BudgetExceeded, match="YANDEX_MAX_PER_RUN"):
+        ys.search("третий", 3, cache=cache, client=api.client(), lot="2")
+    assert ys.search("первый", 3, cache=cache, client=api.client()) is not None  # cache: free
+    assert api.calls == 2 and ys.spent_total(cache) == 2
+    ys.reset_run_caps()
+    ys.search("третий", 3, cache=cache, client=api.client())
+    assert api.calls == 3
+
+
+def test_stats_says_why_off(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(ys, "load_dotenv", lambda _p: None)  # the developer's .env must not leak into the test
+    monkeypatch.delenv("YANDEX_MAX_PER_RUN")
+    assert ys.main(["--stats"]) == 0
+    out = capsys.readouterr().out
+    assert "выключен: не задан YANDEX_MAX_PER_RUN" in out and "всего: 0 из 2500 (осталось 2500)" in out
+
+
+def test_ceiling_refusal_returns_stale_answer(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    api = Api(xml)
+    ys.search(QUERY, 3, cache=SourceCache(tmp_path / "s.sqlite"), client=api.client(), lot="1")
+    monkeypatch.setenv("YANDEX_MAX_PER_LOT", "1")
+    answer = ys.search(QUERY, 3, cache=SourceCache(tmp_path / "s.sqlite", ttl_s=0), client=api.client(), lot="1")
+    assert answer is not None and answer.from_cache and api.calls == 1
+
+
+def test_ledger_refusal_does_not_count_in_the_run(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YANDEX_SEARCH_DAILY_MAX", "1")
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml)
+    ys.search("первый", 3, cache=cache, client=api.client(), lot="1")
+    with pytest.raises(ys.BudgetExceeded, match="YANDEX_SEARCH_DAILY_MAX"):
+        ys.search("второй", 3, cache=cache, client=api.client(), lot="1")
+    assert ys.RUN_CAPS.run == 1 and ys.RUN_CAPS.lots == {"1": 1}  # nothing left: nothing counted

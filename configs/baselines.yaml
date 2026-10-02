@@ -24,3 +24,32 @@ N-pool-recall-ul: # #187: тот же замер на канале продук�
   method: pool_recall
   main_only: true
   entities: [ЮЛ]
+# #377: порядок внутри пула (тот же замер, что N-pool-recall) — взвешенная сумма сигналов реестра вместо ИНН.
+# Сигналы (src/eval/pool_recall.py::signal_order): fit — канал, main — основной ОКВЭД, report — ОКВЭД отчётности,
+# link — связь ОКВЭД → ОКПД2 по истории до cutoff (#250), size — численность, geo — регион заказчика.
+N-order-base:    # правило блока, как N-pool-recall (порядок по ИНН внутри уровня)
+  method: pool_recall
+N-order-report:
+  method: pool_recall
+  order: {fit: 1.0, main: 1.0, report: 1.0}
+N-order-link:
+  method: pool_recall
+  order: {fit: 1.0, main: 1.0, link: 1.0}
+N-order-size:
+  method: pool_recall
+  order: {fit: 1.0, main: 1.0, size: 1.0}
+N-order-all:
+  method: pool_recall
+  order: {fit: 1.0, main: 1.0, report: 1.0, link: 1.0, size: 0.5}
+N-order-size3:   # численность решает внутри уровня канала
+  method: pool_recall
+  order: {fit: 1.0, main: 1.0, size: 3.0}
+N-order-ul-base: # канал продукта (как N-pool-recall-ul), порядок правила
+  method: pool_recall
+  main_only: true
+  entities: [ЮЛ]
+N-order-ul-size: # канал продукта, порядок по численности
+  method: pool_recall
+  main_only: true
+  entities: [ЮЛ]
+  order: {fit: 1.0, main: 1.0, size: 1.0}

@@ -109,6 +109,10 @@ def warnings(a: dict, b: dict) -> list[str]:
     out += [f"{f}: A={a.get(f)!r}, B={b.get(f)!r}" for f in RUN_FIELDS if a.get(f) != b.get(f)]
     out += [f"прогон {name} на грязном дереве (dirty): результат не соответствует его коммиту"
             for name, r in (("A", a), ("B", b)) if r.get("dirty")]
+    da, db = a.get("data"), b.get("data")  # the ingest snapshot, results since D-144
+    if isinstance(da, dict) and isinstance(db, dict):
+        out += [f"data.{f}: A={da.get(f)!r}, B={db.get(f)!r} — другой снимок данных (#421)"
+                for f in ("built_at", "rows") if da.get(f) != db.get(f)]
     return out
 
 
