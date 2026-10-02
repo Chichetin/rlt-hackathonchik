@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
 import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
-import { SearchProgress } from "./SearchProgress";
+import { SearchLoadingState } from "./SearchLoadingState";
+import { BrandMark } from "./BrandMark";
 import { ResultsReader } from "./ResultsReader";
 import { ResultInspector } from "./ResultInspector";
 import { SupplierAvatar, SupplierId, SupplierMetrics, supplierKey, recommendationSummary } from "./SupplierIdentity";
@@ -73,13 +74,6 @@ function SearchIcon({ className = "" }: { className?: string }) {
       <path d="m16 16 4.5 4.5" />
     </svg>
   );
-}
-
-function BrandMark() {
-  return <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-    <path d="M32 3 60 32 32 61 4 32Z" stroke="currentColor" strokeWidth="2" />
-    <path d="M18 44V21l14 17 14-17v23M14 44h9m18 0h9" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-  </svg>;
 }
 
 /** «Новые» emptied by the role chip «Производитель» alone, judged by the filters of the shown answer (#84): the role of
@@ -388,6 +382,8 @@ export function App() {
   // the same query without user filters: how many candidates a filter hides for an unknown attribute
   const [base, setBase] = useState<SearchResponse | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  // the query shown on the loading scene: the text of the running search, not the form being edited (#598)
+  const [loadingQuery, setLoadingQuery] = useState("");
   const [error, setError] = useState("");
   const [open, setOpen] = useState<CounterpartyMatch | null>(null);
   const [lotId, setLotId] = useState(saved.lotId ?? "");
@@ -499,6 +495,7 @@ export function App() {
     if (!qText.trim() && !qExtra().okpd2?.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
     setState("loading");
+    setLoadingQuery(qText.trim() || (qExtra().okpd2?.trim() ? `ОКПД2 ${qExtra().okpd2?.trim()}` : ""));
     setOpen(null);
     try {
       const manualCode = qExtra().okpd2?.trim();
@@ -612,6 +609,7 @@ export function App() {
     if ((!d.lot && !d.q && !d.okpd2) || deepDone.current) return;
     deepDone.current = true;
     setState("loading");
+    setLoadingQuery(d.lot ? `закупка ${d.lot}` : d.q || (d.okpd2 ? `ОКПД2 ${d.okpd2}` : ""));
     setFilters(NO_FILTERS); // a shared link is a plain search, not the filters left in this browser
     void (async () => {
       if (d.lot) {
@@ -889,7 +887,7 @@ export function App() {
       <div className="output">
       {lotMsg?.kind === "err" && <p className="lotmsg lotmsg-err" role="alert">{lotMsg.text}</p>}
       {lot && lotQueryId && <BacktestPanel key={lotQueryId} ident={lotId} />}
-      {state === "loading" && <SearchProgress />}
+      <AnimatePresence initial={false}>{state === "loading" && <SearchLoadingState key="loading" query={loadingQuery} />}</AnimatePresence>
       {res && <div className="results-commandbar">
         <p><span>Закупка</span><strong>{res.query.text}</strong></p>
         <div className="results-commands">

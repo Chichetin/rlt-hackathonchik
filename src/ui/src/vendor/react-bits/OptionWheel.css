@@ -1,0 +1,36 @@
+/* Adapted from React Bits OptionWheel by David Haz (MIT + Commons Clause, see LICENSE.md): the item layout is the
+   original one; the grab cursor, focus outline and drag states are removed — the wheel here is not interactive. */
+.option-wheel {
+  --ow-text-color: #a6a6a6;
+  --ow-active-color: #ffffff;
+  --ow-font-size: 1.4rem;
+  --ow-inset: 0px;
+  --ow-row: 44px;
+
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Each option is absolutely centered, then offset along the curve by the rAF loop through
+   transform/opacity/filter, so everything stays in step. */
+.option-wheel__item {
+  position: absolute;
+  top: 50%;
+  left: var(--ow-inset);
+  white-space: nowrap;
+  font-size: var(--ow-font-size);
+  line-height: 1.15;
+  font-weight: 300;
+  transform-origin: left center;
+  will-change: transform, opacity, filter;
+  /* --ow-p goes 0 -> 1 as an option approaches the middle of the wheel */
+  color: color-mix(in srgb, var(--ow-active-color) calc(var(--ow-p, 0) * 100%), var(--ow-text-color));
+}
+
+.option-wheel__item--selected {
+  font-weight: 450;
+}
