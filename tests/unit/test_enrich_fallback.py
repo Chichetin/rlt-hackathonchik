@@ -1,6 +1,7 @@
 """enrich(inn) while pb.nalog.ru asks for a captcha: rmsp by INN, then bo (#58, D-052).
 
-Answers are real, recorded 01.10 (tests/fixtures/enrich_fallback/README.md); the network is mocked."""
+Answers are real, recorded 01.10 (tests/fixtures/enrich_fallback/README.md), except `_bo_answer` (#454, synthetic: no
+recorded ГИР БО answer for the МСП company); the network is mocked."""
 
 import json
 from pathlib import Path
