@@ -22,7 +22,7 @@ from pathlib import Path
 import duckdb
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # `uv run python scripts/compare_art7235.py` without PYTHONPATH
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # runs without PYTHONPATH
 
 from src.eval.external import publish_dates  # noqa: E402
 from src.eval.metrics import bootstrap_ci  # noqa: E402
