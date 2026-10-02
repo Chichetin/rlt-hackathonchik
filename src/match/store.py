@@ -85,6 +85,7 @@ class Store(Protocol):
     def lot_names(self, lot_id: int) -> list[str]: ...
     def top_suppliers(self, limit: int) -> list[str]: ...
     def participations(self, as_of: date | None) -> pa.Table: ...
+    def cobid(self, inns: list[str], as_of: date | None) -> list[tuple]: ...
     def lot_classes(self) -> pa.Table: ...
 
 
@@ -208,6 +209,32 @@ _CUSTOMER_LOTS = """
 SELECT supplier_inn, count(DISTINCT lot_id) FROM {t[participants]}
 WHERE supplier_inn IN (SELECT unnest(%(inns)s{text_arr})) AND customer_inn = %(cust)s AND {cond}
 GROUP BY supplier_inn
+"""
+
+# Co-bidding (#508): per supplier of the page, the partner with the most shared ЭМ lots (АИС ГЗ rows are winners
+# only — no co-bidding there). Row: inn, partner, own ЭМ lots, shared lots, shared lots the partner won, partner's
+# ЭМ lots, the largest shared lot_id (the source row key).
+_COBID = """
+WITH p AS (
+    SELECT lot_id, supplier_inn, bool_or(is_winner) AS won FROM {t[participants]}
+    WHERE channel = 'ЭМ' AND {cond} GROUP BY lot_id, supplier_inn
+),
+mine AS (SELECT lot_id, supplier_inn FROM p WHERE supplier_inn IN (SELECT unnest(%(inns)s{text_arr}))),
+tot AS (SELECT supplier_inn, count(*) AS n FROM mine GROUP BY supplier_inn),
+pairs AS (
+    SELECT m.supplier_inn AS inn, o.supplier_inn AS partner, count(*) AS joint,
+           sum(CASE WHEN o.won THEN 1 ELSE 0 END) AS partner_wins, max(m.lot_id) AS last_lot
+    FROM mine m JOIN p o ON o.lot_id = m.lot_id AND o.supplier_inn <> m.supplier_inn
+    GROUP BY m.supplier_inn, o.supplier_inn
+),
+best AS (
+    SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY inn ORDER BY joint DESC, partner) AS rn FROM pairs) r
+    WHERE rn = 1
+),
+ptot AS (SELECT supplier_inn, count(*) AS n FROM p WHERE supplier_inn IN (SELECT partner FROM best)
+         GROUP BY supplier_inn)
+SELECT b.inn, b.partner, t.n, b.joint, b.partner_wins, pt.n, b.last_lot
+FROM best b JOIN tot t ON t.supplier_inn = b.inn JOIN ptot pt ON pt.supplier_inn = b.partner
 """
 
 # Reliability aggregates per supplier before as_of (src/match/reliability.py, #72): lots, wins, distinct
@@ -546,6 +573,9 @@ class ParquetStore:
     def participations(self, as_of: date | None) -> pa.Table:
         return _table(*self._fetch(_PARTICIPATIONS, {"as_of": as_of}, as_of=as_of), PARTICIPATIONS)
 
+    def cobid(self, inns: list[str], as_of: date | None) -> list[tuple]:
+        return self._fetch(_COBID, {"inns": inns, "as_of": as_of}, as_of=as_of)[1]
+
     def lot_classes(self) -> pa.Table:
         return _table(*self._fetch(_LOT_CLASSES, {}), LOT_CLASSES)
 
@@ -710,6 +740,9 @@ class PgStore:
 
     def participations(self, as_of: date | None) -> pa.Table:
         return _table(*self._fetch(_PARTICIPATIONS, {"as_of": as_of}, as_of=as_of), PARTICIPATIONS)
+
+    def cobid(self, inns: list[str], as_of: date | None) -> list[tuple]:
+        return self._fetch(_COBID, {"inns": inns, "as_of": as_of}, as_of=as_of)[1]
 
     def lot_classes(self) -> pa.Table:
         return _table(*self._fetch(_LOT_CLASSES, {}), LOT_CLASSES)

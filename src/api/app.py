@@ -339,7 +339,8 @@ def api_search(query: Query, response: Response,
     _queue_uncached(page, uncached)
     return SearchResponse(
         query=query,
-        history=_verified(pipeline.with_reliability(page, query.as_of)),  # shadow: the shown page only (#72)
+        # the shown page only: shadow reliability (#72), co-bidding fact (#508)
+        history=_verified(pipeline.with_cobid(pipeline.with_reliability(page, query.as_of), query.as_of)),
         discovered=_verified(discovered[offset:offset + limit]),
         stub=_is_stub(),
     )

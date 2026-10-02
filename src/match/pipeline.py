@@ -33,6 +33,7 @@ from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.match import confidence, fallback, ranker, speller
+from src.match import copartner as cobid_mod
 from src.match import search as search_mod
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
 from src.match.index import get_index
@@ -151,6 +152,11 @@ def with_reliability(matches: list[CounterpartyMatch], as_of: date | None) -> li
     """The reliability of what the user sees (#72, shadow): the page of /api/search, the rows of an export — not
     every candidate pick() scored. Weight 0: score and order stay."""
     return search_mod.shadow_reliability(matches, as_of)
+
+
+def with_cobid(matches: list[CounterpartyMatch], as_of: date | None) -> list[CounterpartyMatch]:
+    """The co-bidding fact (data:participants, #508) of the shown page only; not in a backtest."""
+    return matches if is_stub() else cobid_mod.with_cobid(matches, as_of)
 
 
 def verified(matches: list[CounterpartyMatch], open_data: bool = True) -> list[CounterpartyMatch]:
