@@ -124,8 +124,11 @@ class Scorer:
     """Cross-encoder (AutoModelForSequenceClassification, one logit) as on the bge-reranker-v2-m3 card."""
 
     def __init__(self, model: str, device: str | None = None, max_length: int = CE_MAX_LEN):
-        import torch
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        import torch  # pyright: ignore[reportMissingImports]
+        from transformers import (  # pyright: ignore[reportMissingImports]
+            AutoModelForSequenceClassification,
+            AutoTokenizer,
+        )
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         dtype = getattr(torch, RERANKERS.get(model, "float32")) if self.device == "cuda" else torch.float32
@@ -139,7 +142,7 @@ class Scorer:
 
     def score(self, pairs: Sequence[tuple[str, str]], batch_size: int = 128) -> np.ndarray:
         """Raw logits (higher = more relevant), in the order of `pairs`; batches by length (less padding)."""
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         out = np.empty(len(pairs), np.float32)
         order = sorted(range(len(pairs)), key=lambda i: -(len(pairs[i][0]) + len(pairs[i][1])))
@@ -197,7 +200,7 @@ def _report(variants: dict[str, list[dict]], bm25_base: list[dict] | None, group
 
 def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = False,
           ns: Sequence[int] = RERANK_N, hybrid_model: str = HYBRID_MODEL) -> None:
-    import torch
+    import torch  # pyright: ignore[reportMissingImports]
 
     cfg = split_config()
     as_of = date.fromisoformat(str(cfg["cutoff"]))
@@ -296,7 +299,7 @@ def _cpu_name() -> str:
 def cpu_latency(model: str, n_queries: int, seed: int, out_dir: Path, ns: Sequence[int] = RERANK_N,
                 threads: int | None = None, batch_size: int = 32) -> dict:
     """Reranker alone on CPU: one query (as /api/search), its top-N BM25 documents scored in batches."""
-    import torch
+    import torch  # pyright: ignore[reportMissingImports]
 
     if threads:
         torch.set_num_threads(threads)

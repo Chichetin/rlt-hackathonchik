@@ -61,6 +61,16 @@ PREFIX = {
     "intfloat/multilingual-e5-large": ("query: ", "passage: "),
     "ai-forever/FRIDA": ("search_query: ", "search_document: "),
 }
+# #270 (E3): models fine-tuned by src/eval/finetune.py -> their base model. The weights are not in git: the
+# folder MODELS_DIR/<slug> (default models/, gitignored); prefixes are those of the base model.
+FINETUNED = {
+    "e3/user-base-okpd2": "deepvk/USER-base",
+    "e3/user-base-okpd2-full": "deepvk/USER-base",
+    "e3/user-base-supplier": "deepvk/USER-base",
+    "e3/e5-small-okpd2": "intfloat/multilingual-e5-small",
+}
+PREFIX.update({ft: PREFIX[base] for ft, base in FINETUNED.items()})
+MODELS_DIR = Path(os.environ.get("MODELS_DIR") or ROOT / "models")
 # T5 encoders overflow in fp16 (inf/NaN activations): bf16 keeps the range at the same speed
 BF16 = {"ai-forever/FRIDA"}
 METRICS = ("cand_recall@200", "winner_hit@200", "recall@10", "mrr")
@@ -78,24 +88,34 @@ def vec_files(model: str, gpu_dir: Path = GPU_DIR) -> list[Path]:
     return [gpu_dir / n for n in names]
 
 
-def load_model(model: str, device: str | None = None):
-    import importlib
+def model_path(model: str) -> str:
+    """HF id, or the local folder of a fine-tuned model (#270)."""
+    return str(MODELS_DIR / slug(model)) if model in FINETUNED else model
 
-    # st.models is a lazy submodule: plain attribute access fails until it is imported (06ca72b broke this, #269)
-    SentenceTransformer = importlib.import_module("sentence_transformers").SentenceTransformer
-    models = importlib.import_module("sentence_transformers.models")
+
+def build_model(model: str, device: str | None = None):
+    """fp32 SentenceTransformer (training starts here, #270); load_model() casts it for inference."""
+    from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
+
+    # sentence-transformers 6: the modules live here (`st.models` is a lazy deprecated alias, not an attribute)
+    from sentence_transformers.sentence_transformer import modules as models  # pyright: ignore[reportMissingImports]
 
     try:
-        m = SentenceTransformer(model, device=device)
+        m = SentenceTransformer(model_path(model), device=device)
     except TypeError:
         # USER-base keeps Normalize at the model root: sentence-transformers 6 reads the HF config.json
         # into it and fails. The same pipeline by hand: Transformer -> mean pooling -> Normalize.
-        tr = models.Transformer(model, max_seq_length=MAX_SEQ)
-        pool = models.Pooling(tr.get_word_embedding_dimension(), pooling_mode="mean")
+        tr = models.Transformer(model_path(model), max_seq_length=MAX_SEQ)
+        pool = models.Pooling(tr.get_embedding_dimension(), pooling_mode="mean")
         m = SentenceTransformer(modules=[tr, pool, models.Normalize()], device=device)
     m.max_seq_length = MAX_SEQ
+    return m
+
+
+def load_model(model: str, device: str | None = None):
+    m = build_model(model, device)
     if m.device.type == "cuda" and model in BF16:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         m.to(torch.bfloat16)
     elif m.device.type == "cuda":
@@ -141,7 +161,7 @@ class Corpus:
     """Vectors of the names that are documents of the cutoff index, on GPU; name row -> doc_ids."""
 
     def __init__(self, model: str, idx, gpu_dir: Path = GPU_DIR):
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         m = norm_map(idx)
         norms: list[str] = []
@@ -166,7 +186,7 @@ class Corpus:
 
         A document with several names keeps the cosine of its best name.
         """
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         out: list[list[tuple[int, float]]] = []
         qs = torch.from_numpy(np.asarray(q, dtype=np.float16)).cuda()
@@ -281,8 +301,14 @@ def _slices(groups: dict[str, list[int]], rows: list[dict], vs: list[dict] | Non
     return out
 
 
+def _vs_base(groups: dict[str, list[int]], rows: list[dict], base: list[dict]) -> dict:
+    """#270: paired Δ (fine-tuned − base model) overall and per slice, the same queries of one run."""
+    per_slice = {name: _deltas([rows[i] for i in ix], [base[i] for i in ix]) for name, ix in groups.items() if ix}
+    return {"all": _deltas(rows, base), "slices": per_slice}
+
+
 def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = False,
-          latency: bool = True) -> dict[str, dict]:
+          latency: bool = True, tag: str = "emb") -> dict[str, dict]:
     cfg = split_config()
     as_of = date.fromisoformat(str(cfg["cutoff"]))
     store = ParquetStore(processed_dir())
@@ -318,12 +344,13 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def save(key: str) -> None:  # after each model: a crash later keeps what is measured
-        name = f"emb-{key}-s1{'-short' if short else ''}.json"
+        name = f"{tag}-{key}-s1{'-short' if short else ''}.json"
         (out_dir / name).write_text(json.dumps(results[key], ensure_ascii=False, indent=2), encoding="utf-8")
 
     save(bm25_key)
+    rows: dict[str, tuple[list[dict], list[dict]]] = {}  # model -> (vector, hybrid) rows, for delta_vs_base
     for model in models:
-        import torch
+        import torch  # pyright: ignore[reportMissingImports]
 
         corpus = Corpus(model, idx)
         m = load_model(model)
@@ -347,6 +374,11 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
             "gpu_seconds": round(elapsed, 1), "cpu_query_latency": cpu_latency(model, texts) if latency else None,
         }
         r = results[slug(model)]
+        rows[model] = (vec, hyb)
+        if (b := FINETUNED.get(model)) in rows:  # the base model ran earlier in this call: one variable differs
+            r["base_model"] = b
+            r["vector"]["delta_vs_base"] = _vs_base(groups, vec, rows[b][0])
+            r["hybrid_rrf"]["delta_vs_base"] = _vs_base(groups, hyb, rows[b][1])
         log.info("%s: recall@10 vec %.3f, hybrid %.3f, bm25 %.3f", model, r["vector"]["metrics"]["recall@10"]["mean"],
                  r["hybrid_rrf"]["metrics"]["recall@10"]["mean"], results[bm25_key]["metrics"]["recall@10"]["mean"])
         save(slug(model))
@@ -381,7 +413,7 @@ def _mean(rows: list[dict], key: str) -> float:
 
 def convex_bench(models: list[str], variants: list[str], n: int, seed: int, tune_n: int, out_dir: Path,
                  tune_seed: int = TUNE_SEED) -> None:
-    import torch
+    import torch  # pyright: ignore[reportMissingImports]
 
     cfg = split_config()
     as_of = date.fromisoformat(str(cfg["cutoff"]))
@@ -482,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--short", action="store_true", help="query = the first position name (user-like)")
     b.add_argument("--no-latency", action="store_true",
                    help="skip CPU query latency (parallel runs make it noisy; measure on an idle machine)")
+    b.add_argument("--tag", default="emb", help="result file prefix: <tag>-<model>-s1[-short].json (E3 for #270)")
     c = sub.add_parser("convex", help="#313 (E5): convex combination vs RRF, alpha tuned on dev_full minus dev")
     c.add_argument("--model", action="append", required=True, choices=sorted(PREFIX))
     c.add_argument("--variant", action="append", choices=VARIANTS, help="default: all")
@@ -499,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "convex":
         convex_bench(args.model, args.variant or list(VARIANTS), args.n, args.seed, args.tune_n, args.out_dir)
         return 0
-    res = bench(args.model, args.n, args.seed, args.out_dir, args.short, latency=not args.no_latency)
+    res = bench(args.model, args.n, args.seed, args.out_dir, args.short, latency=not args.no_latency, tag=args.tag)
     print(json.dumps({k: (v.get("metrics") or {kk: v[kk]["metrics"] for kk in ("vector", "hybrid_rrf")})
                       for k, v in res.items()}, ensure_ascii=False, indent=1))
     return 0
