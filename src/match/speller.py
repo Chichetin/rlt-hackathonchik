@@ -5,27 +5,37 @@ number of distinct names each occurs in — so a backtest index (as_of) gives a 
 Only a word that is NOT a trusted word of the dictionary is touched:
 1. layout — keys typed in the other layout («,evfuf» → «бумага», «сфтщт» → «canon»; `,.;'[]` are Russian
    letters there): the other layout is taken when it is a known, much more frequent word;
-2. typo — a Cyrillic word of ≥ 4 letters: a known word within Damerau–Levenshtein distance 1 (2 for words
-   of ≥ 7 letters), found through single-delete keys (SymSpell-like), much more frequent than the word;
-   among several, the frequency discounted by DIST_DISCOUNT per edit decides («ркатридж» → «картридж»,
-   not the corpus typo «катридж»). A word of the corpus that is rare (< TRUSTED names) is still a typo when a
-   word one edit away is RARE_RATIO times more frequent («дезинфецирующее» 7 → «дезинфицирующее» 1202);
+2. typo — a Cyrillic word of ≥ 4 letters that the Russian morphological dictionary (pymorphy3) does NOT know
+   («зонты», «зеленка», «дума» are words even when the corpus has none of them — never «corrected» into
+   «зоны», «пеленка», «дома»): a known word with the same first letter within Damerau–Levenshtein distance 1
+   (2 for words of ≥ DIST2_LEN letters, never for a capitalised word), found through single-delete keys
+   (SymSpell-like), much more frequent than the word; among several, the frequency discounted by DIST_DISCOUNT
+   per edit decides («кортриджж» → «картридж», not the corpus typo «катридж»). A rare corpus word
+   (< TRUSTED names) is still a typo when a word one edit away is RARE_RATIO times more frequent;
    a word in TRUSTED names or more is never changed.
-Numbers, codes and short words are never changed. The result says which words were changed,
+Numbers, codes, short words, abbreviations in capitals («ДПЛС», «КПИ») and capitalised words inside a phrase
+(names: «ул. Гаврина» is a phrase start, «Корняков» in the middle is not) are never changed; nor is a word whose
+correction gives the search the same token (prefix5: «бокорезов» → «бокорезы» changes nothing but the text).
+«ё» is «е» everywhere, as in the tokenizer. The result says which words were changed,
 so the UI can show «показаны результаты по запросу …» and offer the query as typed (`filters.spell = "off"`).
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import os
 import re
 import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
+
+from src.match.text import tokenize
 
 log = logging.getLogger(__name__)
 
@@ -36,8 +46,8 @@ RATIO = 20  # ... and this many times more frequent than an unknown word it repl
 RARE_RATIO = 100  # ... or than a rare known word (MIN_KNOWN ≤ f < TRUSTED), and one edit away only
 DIST_DISCOUNT = 0.02  # candidate rank: frequency × DIST_DISCOUNT ** distance
 MIN_TYPO_LEN = 4
-DIST2_LEN = 7  # words this long may be 2 edits away
-VOCAB_FILE = "speller-vocab.json"
+DIST2_LEN = 8  # words this long may be 2 edits away (7: «аргенто» → «агент», «Гаврина» → «грина»)
+VOCAB_FILE = "speller-vocab-v2.json"  # v2: «ё» → «е»
 
 _WORD = re.compile(r"[A-Za-zА-Яа-яЁё]+")
 _EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,.~{}:\"<>"
@@ -47,7 +57,19 @@ _LAT_KEYS = re.compile(r"[a-z\[\];',.`~{}:\"<>]*[a-z][a-z\[\];',.`~{}:\"<>]*")
 EN_TO_RU = dict(zip(_EN, _RU, strict=True))  # with the shifted keys: «<» and «,» are both «б»
 RU_TO_EN = dict(zip(_RU[:33], _EN[:33], strict=True))  # the unshifted key of each letter
 _CYR = re.compile(r"[а-яё]+")
-_LAT = re.compile(r"[a-z]+")
+_LAYOUT_PUNCT = re.compile(r"[\[\];',.`~{}:\"<>]")  # keys that are letters in the Russian layout
+
+
+@functools.cache
+def _morph() -> Any:
+    import pymorphy3  # a dependency already (src/match/text.py, tokenizer «pymorphy»)
+
+    return pymorphy3.MorphAnalyzer()
+
+
+def is_russian_word(word: str) -> bool:
+    """A word form the Russian morphological dictionary knows: never a typo, whatever the corpus says."""
+    return bool(_morph().word_is_known(word))
 
 
 @dataclass(frozen=True)
@@ -92,25 +114,25 @@ class Speller:
     def layout(self, token: str) -> str | None:
         """The same keys in the other layout, when that is a known and much more frequent word."""
         table = EN_TO_RU if _LAT_KEYS.fullmatch(token) else RU_TO_EN if _CYR.fullmatch(token) else None
-        if table is None or len(token) < 3:
+        if table is None or len(token) < 3 or (table is RU_TO_EN and is_russian_word(token)):
             return None
         other = "".join(table.get(ch, ch) for ch in token)
         return other if other != token and self.known(other) and self._better(other, token) else None
 
-    def typo(self, word: str) -> str | None:
+    def typo(self, word: str, max_dist: int = 2) -> str | None:
         """The most frequent known word within distance 1 (2 for long words), much more frequent than `word`."""
-        if len(word) < MIN_TYPO_LEN or not _CYR.fullmatch(word) or self.trusted(word):
+        if len(word) < MIN_TYPO_LEN or not _CYR.fullmatch(word) or self.trusted(word) or is_russian_word(word):
             return None
         index = self._delete_index()
         keys = {word} | _deletes(word)
-        limit = 1 if self.known(word) or len(word) < DIST2_LEN else 2  # a rare known word: one edit only
+        limit = 1 if self.known(word) or len(word) < DIST2_LEN else min(2, max_dist)  # a rare known word: one edit
         if limit == 2:
             keys |= {d2 for d in list(keys) for d2 in _deletes(d)}
         cands = {w for k in keys for w in index.get(k, ())}
         cands |= {k for k in keys if self.freq.get(k, 0) >= MIN_TARGET}  # the word with extra letters
         best: tuple[float, str] | None = None
         for c in cands:
-            if c == word or not self._better(c, word):
+            if c == word or c[0] != word[0] or not self._better(c, word):  # people rarely miss the first letter
                 continue
             d = damerau(word, c, limit)
             if d <= limit:
@@ -121,22 +143,37 @@ class Speller:
     def correct(self, text: str) -> Correction:
         changes: list[tuple[str, str]] = []
 
+        phrase_start = True  # the word being fixed starts a phrase (the text or after «. ; : ! ?»)
+
         def fix_word(m: re.Match[str]) -> str:
             raw = m.group(0)
-            word = raw.lower()
+            word = raw.lower().replace("ё", "е")
+            if len(raw) > 1 and raw.isupper():  # an abbreviation or a code
+                return raw
+            if raw[0].isupper() and not (phrase_start and m.start() == 0):  # a name inside a phrase
+                return raw
             if self.known(word) and (self.trusted(word) or not _CYR.fullmatch(word)):
                 return raw
-            new = (None if self.known(word) else self.layout(word)) or self.typo(word)
+            new = None if self.known(word) else self.layout(word)
+            if new is None:
+                new = self.typo(word, max_dist=1 if raw[0].isupper() else 2)  # «Корняков»: a name, one edit at most
+                if new is not None and tokenize(new) == tokenize(word):  # the search sees the same token
+                    new = None
             if new is None:
                 return raw
             changes.append((raw, new))
             return new
 
         def fix(m: re.Match[str]) -> str:
+            nonlocal phrase_start
             raw = m.group(0)
+            before = text[:m.start()].rstrip()
+            phrase_start = not before or before[-1] in ".;:!?«\"(\n"
             token = raw.lower()
             letters = "".join(_WORD.findall(token))
-            if not self.known(letters) and _LAT_KEYS.fullmatch(token):
+            # «[kt,» is «хлеб»: «kt» is a corpus word, but the keys of «х» and «б» say the layout was wrong
+            punct = bool(_LAYOUT_PUNCT.search(token.rstrip(",.;:")))
+            if (not self.known(letters) or punct) and _LAT_KEYS.fullmatch(token):
                 # the whole token typed in the Latin layout; a trailing «, . ; :» may be real punctuation
                 for cut in range(0, min(2, len(token) - 3) + 1):
                     head, tail = token[:len(token) - cut], raw[len(raw) - cut:]
@@ -176,7 +213,7 @@ def vocabulary(texts: list[str]) -> dict[str, int]:
     """word form → number of distinct texts it occurs in (lowercase letters only)."""
     c: Counter[str] = Counter()
     for t in texts:
-        c.update({w.lower() for w in _WORD.findall(t)})
+        c.update({w.lower().replace("ё", "е") for w in _WORD.findall(t)})
     return dict(c)
 
 
@@ -197,7 +234,7 @@ def for_index(index_dir: Path) -> Speller:
                 texts = pq.read_table(texts_path, columns=["text"]).column("text").to_pylist() \
                     if texts_path.exists() else []
                 freq = vocabulary([t for t in texts if t])
-                tmp = path.with_suffix(".tmp")
+                tmp = path.with_suffix(f".tmp{os.getpid()}")  # API, worker and parallel evals build it at once
                 tmp.write_text(json.dumps(freq, ensure_ascii=False), encoding="utf-8")
                 tmp.replace(path)
                 log.info("speller: словарь %d словоформ из %s", len(freq), index_dir.name)

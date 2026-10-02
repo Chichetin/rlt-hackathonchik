@@ -15,7 +15,9 @@ from src.match.speller import Speller, damerau
 
 VOCAB = {"бумага": 500, "офисная": 200, "картридж": 14904, "катридж": 30, "принтера": 300, "для": 5000,
          "canon": 300, "hp": 400, "дезинфицирующее": 1200, "дезинфецирующее": 7, "средство": 900,
-         "квадрокоптер": 19, "лодки": 23, "лотки": 57, "перчатки": 700, "письменный": 305, "стол": 800}
+         "квадрокоптер": 19, "лодки": 23, "лотки": 57, "перчатки": 700, "письменный": 305, "стол": 800,
+         # a frequent neighbour one edit away from a right word that the corpus lacks or has rarely (review #282)
+         "зоны": 900, "зонты": 3, "пеленка": 60, "дома": 2000, "лист": 3000, "потока": 400, "хлеб": 106, "kt": 40}
 
 
 @pytest.fixture
@@ -25,11 +27,14 @@ def sp() -> Speller:
 
 @pytest.mark.parametrize(("typed", "searched"), [
     ("бумвга офисная", "бумага офисная"),  # a neighbouring key
-    ("перчатик", "перчатки"),  # two letters swapped
-    ("стол письменый", "стол письменный"),  # a dropped letter
-    ("ркатридж для принтера", "картридж для принтера"),  # 2 edits: the frequent word, not the corpus typo
-    ("дезинфецирующее средство", "дезинфицирующее средство"),  # a rare corpus typo next to a frequent word
+    ("пкрчатки", "перчатки"),  # a neighbouring key
+    ("стол пимьменный", "стол письменный"),  # a neighbouring key in the first five letters
+    ("пречатки", "перчатки"),  # two letters swapped
+    ("кортриджж для принтера", "картридж для принтера"),  # 2 edits: the frequent word, not the corpus typo
+    ("ркатридж", "ркатридж"),  # the first letter is never changed: the price of not «fixing» rare names
+    ("дкзинфицирующее средство", "дезинфицирующее средство"),  # a neighbouring key
     (",evfuf jabcyfz", "бумага офисная"),  # typed with the Latin layout on (`,` is «б» there)
+    ("[kt,", "хлеб"),  # «kt» is a corpus word, but «[» and «,» are «х» and «б» there
     ("rfhnhblf", "rfhnhblf"),  # the other layout is not a known word: left as typed
     ("сфтщт", "canon"),  # a brand typed with the Russian layout on
 ])
@@ -41,11 +46,26 @@ def test_layout_and_typos_are_fixed(sp, typed, searched):
 @pytest.mark.parametrize("text", [
     "бумага офисная, картридж HP", "катридж",  # known words, a frequent corpus typo, a brand
     "квадрокоптер", "лодки, лотки",  # rare but real words: no frequent neighbour that much more frequent
+    "зонты", "зеленка", "дума", "чист",  # Russian words with a much more frequent corpus word one edit away
+    "ротокан",  # not a dictionary word, but the only neighbour («потока») starts with another letter
     "огнетушитель ОП-4 5 кг", "реагенты для ИФА",  # unknown words without a close known one, codes, numbers
 ])
 def test_right_words_are_never_changed(sp, text):
     c = sp.correct(text)
     assert c.text == text and not c.changed
+
+
+@pytest.mark.parametrize("text", [
+    "перчатик", "стол письменый",  # the typo is past the 5th letter: the search sees the same token (prefix5)
+    "КПИ ДПЛС",  # abbreviations in capitals
+    "бумага Бумвга",  # a capitalised word inside a phrase is a name
+])
+def test_left_as_typed_when_it_changes_nothing_or_is_a_name(sp, text):
+    assert sp.correct(text).text == text
+
+
+def test_yo_is_e(sp):
+    assert Speller({"шуруповерта": 50}).correct("шуруповёрта").changed is False
 
 
 def test_punctuation_and_case_around_a_fixed_word_stay(sp):
@@ -114,7 +134,7 @@ def test_a_broken_dictionary_never_breaks_the_search(monkeypatch, tmp_path):
     def broken(path):
         raise OSError("disk")
 
-    searched, res = _pick(monkeypatch, tmp_path, spell=True)
+    _pick(monkeypatch, tmp_path, spell=True)  # the stubs of search() and the index
     monkeypatch.setattr(pipeline.speller, "for_index", broken)
     res = pipeline.pick(Query(query_id="q", text="бумвга офисная"), config={**search_mod.load_config(), "spell": True},
                         discovery=False)

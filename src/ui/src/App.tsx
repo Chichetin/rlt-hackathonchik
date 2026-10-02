@@ -482,9 +482,11 @@ export function App() {
     }
   }
 
-  async function run(nextFilters: Filters = filters, ready?: Ready) {
-    // the query of this run: a picked test lot (#207) or the form
-    const qText = ready?.text ?? text;
+  // asTyped: «искать как введено» (#282) — this exact text, the server's correction off
+  async function run(nextFilters: Filters = filters, ready?: Ready, asTyped?: string) {
+    // the query of this run: a picked test lot (#207), the shown query as typed, or the form
+    const qText = asTyped ?? ready?.text ?? text;
+    if (asTyped !== undefined) asTypedFor.current = asTyped.trim();
     const qExtra = ready ? () => ready.extra : extra;
     if (!qText.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
@@ -495,12 +497,15 @@ export function App() {
       const none: Filters = NO_FILTERS;
       // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
       const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
-      if (asTypedFor.current === q.text) q.filters = { ...q.filters, spell: "off" };
+      const spellOff = asTypedFor.current === q.text;
+      if (spellOff) q.filters = { ...q.filters, spell: "off" };
+      const baseQuery = buildQuery(qText, none, qExtra());
+      if (spellOff) baseQuery.filters = { ...baseQuery.filters, spell: "off" }; // counts by the same text as the answer
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
-        active ? search(buildQuery(qText, none, qExtra()), { limit: ALL }) : Promise.resolve(null),
+        active ? search(baseQuery, { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
@@ -852,7 +857,7 @@ export function App() {
       {path === "/results" && res?.corrected && shownQuery && state !== "loading" && (
         <p className="lotmsg spell-note" role="note" data-testid="query-corrected">
           Показаны результаты по запросу «{res.corrected}» — исправлены раскладка или опечатки.{" "}
-          <button type="button" className="spell-undo" onClick={() => { asTypedFor.current = shownQuery.text; void run(); }}>
+          <button type="button" className="spell-undo" onClick={() => void run(filters, undefined, shownQuery.text)}>
             Искать как введено: «{shownQuery.text}»
           </button>
         </p>
