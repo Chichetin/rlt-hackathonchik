@@ -10,7 +10,7 @@ PART ?=
 CONFIRM ?=
 
 .PHONY: help setup setup-ml models check check-changed predict lint typecheck test test-ui hooks-test stubs settings-check openapi openapi-check \
-        seal-check ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed okpd2 data pool-load
+        seal-check layers ui-build api worker ui-dev demo e2e eval latency eval-final up down db-load db-embed okpd2 data pool-load
 
 help:              ## список целей
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -59,10 +59,13 @@ openapi-check:     ## контракты, OpenAPI и TS-типы UI не раз�
 seal-check:        ## holdout читают только src/eval/split.py и final.py (D-010)
 	bash scripts/seal_check.sh
 
+layers:            ## импорты в src/ идут вниз по слоям, не вверх (D-106); допущенные нарушения - scripts/layers_allowlist.txt
+	$(PY) python scripts/check_layers.py
+
 settings-check:    ## окружение читает только src/settings.py (остальные файлы — scripts/settings_allowlist.txt)
 	$(PY) python scripts/check_settings.py
 
-check: lint typecheck test test-ui hooks-test openapi-check seal-check settings-check stubs   ## всё целиком: общие файлы, freeze, сдача
+check: lint typecheck test test-ui hooks-test openapi-check seal-check layers settings-check stubs   ## всё целиком: общие файлы, freeze, сдача
 	@echo "make check: OK"
 
 check-changed:     ## только затронутое относительно origin/main (+ e2e, если задет демо-путь) — по умолчанию
