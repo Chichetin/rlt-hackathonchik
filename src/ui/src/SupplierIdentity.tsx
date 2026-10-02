@@ -24,7 +24,7 @@ function times(count: number): string {
 export const COUNTRY: Record<string, { name: string; id: string }> = {
   BY: { name: "Беларусь", id: "УНП" },
   KZ: { name: "Казахстан", id: "БИН" },
-  AM: { name: "Армения", id: "УНН" },
+  AM: { name: "Армения", id: "ИНН" },
   KG: { name: "Кыргызстан", id: "ИНН" },
 };
 
