@@ -135,7 +135,7 @@ def import_answer(answer: Path, model: str, packets: Path, labels: Path, now: st
             with labels.open("ab") as f:
                 f.write(b"\n")
         with labels.open("a", encoding="utf-8-sig" if fresh else "utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=fields, delimiter=delim, restval="")
+            w = csv.DictWriter(f, fieldnames=fields, delimiter=delim, restval="", lineterminator="\n")
             if fresh:
                 w.writeheader()
             w.writerows(new)

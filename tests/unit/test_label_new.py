@@ -58,7 +58,9 @@ def test_precision_and_priority():
     assert per == {"a": pytest.approx(2 / 3), "b": 0.0}  # LLM labels excluded: overlap < 20
     assert body["metrics"]["precision@10"]["value"] == pytest.approx(1 / 3)
     assert body["labeled_by"] == {"человек": 4}
-    assert body["agreement_human_llm"] == {"overlap": 1, "share": 0.0, "kappa": 0.0, "llm_used": False}
+    assert body["agreement_human_llm"] == {
+        "overlap": 1, "share": 0.0, "kappa": 0.0, "llm_used": False,
+        "confusion": {"human0_llm0": 0, "human0_llm1": 1, "human1_llm0": 0, "human1_llm1": 0}}
 
 
 def test_kappa_corrects_share_for_chance():

@@ -211,6 +211,14 @@ def kappa(rows: Sequence[dict[str, str]]) -> float | None:
     return None if chance == 1 else (observed - chance) / (1 - chance)
 
 
+def confusion(rows: Sequence[dict[str, str]]) -> dict[str, int]:
+    """Human × LLM labels on the overlap, keys `human<h>_llm<j>` (#82)."""
+    out = {f"human{h}_llm{j}": 0 for h in (0, 1) for j in (0, 1)}
+    for v in _pairs(rows):
+        out[f"human{v[HUMAN]}_llm{v[LLM]}"] += 1
+    return out
+
+
 def llm_trusted(rows: Sequence[dict[str, str]]) -> bool:
     """EVAL.md B: LLM labels count only after >= MIN_OVERLAP common pairs agree with the human at >= MIN_AGREEMENT."""
     n, share = agreement(rows)
@@ -247,7 +255,7 @@ def precision_body(rows: Sequence[dict[str, str]], shown: dict[str, int] | None 
         "labeled": len(resolved),
         "labeled_by": dict(Counter(kind for _, kind in resolved.values())),
         "agreement_human_llm": {"overlap": n_both, "share": agree, "kappa": kappa(rows),
-                                "llm_used": use_llm and has_llm},
+                                "confusion": confusion(rows), "llm_used": use_llm and has_llm},
         "n_selected": len(shown) if shown else None,
         "empty_blocks": sorted(q for q, n in (shown or {}).items() if n == 0),
         "per_query": per_query,

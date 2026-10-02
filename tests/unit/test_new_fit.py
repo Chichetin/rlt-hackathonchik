@@ -402,3 +402,12 @@ def test_labeled_rows_reuse_labels_by_query_and_inn():
               {"query_id": "other", "inn": "b", "label": "1", "labeled_by": "человек"}]
     got = C.labeled_rows(table, labels)
     assert [(r["inn"], r.get("label", "")) for r in got] == [("a", "1"), ("b", "")]
+
+
+def test_unlabeled_counts_only_human_labels():
+    table = [{"query_id": "q", "inn": "1", "name": ""}, {"query_id": "q", "inn": "2", "name": ""},
+             {"query_id": "q", "inn": "3", "name": ""}]
+    labels = [{"query_id": "q", "inn": "1", "name": "", "label": "1", "labeled_by": "человек:a"},
+              {"query_id": "q", "inn": "2", "name": "", "label": "0", "labeled_by": "llm:m"},  # judge only: still to label
+              {"query_id": "q", "inn": "3", "name": "", "label": "?", "labeled_by": "человек:a"}]
+    assert C.unlabeled_count(table, labels) == 2
