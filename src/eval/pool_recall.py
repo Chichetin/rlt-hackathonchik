@@ -147,7 +147,8 @@ def signal_order(cands: Sequence[Candidate], order: dict[str, float], *, plan: S
 def linked_okveds(path: Path) -> dict[str, set[str]]:
     """OKPD2 class → main OKVED (class level) learned from history (#250, src/enrich/okved_link.py)."""
     if not path.exists():
-        raise FileNotFoundError(f"нет {path} — uv run python -m src.enrich.okved_link build --as-of <cutoff>")
+        raise FileNotFoundError(f"нет {path} — src.enrich.okved_link.build(<cutoff>, out=<processed>/{path.name}) "
+                                "(CLI build пишет okved_link.parquet — переименуйте)")
     out: dict[str, set[str]] = {}
     sql = okved_link.select(okved_link.MIN_LIFT, okved_link.MIN_SUPPLIERS, okved_link.TOP, okved_link.src_of(path))
     for cls, okved, *_ in duckdb.connect().execute(sql).fetchall():
