@@ -238,7 +238,9 @@ def is_active(cp: Counterparty, page: CachedPage) -> bool:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Реестр плательщиков Беларуси (МНС): компания по УНП")
     ap.add_argument("args", nargs="+", help="УНП […] — живой запрос с кешем; seed <каталог> — записанные ответы в кеш")
-    args = ap.parse_args(argv).args
+    ap.add_argument("--record", type=Path, default=None, help="каталог: записать ответ найденной компании <УНП>.json")
+    ns = ap.parse_args(argv)
+    args = ns.args
     if args[0] == "seed":
         if len(args) != 2:
             ap.error("seed <каталог>")
@@ -257,8 +259,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{unp}: в реестре плательщиков Беларуси не найден")
             continue
         print(f"{cp.foreign_id}  {cp.name}  | {cp.status} | {cp.contacts.get('address', '')}")
-        for e in cp.evidence:
-            print(f"    {e.fact}  [{e.url}]")
+        raw = cache.page_text(raw_url(unp))
+        if ns.record is not None and raw is not None:
+            ns.record.mkdir(parents=True, exist_ok=True)
+            rec = {"recorded_at": int(page.fetched_at), "url": page_url(unp), "answer": json.loads(raw)}
+            (ns.record / f"{unp}.json").write_text(json.dumps(rec, ensure_ascii=False, indent=1) + "\n",
+                                                   encoding="utf-8")
     return code
 
 

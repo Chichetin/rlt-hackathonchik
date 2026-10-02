@@ -51,6 +51,8 @@ DIST2_LEN = 8  # words this long may be 2 edits away (7: «аргенто» → 
 VOCAB_FILE = "speller-vocab-v2.json"  # v2: «ё» → «е»
 
 _WORD = re.compile(r"[A-Za-zА-Яа-яЁё]+")
+# Preserve complete model/article identifiers, including separators: АППВ3x2, cf-283a, DIN_933.
+_IDENTIFIER = re.compile(r"\w+(?:[-./\\]\w+)*")
 _EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,.~{}:\"<>"
 _RU = "ёйцукенгшщзхъфывапролджэячсмитьбюёхъжэбю"
 _TOKEN = re.compile(r"[A-Za-zА-Яа-яЁё\[\];',.`~{}:\"<>]+")  # a word with the keys that are letters in the other layout
@@ -143,11 +145,18 @@ class Speller:
 
     def correct(self, text: str) -> Correction:
         changes: list[tuple[str, str]] = []
+        protected = bytearray(len(text))
+        for identifier in _IDENTIFIER.finditer(text):
+            if any(ch.isdigit() for ch in identifier.group()):
+                protected[identifier.start():identifier.end()] = b"\x01" * len(identifier.group())
 
         phrase_start = True  # the word being fixed starts a phrase (the text or after «. ; : ! ?»)
+        token_start = 0
 
         def fix_word(m: re.Match[str]) -> str:
             raw = m.group(0)
+            if any(protected[token_start + m.start():token_start + m.end()]):
+                return raw
             word = raw.lower().replace("ё", "е")
             if len(raw) > 1 and raw.isupper():  # an abbreviation or a code
                 return raw
@@ -166,7 +175,8 @@ class Speller:
             return new
 
         def fix(m: re.Match[str]) -> str:
-            nonlocal phrase_start
+            nonlocal phrase_start, token_start
+            token_start = m.start()
             raw = m.group(0)
             before = text[:m.start()].rstrip()
             phrase_start = not before or before[-1] in ".;:!?«\"(\n"
@@ -174,7 +184,8 @@ class Speller:
             letters = "".join(_WORD.findall(token))
             # «[kt,» is «хлеб»: «kt» is a corpus word, but the keys of «х» and «б» say the layout was wrong
             punct = bool(_LAYOUT_PUNCT.search(token.rstrip(",.;:")))
-            if (not self.known(letters) or punct) and _LAT_KEYS.fullmatch(token):
+            if (not any(protected[m.start():m.end()])
+                    and (not self.known(letters) or punct) and _LAT_KEYS.fullmatch(token)):
                 # the whole token typed in the Latin layout; a trailing «, . ; :» may be real punctuation
                 for cut in range(0, min(2, len(token) - 3) + 1):
                     head, tail = token[:len(token) - cut], raw[len(raw) - cut:]
