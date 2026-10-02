@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { animate, useReducedMotion } from "motion/react";
 import { easeOut } from "./Motion";
-import { SupplierAvatar, SupplierMetrics, supplierKey } from "./SupplierIdentity";
+import { SupplierAvatar, SupplierId, SupplierMetrics, supplierKey } from "./SupplierIdentity";
 import { Ratings } from "./Ratings";
 import { componentText, nextReason, rankerReason } from "./ranker";
 import { SupplierScore } from "./SupplierScore";
@@ -82,7 +82,7 @@ function InspectorBody({ match, onOpen, weightsNote, customerRegion }: {
     <p className="inspector-origin">{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</p>
     <div className="inspector-identity"><SupplierAvatar cp={cp} /><h2>{cp.name}</h2></div>
     <p className="inspector-meta"><RoleBadge kind={cp.kind} /> · {regionLabel(cp)}{relationToCustomer(cp, customerRegion) && <> — {relationToCustomer(cp, customerRegion)}</>}</p>
-    <p className="inspector-inn">ИНН {cp.inn ? <strong>{cp.inn}</strong> : "не подтверждён"}</p>
+    <p className="inspector-inn"><SupplierId cp={cp} /></p>
     <div className="inspector-topline">
       <SupplierScore score={match.score} inspector />
     <button type="button" className="inspector-open" onClick={() => onOpen(match)}>Открыть полную карточку <span aria-hidden="true">↗</span></button>
