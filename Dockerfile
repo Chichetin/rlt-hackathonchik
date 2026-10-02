@@ -1,4 +1,4 @@
-# Один образ для api и worker (docker-compose.yml). UI собирается внутри и отдаётся API.
+# Образ api (docker-compose.yml): UI собирается внутри и отдаётся API. worker собирается из лёгкого Dockerfile.worker (D-155).
 FROM node:22-slim AS ui
 WORKDIR /ui
 COPY src/ui/package.json src/ui/package-lock.json ./
