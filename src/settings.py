@@ -87,6 +87,10 @@ class Settings:
     bm25_tokenizer = _Var("BM25_TOKENIZER", lambda v: v)  # overrides `tokenizer:` of configs/search.yaml
     # block «Новые» (src/match/new_fit.py, #77): off | shadow | on, overrides `mode:` of configs/discover.yaml
     discovery_new_fit = _Var("DISCOVERY_NEW_FIT", lambda v: (v or "").strip() or None)
+    # block «Новые» for a query WITHOUT OKPD2, by the class search() predicts from the text (P-02, D-141);
+    # on by default, 0 / false / off (any case, spaces around) — off
+    discovery_predicted_class = _Var("DISCOVERY_PREDICTED_CLASS",
+                                     lambda v: (v or "").strip().lower() not in {"0", "false", "off"})
     # EIS contract history (src/sources/eis_contracts.py, #244): cache ages, s; cards opened per check
     eis_contracts_search_max_age_s = _Var("EIS_CONTRACTS_SEARCH_MAX_AGE_S", lambda v: float(v or 7 * 24 * 3600))
     eis_contracts_card_max_age_s = _Var("EIS_CONTRACTS_CARD_MAX_AGE_S", lambda v: float(v or 30 * 24 * 3600))

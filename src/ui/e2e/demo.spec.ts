@@ -192,11 +192,13 @@ test("номер закупки не найден → понятное сооб�
   await page.getByLabel("Что нужно закупить").fill("Бумага офисная А4");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   await expect(page.getByRole("region", { name: "С опытом госзакупок" }).locator(".item").first()).toBeVisible();
-  // без ОКПД2 блок «Новые» не строится (D-041) и называет причину
+  // без ОКПД2 класс определяется по тексту тем же классификатором, что у подбора (P-02, #394): блок «Новые»
+  // строится и называет класс как определённый по тексту, а не как ОКПД2 запроса
   await page.getByRole("button", { name: /^Новые/ }).click();
-  await expect(page.getByRole("region", { name: "Новые из открытых источников" }).locator(".empty")).toContainText(
-    "Код ОКПД2 не указан — загрузите закупку по номеру",
-  );
+  const discovered = page.getByRole("region", { name: "Новые из открытых источников" });
+  await expect(discovered.getByTestId("discovery-class")).toContainText("ОКПД2 определён по тексту: 17.12");
+  await expect(discovered.locator(".item").first()).toBeVisible();
+  await expect(discovered.locator(".why").first()).toContainText("класс определён автоматически");
 });
 
 

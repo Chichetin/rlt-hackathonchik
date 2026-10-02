@@ -44,6 +44,15 @@ def test_flags_are_exactly_one() -> None:
         assert (s.demo_fixture, s.enrich_offline) == (False, False), other
 
 
+def test_predicted_class_of_discovery_is_on_unless_0() -> None:
+    """#394: «Новые» for a free-text query is on by default; 0 / false / off switch it off."""
+    assert get_settings({}).discovery_predicted_class is True
+    for on in ("1", "true", "", "yes", "on"):
+        assert get_settings({"DISCOVERY_PREDICTED_CLASS": on}).discovery_predicted_class is True, on
+    for off in ("0", "false", "off", " OFF ", "False", "0\n"):
+        assert get_settings({"DISCOVERY_PREDICTED_CLASS": off}).discovery_predicted_class is False, off
+
+
 def test_api_key_is_stripped() -> None:
     assert get_settings({"API_KEY": "  secret \n"}).api_key == "secret"
     assert get_settings({"API_KEY": "   "}).api_key == ""
