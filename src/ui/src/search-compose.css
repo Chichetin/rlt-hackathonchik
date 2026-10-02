@@ -1,7 +1,7 @@
 /* Search composer: two useful islands, a shared baseline, one primary action.
    Route scope keeps the supplier results layout independent. */
 .query-main, .query-options { min-width: 0; }
-.query-main > label { display: block; margin-bottom: 8px; font-size: 14px; color: var(--muted); font-weight: 500; }
+.query-main > label, .query-codes > label { display: block; margin-bottom: 8px; font-size: 14px; color: var(--muted); font-weight: 500; }
 .search-compose { display: block; }
 .search-compose .query { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(320px,1fr); gap: 24px; padding: 0; background: transparent; border: 0; box-shadow: none; backdrop-filter: none; }
 .search-compose .query::before { display: none; }

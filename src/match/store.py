@@ -81,6 +81,7 @@ class Store(Protocol):
     def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
                            exclude_lot: int = -1) -> list[tuple]: ...
     def lot(self, ident: str) -> tuple | None: ...
+    def lot_by_procedure(self, procedure_id: int) -> int | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
     def lot_names(self, lot_id: int) -> list[str]: ...
     def top_suppliers(self, limit: int) -> list[str]: ...
@@ -368,6 +369,11 @@ SELECT lot_id, subject, procedure_name, start_price, customer_inn, channel FROM 
 WHERE lot_id = %(lot_id)s OR reqnum = %(ident)s ORDER BY (lot_id = %(lot_id)s) DESC, lot_id LIMIT 1
 """
 
+# Извещения.procedure_id — the procedure ID in АИС ГЗ / ЭМ, 1:1 with lot_id in the export (#617).
+_LOT_BY_PROCEDURE = """
+SELECT lot_id FROM {t[notices]} WHERE procedure_id = %(procedure_id)s ORDER BY lot_id LIMIT 1
+"""
+
 _LOT_OKPD2 = """
 SELECT okpd2_code FROM {t[items]}
 WHERE lot_id = %(lot_id)s AND okpd2_code IS NOT NULL AND okpd2_code <> '' GROUP BY okpd2_code ORDER BY okpd2_code{c}
@@ -561,6 +567,10 @@ class ParquetStore:
         rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})[1]
         return rows[0] if rows else None
 
+    def lot_by_procedure(self, procedure_id: int) -> int | None:
+        rows = self._fetch(_LOT_BY_PROCEDURE, {"procedure_id": procedure_id})[1]
+        return int(rows[0][0]) if rows else None
+
     def lot_okpd2(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_OKPD2, {"lot_id": lot_id})[1]]
 
@@ -728,6 +738,10 @@ class PgStore:
     def lot(self, ident: str) -> tuple | None:
         _, rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})
         return rows[0] if rows else None
+
+    def lot_by_procedure(self, procedure_id: int) -> int | None:
+        _, rows = self._fetch(_LOT_BY_PROCEDURE, {"procedure_id": procedure_id})
+        return int(rows[0][0]) if rows else None
 
     def lot_okpd2(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_OKPD2, {"lot_id": lot_id})[1]]
