@@ -209,3 +209,12 @@ def test_final_refuses_a_broken_sample_before_the_marker(tmp_path, monkeypatch, 
     monkeypatch.setattr(F, "split_config", lambda: {**split_config(), "holdout_sample": n})
     assert F.main() == 2
     assert not (tmp_path / "seen").exists()
+
+
+def test_the_cutoff_reader_is_in_the_hashed_method_code():
+    """configs/split.yaml is read by src/ingest/split_config.py (#294): changing it changes the eval-final hash."""
+    import src.ingest.split_config as sc
+
+    rel = Path(sc.__file__).resolve().relative_to(R.ROOT).as_posix()
+    assert any(rel == p or rel.startswith(p + "/") for p in R.METHOD_PATHS), rel
+    assert split_config is sc.split_config  # the eval tools read the very same function

@@ -37,7 +37,7 @@ IP_ROW = {"inn": "500100732259", "ogrn": "318169000190351", "nptype": "IP", "cat
 @pytest.fixture(autouse=True)
 def _fast_and_unblocked(monkeypatch):
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", 0.0)
-    monkeypatch.setattr(rmsp, "_blocked_until", 0.0)
+    rmsp.PACER.reset()
 
 
 @pytest.fixture
@@ -329,9 +329,11 @@ def test_live_requests_respect_plan_budget_and_block(tmp_path):
     res = _run(SourceCache(tmp_path / "c.sqlite"), processed, query=q, offline=False, budget_s=0.0,
                client=_client(handler))
     assert posted == [] and all("нет в кеше" in r for r in res.requests)  # budget spent → cache only
+    assert not res.source_failed  # nothing was asked, nothing failed: no «источники не ответили» (#287)
     blocked = _run(SourceCache(tmp_path / "d.sqlite"), processed, query=q, offline=False,
                    client=_client(lambda r: (posted.append("x"), httpx.Response(403))[1]))
     assert posted == ["x"] and blocked.matches == [] and "отказал" in blocked.requests[0]  # one try, then stop
+    assert blocked.source_failed  # the user is told the block may be incomplete (X-Discovery-Error, #287)
     assert any("защиту не обходим" in n for n in blocked.notes)
 
 
@@ -346,9 +348,11 @@ def test_source_timeout_gives_empty_block_and_the_rest_of_the_query_is_cache_onl
     res = _run(SourceCache(tmp_path / "c.sqlite"), processed, offline=False, client=_client(handler))
     assert res.matches == [] and len(calls) == 1  # one attempt, not one per (OKVED, region)
     assert "не ответил" in res.requests[0] and all("в сеть не ходили" in r for r in res.requests[1:])
+    assert res.source_failed  # a timeout is a failed source, not «nobody found» (#287)
     assert rmsp.blocked()  # the hanging source is left alone for a while: the next search does not wait either
     again = _run(SourceCache(tmp_path / "c2.sqlite"), processed, offline=False, client=_client(_no_network))
     assert again.matches == [] and all("в сеть не ходили" in r for r in again.requests)
+    assert again.source_failed  # the next search during the pause is still «may be incomplete» (#287)
 
 
 def test_server_error_makes_the_rest_of_the_query_cache_only(tmp_path):
@@ -389,7 +393,7 @@ def test_hanging_source_cannot_hold_the_search_longer_than_the_budget(tmp_path, 
                                                                      expected_calls):
     budget = 0.6
     monkeypatch.setattr(rmsp, "MIN_INTERVAL_S", pacing)
-    monkeypatch.setattr(rmsp, "_last_request", 0.0)
+    rmsp.PACER.reset()
     monkeypatch.setattr(rmsp, "TIMEOUT_S", 3.0)
     calls: list = []
     res = _run(SourceCache(tmp_path / "c.sqlite"), _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]),

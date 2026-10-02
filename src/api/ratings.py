@@ -15,7 +15,6 @@ survive edits. This is not authenticated voting. Stored with SQLAlchemy next to 
 from __future__ import annotations
 
 import hashlib
-import os
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
@@ -28,6 +27,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
 
 from src.contracts import inn_is_valid
+from src.settings import get_settings
 from src.worker.queue import engine_from_env
 
 MIN_SHOWN = 3  # the average is shown from this many published ratings
@@ -119,7 +119,7 @@ class RatingSaved(BaseModel):
 
 
 def _salt() -> str:
-    return os.environ.get("RATINGS_SALT", "rlt-ratings")
+    return get_settings().ratings_salt
 
 
 def _digest(*parts: str) -> str:
