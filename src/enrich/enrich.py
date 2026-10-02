@@ -29,7 +29,7 @@ import httpx
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
 from src.regions import label_by_code, name_by_code
 from src.settings import get_settings
-from src.sources import bo_nalog, eis_rnp, fns_opendata, gisp, pb_nalog, rmsp, role
+from src.sources import bo_nalog, eis_rnp, fns_opendata, gisp, nostroy, pb_nalog, rmsp, role
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
 
@@ -268,9 +268,21 @@ def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) ->
     return cp.model_copy(update=update) if update else cp
 
 
+def _sro(inn: str, cache: SourceCache) -> list[Evidence]:
+    """Membership in an SRO of builders (НОСТРОЙ, #368) from the cache only: an INN nobody asked about has no fact; a
+    broken cached answer never takes the card down."""
+    try:
+        return nostroy.check(inn, cache, offline=True).evidence
+    except (KeyError, ValueError):
+        return []
+    except Exception:  # noqa: BLE001
+        log.exception("enrich %s: ответ реестра НОСТРОЙ не разобран", inn)
+        return []
+
+
 def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counterparty]:
-    """The cards plus the offline facts of ФНС open data, each with its own url, and the role «производитель» by the
-    registry of industrial products (ГИСП) — one query per source for all, no network."""
+    """The cards plus the offline facts of ФНС open data, each with its own url, the SRO membership cached from НОСТРОЙ
+    (#368) and the role «производитель» by the registry of industrial products (ГИСП) — no network."""
     inns = [c.inn for c in cards if c.inn and inn_is_valid(c.inn)]
     facts = fns_opendata.lookup_many(inns, cache)
     try:
@@ -281,7 +293,8 @@ def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counter
 
     def merged(c: Counterparty) -> Counterparty:
         have = {(e.url, e.field, e.value) for e in c.evidence}  # a card that already has them gets them once
-        new = [e for e in facts.get(c.inn or "", []) if (e.url, e.field, e.value) not in have]
+        mine = [*facts.get(c.inn or "", []), *_sro(c.inn or "", cache)]
+        new = [e for e in mine if (e.url, e.field, e.value) not in have]
         c = c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
         return gisp.with_role(c, products.get(c.inn or "", [])[:1], cache)  # facts already there are not repeated
     return [merged(c) for c in cards]
