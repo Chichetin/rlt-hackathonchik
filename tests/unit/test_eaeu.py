@@ -33,7 +33,8 @@ def test_lead_file_holds_only_checked_identifiers():
     assert leads and all(lead.country in eaeu.COUNTRY_NAME for lead in leads)
     assert all(by_grp.unp_is_valid(lead.national_id) for lead in leads if lead.country == "BY")
     # every lead has the registry's recorded answer next to it: the demo shows it without the network
-    assert all((eaeu.RECORDED / f"{lead.national_id}.json").is_file() for lead in leads)
+    recorded = {"BY": eaeu.RECORDED, "AM": eaeu.RECORDED_AM}
+    assert all((recorded[lead.country] / f"{lead.national_id}.json").is_file() for lead in leads)
 
 
 def test_goods_query_gets_the_registry_company_after_the_block(cache):
@@ -61,7 +62,7 @@ def test_no_row_for_services_or_other_classes(cache, codes, classes):
 
 def test_lead_without_a_cached_registry_answer_is_not_shown(cache, tmp_path: Path):
     lead = eaeu.Lead("17.12", "BY", UNP, "как показал поиск", "https://example.by/")
-    rows, line = eaeu.matches(["17.12"], ["17.12"], cache, WEIGHTS, False, leads=[lead], recorded=None)
+    rows, line = eaeu.matches(["17.12"], ["17.12"], cache, WEIGHTS, False, leads=[lead], recorded=False)
     assert rows == [] and line is not None and "без ответа реестра в кеше 1" in line
     kz = eaeu.Lead("17.12", "KZ", "123456789012", "x", "https://example.kz/")  # no registry connected: never shown
     assert eaeu.matches(["17.12"], ["17.12"], cache, WEIGHTS, False, leads=[kz])[0] == []
