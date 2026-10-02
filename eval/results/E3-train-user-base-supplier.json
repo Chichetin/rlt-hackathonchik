@@ -1,0 +1,41 @@
+{
+  "model": "e3/user-base-supplier",
+  "base": "deepvk/USER-base",
+  "pairs": "/mnt/storage/rlt236/e3/pairs/supplier-100k.parquet",
+  "pairs_manifest": {
+    "kind": "supplier",
+    "as_of": "2025-04-01",
+    "date_field": "notices.publish_date",
+    "n_pairs": 99076,
+    "batch_size": 256,
+    "batches": 391,
+    "seed": 20261002,
+    "rows": 2346666,
+    "groups_total": 34869,
+    "groups": 21018,
+    "names": 677814,
+    "max_publish_date": "2025-03-31",
+    "lots_used": 340994,
+    "eval_lots_checked": 51599,
+    "eval_lots_overlap": 0,
+    "seconds": 8.6,
+    "created": "2026-10-02T02:02:40+00:00"
+  },
+  "loss": "CachedMultipleNegativesRankingLoss (= MNRL, scale 20, cos; mini-batch 64), in-batch negatives",
+  "epochs": 1,
+  "steps": 391,
+  "batch_size_max": 256,
+  "lr": 2e-05,
+  "warmup": 0.1,
+  "weight_decay": 0.01,
+  "precision": "fp32 + TF32",
+  "prefix": [
+    "query: ",
+    "passage: "
+  ],
+  "loss_first50": 3.4807,
+  "loss_last50": 2.8558,
+  "train_seconds": 1097.3,
+  "gpu": "NVIDIA GeForce RTX 4080",
+  "created": "2026-10-02T02:55:20+00:00"
+}
