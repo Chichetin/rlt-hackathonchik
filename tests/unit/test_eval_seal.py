@@ -306,3 +306,19 @@ def test_the_configured_ranker_model_is_tracked_and_hashed():
     assert any(rel == p or rel.startswith(p + "/") for p in R.METHOD_PATHS), rel
     tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--error-unmatch", rel], capture_output=True)
     assert tracked.returncode == 0, f"{rel} не в git"
+
+
+def test_dev_results_are_dirty_on_an_uncommitted_ranker_model(repo):
+    """A dev result records `dirty` for the very paths the eval-final gate freezes, the ranker models too: a retrained
+    model left uncommitted made `make eval` say dirty: false, and `make parity` did not warn (#455)."""
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    model = repo / "models" / "ranker" / "m.txt"
+    model.parent.mkdir(parents=True)
+    model.write_text("tree 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "model"], check=True)
+    assert R.tree_dirty() is False
+    model.write_text("tree 2\n", encoding="utf-8")
+    assert R.tree_dirty() is True
+    assert R.result_record("x", "dev", {}, {})["dirty"] is True
+    assert F.FROZEN_PATHS == R.FROZEN_PATHS  # one list for the gate and for the results
