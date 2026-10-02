@@ -10,13 +10,13 @@ export type Weights = Record<ComponentName, number>;
 
 export const COMPONENTS: ComponentName[] = ["product_fit", "experience", "reliability", "activity", "geography", "price"];
 
-/** Mirrors `weights` in configs/search.yaml (H-15f, D-077); weights.test.ts reads the yaml so the two cannot drift. */
+/** Mirrors `weights` in configs/search.yaml (#576); weights.test.ts reads the yaml so the two cannot drift. */
 export const DEFAULT_WEIGHTS: Weights = {
-  product_fit: 0.762,
-  experience: 0.19,
+  product_fit: 0.5,
+  experience: 0.25,
   reliability: 0.0,
-  activity: 0.048,
-  geography: 0.0,
+  activity: 0.15,
+  geography: 0.1,
   price: 0.0,
 };
 
@@ -59,7 +59,7 @@ export const PRESETS: Preset[] = [
   {
     id: "local",
     title: "Рядом с заказчиком",
-    hint: "Регион заказчика и соседний выше остальных — по КПП; у ИП регион не учитывается",
+    hint: "Регион заказчика и соседний выше остальных — по КПП, у ИП — по региону ИНН",
     weights: { product_fit: 0.6, experience: 0.15, reliability: 0, activity: 0.05, geography: 0.2, price: 0 },
   },
   {
