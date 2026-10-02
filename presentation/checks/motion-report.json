@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T12:43:09.461Z",
+  "checked_at": "2026-10-02T13:20:38.849Z",
   "checks": [
     {
       "name": "Pipeline emphasis animates on arrow",
@@ -50,7 +50,7 @@
       "passed": true
     },
     {
-      "name": "Score preserved in reserve",
+      "name": "Score formula note preserved in reserve",
       "passed": true
     },
     {
