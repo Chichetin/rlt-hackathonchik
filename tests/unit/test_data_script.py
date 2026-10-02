@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import zipfile
@@ -47,12 +48,16 @@ def release(tmp_path: Path) -> dict[str, str]:
             z.writestr(name, f"a;b\n{name};1\n")
     names = (*PROCESSED, "raw-24-25.zip")
     (assets / "SHA256SUMS").write_text("".join(f"{sha(assets / n)}  {n}\n" for n in names), encoding="utf-8")
+    (assets / "sources-cache.sqlite").write_text("snapshot of the source cache\n", encoding="utf-8")
+    snapshot = f"{sha(assets / 'sources-cache.sqlite')}  sources-cache.sqlite\n"
+    (assets / "SHA256SUMS.cache").write_text(snapshot, encoding="utf-8")
     gh = bin_dir / "gh"
     gh.write_text(FAKE_GH, encoding="utf-8")
     gh.chmod(0o755)
     return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_ASSETS": str(assets),
             "FAKE_LOG": str(tmp_path / "gh.log"), "DATA_PROCESSED_DIR": str(tmp_path / "out" / "processed"),
-            "DATA_RAW_DIR": str(tmp_path / "out" / "raw dir")}  # a space in the path on purpose
+            "DATA_RAW_DIR": str(tmp_path / "out" / "raw dir"),
+            "SOURCE_CACHE": str(tmp_path / "out" / "cache dir" / "sources.sqlite")}  # a space in the path on purpose
 
 
 def run(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -128,3 +133,92 @@ def test_without_gh_says_what_to_install(tmp_path):
     (tools / "dirname").symlink_to(str(shutil.which("dirname")))
     res = run(["processed"], {"PATH": str(tools), "DATA_PROCESSED_DIR": str(tmp_path / "p")})
     assert res.returncode == 1 and "нужен GitHub CLI (gh)" in res.stderr and not (tmp_path / "p").exists()
+
+
+def _make_cache(path: Path, rows: list[tuple[str, str, float]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE IF NOT EXISTS pages (key TEXT PRIMARY KEY, url TEXT NOT NULL, "
+                "body TEXT NOT NULL, status INTEGER NOT NULL, fetched_at REAL NOT NULL)")
+    con.executemany("INSERT INTO pages VALUES (?, ?, ?, 200, ?)", [(k, f"https://x/{k}", b, ts) for k, b, ts in rows])
+    con.commit()
+    con.close()
+
+
+def _pages(path: Path) -> dict[str, tuple[str, float]]:
+    con = sqlite3.connect(path)
+    try:
+        return {k: (b, ts) for k, b, ts in con.execute("SELECT key, body, fetched_at FROM pages")}
+    finally:
+        con.close()
+
+
+def _real_snapshot(release: dict[str, str]) -> None:
+    """Replace the fake text snapshot of the release by a real sqlite one (keys a, b) with its checksum."""
+    assets = Path(release["FAKE_ASSETS"])
+    (assets / "sources-cache.sqlite").unlink()
+    _make_cache(assets / "sources-cache.sqlite", [("a", "snap-a", 1.0), ("b", "snap-b", 1.0)])
+    (assets / "SHA256SUMS.cache").write_text(f"{sha(assets / 'sources-cache.sqlite')}  sources-cache.sqlite\n",
+                                             encoding="utf-8")
+
+
+def test_cache_snapshot_is_downloaded_once(release):
+    target = Path(release["SOURCE_CACHE"])
+    res = run(["cache"], release)
+    assert res.returncode == 0, res.stderr
+    assert target.read_text(encoding="utf-8") == "snapshot of the source cache\n"
+    assert not list(target.parent.glob(".download.*"))
+    assert downloads(release) == ["SHA256SUMS.cache", "sources-cache.sqlite"]  # the data SHA256SUMS are not touched
+    again = run(["cache"], release)
+    assert again.returncode == 0 and "уже на месте" in again.stdout and downloads(release) == ["SHA256SUMS.cache"]
+
+
+def test_cache_snapshot_is_merged_into_a_local_cache_and_keeps_its_newer_rows(release):
+    _real_snapshot(release)
+    target = Path(release["SOURCE_CACHE"])
+    _make_cache(target, [("b", "local-b-newer", 99.0), ("c", "local-c", 5.0)])  # `make demo` made it on a search
+    res = run(["cache"], release)
+    assert res.returncode == 0, res.stderr
+    assert "добавлено из снимка записей: 1" in res.stdout
+    assert _pages(target) == {"a": ("snap-a", 1.0), "b": ("local-b-newer", 99.0), "c": ("local-c", 5.0)}
+    assert not list(target.parent.glob(".download.*"))
+    assert run(["cache"], release).returncode == 0  # a second run changes nothing
+    assert _pages(target) == {"a": ("snap-a", 1.0), "b": ("local-b-newer", 99.0), "c": ("local-c", 5.0)}
+
+
+def test_cache_snapshot_is_merged_into_an_empty_local_cache(release):
+    _real_snapshot(release)
+    target = Path(release["SOURCE_CACHE"])
+    _make_cache(target, [])
+    assert run(["cache"], release).returncode == 0
+    assert set(_pages(target)) == {"a", "b"}
+
+
+def test_cache_force_replaces_the_local_cache(release):
+    _real_snapshot(release)
+    target = Path(release["SOURCE_CACHE"])
+    _make_cache(target, [("c", "local-c", 5.0)])
+    forced = run(["cache"], {**release, "CACHE_FORCE": "1"})
+    assert forced.returncode == 0, forced.stderr
+    assert set(_pages(target)) == {"a", "b"}
+
+
+def test_cache_that_is_not_sqlite_is_not_silently_reported_as_done(release):
+    _real_snapshot(release)
+    target = Path(release["SOURCE_CACHE"])
+    target.parent.mkdir(parents=True)
+    target.write_text("not a database", encoding="utf-8")
+    res = run(["cache"], release)
+    assert res.returncode == 1 and "снимок не влит" in res.stderr and "готово" not in res.stdout
+    assert target.read_text(encoding="utf-8") == "not a database"
+
+
+def test_cache_with_wrong_checksum_is_refused_and_not_part_of_all(release):
+    (Path(release["FAKE_ASSETS"]) / "sources-cache.sqlite").write_text("tampered", encoding="utf-8")
+    res = run(["cache"], release)
+    assert res.returncode == 1 and "контрольная сумма sources-cache.sqlite не сошлась" in res.stderr
+    assert not Path(release["SOURCE_CACHE"]).exists()
+    downloads(release)
+    res_all = run([], release)  # no part = all: the data, never the cache
+    assert res_all.returncode == 0, res_all.stderr
+    assert "sources-cache.sqlite" not in downloads(release) and not Path(release["SOURCE_CACHE"]).exists()
