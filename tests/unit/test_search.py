@@ -82,7 +82,7 @@ def test_default_scoring_is_h15f_normalized(search_data):
     assert search_mod.scoring_options(cfg) == {"fit_bm25_share": 0.8, "experience_by": "similar", "tie_break": "bm25",
                                                "name_share": 0.5, "exp_scale": "pool",
                                                "sat_lots": 20, "sat_wins": 10,  # caps: the default, #196 is opt-in
-                                               "price": "none", "activity_by": "all",
+                                               "price": "scale", "activity_by": "all",
                                                # #105 options are opt-in
                                                "experience_wins": "count", "price_decades": 2.0}
     m = search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]))[0]
