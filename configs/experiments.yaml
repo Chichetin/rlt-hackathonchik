@@ -147,3 +147,41 @@ abl-activity:
   spell: false
   ranker: null
   weights: {activity: 0.0}
+# #105: компонента price — масштаб НМЦК запроса против медианы НМЦК лотов поставщика до as_of
+# (src/match/search.py::_price), поверх дефолта H-15f; вес price добавляется к сумме (баллы не нормированы).
+H-105-price05:
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.05}
+  options: {price: scale}
+H-105-price10:
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.10}
+  options: {price: scale}
+# #105: свежесть опыта — activity по последней закупке с похожими позициями, а не по последнему участию вообще
+H-105-fresh:
+  ranker: null   # измерено на v2 до #198 (D-103)
+  options: {activity_by: similar}
+H-105-fresh10:   # то же, вес activity 0.10 вместо 0.048
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {activity: 0.10}
+  options: {activity_by: similar}
+# #105: доля побед (сглаженная) вместо числа побед во второй половине experience
+H-105-winrate:
+  ranker: null   # измерено на v2 до #198 (D-103)
+  options: {experience_wins: rate}
+H-105-price05-d1:   # price обнуляется при 10× (как в предложении METHODOLOGY), вес 0.05
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.05}
+  options: {price: scale, price_decades: 1.0}
+H-105-combo:     # price 0.05 (масштаб НМЦК) + свежесть по похожим позициям — две компоненты, что не ухудшили dev
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.05}
+  options: {price: scale, activity_by: similar}
+H-105-combo-aisgz:   # combo + сглаженная доля побед только для канала АИС ГЗ (там один исполнитель на лот)
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.05}
+  options: {price: scale, activity_by: similar, experience_wins: rate_aisgz}
+# #105 поверх дефолта D-103 (ранжировщик): признак days_similar — давность последней похожей закупки.
+# R-105-gbm обучен src.match.ranker_train --name R-105 теми же данными и seed, что R-198, плюс этот признак.
+H-105-rk:
+  ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt}

@@ -28,9 +28,9 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Компьютерное оборудование"]  # src/ui/src/App.tsx
+EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Ноутбуки"]  # src/ui/src/App.tsx
 HEADERS = ("X-Total-History", "X-Total-Discovered", "X-Facets", "X-Search-Context", "X-Search-Note", "X-Excluded-Lot",
-           "X-Discovery-Error", "X-Query-Corrected", "X-Weak-Match")
+           "X-Discovery-Error", "X-Query-Corrected", "X-Weak-Match", "X-Discovery-Class")
 UI_FILTERS = {"near_customer": "auto"}  # what buildQuery() sends with NO_FILTERS (src/ui/src/api.ts)
 OKPD2_PER_REQUEST = 50  # OKPD2_LABELS_MAX of src/api/app.py, PER_REQUEST of src/ui/src/okpd2.ts
 _CODE = re.compile(r"\d{2}\.\d{2}(?:\.\d{1,2}(?:\.\d{3})?)?")

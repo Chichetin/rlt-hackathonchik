@@ -10,7 +10,6 @@ Location: $SOURCE_CACHE (default cache/sources.sqlite, not in git).
 from __future__ import annotations
 
 import hashlib
-import os
 import sqlite3
 import time
 from collections.abc import Callable, Iterator
@@ -18,7 +17,9 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_TTL_S = int(os.environ.get("SOURCE_CACHE_TTL_S", str(7 * 24 * 3600)))
+from src.settings import get_settings
+
+DEFAULT_TTL_S = get_settings().source_cache_ttl_s
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,7 @@ class CachedPage:
 class SourceCache:
     def __init__(self, path: Path | str | None = None, ttl_s: int = DEFAULT_TTL_S):
         # read at call time: tests and `make demo` point SOURCE_CACHE elsewhere after import
-        self.path = Path(path or os.environ.get("SOURCE_CACHE", "cache/sources.sqlite"))
+        self.path = Path(path or get_settings().source_cache)
         self.ttl_s = ttl_s
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:

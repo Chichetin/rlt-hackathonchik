@@ -1,10 +1,11 @@
 """discover(query) -> companies from open sources that are NOT in organizers' data. Owner: SOURCES.
 
 Block «Новые из открытых источников» (`origin="discovered"`, #16, D-036, D-037):
-1. OKPD2 class of the query (first 4 digits): `Query.okpd2`, or — when empty — the class search()
-   itself predicted and wrote into its `product_fit` explanations (so both blocks speak about the
-   same class); if it wrote none — the class voted by the lots of the top history matches
-   (`data:items#<lot>` Evidence of search()).
+1. OKPD2 class of the query (first 4 digits): `Query.okpd2`, or — when empty — the code search()
+   itself predicted from the text (`predicted_code`: search.predicted_code(), P-02, passed by
+   src/match/pipeline.py — so both blocks speak about the same class, #394); without it — the class
+   search() wrote into its `product_fit` explanations, and if it wrote none — the class voted by the
+   lots of the top history matches (`data:items#<lot>` Evidence of search()).
 2. OKPD2 class → OKVED prefixes: the same class (OKPD2 and OKVED2 share the first four digits by
    design) and, for goods, a wholesale code from a hand-made table (WHOLESALE). There is no official
    OKPD2 → OKVED2 key (research/SOURCES.md): the mapping is our rule and is shown to the user.
@@ -20,10 +21,10 @@ Block «Новые из открытых источников» (`origin="discov
    enrichment queue (`enqueue`), so the request itself makes no pb.nalog.ru calls.
 
 `DISCOVERY_OFFLINE=1` or `ENRICH_OFFLINE=1` — cache only, no network.
-`DISCOVERY_PREDICTED_CLASS=1` — also build the block for a query WITHOUT OKPD2, by the class search()
-predicts. Off by default: until #63 the prediction is wrong on real data («бумага офисная» → paints),
-and a wrong class would show irrelevant companies with product_fit 1.0. Without the flag such a query
-gets an empty block and no network request.
+A query WITHOUT OKPD2 gets the block by the class search() predicts from the text (#394, D-141 revises D-041:
+P-02 predicts the class right in 0.820 of positions, D-110). The class is never called «ОКПД2 запроса»:
+the explanation and the UI say it was determined automatically. `DISCOVERY_PREDICTED_CLASS=0` switches
+it off (also `false` / `off`, src/settings.py): such a query gets an empty block and no network request.
 CLI (live check, cache warm-up): `python -m src.enrich.discover "бумага офисная" --okpd2 17.12.14`;
 without `--okpd2` the class is the one search() predicts on organizers' data (as in /api/search).
 """
@@ -50,8 +51,10 @@ from src.enrich.evidence import check_counterparty, strip_unverified, value_in_p
 from src.ingest.load import suppliers_path
 from src.match import new_fit
 from src.match import search as search_mod
-from src.match.filters import REGION_CODE, apply_filters, apply_legal
+from src.match.filters import apply_filters, apply_legal
 from src.match.index import processed_dir
+from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_NAME
+from src.settings import get_settings
 from src.sources import pb_nalog, rmsp, role, web_leads
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
@@ -65,9 +68,6 @@ MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
 FIT = {"class": 1.0, "wholesale": 0.6}  # product_fit of a discovered company (D-036)
-NEIGHBOUR = {"78": "47", "47": "78"}
-NEIGHBOUR_VALUE = 0.8  # as in src/match/search.py
-REGION_NAME = {v: k for k, v in REGION_CODE.items()}
 COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geography", "price")
 
 # OKPD2 prefix (longest wins) → OKVED2 wholesale codes for these goods, the main one first. A hand-made
@@ -139,7 +139,7 @@ class Discovery:
 
 
 def predicted_class_allowed() -> bool:
-    return os.environ.get("DISCOVERY_PREDICTED_CLASS") == "1"
+    return get_settings().discovery_predicted_class
 
 
 def offline_mode() -> bool:
@@ -183,11 +183,10 @@ def okved_plan(codes: Sequence[str]) -> list[Channel]:
 def stated_class(history: Sequence[CounterpartyMatch]) -> str | None:
     """The OKPD2 class search() predicted for the query, read from its product_fit explanations.
 
-    TODO(#63, area:match): search() returns its predicted code only inside a Russian sentence of the
-    explanation; parsing it is fragile (a reworded sentence silently switches us to the lot vote —
-    tests/unit/test_discover.py::test_class_is_predicted_from_history_lots pins the wording). When
-    search() exposes the predicted code as data, read it from there. The prediction itself is weak
-    on real data (#63: «бумага офисная» → 20.30), so the class is always shown as «определён
+    Fallback only: search() exposes its predicted code as data (search.predicted_code(), #394) and the
+    pipeline passes it to discover(); this parse of the explanation serves callers that have only the
+    matches (a reworded sentence switches to the lot vote — test_class_is_predicted_from_history_lots
+    pins the wording). The prediction can be wrong, so the class is always shown as «определён
     автоматически», never as the class of the query.
     """
     votes: dict[str, int] = {}
@@ -517,10 +516,13 @@ def discover(
     budget_s: float = LIVE_BUDGET_S,
     client: httpx.Client | None = None,
     fit_mode: str | None = None,
+    predicted_code: str | None = None,
 ) -> Discovery:
     """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data.
 
     `fit_mode` (off | shadow | on) overrides new_fit.mode() — for the off/on comparison (#77).
+    `predicted_code` — the OKPD2 code search() predicted from the text of this query (search.predicted_code());
+    used only when the query has no OKPD2 of its own, and then its full code picks the wholesale row.
     """
     cache = cache or SourceCache()
     processed = processed or processed_dir()
@@ -533,15 +535,17 @@ def discover(
     classes = okpd_classes(query.okpd2)
     codes: list[str] = [c.strip() for c in query.okpd2]
     if not classes:
-        if not predicted_class_allowed():  # D-036: off until search() predicts the class reliably (#63)
+        if not predicted_class_allowed():  # #394: on by default, DISCOVERY_PREDICTED_CLASS=0 switches it off
             res.notes.append("ОКПД2 в запросе не указан — блок «Новые» не строится "
                              "(DISCOVERY_PREDICTED_CLASS выключен)")
             return res
-        guess = predict_class(history, processed)
+        # the code search() predicted from the text (P-02); without it — what its explanations / lots say
+        code = predicted_code.strip() if predicted_code and okpd_classes([predicted_code]) else None
+        guess = okpd_classes([code])[0] if code else predict_class(history, processed)
         if guess is None:
-            res.notes.append("ОКПД2 запроса не указан и не определён по истории — поиск по ОКВЭД невозможен")
+            res.notes.append("ОКПД2 запроса не указан и по тексту не определён — поиск по ОКВЭД невозможен")
             return res
-        classes, codes, res.predicted = [guess], [guess], True
+        classes, codes, res.predicted = [guess], [code or guess], True
     res.okpd_classes = classes[:MAX_CLASSES]
 
     jobs = [(ch, region, np) for region in _regions(query) for ch in okved_plan(codes)
@@ -665,7 +669,7 @@ def discover(
 def _report(query: Query, res: Discovery, cache: SourceCache) -> None:
     print(f"\nЗапрос: «{query.text}», ОКПД2 {', '.join(query.okpd2) or '—'} "
           f"→ классы {', '.join(res.okpd_classes) or '—'}"
-          f"{' (определён автоматически search() по похожим закупкам)' if res.predicted else ''}")
+          f"{' (определён по тексту search(), P-02)' if res.predicted else ''}")
     for line in res.requests:
         print(f"  rmsp: {line}")
     for line in res.leads:
@@ -701,12 +705,14 @@ def main(argv: list[str] | None = None) -> int:
     query = Query(query_id="discover-cli", text=args.text, okpd2=args.okpd2, region=args.region)
     offline = args.offline or offline_mode()
     history: list[CounterpartyMatch] = []
+    predicted: str | None = None
     if not args.okpd2:  # the text path of the UI: the class is what search() predicts
         try:
             history = search_mod.search(query)
+            predicted = search_mod.predicted_code()
         except FileNotFoundError:
             print("  ! данные организаторов не загружены — класс ОКПД2 по тексту не определить, укажите --okpd2")
-    res = discover(query, history, cache=cache, offline=offline, budget_s=60.0)
+    res = discover(query, history, cache=cache, offline=offline, budget_s=60.0, predicted_code=predicted)
     if args.enrich and not offline:
         for m in res.matches:
             inn = m.counterparty.inn
@@ -721,7 +727,7 @@ def main(argv: list[str] | None = None) -> int:
                 code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else ""
                 print(f"  ! карточка {inn} не получена ({type(e).__name__} {code}) — обогащение остановлено")
                 break
-        res = discover(query, history, cache=cache, offline=True)
+        res = discover(query, history, cache=cache, offline=True, predicted_code=predicted)
     _report(query, res, cache)
     return 0
 

@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import os
 import re
 import sqlite3
 import threading
@@ -48,6 +47,7 @@ from urllib.parse import quote
 import httpx
 
 from src.contracts import inn_is_valid
+from src.settings import get_settings, load_dotenv
 from src.sources.cache import SourceCache
 from src.sources.pacing import HostPacer
 
@@ -63,29 +63,26 @@ MAX_DOCS = 50  # groups on one page; more is a separate (paid) page
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _env_float(name: str, default: str) -> float:
-    return float(os.environ.get(name) or default)
-
-
-# read at every call: tests, the CLI (.env) and an operator may set them after import
+# read at every call: tests, the CLI (.env) and an operator may set them after import (src/settings.py)
 def api_key() -> str:
-    return os.environ.get("YANDEX_SEARCH_API_KEY", "").strip()
+    return get_settings().yandex_search_api_key
 
 
 def folder_id() -> str:
-    return os.environ.get("YANDEX_SEARCH_FOLDER_ID", "").strip()
+    return get_settings().yandex_search_folder_id
 
 
 def ttl_s() -> int:
-    return int(_env_float("YANDEX_SEARCH_TTL_S", str(30 * 24 * 3600)))
+    return get_settings().yandex_search_ttl_s
 
 
 def daily_max() -> int:
-    return int(_env_float("YANDEX_SEARCH_DAILY_MAX", "100"))
+    return get_settings().yandex_search_daily_max
 
 
 def offline() -> bool:
-    return os.environ.get("YANDEX_SEARCH_OFFLINE") == "1" or os.environ.get("ENRICH_OFFLINE") == "1"
+    s = get_settings()
+    return s.yandex_search_offline or s.enrich_offline
 
 
 def main_checkout(root: Path = ROOT) -> Path:
@@ -96,14 +93,14 @@ def main_checkout(root: Path = ROOT) -> Path:
 
 
 def cache_path() -> Path:
-    return Path(os.environ.get("YANDEX_SEARCH_CACHE") or main_checkout() / "cache" / "yandex_search.sqlite")
+    return get_settings().yandex_search_cache or main_checkout() / "cache" / "yandex_search.sqlite"
 
 
 def default_cache() -> SourceCache:
     return SourceCache(cache_path(), ttl_s=ttl_s())
 
 
-PACER = HostPacer(lambda: _env_float("YANDEX_SEARCH_MIN_INTERVAL_S", "1.0"), BLOCK_COOLDOWN_S)
+PACER = HostPacer(lambda: get_settings().yandex_search_min_interval_s, BLOCK_COOLDOWN_S)
 _LOCK = threading.Lock()  # one «cap check → paid request → cache» at a time in this process
 
 
@@ -356,23 +353,13 @@ def search(query: str, n: int = 10, region: str | None = None, page: int = 0, *,
     return SearchAnswer(q, url, found, hits, page_.fetched_at, from_cache=not live)
 
 
-def _load_dotenv(path: Path) -> None:
-    """KEY=VALUE lines of .env into the environment; a variable already set wins. CLI only."""
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        name, sep, value = line.strip().partition("=")
-        if sep and name and not name.startswith("#"):
-            os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
-
-
 def main(argv: list[str] | None = None) -> int:
     for env in dict.fromkeys((ROOT / ".env", main_checkout() / ".env")):  # the worktree's own first
-        _load_dotenv(env)
+        load_dotenv(env)
     ap = argparse.ArgumentParser(description="Яндекс Search API через кеш (каждый живой запрос платный)")
     ap.add_argument("query", nargs="?")
     ap.add_argument("-n", type=int, default=10, help="результатов (групп) на странице, 1–50")
-    ap.add_argument("--region", default=os.environ.get("YANDEX_SEARCH_REGION") or None,
+    ap.add_argument("--region", default=get_settings().yandex_search_region or None,
                     help="регион Яндекса (lr), СПб — 2")
     ap.add_argument("--page", type=int, default=0)
     ap.add_argument("--offline", action="store_true", help="только кеш, без сети и без трат")

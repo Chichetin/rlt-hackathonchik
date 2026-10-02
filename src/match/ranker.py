@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from src.contracts import Counterparty, CounterpartyMatch, Query
-from src.match.filters import REGION_CODE
+from src.regions import REGION_CODE
 
 if TYPE_CHECKING:
     from src.match.search import Candidate
@@ -87,6 +87,7 @@ FEATURES: dict[str, str] = {
     "channel_em": "канал запроса — ЭМ",
     "channel_share": "доля его лотов в канале запроса",
     "okpd_predicted": "ОКПД2 запроса определён по похожим позициям",
+    "days_similar": "давность последней закупки с похожими позициями",  # #105; a model may lack it (cols)
 }
 NAMES = list(FEATURES)
 
@@ -143,6 +144,8 @@ def feature_row(c: Candidate, top_bm25: float, comps: dict[str, float], cust_lot
         "channel_em": channel,
         "channel_share": (em_share if channel == 1.0 else 1.0 - em_share) if not math.isnan(channel) else math.nan,
         "okpd_predicted": float(predicted) if codes else math.nan,
+        "days_similar": (math.log1p(max(0, (ref - c.last_similar).days)) if c.last_similar is not None and ref
+                         else math.nan),
     }
     return [float(row[n]) for n in NAMES]
 
@@ -153,14 +156,14 @@ class Model:
     path: Path
     params: dict  # logreg: fill, mean, std, coef, intercept
     booster: Any = None  # lgbm.Booster
+    cols: list[int] | None = None  # positions in NAMES of the model's features (an older model has fewer)
     ablate: tuple[int, ...] = ()  # feature columns fed as missing (NaN): eval-time ablation, #361
 
     def _x(self, x: np.ndarray) -> np.ndarray:
-        if not self.ablate:
-            return x
-        x = np.array(x, dtype=float)
-        x[:, list(self.ablate)] = np.nan
-        return x
+        if self.ablate:
+            x = np.array(x, dtype=float)
+            x[:, list(self.ablate)] = np.nan
+        return x if self.cols is None else x[:, self.cols]
 
     def raw(self, x: np.ndarray) -> np.ndarray:
         """Ranking score (higher is better) of rows x (n, len(NAMES))."""
@@ -170,11 +173,17 @@ class Model:
         return self._z(x) @ self.params["coef"] + self.params["intercept"]
 
     def contrib(self, x: np.ndarray) -> np.ndarray:
-        """Per-feature contribution to raw() (n, len(NAMES)), the bias excluded."""
-        x = self._x(x)
+        """Per-feature contribution to raw() (n, len(NAMES)), the bias excluded; 0 for features the model lacks."""
+        xs = self._x(x)
         if self.kind == "lgbm":
-            return np.asarray(self.booster.predict(x, pred_contrib=True, num_threads=1), dtype=float)[:, :-1]
-        return self._z(x) * self.params["coef"]
+            own = np.asarray(self.booster.predict(xs, pred_contrib=True, num_threads=1), dtype=float)[:, :-1]
+        else:
+            own = self._z(xs) * self.params["coef"]
+        if self.cols is None:
+            return own
+        full = np.zeros((x.shape[0], len(NAMES)))
+        full[:, self.cols] = own
+        return full
 
     def _z(self, x: np.ndarray) -> np.ndarray:
         p = self.params
@@ -203,6 +212,18 @@ def spec(cfg: dict) -> dict | None:
     return raw
 
 
+def _cols(path: Path, features: list[str]) -> list[int] | None:
+    """Positions of the model's features in NAMES (None — exactly NAMES); a feature NAMES lacks is an error.
+    A model trained before a feature was added (#105: days_similar) keeps working on its own columns."""
+    if features == NAMES:
+        return None
+    if not features:
+        raise ValueError(f"{path}: в файле модели нет списка признаков — переобучите")
+    if unknown := [f for f in features if f not in NAMES]:
+        raise ValueError(f"{path}: признаков модели нет в ranker.NAMES ({', '.join(unknown)}) — переобучите")
+    return [NAMES.index(f) for f in features]
+
+
 def load(sp: dict) -> Model:
     """Model of the spec, cached in memory by (path, mtime); `ablate` gives a copy with those features missing."""
     model = _load(sp)
@@ -222,16 +243,12 @@ def _load(sp: dict) -> Model:
         import lightgbm as lgb
 
         booster = lgb.Booster(model_str=path.read_text(encoding="utf-8"))  # not model_file: non-ASCII paths
-        if booster.feature_name() != NAMES:
-            raise ValueError(f"{path}: признаки модели не совпадают с ranker.NAMES — переобучите")
-        model = Model("lgbm", path, {}, booster)
+        model = Model("lgbm", path, {}, booster, _cols(path, booster.feature_name()))
     else:
         body = json.loads(path.read_text(encoding="utf-8"))
-        if body.get("features") != NAMES:
-            raise ValueError(f"{path}: признаки модели не совпадают с ranker.NAMES — переобучите")
         params: dict[str, Any] = {k: np.asarray(body[k], dtype=float) for k in ("fill", "mean", "std", "coef")}
         params["intercept"] = float(body["intercept"])
-        model = Model("logreg", path, params)
+        model = Model("logreg", path, params, cols=_cols(path, body.get("features") or []))
     with _lock:
         _models[key] = model
     return model
@@ -253,7 +270,7 @@ def value_text(name: str, x: float) -> str:
         return f"{label}: нет данных"
     if name in _COUNT:
         v = str(round(math.expm1(x)))
-    elif name in ("days_last", "days_first"):
+    elif name in ("days_last", "days_first", "days_similar"):
         v = f"{round(math.expm1(x))} дн."
     elif name in _SHARE:
         v = f"{x:.0%}"
