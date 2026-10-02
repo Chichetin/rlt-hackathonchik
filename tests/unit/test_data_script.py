@@ -56,13 +56,17 @@ def release(tmp_path: Path) -> dict[str, str]:
     (assets / "gisp-meta.json").write_text('{"rows": 1}\n', encoding="utf-8")
     (assets / "SHA256SUMS.gisp").write_text(
         "".join(f"{sha(assets / n)}  {n}\n" for n in ("gisp-products.parquet", "gisp-meta.json")), encoding="utf-8")
+    (assets / "fns_opendata.parquet").write_text("fns open data\n", encoding="utf-8")
+    (assets / "SHA256SUMS.fnsod").write_text(f"{sha(assets / 'fns_opendata.parquet')}  fns_opendata.parquet\n",
+                                            encoding="utf-8")
     for n in POOL_ASSETS:
         (assets / n).write_text(f"pool {n}\n", encoding="utf-8")
     (assets / "SHA256SUMS.pool").write_text("".join(f"{sha(assets / n)}  {n}\n" for n in POOL_ASSETS), encoding="utf-8")
     gh = bin_dir / "gh"
     gh.write_text(FAKE_GH, encoding="utf-8")
     gh.chmod(0o755)
-    return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_ASSETS": str(assets),
+    env = {k: v for k, v in os.environ.items() if k != "FNS_OPENDATA_PARQUET"}  # default target unless set
+    return {**env, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_ASSETS": str(assets),
             "FAKE_LOG": str(tmp_path / "gh.log"), "DATA_PROCESSED_DIR": str(tmp_path / "out" / "processed"),
             "DATA_RAW_DIR": str(tmp_path / "out" / "raw dir"),
             "GISP_DIR": str(tmp_path / "out" / "gisp dir"),
@@ -293,3 +297,25 @@ def test_pool_with_wrong_checksum_or_bad_name_is_refused_and_not_part_of_all(rel
     (assets / "SHA256SUMS.pool").write_text(f"{'0' * 64}  other.parquet\n", encoding="utf-8")
     empty = run(["pool"], release)
     assert empty.returncode == 1 and "нет файлов pool-*" in empty.stderr
+
+
+def test_fnsod_goes_to_data_processed_dir_once_and_is_not_part_of_all(release):
+    target = Path(release["DATA_PROCESSED_DIR"]) / "fns_opendata.parquet"  # = _parquet() of src/sources/fns_opendata.py
+    res = run(["fnsod"], release)
+    assert res.returncode == 0, res.stderr
+    assert target.read_text(encoding="utf-8") == "fns open data\n"
+    assert downloads(release) == ["SHA256SUMS.fnsod", "fns_opendata.parquet"]  # its own checksum list
+    again = run(["fnsod"], release)
+    assert again.returncode == 0 and "уже на месте" in again.stdout and downloads(release) == ["SHA256SUMS.fnsod"]
+    assert run([], release).returncode == 0 and "SHA256SUMS.fnsod" not in downloads(release)
+
+
+def test_fnsod_honours_fns_opendata_parquet_and_refuses_a_wrong_checksum(release, tmp_path):
+    target = tmp_path / "elsewhere dir" / "fns.parquet"
+    env = {**release, "FNS_OPENDATA_PARQUET": str(target)}
+    assert run(["fnsod"], env).returncode == 0 and target.read_text(encoding="utf-8") == "fns open data\n"
+    (Path(release["FAKE_ASSETS"]) / "fns_opendata.parquet").write_text("tampered", encoding="utf-8")
+    target.unlink()
+    res = run(["fnsod"], env)
+    assert res.returncode == 1 and "контрольная сумма fns_opendata.parquet не сошлась" in res.stderr
+    assert not target.exists() and not list(target.parent.glob(".download.*"))
