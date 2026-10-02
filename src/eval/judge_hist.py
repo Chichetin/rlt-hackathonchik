@@ -198,7 +198,8 @@ def score(exp: str) -> int:
     data = json.loads(LABELS.read_text(encoding="utf-8"))
     body = score_records(data["queries"], data["records"])
     cfg = {"judge_model": data.get("model"), "systems": {k: v[1] or "product default" for k, v in SYSTEMS.items()},
-           "top": TOP, "seed": SEED, "pool": POOL, "names_per_supplier": NAMES}
+           "top": TOP, "seed": SEED, "pool": POOL, "names_per_supplier": NAMES,
+           "internal_only": True, "human_agreement": None, "decision": "D-133"}
     rec = R.result_record(exp, f"dev_fresh_free_text(n={body['n_queries']},seed={SEED})", cfg, body)
     R.RESULTS.mkdir(parents=True, exist_ok=True)
     out = R.RESULTS / f"{exp}.json"
