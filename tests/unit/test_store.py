@@ -269,6 +269,8 @@ DIRECT_PARQUET_OK = {
     "src/sources/fns_opendata.py": "FNS open data, not organizers' data",
     "src/enrich/discover.py": "waits for PR #131 and #258 — the second part of #293",
     "src/match/new_fit.py": "OKPD2 item profile of «Новые» (#77, shadow) — the second part of #293",
+    "src/ingest/predict.py": "make predict (#229): offline batch over a test upload: known OKPD2 classes and sections "
+                             "(code vs text); to Store with the second part of #293",
 }
 
 
