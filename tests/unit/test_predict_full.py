@@ -347,7 +347,7 @@ def test_from_pool_class_company_with_evidence(pool_dir, tmp_path):
         cache=cache, pool_dir=pool_dir)
     assert checked is True and [m.counterparty.inn for m in found] == ["0078000013"]
     m = found[0]
-    assert P._fit(m) == 1.0 and relation["0078000013"] == "class" and m.origin == "discovered"
+    assert P._fit(m) == discover_mod.FIT["class"] and relation["0078000013"] == "class" and m.origin == "discovered"
     assert check_counterparty(m.counterparty, cache.page_text) == []
     (tmp_path / "k").mkdir()
     known = _suppliers(tmp_path / "k", ["0078000013"])
