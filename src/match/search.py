@@ -84,6 +84,16 @@ UNAVAILABLE = {
     "reliability": "Нет данных: статус, РНП и расторжения ещё не подключены — в score не входит",
     "price": "Нет данных: в выгрузке нет цены контракта, только НМЦК — в score не входит",
 }
+# options.price scale, but nothing to compare (#585): the weight goes to the other criteria
+NO_PRICE = "Нет данных: НМЦК закупки не указана или у поставщика нет лотов с НМЦК — вес отдан другим критериям"
+
+
+def _without_price(w: dict[str, float]) -> dict[str, float]:
+    """Weights with the price share spread over the other criteria in proportion, so the score keeps its scale."""
+    total, wp = sum(w.values()), w.get("price", 0.0)
+    if wp <= 0 or total <= wp:
+        return w
+    return {k: 0.0 if k == "price" else round(v * total / (total - wp), 4) for k, v in w.items()}
 
 
 # Scoring options of experiments (#22, `options:` in configs/search.yaml or configs/experiments.yaml).
@@ -697,14 +707,16 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
         if profile_note:
             geo_why = f"{geo_why}; {profile_note}"
+        wc = _without_price(w) if price is None else w
+        no_price = NO_PRICE if opts["price"] == "scale" else UNAVAILABLE["price"]
         comps = [
-            _component("product_fit", fit, w, fit_why),
-            _component("experience", exp, w, exp_why),
-            _reliability("off" if rel_mode == "shadow" else rel_mode, history.get(c.inn), prior, last_day, w),
-            _component("price", price[0], w, price[1]) if price is not None else ScoreComponent(
-                name="price", value=0.0, weight=0.0, explanation=UNAVAILABLE["price"]),
-            _component("activity", act, w, act_why),
-            _component("geography", geo, w, geo_why),
+            _component("product_fit", fit, wc, fit_why),
+            _component("experience", exp, wc, exp_why),
+            _reliability("off" if rel_mode == "shadow" else rel_mode, history.get(c.inn), prior, last_day, wc),
+            _component("price", price[0], wc, price[1]) if price is not None else ScoreComponent(
+                name="price", value=0.0, weight=0.0, explanation=no_price),
+            _component("activity", act, wc, act_why),
+            _component("geography", geo, wc, geo_why),
         ]
         comps.sort(key=lambda x: list(w).index(x.name) if x.name in w else len(w))
         cp = cp.model_copy(update={"evidence": [*cp.evidence, Evidence(

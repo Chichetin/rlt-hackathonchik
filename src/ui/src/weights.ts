@@ -12,17 +12,17 @@ export const COMPONENTS: ComponentName[] = ["product_fit", "experience", "reliab
 
 /** Mirrors `weights` in configs/search.yaml (#576); weights.test.ts reads the yaml so the two cannot drift. */
 export const DEFAULT_WEIGHTS: Weights = {
-  product_fit: 0.5,
-  experience: 0.25,
-  reliability: 0.0,
-  activity: 0.15,
-  geography: 0.1,
-  price: 0.0,
+  product_fit: 0.4,
+  experience: 0.2,
+  reliability: 0.15,
+  activity: 0.1,
+  geography: 0.07,
+  price: 0.08,
 };
 
 /** Out of the score: the server gives them weight 0 — price: no data (UNAVAILABLE in src/match/search.py, D-029);
  * reliability: computed for the shown rows, for reference only (reliability.mode shadow, #72). */
-export const UNAVAILABLE: ComponentName[] = ["reliability", "price"];
+export const UNAVAILABLE: ComponentName[] = []; // #585: reliability and price are in the score
 
 /** Why a component is out of the score — the text of its row in the advanced mode. */
 export function offNote(c: ComponentName): string {
@@ -91,13 +91,15 @@ export function normalize(w: Weights): Weights {
  *  geography in H-15f, may be raised; no-data components stay at 0), so the scale of the score stays the same as
  *  with the standard weights and only the order changes. The learned ranker's reasons (#198, #278) are dropped. */
 export function reweight(m: CounterpartyMatch, w: Weights): CounterpartyMatch {
-  const scored = m.components.filter((c) => !UNAVAILABLE.includes(c.name));
+  // a criterion the server could not compute for this supplier («Нет данных», e.g. price without НМЦК) stays at 0
+  const off = (c: CounterpartyMatch["components"][number]) => UNAVAILABLE.includes(c.name) || c.explanation.startsWith("Нет данных");
+  const scored = m.components.filter((c) => !off(c));
   const mass = scored.reduce((a, c) => a + c.weight, 0);
   const share = scored.reduce((a, c) => a + Math.max(0, w[c.name] ?? 0), 0);
   const components = m.components.map((c) => ({
     ...c,
     explanation: componentText(c), // the order is the formula's now: the learned ranker's reason (#198) does not apply
-    weight: !UNAVAILABLE.includes(c.name) && share > 0 ? Math.round((Math.max(0, w[c.name] ?? 0) / share) * mass * 1e4) / 1e4 : 0,
+    weight: !off(c) && share > 0 ? Math.round((Math.max(0, w[c.name] ?? 0) / share) * mass * 1e4) / 1e4 : 0,
   }));
   const score = Math.round(components.reduce((a, c) => a + c.value * c.weight, 0) * 1e4) / 1e4;
   return { ...m, components, score, rank_reason: null };
