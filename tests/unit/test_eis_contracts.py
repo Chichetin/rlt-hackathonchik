@@ -24,6 +24,7 @@ import httpx
 import pytest
 
 from src.contracts import Evidence
+from src.enrich import eis_contracts_check as chk
 from src.enrich import evidence as ev_check
 from src.sources import eis_contracts as m
 from src.sources import eis_rnp
@@ -43,7 +44,8 @@ AT = datetime(2026, 5, 14, 8, 43, 45, tzinfo=UTC).timestamp()  # Wayback snapsho
 def cache(tmp_path, monkeypatch):
     monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources.sqlite"))
     monkeypatch.setenv("ENRICH_OFFLINE", "1")
-    monkeypatch.setattr(m, "MIN_INTERVAL_S", 0.0)
+    monkeypatch.setattr(eis_rnp, "MIN_INTERVAL_S", 0.0)
+    eis_rnp.PACER.reset()
     c = SourceCache()
     c.put(m.card_url(N_IT), CARD, fetched_at=AT)
     c.put(m.card_url(N_GOODS), CARD_GOODS, fetched_at=AT)
@@ -60,7 +62,7 @@ def _listed(monkeypatch, cache, as_of, *bodies, total=None):
 
 
 def _card_facts(evs: list[Evidence]) -> list[Evidence]:
-    return [e for e in evs if not m._is_search(e.url)]
+    return [e for e in evs if not m.is_search(e.url)]
 
 
 # --- parsing --------------------------------------------------------------------------------------
@@ -133,12 +135,12 @@ def test_supplied_class_gives_basis_and_evidence_that_passes(cache, monkeypatch)
     assert (ev.source, ev.url, ev.field, ev.value) == (m.SOURCE, url, "contract", N_IT)
     assert (listed.url, listed.field, listed.value) == (m.search_url(SUPPLIER, as_of), "contract", N_IT)
     assert m.supplier_of(listed.url) == SUPPLIER
-    assert m.check_supply(res.evidence, cache.page_text, SUPPLIER) == []
-    assert m.check_supply(res.evidence, cache.page_text, "7820324037")  # another supplier's INN
-    assert m.check_supply([ev], cache.page_text, SUPPLIER)  # the card alone does not tie it to the supplier
+    assert chk.check_supply(res.evidence, cache.page_text, SUPPLIER) == []
+    assert chk.check_supply(res.evidence, cache.page_text, "7820324037")  # another supplier's INN
+    assert chk.check_supply([ev], cache.page_text, SUPPLIER)  # the card alone does not tie it to the supplier
     assert ev.fetched_at == datetime.fromtimestamp(AT, tz=UTC)
     assert "ОКПД2 62.01.11.000" in ev.fact and "от 15.07.2019" in ev.fact
-    assert m.check_evidence(ev, cache.page_text) == []
+    assert chk.check_evidence(ev, cache.page_text) == []
     # evidence.py's literal check: the contract number and the code are on the cached page
     assert ev_check.value_in_page("contract", N_IT, CARD)
     assert ev_check.value_in_page("okpd2", "62.01.11.000", CARD)
@@ -150,7 +152,7 @@ def test_supplied_picks_the_card_with_the_class(cache, monkeypatch):
     res = m.supplied(SUPPLIER, "22.29", cache=cache)
     assert res.supplied is True and [c.number for c in res.contracts] == [N_GOODS]
     assert "ОКПД2 22.29.10.110" in res.evidence[0].fact
-    assert m.check_evidence(res.evidence[0], cache.page_text) == []
+    assert chk.check_evidence(res.evidence[0], cache.page_text) == []
     assert m.supplied(SUPPLIER, "14.1", cache=cache).contracts[0].number == N_GOODS
 
 
@@ -260,12 +262,16 @@ def test_blocked_card_stops_the_check(cache, monkeypatch):
 
 def test_requests_share_the_rnp_pace(cache, monkeypatch):
     monkeypatch.delenv("ENRICH_OFFLINE")
-    monkeypatch.setattr(m, "MIN_INTERVAL_S", 0.3)
-    monkeypatch.setattr(eis_rnp, "_last_request", time.monotonic())  # РНП has just asked zakupki.gov.ru
+    monkeypatch.setattr(eis_rnp, "MIN_INTERVAL_S", 0.3)
+    with eis_rnp.PACER.slot():  # РНП has just asked zakupki.gov.ru
+        pass
     t0 = time.monotonic()
     m.supplied(SUPPLIER, "62.01", cache=cache, client=_client(lambda r: httpx.Response(200, text=NO_RESULTS)))
     assert time.monotonic() - t0 >= 0.25
-    assert eis_rnp._last_request >= t0  # and the next РНП request waits for this one
+    t1 = time.monotonic()
+    with eis_rnp.PACER.slot():  # and the next РНП request waits for this one
+        pass
+    assert time.monotonic() - t1 >= 0.25
 
 
 def test_invalid_input_is_an_error_not_an_answer(cache):
@@ -281,7 +287,7 @@ def test_invalid_input_is_an_error_not_an_answer(cache):
 def _good(cache, monkeypatch) -> Evidence:
     _listed(monkeypatch, cache, None, CARD)
     [ev] = _card_facts(m.supplied(SUPPLIER, "62.01", cache=cache).evidence)
-    assert m.check_evidence(ev, cache.page_text) == []
+    assert chk.check_evidence(ev, cache.page_text) == []
     return ev
 
 
@@ -298,7 +304,7 @@ def _good(cache, monkeypatch) -> Evidence:
 ])
 def test_made_up_contract_fact_is_rejected(cache, monkeypatch, update):
     ev = _good(cache, monkeypatch).model_copy(update=update)
-    assert m.check_evidence(ev, cache.page_text)
+    assert chk.check_evidence(ev, cache.page_text)
 
 
 def test_number_elsewhere_on_a_card_is_not_that_contract(cache, monkeypatch):
@@ -310,7 +316,7 @@ def test_number_elsewhere_on_a_card_is_not_that_contract(cache, monkeypatch):
     cache.put(url, CARD + f"<p>см. также № {other}</p>", fetched_at=AT)
     forged = ev.model_copy(update={"url": url, "value": other, "fact": ev.fact.replace(N_IT, other)})
     assert ev_check.value_in_page("contract", other, cache.page_text(url) or "")
-    assert m.check_evidence(forged, cache.page_text)
+    assert chk.check_evidence(forged, cache.page_text)
 
 
 # --- review #273: incomplete answers are None, the supplier link is a fact -----------------------
@@ -371,13 +377,13 @@ def _search_fact(url: str, number: str = LISTED) -> Evidence:
 def test_search_fact_on_the_real_search_page(cache):
     url = m.search_url(SUPPLIER)
     cache.put(url, SEARCH, fetched_at=AT)
-    assert m.check_evidence(_search_fact(url), cache.page_text, SUPPLIER) == []
-    assert m.check_evidence(_search_fact(url, N_IT), cache.page_text, SUPPLIER)  # not in this answer
+    assert chk.check_evidence(_search_fact(url), cache.page_text, SUPPLIER) == []
+    assert chk.check_evidence(_search_fact(url, N_IT), cache.page_text, SUPPLIER)  # not in this answer
     # a 19-digit number that IS on the page but is a purchase notice, not a contract entry
     assert "0173100007824000071" in SEARCH
-    assert m.check_evidence(_search_fact(url, "0173100007824000071"), cache.page_text, SUPPLIER)
-    assert m.check_evidence(_search_fact(url), cache.page_text, "7820324037")  # filtered by another INN
+    assert chk.check_evidence(_search_fact(url, "0173100007824000071"), cache.page_text, SUPPLIER)
+    assert chk.check_evidence(_search_fact(url), cache.page_text, "7820324037")  # filtered by another INN
     unfiltered = f"{m.BASE}{m.SEARCH_PATH}?searchString=%D0%BD%D0%B0%D0%BB%D0%BE%D0%B3"
     cache.put(unfiltered, SEARCH, fetched_at=AT)
     assert m.supplier_of(unfiltered) is None
-    assert m.check_evidence(_search_fact(unfiltered), cache.page_text)  # no supplier filter in the URL
+    assert chk.check_evidence(_search_fact(unfiltered), cache.page_text)  # no supplier filter in the URL

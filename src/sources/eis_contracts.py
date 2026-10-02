@@ -38,20 +38,21 @@ for `contractDateTo = as_of − 1 day`, and every date read from the pages is ch
 
 Pacing: one host, one budget — the lock and the time of the last request are those of
 src/sources/eis_rnp.py (`Crawl-delay: 60` of zakupki.gov.ru), so РНП and contract requests together
-keep one request per MIN_INTERVAL_S. Pages go to SourceCache as is; `ENRICH_OFFLINE=1` — cache only.
+keep one request per eis_rnp.MIN_INTERVAL_S (eis_rnp.PACER). Pages go to SourceCache as is;
+`ENRICH_OFFLINE=1` — cache only.
 
 Подключение (этап 2, после PR #131): in discover(), behind an option off by default, for candidates
 already in the top of the lot only — `supplied(inn, okpd2_class, as_of=query.as_of)`; True → the
 product_fit step PRODUCT_FIT (0.8) with `basis` and `evidence`. Before that, `contract` has to return
 to `src/enrich/evidence.FIELDS` (it was there until D-066), otherwise strip_unverified() drops these
-facts; until then `check_supply(evidence, page_text, inn)` below is the check (both facts per contract).
+facts; until then `src/enrich/eis_contracts_check.py::check_supply(evidence, page_text, inn)` is the
+check (both facts per contract): verification is the enrich layer's job, this module only reads pages.
 """
 
 from __future__ import annotations
 
 import html
 import logging
-import os
 import re
 import time
 from collections.abc import Callable
@@ -62,7 +63,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import httpx
 
 from src.contracts import Evidence, inn_is_valid
-from src.enrich import evidence as ev_check
+from src.settings import get_settings
 from src.sources import eis_rnp
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.eis_rnp import BASE, NO_RESULTS, UA, Blocked
@@ -73,17 +74,16 @@ log = logging.getLogger(__name__)
 SOURCE = "ЕИС, реестр контрактов"
 FIELD = "contract"
 PRODUCT_FIT = 0.8  # «подтверждена контрактом» (#77, ступени product_fit — решение человека IR630)
-MIN_INTERVAL_S = eis_rnp.MIN_INTERVAL_S  # the zakupki.gov.ru budget, shared with РНП
-SEARCH_MAX_AGE_S = float(os.environ.get("EIS_CONTRACTS_SEARCH_MAX_AGE_S", str(7 * 24 * 3600)))
-CARD_MAX_AGE_S = float(os.environ.get("EIS_CONTRACTS_CARD_MAX_AGE_S", str(30 * 24 * 3600)))
-MAX_CARDS = int(os.environ.get("EIS_CONTRACTS_MAX_CARDS", "3"))  # cards opened per check: 1 request/min each
+SEARCH_MAX_AGE_S = get_settings().eis_contracts_search_max_age_s
+CARD_MAX_AGE_S = get_settings().eis_contracts_card_max_age_s
+MAX_CARDS = get_settings().eis_contracts_max_cards  # cards opened per check: 1 request/min each
 TIMEOUT_S = eis_rnp.TIMEOUT_S
 DELIVERED = ("Исполнение", "Исполнение завершено")  # stages that mean the goods were (being) delivered
 # every stage of the search filter contractStageList=0,1,2,3; the labels of 2 and 3 are [ПРОВЕРИТЬ] live —
 # an unknown label makes the answer incomplete (None), it is never skipped silently
 STAGES = (*DELIVERED, "Исполнение прекращено", "Аннулировано")
 
-_NUMBER = re.compile(r"\d{19}")  # registry number of a 44-ФЗ contract
+NUMBER_RE = re.compile(r"\d{19}")  # registry number of a 44-ФЗ contract
 _CLASS = re.compile(r"\d{2}(?:\.\d{1,2}){0,3}(?:\.\d{3})?")  # «62», «62.0», «62.01», …, «62.01.11.000»
 _ENTRY = re.compile(r"search-registry-entry-block.*?(?=search-registry-entry-block|$)", re.S)
 _ENTRY_NUMBER = re.compile(r"registry-entry__header-mid__number\">\s*<a[^>]*>\s*№\s*(\d{19})\s*</a>", re.S)
@@ -215,17 +215,8 @@ def _validate_card(number: str) -> Callable[[str], None]:
 
 
 def _get(client: httpx.Client, url: str, validate: Callable[[str], None]) -> tuple[int, str]:
-    # one host, one budget: the РНП client's lock and clock (Crawl-delay: 60).
-    # TODO(#244): a public pacer in eis_rnp.py (or eis_common.py) once PR #156 is merged; until then the
-    # private _lock/_last_request are shared on purpose — a second clock would double the request rate.
-    with eis_rnp._lock:
-        wait = MIN_INTERVAL_S - (time.monotonic() - eis_rnp._last_request)
-        if wait > 0:
-            time.sleep(wait)
-        try:
-            r = client.get(url)
-        finally:
-            eis_rnp._last_request = time.monotonic()
+    with eis_rnp.PACER.slot():  # one host, one budget: the РНП client's pacer (Crawl-delay: 60)
+        r = client.get(url)
     if r.status_code in (403, 429):
         raise Blocked(f"zakupki.gov.ru ответил {r.status_code} — останавливаемся")
     r.raise_for_status()
@@ -238,7 +229,7 @@ def fetch(url: str, validate: Callable[[str], None], max_age_s: float, cache: So
     """Cached, paced GET. Offline → cache or KeyError; a failed request → the stale page if any."""
     cache = cache or SourceCache()
     hit = cache.get(url, allow_stale=True)
-    if os.environ.get("ENRICH_OFFLINE") == "1":
+    if get_settings().enrich_offline:
         if hit is None:
             raise KeyError(url)
         return hit
@@ -366,7 +357,7 @@ def _listed_evidence(card: Contract, search: CachedPage) -> Evidence:
                     fact=f"Госконтракт № {card.number} — в выдаче реестра контрактов ЕИС по фильтру «Поставщик»")
 
 
-def _is_search(url: str) -> bool:
+def is_search(url: str) -> bool:
     return urlsplit(url).path == SEARCH_PATH
 
 
@@ -377,61 +368,3 @@ def supplier_of(url: str) -> str | None:
         return None
     values = parse_qs(parts.query).get("supplierTitle", [])
     return values[0] if len(values) == 1 and inn_is_valid(values[0]) else None
-
-
-_FACT_CODE = re.compile(r"ОКПД2 (\d{2}\.\d{2}(?:\.\d{1,2})?(?:\.\d{3})?)")
-_FACT_DATE = re.compile(r" от (\d{2}\.\d{2}\.\d{4})")
-_FACT_CUSTOMER = re.compile(r", заказчик (.*), позиция ОКПД2 ")
-
-
-def check_evidence(ev: Evidence, page_text: ev_check.PageText, inn: str | None = None) -> list[str]:
-    """evidence.py rules for a contract fact, plus what is specific to it.
-    Card fact: the cached page is the card of this very contract, and the OKPD2 code, the date and the
-    customer named in the fact are those of the card. Search fact: the contract is an entry of a
-    contract search page whose URL is filtered by supplier INN (`inn`, if given, must be that INN).
-
-    `contract` is not in evidence.FIELDS (removed with estore, D-066), so the general rules run with the
-    field read as a text field — the same branch `contract` would take there."""
-    if ev.field != FIELD or ev.value is None or not _NUMBER.fullmatch(ev.value):
-        return [f"{ev.url}: не факт о контракте ЕИС (field={ev.field!r}, value={ev.value!r})"]
-    errors = ev_check.check_evidence(ev.model_copy(update={"field": "name"}), page_text)
-    body = page_text(ev.url)
-    if body is None:
-        return errors
-    if _is_search(ev.url):
-        supplier = supplier_of(ev.url)
-        if supplier is None or (inn is not None and supplier != inn):
-            errors.append(f"{ev.url}: выдача не отфильтрована по ИНН поставщика {inn or '(любой)'}")
-        if ev.value not in {c.number for c in parse_search(body)[0]}:
-            errors.append(f"{ev.url}: контракта {ev.value} нет среди записей выдачи")
-        return errors
-    card = parse_card(body)
-    if card is None or card.number != ev.value:
-        errors.append(f"{ev.url}: страница — не карточка контракта {ev.value}")
-        return errors
-    codes = _FACT_CODE.findall(ev.fact)
-    if not codes:
-        errors.append(f"{ev.url}: в факте нет кода ОКПД2")
-    for code in codes:
-        if code not in card.codes:
-            errors.append(f"{ev.url}: ОКПД2 {code} нет среди позиций контракта {ev.value}")
-    for d in _FACT_DATE.findall(ev.fact):
-        if card.signed is None or d != f"{card.signed:%d.%m.%Y}":
-            errors.append(f"{ev.url}: дата {d} — не дата заключения контракта {ev.value}")
-    for name in _FACT_CUSTOMER.findall(ev.fact):
-        if ev_check.normalize(name) != ev_check.normalize(card.customer):
-            errors.append(f"{ev.url}: заказчик «{name}» — не заказчик контракта {ev.value}")
-    return errors
-
-
-def check_supply(evidence: list[Evidence], page_text: ev_check.PageText, inn: str) -> list[str]:
-    """A True answer as a whole: every fact passes, and every contract has both facts — its card and its
-    entry in the search filtered by this supplier INN."""
-    errors = [e for ev in evidence for e in check_evidence(ev, page_text, inn)]
-    kinds: dict[str | None, set[bool]] = {}
-    for ev in evidence:
-        kinds.setdefault(ev.value, set()).add(_is_search(ev.url))
-    for number, k in kinds.items():
-        if k != {True, False}:
-            errors.append(f"контракт {number}: нужны оба факта — карточка и запись в выдаче по ИНН поставщика")
-    return errors
