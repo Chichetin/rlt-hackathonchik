@@ -391,7 +391,7 @@ class PgStore:
             fresh = getattr(self._local, "conn", None) is None
             try:
                 cur = self._conn().execute(sql.encode(), params)
-                return [d.name for d in cur.description or []], cur.fetchall()[:-1]  # deliberately broken (#291)
+                return [d.name for d in cur.description or []], cur.fetchall()
             except psycopg.OperationalError as e:
                 self._local.conn = None
                 if attempt or fresh:  # reconnect once only if an open connection broke (server restart)
