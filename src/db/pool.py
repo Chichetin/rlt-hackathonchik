@@ -12,6 +12,10 @@ Tables (the same in parquet and in Postgres):
 - `okved` — (code, inn, main, region_code): the main and every additional OKVED of a company, one row per
   (inn, code); the candidate index by an OKVED prefix (human decision 01.10: an additional OKVED counts too);
 - `company_class` — OKPD2 codes the company declared as produced (`СвПрод`, ~0.15 % of records).
+- `large` — companies that are NOT in the registry dump (#219): a row per INN that ГИР БО or the registry card of
+  pb.nalog.ru names, with the cached page of that source (scripts/large_pool.py build). Parquet only, also when
+  the rest is read from Postgres: about a thousand rows next to 6.8 M. `large_candidates()` and `large_pages()`
+  read it; the Evidence is built from the page by the same code as for a live answer (src/enrich/enrich.py).
 
 Facts: every shown value of a company is an Evidence built from its row by `msp_dump.counterparty()` and
 checked against the page `msp_dump.page()` that `counterparties()` puts into src/sources/cache.py. The
@@ -38,16 +42,27 @@ from typing import Any
 import duckdb
 import pyarrow as pa
 
-from src.contracts import Counterparty
+from src.contracts import Counterparty, inn_is_valid
 from src.db.load import pg_dsn
+from src.regions import REGIONS
 from src.settings import get_settings
-from src.sources import msp_dump, role
-from src.sources.cache import SourceCache
+from src.sources import bo_nalog, msp_dump, pb_nalog, role
+from src.sources.cache import CachedPage, SourceCache
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 POOL = ROOT / "data" / "external" / "rsmp" / "pool"
 TABLES = ("companies", "okved", "company_class")
+LARGE = "large"  # companies outside the registry dump (#219): its own parquet, not a table of the dump
+LARGE_SCHEMA = pa.schema([
+    ("inn", pa.string()), ("ogrn", pa.string()), ("name", pa.string()), ("okved_main", pa.string()),
+    ("region_code", pa.string()), ("status", pa.string()), ("source", pa.string()),  # 'bo' | 'pb'
+    ("url", pa.string()), ("fetched_at", pa.float64()), ("body", pa.string()),  # the cached page of the source
+    ("msp_checked_at", pa.float64()),  # download time of the registry dump that has no record of this INN
+])
+# ГИР БО names a region by one upper-case word («САНКТ-ПЕТЕРБУРГ», «ЛЕНИНГРАДСКАЯ»); only the regions of
+# src/regions.py get a code, any other company stays without one and is not offered for a region
+_BO_REGION = {r.name.split()[0].upper(): r.code for r in REGIONS}
 FOREIGN = {"public", "data", "vec"}  # schemas of other loaders: never written or dropped here
 _PREFIX = re.compile(r"\d{2}(?:\.\d{1,2}){0,2}", re.ASCII)
 _INN = re.compile(r"\d{10}|\d{12}", re.ASCII)
@@ -249,6 +264,88 @@ def counterparties(inns: Iterable[str], cache: SourceCache, *, url: str | None =
         if cache.page_text(page_url) != body:
             cache.put(page_url, body, fetched_at=row["fetched_at"])
         out[inn] = cp
+    return out
+
+
+def large_row(inn: str, source: str, page: CachedPage, msp_checked_at: float | None = None) -> dict[str, Any] | None:
+    """A row of `large` from the cached answer of ГИР БО ('bo') or the registry card ('pb'): only what the
+    page says. None when the INN fails the checksum or the page does not name the company.
+    `msp_checked_at`: the caller looked the INN up in the registry dump downloaded then and found no record."""
+    if not inn_is_valid(inn) or source not in ("bo", "pb"):
+        return None
+    if source == "bo":
+        f = bo_nalog.parse(page.body)
+        name, ogrn, okved, status = f.get("shortName"), f.get("ogrn"), f.get("okved2"), f.get("statusCode")
+        region = _BO_REGION.get((f.get("region") or "").upper())
+    else:
+        f = pb_nalog.parse(page.body)
+        name = f.get("vyp.НаимЮЛСокр") or f.get("search.namec") or f.get("vyp.НаимЮЛПолн") or f.get("search.namep")
+        ogrn = f.get("vyp.ОГРН") or f.get("search.ogrn")
+        okved = f.get("vyp.КодОКВЭД") or f.get("search.okved2main")
+        status = f.get("vyp.sulst_name_ex") or f.get("search.sulst_name_ex")
+        region = (f.get("vyp.КПП") or "")[:2] or None
+    if not name:
+        return None
+    return {"inn": inn, "ogrn": ogrn, "name": name, "okved_main": okved, "region_code": region, "status": status,
+            "source": source, "url": page.url, "fetched_at": page.fetched_at, "body": page.body,
+            "msp_checked_at": msp_checked_at}
+
+
+_LARGE_ACTIVE = "((source = 'bo' AND status = 'ACTIVE') OR (source = 'pb' AND status ILIKE 'действующ%'))"
+
+
+def msp_absent_page(inn: str) -> str:
+    """The page «the registry dump has no record of this INN», in the words of rmsp's empty answer."""
+    return f"query.inn: {inn}\nanswer.inn_rows: 0"
+
+
+def _large(pool_dir: Path, where: str) -> list[dict[str, Any]]:
+    path = pool_dir / f"{LARGE}.parquet"
+    if not path.exists():  # the table is optional: without it the pool is the registry dump alone
+        return []
+    cur = duckdb.connect().execute(f"SELECT * FROM read_parquet({_lit(path.as_posix())}) WHERE {where} ORDER BY inn")
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+
+
+def large_candidates(prefixes: Sequence[str], *, regions: Sequence[str] | None = None,
+                     pool_dir: Path = POOL) -> list[dict[str, Any]]:
+    """Companies outside the registry dump whose main OKVED is under one of `prefixes` — the rows of
+    `candidates()` (inn, code, main; the sources give the main code only), ordered by INN. Only companies the
+    source calls active (ГИР БО `ACTIVE`, the card «Действующая…»): one in liquidation is not offered as new."""
+    for p in prefixes:
+        if not _PREFIX.fullmatch(p):
+            raise ValueError(f"не префикс ОКВЭД: {p!r}")
+    for r in regions or ():
+        if not re.fullmatch(r"\d{2}", r, re.ASCII):
+            raise ValueError(f"не код региона: {r!r}")
+    if not prefixes:
+        return []
+    like = " OR ".join(f"okved_main LIKE {_lit(p + '%')}" for p in prefixes)  # checked: digits and dots only
+    where = f"({like}) AND {_LARGE_ACTIVE}" + (
+        f" AND region_code IN ({','.join(map(_lit, regions))})" if regions else "")
+    return [{"inn": r["inn"], "code": r["okved_main"], "main": True} for r in _large(pool_dir, where)]
+
+
+def large_pages(inns: Iterable[str], cache: SourceCache, *, pool_dir: Path = POOL) -> dict[str, dict[str, Any]]:
+    """Rows of `large` by INN; the page of each goes to the source cache (unless a newer one is there), so
+    the Evidence built from `row["body"]` is checked like a live answer and no request is needed."""
+    want = sorted({i for i in inns if _INN.fullmatch(i)})
+    if not want:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for row in _large(pool_dir, f"inn IN ({','.join(map(_lit, want))})"):
+        hit = cache.get(row["url"], allow_stale=True)
+        if hit is None or hit.fetched_at < row["fetched_at"]:
+            cache.put(row["url"], row["body"], fetched_at=row["fetched_at"])
+        elif hit.body != row["body"]:  # a newer answer of the source: the facts are read from it
+            row = {**row, "body": hit.body, "fetched_at": hit.fetched_at}
+        # «no record in the dump» is a page too (as rmsp's empty answer): our render of the lookup, never over
+        # a record of the dump that counterparties() may have put under the same address
+        absent = msp_dump.page_url(row["inn"])
+        if row["msp_checked_at"] is not None and cache.page_text(absent) is None:
+            cache.put(absent, msp_absent_page(row["inn"]), fetched_at=row["msp_checked_at"])
+        out[row["inn"]] = row
     return out
 
 
