@@ -128,9 +128,7 @@ def test_main_enqueue_only_fills_the_queue_from_the_store_and_enriches_nothing(e
 def test_worker_night_mode_sleeps_on_captcha_and_continues(eng, monkeypatch):
     from src.sources.pb_nalog import CaptchaRequired
     from src.worker import worker as W
-    from src.worker.queue import enqueue
-
-    from src.worker.queue import MAX_ATTEMPTS
+    from src.worker.queue import MAX_ATTEMPTS, enqueue
 
     enqueue(eng, "enrich", GOOD[0])
     calls: list[str] = []
