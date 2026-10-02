@@ -166,8 +166,15 @@ def test_warm_asks_only_new_leads_without_a_card_and_stops_on_a_refusal(leads_di
     monkeypatch.setenv("SOURCE_CACHE", str(cache.path))
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(_processed(tmp_path, [KNOWN])))
     asked: list[str] = []
-    monkeypatch.setattr(W, "enrich", lambda inn, c: asked.append(inn))
+    rnp_flags: list[bool | None] = []
+
+    def card_only(inn: str, c: SourceCache, *, rnp_offline: bool | None = None) -> None:
+        asked.append(inn)
+        rnp_flags.append(rnp_offline)
+
+    monkeypatch.setattr(W, "enrich", card_only)
     assert W.warm(web_leads.load(), 10, 0) == 1 and asked == [NO_CARD]  # known and cached ones are not asked
+    assert rnp_flags == [True]  # a card warm-up never waits on the 60 s РНП Crawl-delay (D-141)
 
 
 def test_warm_stops_at_the_first_refusal_but_skips_a_company_without_a_card(leads_dir, tmp_path, monkeypatch):
@@ -179,7 +186,7 @@ def test_warm_stops_at_the_first_refusal_but_skips_a_company_without_a_card(lead
     todo = sorted([NO_CARD, OTHER, TRADER, MOSCOW])  # new, without a cached card
     asked: list[str] = []
 
-    def refuse(inn, c):
+    def refuse(inn, c, **kw):
         asked.append(inn)
         raise pb_nalog.CaptchaRequired("captcha")
 
@@ -187,7 +194,7 @@ def test_warm_stops_at_the_first_refusal_but_skips_a_company_without_a_card(lead
     assert W.warm(web_leads.load(), 10, 0) == 0 and asked == todo[:1]  # stopped, the next run continues
     asked.clear()
 
-    def first_missing(inn, c):
+    def first_missing(inn, c, **kw):
         asked.append(inn)
         if inn == todo[0]:
             raise KeyError(inn)
