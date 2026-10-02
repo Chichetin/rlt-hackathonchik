@@ -456,6 +456,8 @@ export function App() {
   }
 
   const runSeq = useRef(0);
+  // «искать как введено» (#282): the text for which the user turned the correction off; another text — on again
+  const asTypedFor = useRef<string | null>(null);
   // local scoring weights (#179): only in this browser; the server and the export keep the standard ones
   const [weightSet, setWeightSet] = useState<WeightSettings>(loadWeights);
   const weights = activeWeights(weightSet);
@@ -493,6 +495,7 @@ export function App() {
       const none: Filters = NO_FILTERS;
       // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
       const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
+      if (asTypedFor.current === q.text) q.filters = { ...q.filters, spell: "off" };
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
@@ -845,6 +848,15 @@ export function App() {
           {n}
         </p>
       ))}
+
+      {path === "/results" && res?.corrected && shownQuery && state !== "loading" && (
+        <p className="lotmsg spell-note" role="note" data-testid="query-corrected">
+          Показаны результаты по запросу «{res.corrected}» — исправлены раскладка или опечатки.{" "}
+          <button type="button" className="spell-undo" onClick={() => { asTypedFor.current = shownQuery.text; void run(); }}>
+            Искать как введено: «{shownQuery.text}»
+          </button>
+        </p>
+      )}
 
       {path === "/results" && res?.excludedLot && state !== "loading" && (
         <p className="lotmsg own-lot-note" role="note">

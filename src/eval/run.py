@@ -22,6 +22,7 @@ import yaml
 from src.contracts import Query
 from src.eval import baselines
 from src.eval.metrics import METRICS, bootstrap_ci
+from src.eval import corrupt
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import pipeline
 from src.match import search as search_mod
@@ -292,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
     ap.add_argument("--sample", type=int, default=None,
                     help="first screen on N cases of the part (fixed seed): winners only go to the full run")
+    ap.add_argument("--corrupt", default=None, choices=corrupt.MODES,
+                    help="spoil the query texts (typos / Latin layout) to measure the speller (#282)")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
@@ -310,6 +313,9 @@ def main(argv: list[str] | None = None) -> int:
         keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
         cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
         part = f"{args.part}-s{args.sample}"
+    if args.corrupt:  # the text only, deterministic per query: every experiment sees the same spoiled queries
+        cases = [c.model_copy(update={"query": corrupt.spoil(c.query, args.corrupt)}) for c in cases]
+        part = f"{part}-{args.corrupt}"
     rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"

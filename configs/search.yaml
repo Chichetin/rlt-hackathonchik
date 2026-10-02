@@ -2,6 +2,9 @@
 # Любая правка = новая конфигурация (новый sha256). Источник: разделы 5 и 7 workflow.
 retriever: bm25          # T-02: stub → bm25 (v1, D-029) → bm25+okpd2 → hybrid_rrf (только через эксперимент)
 tokenizer: prefix5       # prefix5 | snowball | pymorphy (#116); переопределение — переменная BM25_TOKENIZER
+# Исправление раскладки и опечаток в запросе (#282, src/match/speller.py): словарь — словоформы позиций индекса.
+# Включение — по замеру make eval на испорченных и чистых запросах (research/EXPERIMENTS.md).
+spell: false
 k: 20
 # Веса H-15f (#22, #174, подтверждение человека №3 01.10; research/DECISIONS.md D-077), нормированные к 1:
 # 0.8 / 0.2 / 0.05 из configs/experiments.yaml, делённые на 1.05 — порядок как у H-15f с точностью до

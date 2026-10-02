@@ -85,9 +85,9 @@ demo:              ## всё одной командой с чистого кл�
 e2e: ui-build      ## e2e демо-сценария (Playwright), свой порт: E2E_PORT=8766
 	cd $(UI) && npx playwright test
 
-eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-часть)
+eval:              ## make eval EXP=<id> [SAMPLE=N] [CORRUPT=typo|layout] → eval/results/<id>.json (dev-часть)
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
-	$(PY) python -m src.eval.run --exp $(EXP)
+	$(PY) python -m src.eval.run --exp $(EXP) $(if $(CORRUPT),--corrupt $(CORRUPT)) $(if $(SAMPLE),--sample $(SAMPLE))
 
 predict:           ## тестовая выгрузка организаторов → eval/predict/<папка>.csv: make predict CSV_DIR=<папка> [TOP=10] [OFFLINE=1]
 	@[ -n "$(CSV_DIR)" ] || { echo "нужен CSV_DIR=<папка с Извещения*.csv и ТРУ*.csv>"; exit 2; }
