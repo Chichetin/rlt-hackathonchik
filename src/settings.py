@@ -131,6 +131,7 @@ class Settings:
     # block «Новые» (src/enrich/discover.py) and the LLM provider (src/llm) — read at every call
     discovery_offline = _Var("DISCOVERY_OFFLINE", lambda v: v == "1")  # 1 — registries from the cache only
     discovery_leads = _Var("DISCOVERY_LEADS", lambda v: v != "0")  # 0 — web leads (#108) are not added
+    discovery_eaeu = _Var("DISCOVERY_EAEU", lambda v: v != "0")  # 0 — EAEU companies (#200) are not added
     discovery_np_types = _Var("DISCOVERY_NP_TYPES", lambda v: v or "UL")  # rmsp entity types, comma-separated
     llm_provider = _Var("LLM_PROVIDER", lambda v: (v or "none").strip().lower())  # none — the mode without LLM
     # tools (src/eval, src/match/ranker_train.py) — read at every call, except the two directories of emb_bench (import)

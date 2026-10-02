@@ -3,7 +3,7 @@ import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } 
 import { ExampleWheel, RollingNumber } from "./Micro";
 import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
 import { ResultInspector } from "./ResultInspector";
-import { SupplierAvatar, SupplierMetrics, supplierKey, recommendationSummary } from "./SupplierIdentity";
+import { SupplierAvatar, SupplierId, SupplierMetrics, supplierKey, recommendationSummary } from "./SupplierIdentity";
 import { SupplierScore } from "./SupplierScore";
 import { ResultGroupTransition } from "./ResultGroupTransition";
 import "./micro.css";
@@ -1097,7 +1097,7 @@ function Block(props: {
                   <span className="supplier-meta">
                     <RoleBadge kind={cp.kind} />
                     <span>{regionLabel(cp)}{relationToCustomer(cp, props.customerRegion) && <> — {relationToCustomer(cp, props.customerRegion)}</>}</span>
-                    <span className="supplier-inn">ИНН {cp.inn ? <strong>{cp.inn}</strong> : "не подтверждён"}</span>
+                    <span className="supplier-inn"><SupplierId cp={cp} /></span>
                   </span>
                   <span className="supplier-reading">
                   {nextReason(m) ? <span className="supplier-reason"><span className="why-label">Выше следующего</span><span className="why" title={rankerReason(m) ?? m.rank_reason ?? ""}>{nextReason(m)}</span></span>
@@ -1232,8 +1232,8 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
 
       <h3>Сведения о компании</h3>
       <dl className="facts">
-        <dt>ИНН</dt>
-        <dd>{cp.inn ?? "не подтверждён"}</dd>
+        <dt>{cp.inn || !cp.country || cp.country === "RU" ? "ИНН" : "Идентификатор"}</dt>
+        <dd>{cp.inn || !cp.country || cp.country === "RU" ? cp.inn ?? "не подтверждён" : <SupplierId cp={cp} />}</dd>
         <dt>Тип</dt>
         <dd>{KIND_LABEL[cp.kind ?? "unknown"]}</dd>
         <dt>Статус</dt>
