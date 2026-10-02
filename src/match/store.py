@@ -73,9 +73,14 @@ class Store(Protocol):
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
                         exclude_lot: int = -1) -> list[tuple]: ...
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]: ...
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
     def lot_names(self, lot_id: int) -> list[str]: ...
+    def top_suppliers(self, limit: int) -> list[str]: ...
+    def participations(self, as_of: date | None) -> pa.Table: ...
+    def lot_classes(self) -> pa.Table: ...
 
 
 def levels(code: str) -> tuple[str, str | None, str | None, str | None]:
@@ -240,6 +245,35 @@ ORDER BY agg.n_lots DESC, agg.n_wins DESC, agg.supplier_inn{c}
 """
 OKPD2_COLUMN = {4: "okpd2_code", 3: "okpd2_l6", 2: "okpd2_l4", 1: "okpd2_l2"}
 
+# Suppliers of one customer's lots in the query's OKPD2 groups before as_of, most lots first (#195):
+# (inn, lots, wins, latest lot, its position name, its date) — the same shape as _OKPD2_SUPPLIERS.
+_CUSTOMER_SUPPLIERS = """
+WITH j AS (
+    SELECT supplier_inn, lot_id, is_winner, publish_date FROM {t[participants]}
+    WHERE customer_inn = %(cust)s AND {cond}
+      AND lot_id <> %(exclude)s  -- the notice the query was built from (#249, F-13); -1 — none
+      AND lot_id IN (SELECT lot_id FROM {t[items]} WHERE okpd2_l4 IN (SELECT unnest(%(groups)s{text_arr})))
+),
+agg AS (
+    SELECT supplier_inn, count(DISTINCT lot_id) AS n_lots, count(DISTINCT lot_id) FILTER (WHERE is_winner) AS n_wins
+    FROM j GROUP BY supplier_inn
+    ORDER BY n_lots DESC, n_wins DESC, supplier_inn{c} LIMIT %(limit)s
+),
+best AS (
+    SELECT DISTINCT ON (j.supplier_inn) j.supplier_inn, j.lot_id, j.publish_date
+    FROM j JOIN agg USING (supplier_inn)
+    ORDER BY j.supplier_inn, j.publish_date DESC NULLS LAST, j.lot_id DESC
+),
+name AS (
+    SELECT lot_id, min(product_name{c}) AS text FROM {t[items]}
+    WHERE lot_id IN (SELECT lot_id FROM best) AND okpd2_l4 IN (SELECT unnest(%(groups)s{text_arr}))
+    GROUP BY lot_id
+)
+SELECT agg.supplier_inn, agg.n_lots, agg.n_wins, best.lot_id, name.text, best.publish_date
+FROM agg JOIN best USING (supplier_inn) LEFT JOIN name USING (lot_id)
+ORDER BY agg.n_lots DESC, agg.n_wins DESC, agg.supplier_inn{c}
+"""
+
 _LOT = """
 SELECT lot_id, subject, procedure_name, start_price, customer_inn, channel FROM {t[notices]}
 WHERE lot_id = %(lot_id)s OR reqnum = %(ident)s ORDER BY (lot_id = %(lot_id)s) DESC, lot_id LIMIT 1
@@ -256,6 +290,36 @@ SELECT product_name FROM {t[items]}
 WHERE lot_id = %(lot_id)s AND product_name IS NOT NULL AND trim(product_name) <> ''
 GROUP BY product_name ORDER BY product_name{c} LIMIT 5
 """
+
+
+# The most active suppliers first (src/worker/prefetch.py warms the source cache in this order, D-056).
+_TOP_SUPPLIERS = """
+SELECT inn FROM {t[suppliers]} WHERE inn_valid
+ORDER BY lots_won DESC NULLS LAST, lots_participated DESC NULLS LAST, last_seen DESC NULLS LAST, inn{c}
+LIMIT %(limit)s
+"""
+
+# The baselines of the backtest (src/eval/baselines.py): one row per lot x supplier x customer before as_of and
+# the OKPD2 groups of every lot. inn_valid: an INN with a wrong checksum is never relevant (D-032).
+_PARTICIPATIONS = """
+SELECT lot_id, supplier_inn AS inn, customer_inn, bool_or(is_winner) AS is_winner
+FROM {t[participants]} WHERE inn_valid AND {cond}
+GROUP BY lot_id, supplier_inn, customer_inn
+"""
+PARTICIPATIONS = pa.schema([("lot_id", pa.int64()), ("inn", pa.string()), ("customer_inn", pa.string()),
+                            ("is_winner", pa.bool_())])
+
+_LOT_CLASSES = """
+SELECT DISTINCT lot_id, okpd2_l4 AS l4, okpd2_l2 AS l2 FROM {t[items]} WHERE okpd2_l2 IS NOT NULL
+"""
+LOT_CLASSES = pa.schema([("lot_id", pa.int64()), ("l4", pa.string()), ("l2", pa.string())])
+
+
+def _table(cols: list[str], rows: list[tuple], schema: pa.Schema) -> pa.Table:
+    """Rows of a query as an Arrow table of `schema` — the same types from both backends."""
+    assert cols == schema.names, (cols, schema.names)
+    columns = list(zip(*rows, strict=True)) if rows else [[] for _ in cols]
+    return pa.table([pa.array(list(c), f.type) for c, f in zip(columns, schema, strict=True)], schema=schema)
 
 
 def _okpd2_sql(level: int) -> str:
@@ -311,7 +375,13 @@ class ParquetStore:
 
     def _fetch(self, template: str, params: dict, *, as_of: date | None = None, suppliers: str = "",
                lots: pa.Table | None = None) -> tuple[list[str], list[tuple]]:
-        t = {n: _pq(self.processed / f"{n}.parquet") for n in ("notices", "items", "participants")}
+        names = ("notices", "items", "participants")
+        missing = [f"{n}.parquet" for n in names if f"{{t[{n}]}}" in template
+                   and not (self.processed / f"{n}.parquet").exists()]
+        if missing:
+            raise StoreUnavailable(f"данные организаторов не собраны: нет {', '.join(missing)} в {self.processed} — "
+                                   "`uv run python -m src.ingest.build` (DATA_RAW_DIR → DATA_PROCESSED_DIR)")
+        t = {n: _pq(self.processed / f"{n}.parquet") for n in names}
         sql = template.format(t=t | {"suppliers": suppliers}, cond=_cond(as_of), lots="lots_in l", **self._sql_kw)
         for k in params:
             sql = sql.replace(f"%({k})s", f"${k}")
@@ -360,6 +430,11 @@ class ParquetStore:
         params = {"codes": codes, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
         return self._fetch(_okpd2_sql(level), params, as_of=as_of)[1]
 
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]:
+        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
+        return self._fetch(_CUSTOMER_SUPPLIERS, params, as_of=as_of)[1]
+
     def lot(self, ident: str) -> tuple | None:
         rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})[1]
         return rows[0] if rows else None
@@ -369,6 +444,15 @@ class ParquetStore:
 
     def lot_names(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_NAMES, {"lot_id": lot_id})[1]]
+
+    def top_suppliers(self, limit: int) -> list[str]:
+        return [r[0] for r in self._fetch(_TOP_SUPPLIERS, {"limit": limit}, suppliers=self._suppliers(None))[1]]
+
+    def participations(self, as_of: date | None) -> pa.Table:
+        return _table(*self._fetch(_PARTICIPATIONS, {"as_of": as_of}, as_of=as_of), PARTICIPATIONS)
+
+    def lot_classes(self) -> pa.Table:
+        return _table(*self._fetch(_LOT_CLASSES, {}), LOT_CLASSES)
 
 
 class PgStore:
@@ -495,6 +579,11 @@ class PgStore:
         params = {"codes": codes, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
         return self._fetch(_okpd2_sql(level), params, as_of=as_of)[1]
 
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]:
+        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
+        return self._fetch(_CUSTOMER_SUPPLIERS, params, as_of=as_of)[1]
+
     def lot(self, ident: str) -> tuple | None:
         _, rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})
         return rows[0] if rows else None
@@ -504,6 +593,15 @@ class PgStore:
 
     def lot_names(self, lot_id: int) -> list[str]:
         return [r[0] for r in self._fetch(_LOT_NAMES, {"lot_id": lot_id})[1]]
+
+    def top_suppliers(self, limit: int) -> list[str]:
+        return [r[0] for r in self._fetch(_TOP_SUPPLIERS, {"limit": limit})[1]]
+
+    def participations(self, as_of: date | None) -> pa.Table:
+        return _table(*self._fetch(_PARTICIPATIONS, {"as_of": as_of}, as_of=as_of), PARTICIPATIONS)
+
+    def lot_classes(self) -> pa.Table:
+        return _table(*self._fetch(_LOT_CLASSES, {}), LOT_CLASSES)
 
 
 def processed_dir() -> Path:

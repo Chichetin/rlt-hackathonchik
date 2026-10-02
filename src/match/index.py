@@ -29,7 +29,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.match.store import LotHits, ParquetStore, Store, get_store
+from src.match.store import LotHits, Store, get_store
 from src.match.store import processed_dir as processed_dir
 from src.match.text import tokenize, tokenizer_version
 
@@ -40,11 +40,6 @@ ROOT = Path(__file__).resolve().parents[2]
 def index_root() -> Path:
     d = Path(os.environ.get("INDEX_DIR") or ROOT / "indexes")
     return d if d.is_absolute() else ROOT / d
-
-
-def check_processed(processed: Path) -> dict:
-    """Manifest of the ingest parquet, or FileNotFoundError with the command that builds it."""
-    return ParquetStore(processed).manifest()
 
 
 def pq_path(path: Path) -> str:
@@ -162,14 +157,12 @@ def _load(key: str, path: Path) -> LotIndex:
                     date.fromisoformat(as_of) if as_of else None)
 
 
-def get_index(store: Store | Path | None, as_of: date | None) -> LotIndex:
+def get_index(store: Store | None, as_of: date | None) -> LotIndex:
     """Cached index for (ingest manifest, as_of): memory, then disk, else built once from the store.
 
-    `store`: a Store, an ingest directory (parquet) or None — the store of the environment."""
+    `store`: a Store or None — the store of the environment (organizers' data only through Store, #293)."""
     if store is None:
         store = get_store()
-    elif isinstance(store, Path):
-        store = ParquetStore(store)
     key = index_key(store.manifest(), as_of)
     with _lock:
         if key in _cache:
@@ -232,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["LotHits", "LotIndex", "check_processed", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
+__all__ = ["LotHits", "LotIndex", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
 
 
 if __name__ == "__main__":
