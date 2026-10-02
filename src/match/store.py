@@ -14,6 +14,7 @@ Ordering is part of the result (ties, the BM25 doc numbering): every ORDER BY on
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -74,6 +75,7 @@ class Store(Protocol):
     def supplier_history(self, inns: list[str], as_of: date | None) -> dict[str, History]: ...
     def reliability_prior(self, as_of: date | None) -> Prior: ...
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
+    def supplier_inns(self, as_of: date | None) -> frozenset[str]: ...
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
                         exclude_lot: int = -1) -> list[tuple]: ...
     def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
@@ -374,6 +376,25 @@ SELECT DISTINCT lot_id, okpd2_l4 AS l4, okpd2_l2 AS l2 FROM {t[items]} WHERE okp
 """
 LOT_CLASSES = pa.schema([("lot_id", pa.int64()), ("l4", pa.string()), ("l2", pa.string())])
 
+# Every INN of the suppliers table before as_of (discover.known_inns, #293): a company found in an open source
+# is «new» only when absent from it. Read once per data version (_supplier_inns).
+_SUPPLIER_INNS = "SELECT DISTINCT inn FROM {t[suppliers]} WHERE inn IS NOT NULL"
+_INNS: dict[tuple, frozenset[str]] = {}  # (store, as_of, data version) -> INNs; one version kept per (store, as_of)
+_inns_lock = threading.Lock()
+
+
+def _supplier_inns(key: tuple, version: object, fetch) -> frozenset[str]:
+    """The INNs of `key` = (store, as_of) at `version`; a new version (a rebuilt ingest) is read again."""
+    with _inns_lock:
+        hit = _INNS.get((*key, version))
+    if hit is None:
+        hit = frozenset(r[0] for r in fetch())
+        with _inns_lock:
+            for old in [k for k in _INNS if k[:-1] == key]:
+                del _INNS[old]
+            _INNS[(*key, version)] = hit
+    return hit
+
 
 def _table(cols: list[str], rows: list[tuple], schema: pa.Schema) -> pa.Table:
     """Rows of a query as an Arrow table of `schema` — the same types from both backends."""
@@ -426,12 +447,15 @@ class ParquetStore:
         except (KeyError, ValueError) as e:
             raise StoreUnavailable(f"{self.processed}/manifest.json: нет built_at — пересоберите ingest") from e
 
-    def _suppliers(self, as_of: date | None) -> str:
+    def _suppliers_path(self, as_of: date | None) -> Path:
         path = self.processed / (f"suppliers_{as_of.isoformat()}.parquet" if as_of else "suppliers.parquet")
         if not path.exists():
             raise StoreUnavailable(f"{path} не собран: `uv run python -m src.ingest.build` (as_of={as_of}; "
                                    "заранее собирается только cutoff)")
-        return _pq(path)
+        return path
+
+    def _suppliers(self, as_of: date | None) -> str:
+        return _pq(self._suppliers_path(as_of))
 
     def _fetch(self, template: str, params: dict, *, as_of: date | None = None, suppliers: str = "",
                lots: pa.Table | None = None) -> tuple[list[str], list[tuple]]:
@@ -490,6 +514,11 @@ class ParquetStore:
         cols, rows = self._fetch(_SUPPLIERS, {"inns": inns, "as_of": as_of}, as_of=as_of,
                                  suppliers=self._suppliers(as_of))
         return [dict(zip(cols, r, strict=True)) for r in rows]
+
+    def supplier_inns(self, as_of: date | None) -> frozenset[str]:
+        path = self._suppliers_path(as_of)  # the file's mtime is its version: a rebuilt file is read again
+        return _supplier_inns((self.name, path.as_posix()), path.stat().st_mtime_ns,
+                              lambda: self._fetch(_SUPPLIER_INNS, {}, suppliers=_pq(path))[1])
 
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
                         exclude_lot: int = -1) -> list[tuple]:
@@ -637,14 +666,24 @@ class PgStore:
     def reliability_prior(self, as_of: date | None) -> Prior:
         return _prior(self._fetch(_RELIABILITY_PRIOR, {"as_of": as_of}, as_of=as_of)[1])
 
-    def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]:
+    def _suppliers_table(self, as_of: date | None) -> str:
         table = f"suppliers_{as_of.isoformat().replace('-', '_')}" if as_of else "suppliers"
         _, ok = self._fetch("SELECT to_regclass(%(t)s) IS NOT NULL", {"t": f"{self.schema}.{table}"})
         if not ok[0][0]:
             raise StoreUnavailable(f"Postgres: нет {self.schema}.{table} (as_of={as_of}; заранее собирается только "
                                    "cutoff) — `make db-load`")
+        return table
+
+    def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]:
+        table = self._suppliers_table(as_of)
         cols, rows = self._fetch(_SUPPLIERS, {"inns": inns, "as_of": as_of}, as_of=as_of, suppliers=table)
         return [dict(zip(cols, r, strict=True)) for r in rows]
+
+    def supplier_inns(self, as_of: date | None) -> frozenset[str]:
+        table = self._suppliers_table(as_of)  # version: built_at of the manifest (db-load seen within MANIFEST_TTL_S)
+        db = hashlib.sha256(self.dsn.encode()).hexdigest()[:16]  # the key never holds the password
+        return _supplier_inns((self.name, db, self.schema, table), self.manifest().get("built_at"),
+                              lambda: self._fetch(_SUPPLIER_INNS, {}, suppliers=table)[1])
 
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
                         exclude_lot: int = -1) -> list[tuple]:
@@ -718,6 +757,12 @@ def get_store() -> Store:
     return store
 
 
+def store_for(processed: Path | None) -> Store:
+    """The store a caller with an optional parquet dir reads: None — the store of the environment (get_store(),
+    Postgres in `make up`); an explicit dir — that ingest as is (a test fixture, `make predict` on its own build)."""
+    return get_store() if processed is None else ParquetStore(processed)
+
+
 def _forget(store: Store) -> None:
     with _lock:
         for key in [k for k, (s, _) in _stores.items() if s is store]:
@@ -727,3 +772,5 @@ def _forget(store: Store) -> None:
 def clear_stores() -> None:
     with _lock:
         _stores.clear()
+    with _inns_lock:
+        _INNS.clear()
