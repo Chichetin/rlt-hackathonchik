@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ENRICH_QUEUE_MAX_DEFAULT = 2000
 COUNTERPARTY_LIVE_MAX_DEFAULT = 2
 QUEUE_STALE_RUNNING_DEFAULT_S = 600
+REVIEWS_LIVE_MAX_DEFAULT = 2
 
 
 def _resolved(path: Path) -> Path:
@@ -90,6 +91,12 @@ class Settings:
     eis_contracts_search_max_age_s = _Var("EIS_CONTRACTS_SEARCH_MAX_AGE_S", lambda v: float(v or 7 * 24 * 3600))
     eis_contracts_card_max_age_s = _Var("EIS_CONTRACTS_CARD_MAX_AGE_S", lambda v: float(v or 30 * 24 * 3600))
     eis_contracts_max_cards = _Var("EIS_CONTRACTS_MAX_CARDS", lambda v: int(v or 3))
+    # 2GIS reviews on demand (src/sources/gis2.py, src/api/reviews.py; #234, D-142): a typo in a pause raises
+    gis2_min_interval_s = _Var("GIS2_MIN_INTERVAL_S", lambda v: float(v or 3.0))  # between requests to 2gis.ru
+    gis2_timeout_s = _Var("GIS2_TIMEOUT_S", lambda v: float(v or 20.0))
+    gis2_down_cooldown_s = _Var("GIS2_DOWN_COOLDOWN_S", lambda v: float(v or 90.0))  # pause after a timeout
+    gis2_disabled = _Var("GIS2_DISABLED", lambda v: (v or "").strip().lower() in {"1", "true", "yes"})
+    reviews_live_max = _Var("REVIEWS_LIVE_MAX", _limit(REVIEWS_LIVE_MAX_DEFAULT))  # reads of 2gis.ru at once, ≥ 1
     # worker (src/worker): unlike the two limits above this one always raised on garbage, a typo is not a default
     queue_stale_running_s = _Var("QUEUE_STALE_RUNNING_S", lambda v: int(v or QUEUE_STALE_RUNNING_DEFAULT_S))
 

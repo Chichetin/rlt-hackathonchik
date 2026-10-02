@@ -33,6 +33,7 @@ PageText = Callable[[str], str | None]  # url -> cached page text or None
 FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region",
           "rnp"}
 FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/sources/fns_opendata.py
+FIELDS |= {"review"}  # a quote of a public review (src/enrich/reviews.py), a normalized substring of the page
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
