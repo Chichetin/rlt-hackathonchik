@@ -73,6 +73,59 @@
         }
       }
     },
+    "/api/testset/template.xlsx": {
+      "get": {
+        "summary": "Get Template",
+        "operationId": "get_template_api_testset_template_xlsx_get",
+        "responses": {
+          "200": {
+            "description": "шаблон списка закупок",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/testset/template": {
+      "post": {
+        "summary": "Upload Template",
+        "description": "The filled template -> the active set (Извещения + ТРУ of the organizers' format); 422 when unusable.",
+        "operationId": "upload_template_api_testset_template_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedTestset"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/testset/predict.csv": {
       "get": {
         "summary": "Predict Testset",
@@ -118,6 +171,50 @@
           },
           "422": {
             "description": "offline=0: живой прогон по всем лотам — только make predict"
+          }
+        }
+      }
+    },
+    "/api/testset/predict.xlsx": {
+      "get": {
+        "summary": "Predict Xlsx",
+        "description": "predict.csv as an Excel book (offline) + «Ошибки»: rows not taken from the template and notes on lots.",
+        "operationId": "predict_xlsx_api_testset_predict_xlsx_get",
+        "parameters": [
+          {
+            "name": "top",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "кандидатов в каждом блоке",
+              "default": 10,
+              "title": "Top"
+            },
+            "description": "кандидатов в каждом блоке"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "листы «Рекомендации» и «Ошибки»",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          },
+          "404": {
+            "description": "набор не загружен"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       }
@@ -388,6 +485,55 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/live-search": {
+      "post": {
+        "summary": "Api Live Search",
+        "description": "The button «Искать в реальном времени» (#550): new suppliers of this purchase found by Yandex now\n(discover.live_search), without the trigger «< 3 strong» and without a deadline. The UI sends the query with the\nOKPD2 class «Новые» searched by. What happened — the X-Live-Note header, percent-encoded UTF-8.",
+        "operationId": "api_live_search_api_live_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Query"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CounterpartyMatch"
+                  },
+                  "type": "array",
+                  "title": "Response Api Live Search Api Live Search Post"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "живой поиск уже идёт — повторите позже"
+          },
+          "503": {
+            "description": "живой поиск не настроен (нет ключа или потолков Яндекса) или у закупки нет класса ОКПД2"
           },
           "422": {
             "description": "Validation Error",
@@ -778,6 +924,28 @@
               }
             ],
             "title": "Inn"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "foreign_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Foreign Id"
           },
           "kpp": {
             "anyOf": [
@@ -1660,6 +1828,27 @@
         ],
         "title": "SearchResponse",
         "description": "API envelope: two blocks of the result (the incumbent trap, methodology step 5)."
+      },
+      "UploadTemplateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name",
+            "description": "имя файла (.xlsx или .csv по шаблону)"
+          },
+          "data": {
+            "type": "string",
+            "title": "Data",
+            "description": "содержимое файла, base64"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "data"
+        ],
+        "title": "UploadTemplateRequest"
       },
       "UploadTestsetRequest": {
         "properties": {

@@ -9,7 +9,8 @@ Counts for the filter chips (#232) are the X-Facets header, ASCII JSON
 "entity": {"ul": n, "ip": n, "unknown": n}, "near": {"worked": n, "near": n, "any": n}}`: the candidates of the block
 after the legal status (liquidation, RNP), each group after the user filters of the other groups
 (filters.chip_facets), so a chip count is the block size its choice gives with the other filters on; «Новые» shows
-at most discover.MAX_SHOWN, so its counts are capped at it. Filter keys — src/match/filters.py.
+every candidate after the filters up to `block.max_shown` of configs/discover.yaml (#549, #558), so its counts are
+capped at it. Filter keys — src/match/filters.py.
 The customer and the purchase type the search assumed (#242) are the X-Search-Context header, ASCII JSON
 `{"customer_region", "customer_basis": "ИНН 78…" | "регион запроса", "purchase_type": goods | works | services |
 remote | null, "purchase_label", "type_basis": [up to 3 OKPD2 codes], "default_near": near | any, "applied_near":
@@ -40,6 +41,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 from urllib.parse import quote
 
@@ -59,6 +61,7 @@ from src.api.reviews import router as reviews_router
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
+from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import strip_unverified
 from src.ingest.okpd2 import label as okpd2_label
@@ -105,18 +108,23 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         cfg = search_mod.load_config()
         retriever, model = cfg["retriever"], cfg.get("embedding_model")
+        if (short := search_mod.hybrid_short(cfg)) and search_mod.routed(cfg, "прогрев")["retriever"] == "pg_hybrid":
+            retriever, model = "pg_hybrid", short["model"]  # #485: short queries go to pg_hybrid with their own model
         reliability = reliability_mode(cfg)
     except (OSError, ValueError, KeyError):
         retriever = model = reliability = None
     if reliability in ("shadow", "on") and not _is_stub():
         threading.Thread(target=_warm_reliability, name="warm-reliability", daemon=True).start()
     if retriever == "pg_hybrid":
-        from src.match import pg_retriever
-
         try:
-            log.info("pg_hybrid прогрет: %s", pg_retriever.warm(model))
-        except pg_retriever.VectorsUnavailable as e:
+            from src.match import pg_retriever
+        except ImportError as e:  # no extra pg (psycopg): search() falls back to BM25 the same way
             log.warning("pg_hybrid недоступен, поиск пойдёт по BM25: %s", e)
+        else:
+            try:
+                log.info("pg_hybrid прогрет: %s", pg_retriever.warm(model))
+            except pg_retriever.VectorsUnavailable as e:
+                log.warning("pg_hybrid недоступен, поиск пойдёт по BM25: %s", e)
     yield
 
 
@@ -221,6 +229,17 @@ def health() -> Health:
                   store=store)
 
 
+def _after_data(as_of: date) -> bool:
+    """A lot's date after the indexed history (#589): the search reuses the full index, no new one is built."""
+    from src.match.index import get_index
+
+    try:
+        end = get_index(None, None).data_end
+    except Exception:  # noqa: BLE001 — no data: the search itself answers 503
+        return False
+    return end is not None and as_of > end
+
+
 def _accepted(query: Query) -> None:
     """422 before the search for what the product does not take: an empty text (#113); `as_of` — the eval
     knob (search() is called directly there): through the API a client date built a new BM25 index per date
@@ -228,8 +247,9 @@ def _accepted(query: Query) -> None:
     (#145, F-01); a text over MAX_TEXT_CHARS (F-02)."""
     if not query.text.strip():
         raise HTTPException(422, "Пустой запрос")
-    if query.as_of is not None:
-        raise HTTPException(422, "as_of задаётся только в backtest (make eval): API ищет по всем данным")
+    if query.as_of is not None and not _after_data(query.as_of):
+        raise HTTPException(422, "as_of внутри периода данных — только в backtest (make eval): API ищет по всем "
+                                 "данным; дата лота после конца данных (выгрузка защиты) принимается")
     if len(query.text) > MAX_TEXT_CHARS:
         raise HTTPException(422, f"Текст запроса длиннее {MAX_TEXT_CHARS:_} символов".replace("_", " ")
                                  + " — оставьте наименование позиции или фрагмент ТЗ")
@@ -346,6 +366,29 @@ def api_search(query: Query, response: Response,
     )
 
 
+_LIVE_LOCK = threading.Lock()  # one live search at a time: every one spends the human's Yandex budget
+
+
+@app.post("/api/live-search", response_model=list[CounterpartyMatch],
+          responses={429: {"description": "живой поиск уже идёт — повторите позже"},
+                     503: {"description": "живой поиск не настроен (нет ключа или потолков Яндекса) или у закупки "
+                                          "нет класса ОКПД2"}})
+def api_live_search(query: Query, response: Response) -> list[CounterpartyMatch]:
+    """The button «Искать в реальном времени» (#550): new suppliers of this purchase found by Yandex now
+    (discover.live_search), without the trigger «< 3 strong» and without a deadline. The UI sends the query with the
+    OKPD2 class «Новые» searched by. What happened — the X-Live-Note header, percent-encoded UTF-8."""
+    if not _LIVE_LOCK.acquire(blocking=False):
+        raise guard.busy("живой поиск уже идёт — повторите позже")
+    try:
+        live = discover_mod.live_search(query)
+    except discover_mod.LiveOff as e:
+        raise HTTPException(503, str(e)) from e
+    finally:
+        _LIVE_LOCK.release()
+    response.headers["X-Live-Note"] = quote(live.note)
+    return _verified(live.matches)
+
+
 @app.get("/api/lot/{ident}", response_model=Query)
 def api_lot(ident: str) -> Query:
     """Notice number (lot_id or reqnum) -> Query from the notice; 503 when organizers' data is absent."""
@@ -450,7 +493,7 @@ def api_export(query: Query) -> StreamingResponse:
         for place, m in enumerate(rows, 1):
             cp = m.counterparty
             ws.append([
-                block, cp.name, cp.inn or "ИНН не подтверждён",
+                block, cp.name, cp.inn or cp.foreign_id or "ИНН не подтверждён",
                 KIND_LABEL[kind_of(cp)], ENTITY_LABEL.get(entity_of(cp) or "", "не определено"), cp.region or "",
                 {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], place, round(m.score, 3),
                 m.rank_reason or "",

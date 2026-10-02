@@ -105,7 +105,6 @@ def test_one_failing_lot_does_not_stop_export(search_data, tmp_path, monkeypatch
         (lambda d: (d / "Извещения_24-25.csv").write_text("lot_id;name\n1;x\n", encoding="utf-8"), "subject"),
         (lambda d: (d / "ТРУ_24-25.csv").write_text("lot_id;product_name\n1;x\n", encoding="utf-8"), "okpd2_code"),
         (lambda d: (d / "Извещения_24-25.csv").write_text("", encoding="utf-8"), "пустой файл"),
-        (lambda d: (d / "Извещения_x.csv").write_text("lot_id;subject\n", encoding="utf-8"), "несколько файлов"),
     ],
 )
 def test_format_errors_are_messages(tmp_path, mutate, needle, capsys):
@@ -128,6 +127,36 @@ def test_extra_and_absent_columns_are_warnings(tmp_path):
     assert "ячеек больше" in text
     assert [lt.lot_id for lt in ts.lots] == ["1", "2", "3"]
     assert any("пустой предмет" in n for n in ts.lots[1].notes)
+
+
+def test_testset_glued_header_cell_is_split(tmp_path):
+    # the organizers' test export of 02.10: "reqnum;procedure_name" in one quoted header cell (#590)
+    d = _copy(tmp_path)
+    (d / "Извещения_24-25.csv").write_text(
+        '"publish_date";"procedure_id";"lot_id";"start_price";"reqnum;procedure_name";"subject";"is_smp";'
+        '"customer_inn";"customer_kpp";"is_eshop_or_aisgz"\n'
+        "2026-01-23;5805974;6041774;63600.00;;Обслуживание;Обслуживание;false;7813131108;781301001;ЭМ\n"
+        "2026-02-09;5822537;6058337;501397.40;0372200075025000162;Исследования;Исследования;false;"
+        "7801048494;780101001;АИС ГЗ\n", encoding="utf-8")
+    ts = load_testset(d)
+    assert [lt.lot_id for lt in ts.lots] == ["6041774", "6058337"]
+    first, second = ts.lots
+    assert first.query.customer_inn == "7813131108" and first.query.channel == "ЭМ"
+    assert second.query.customer_inn == "7801048494" and second.query.channel == "АИС ГЗ"
+    assert second.reqnum == "0372200075025000162" and first.query.budget == 63600.0
+    text = " ".join(ts.warnings)
+    assert "ячеек больше" not in text and "лишние колонки" not in text
+
+
+def test_testset_several_notice_files_are_read_together(tmp_path):
+    # the defense export (#589): «Предзащита_Извещения_1..4» in one folder, positions in «Потоварка»
+    d = _copy(tmp_path)
+    (d / "Предзащита_Извещения_2.csv").write_text("lot_id;subject\n7001;Вода питьевая\n", encoding="utf-8")
+    (d / "Предзащита_Потоварка_2.csv").write_text("lot_id;okpd2_code\n7001;11.07.11.110\n", encoding="utf-8")
+    ts = load_testset(d)
+    assert [lt.lot_id for lt in ts.lots] == ["9001", "9002", "9003", "7001"]
+    lot = ts.find("7001")
+    assert lot is not None and lot.query.okpd2 == ["11.07.11.110"]
 
 
 def test_bad_price_is_a_note(tmp_path):

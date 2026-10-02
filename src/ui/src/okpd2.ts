@@ -21,6 +21,16 @@ async function fetchLabels(codes: string[]): Promise<void> {
   for (let i = 0; i < missing.length; i += PER_REQUEST) await fetchChunk(missing.slice(i, i + PER_REQUEST));
 }
 
+/** Resolve code-only input before text retrieval: numeric code tokens are not product names. */
+export async function lookupOkpd2Name(code: string): Promise<string> {
+  await fetchLabels([code]);
+  const label = known.get(code);
+  if (!label) throw new Error("Не удалось получить название категории ОКПД2. Повторите поиск или введите название товара.");
+  const name = label.match(/«(.+)»/)?.[1];
+  if (!name) throw new Error(`Код ОКПД2 ${code} не найден в справочнике. Проверьте код или введите название товара.`);
+  return name;
+}
+
 export function okpd2Text(codes: string[], labels: Map<string, string>): string {
   return codes.map((c) => labels.get(c) ?? c).join(", ");
 }

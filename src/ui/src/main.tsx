@@ -8,6 +8,10 @@ import "./search-compose.css";
 import "./responsive-ui.css";
 import "./results-view.css";
 import "./interior-ui.css";
+import "./supplier-results.css";
+import "./work-glass.css";
+import "./work-typography.css";
+import "./results-reader.css";
 
 if (STATIC_DEMO) installStaticApi(); // the static stand without the API (#283)
 

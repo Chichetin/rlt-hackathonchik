@@ -19,10 +19,12 @@ from src.eval.run import RESULTS, slice_names
 
 
 def require_same_cases(a: dict, b: dict) -> None:
-    """ValueError unless both runs cover the same query ids: the pairing of `paired` and of src.eval.parity."""
+    """Require the same nonempty, unique query ids for `paired` and src.eval.parity."""
     ids_a = [q["query_id"] for q in a["per_query"]]
-    ids_b = {q["query_id"] for q in b["per_query"]}
-    if set(ids_a) != ids_b or len(ids_a) != len(ids_b):
+    ids_b = [q["query_id"] for q in b["per_query"]]
+    if not ids_a or not ids_b:
+        raise ValueError(f"{a['exp_id']} и {b['exp_id']}: нет кейсов в одном из прогонов — парное сравнение невозможно")
+    if set(ids_a) != set(ids_b) or len(ids_a) != len(set(ids_a)) or len(ids_b) != len(set(ids_b)):
         raise ValueError(f"{a['exp_id']} и {b['exp_id']}: разные наборы кейсов — парное сравнение невозможно")
 
 

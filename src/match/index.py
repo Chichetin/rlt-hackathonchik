@@ -91,16 +91,17 @@ class LotIndex:
     def lot_hits(self, hits: list[tuple[int, float]]) -> LotHits:
         """Documents -> their lots; a lot keeps its best document (the first one in `hits`: score desc)."""
         lots_by_doc, off, _ = self._maps()
-        parts = [(lots_by_doc[off[d]:off[d + 1]], s, d, r) for r, (d, s) in enumerate(hits)]
-        if not parts:
+        if not hits:
             return LotHits(np.empty(0, np.int64), np.empty(0), np.empty(0, np.int32))
-        lot = np.concatenate([p[0] for p in parts]).astype(np.int64)
-        score = np.concatenate([np.full(len(p[0]), p[1]) for p in parts])
-        doc = np.concatenate([np.full(len(p[0]), p[2], np.int32) for p in parts])
-        rank = np.concatenate([np.full(len(p[0]), p[3]) for p in parts])
-        order = np.lexsort((rank, lot))  # by lot, then by rank: the first row of a lot is its best document
-        pick = order[np.unique(lot[order], return_index=True)[1]]
-        return LotHits(lot[pick], score[pick], doc[pick])
+        parts = [lots_by_doc[off[d]:off[d + 1]] for d, _ in hits]
+        lot = np.concatenate(parts).astype(np.int64, copy=False)
+        # Concatenation already follows hit rank: the first occurrence is the best document.
+        # unique preserves ascending lot_id; recover the hit without per-lot score/doc/rank arrays.
+        unique, first = np.unique(lot, return_index=True)
+        owner = np.searchsorted(np.cumsum([len(p) for p in parts]), first, side="right")
+        score = np.asarray([s for _, s in hits], dtype=float)
+        doc = np.asarray([d for d, _ in hits], dtype=np.int32)
+        return LotHits(unique, score[owner], doc[owner])
 
     def text(self, doc_id: int) -> str:
         return self._maps()[2][doc_id].as_py()
@@ -162,6 +163,10 @@ def get_index(store: Store | None, as_of: date | None) -> LotIndex:
     `store`: a Store or None — the store of the environment (organizers' data only through Store, #293)."""
     if store is None:
         store = get_store()
+    if as_of is not None:  # a lot published after the data (#589: defense lots of 2026): its history is all of it,
+        full = get_index(store, None)  # the same index — not a new one per date
+        if full.data_end is not None and as_of > full.data_end:
+            return full
     key = index_key(store.manifest(), as_of)
     with _lock:
         if key in _cache:

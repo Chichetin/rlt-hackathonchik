@@ -113,9 +113,12 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
         log.info("search %s: %s", query.query_id, out.note)
     # each chip group counted after the user filters of the other groups (review of #240, #242, D-094)
     new = chip_facets((m for m in legal if m.origin == "discovered"), query)
-    if candidates is not None:  # discovery: the block is cut to MAX_SHOWN after the user filters
-        new = {g: {v: min(n, discover_mod.MAX_SHOWN) for v, n in counts.items()}
-               for g, counts in chip_facets(apply_legal(candidates), query).items()}
+    if candidates is not None:  # discovery: the block is the mixed top MAX_SHOWN + every one above min_score (#549)
+        block = discover_mod.block_config()
+        legal_new = apply_legal(candidates)
+        strong = chip_facets((m for m in legal_new if m.score >= block["min_score"]), query)
+        new = {g: {v: min(n, block["max_shown"], max(discover_mod.MAX_SHOWN, strong[g][v])) for v, n in counts.items()}
+               for g, counts in chip_facets(legal_new, query).items()}
     out.matches = shown
     out.facets = {"history": chip_facets((m for m in legal if m.origin == "history"), query), "discovered": new}
     return out
@@ -124,8 +127,9 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
 def _for_purchase(matches: list[CounterpartyMatch], query: Query) -> list[CounterpartyMatch]:
     """The role of every candidate for the purchase type of the query (role.for_purchase, #188)."""
     kind = purchase_type(query.okpd2)
-    if kind not in role.SERVICE_DATIVE:
-        return matches
+    if kind not in role.SERVICE_DATIVE:  # goods: the second basis of the role, by the history of purchases (#509)
+        return [m.model_copy(update={"counterparty": role.with_behavior(m.counterparty, kind)})
+                if m.origin == "history" else m for m in matches]
     return [m.model_copy(update={"counterparty": role.for_purchase(m.counterparty, kind)}) for m in matches]
 
 
@@ -218,11 +222,17 @@ def _discovered(query: Query, history: list[CounterpartyMatch], enqueue: Callabl
     """Block «Новые» (#16, D-037): open sources via the cache; a failing source never breaks the search.
 
     `predicted` — the OKPD2 code search() predicted from the text (search.predicted_code(), P-02): the class of
-    the block for a query without a code (#394). Returns the block (top MAX_SHOWN), every candidate before the
-    user filters (X-Facets) and the Discovery.
+    the block for a query without a code (#394). Returns the block (configs/discover.yaml `block`), every candidate
+    before the user filters (X-Facets) and the Discovery.
     """
     try:
-        res = discover_mod.discover(query, history, enqueue=enqueue, offline=offline, predicted_code=predicted)
+        # the offline pool (#185, #219) joins «Новые» as in make predict (#518): no network, cache and parquet only;
+        # the block's size and the limits of its live requests — configs/discover.yaml `block` (#549)
+        block = discover_mod.block_config()
+        res = discover_mod.discover(query, history, enqueue=enqueue, offline=offline, predicted_code=predicted,
+                                    pool=True, pool_limit=block["pool_limit"], budget_s=block["budget_s"],
+                                    max_requests=block["max_requests"], pages=block["pages"],
+                                    min_score=block["min_score"], max_shown=block["max_shown"])
     except Exception as e:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
         log.exception("discovery: блок «Новые» пуст из-за ошибки")
         return [], [], None, type(e).__name__

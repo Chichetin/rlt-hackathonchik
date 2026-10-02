@@ -54,7 +54,11 @@ SPECS = {
     "deepvk/USER-base": Spec(768, "names_user_base", QUERY, PASSAGE),
     "intfloat/multilingual-e5-base": Spec(768, "names_e5_base", QUERY, PASSAGE),
     "cointegrated/rubert-tiny2": Spec(312, "names_rubert_tiny2", "", ""),
+    # E3 (#270): USER-base fine-tuned on 100k name pairs of one OKPD2 code; weights are not in git — the folder
+    # MODELS_DIR/user-base-okpd2 (as src/eval/emb_bench.py FINETUNED); vectors — vecs-user-base-okpd2.parquet (#485)
+    "e3/user-base-okpd2": Spec(768, "names_e3_okpd2", QUERY, PASSAGE),
 }
+LOCAL = {"e3/user-base-okpd2"}  # fine-tuned models: loaded from MODELS_DIR/<last part of the name>
 
 
 def spec(model: str | None) -> Spec:
@@ -65,16 +69,21 @@ def spec(model: str | None) -> Spec:
 Encoder = Callable[[list[str]], np.ndarray]
 
 
+def model_path(name: str) -> str:
+    """HF id, or the local folder of a fine-tuned model (MODELS_DIR/<slug>, #485)."""
+    return str(get_settings().models_dir / name.split("/")[-1].lower()) if name in LOCAL else name
+
+
 def model_encoder(prefix: str = PASSAGE, name: str = MODEL) -> Encoder:
     # heavy (torch), optional extra: `make setup-ml`
-    from sentence_transformers import SentenceTransformer, models  # pyright: ignore[reportMissingImports]
+    from sentence_transformers import SentenceTransformer, models  # pyright: ignore
 
     try:
-        model = SentenceTransformer(name)  # CUDA if torch sees a GPU, else CPU
+        model = SentenceTransformer(model_path(name))  # CUDA if torch sees a GPU, else CPU
     except TypeError:
         # USER-base keeps Normalize at the model root: sentence-transformers 6 reads the HF config.json into it
         # and fails. The same pipeline by hand: Transformer -> mean pooling -> Normalize (#115).
-        tr = models.Transformer(name, max_seq_length=MAX_SEQ)
+        tr = models.Transformer(model_path(name), max_seq_length=MAX_SEQ)
         model = SentenceTransformer(modules=[tr, models.Pooling(tr.get_word_embedding_dimension(), "mean"),
                                              models.Normalize()])
     model.max_seq_length = MAX_SEQ

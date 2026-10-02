@@ -107,6 +107,7 @@ class Settings:
     source_cache_ttl_s = _Var("SOURCE_CACHE_TTL_S", lambda v: int(v or 7 * 24 * 3600))
     pb_min_interval_s = _Var("PB_MIN_INTERVAL_S", lambda v: float(v or 1.0))
     pb_disabled = _Var("PB_DISABLED", lambda v: v == "1")  # 1 — pb.nalog.ru is not asked (captcha, D-052)
+    pb_captcha_solve = _Var("PB_CAPTCHA_SOLVE", lambda v: v == "1")  # 1 — solve its captcha (#532; extra `captcha`)
     bo_min_interval_s = _Var("BO_MIN_INTERVAL_S", lambda v: float(v or 1.0))
     bo_timeout_s = _Var("BO_TIMEOUT_S", lambda v: float(v or 5.0))
     rmsp_min_interval_s = _Var("RMSP_MIN_INTERVAL_S", lambda v: float(v or 1.0))
@@ -131,6 +132,7 @@ class Settings:
     # block «Новые» (src/enrich/discover.py) and the LLM provider (src/llm) — read at every call
     discovery_offline = _Var("DISCOVERY_OFFLINE", lambda v: v == "1")  # 1 — registries from the cache only
     discovery_leads = _Var("DISCOVERY_LEADS", lambda v: v != "0")  # 0 — web leads (#108) are not added
+    discovery_eaeu = _Var("DISCOVERY_EAEU", lambda v: v != "0")  # 0 — EAEU companies (#200) are not added
     discovery_np_types = _Var("DISCOVERY_NP_TYPES", lambda v: v or "UL")  # rmsp entity types, comma-separated
     llm_provider = _Var("LLM_PROVIDER", lambda v: (v or "none").strip().lower())  # none — the mode without LLM
     # tools (src/eval, src/match/ranker_train.py) — read at every call, except the two directories of emb_bench (import)

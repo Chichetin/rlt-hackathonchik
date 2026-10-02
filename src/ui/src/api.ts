@@ -37,10 +37,16 @@ export function filtersActive(f: Filters): boolean {
   return f.only_msp || f.kinds.length > 0 || !!f.entity || !!f.min_level;
 }
 
-// Поля закупки, которые не вводятся руками: приходят из извещения (okpd2, канал, ИНН заказчика).
-export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "budget">;
+// Дополнительный контекст готового извещения. ОКПД2 также можно ввести в строку поиска.
+// as_of: the lot's publish date from a test export (#589) — the search sees history strictly before it
+export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "budget" | "as_of">;
 // customer_region: the customer's region when there is no customer INN (#242) — goes to Query.region
-export type Extra = { budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
+export type Extra = { okpd2?: string; budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
+
+export function enteredOkpd2(text: string): string | undefined {
+  const code = text.trim().replace(/^ОКПД2\s*[:—-]?\s*/i, "");
+  return /^\d{2}(?:\.\d|\.\d{2}(?:\.\d|\.\d{2}(?:\.\d{1,3})?)?)?$/.test(code) ? code : undefined;
+}
 
 export function buildQuery(text: string, filters: Filters, extra?: Extra): Query {
   const f: Record<string, string | boolean | number> = {};
@@ -58,8 +64,13 @@ export function buildQuery(text: string, filters: Filters, extra?: Extra): Query
     filters: f,
     region: extra?.customer_region || "Санкт-Петербург",
   };
-  if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
+  // A code-only query goes through the existing OKPD2 search path. Product
+  // dimensions/model numbers inside prose must not become category filters.
+  const enteredCode = extra?.okpd2?.trim() ? enteredOkpd2(extra.okpd2) : enteredOkpd2(text);
+  if (enteredCode) q.okpd2 = [enteredCode];
+  else if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
   if (extra?.lot?.channel) q.channel = extra.lot.channel;
+  if (extra?.lot?.as_of) q.as_of = extra.lot.as_of;
   const budget = Number(extra?.budget.replace(/\s/g, "").replace(",", "."));
   if (extra?.budget.trim() && Number.isFinite(budget) && budget > 0) q.budget = budget;
   const inn = (extra?.customer_inn ?? "").trim();
@@ -116,7 +127,7 @@ async function post(path: string, body: unknown): Promise<Response> {
 
 // Пагинация и фильтры — на сервере (D-024): страница каждого блока, размер блока после фильтров —
 // в заголовках X-Total-History / X-Total-Discovered (в замороженном SearchResponse поля total нет).
-export const PAGE = 20;
+export const PAGE = 10;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
@@ -184,6 +195,15 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
     corrections: corrections(r),
     discoveryClass: discoveryClass(r),
   };
+}
+
+// #550: «Искать в реальном времени» — живой Яндекс-поиск новых поставщиков по закупке (POST /api/live-search).
+// 503 — живой поиск не настроен (нет ключа или потолков) или у закупки нет класса ОКПД2; текст причины — в detail.
+export type LiveResult = { matches: CounterpartyMatch[]; note: string };
+export async function liveSearch(q: Query): Promise<LiveResult> {
+  const r = await fetch("/api/live-search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(q) });
+  if (!r.ok) throw new Error(await detail(r));
+  return { matches: await r.json(), note: decodeURIComponent(r.headers.get("X-Live-Note") ?? "") };
 }
 
 // #242: who the customer is and what is bought, as the server decided it (X-Search-Context)
@@ -362,6 +382,26 @@ export async function uploadTestset(files: File[]): Promise<Testset> {
   if (!r.ok) throw new Error(await detail(r));
   const body: unknown = await r.json();
   if (!isTestset(body)) throw new Error("сервер не принял выгрузку: неожиданный ответ");
+  return body;
+}
+
+// The customer's list of purchases by the template (#501): one .xlsx or .csv, sent as base64 in JSON.
+export const TEMPLATE_URL = "/api/testset/template.xlsx";
+export const PREDICT_XLSX_URL = "/api/testset/predict.xlsx?top=10";
+
+function base64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+export async function uploadTemplate(file: File): Promise<Testset> {
+  const payload = { name: file.name, data: base64(await file.arrayBuffer()) };
+  const r = await fetch("/api/testset/template", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (!r.ok) throw new Error(await detail(r));
+  const body: unknown = await r.json();
+  if (!isTestset(body)) throw new Error("сервер не принял список закупок: неожиданный ответ");
   return body;
 }
 

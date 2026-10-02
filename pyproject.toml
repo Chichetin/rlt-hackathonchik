@@ -31,6 +31,10 @@ ml = [
 ]
 # Postgres для очереди обогащения в docker-compose (DATABASE_URL=postgresql+psycopg://…).
 pg = ["psycopg[binary]>=3.2"]
+# Капча pb.nalog.ru (#532, D-085): ddddocr + opencv, ~150 МБ. Только для прогона с PB_CAPTCHA_SOLVE=1.
+captcha = [
+    "ddddocr>=1.6.1",
+]
 
 [dependency-groups]
 dev = [

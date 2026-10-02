@@ -241,6 +241,19 @@ def drop_okpd2(cases: list[EvalCase]) -> list[EvalCase]:
     return [c.model_copy(update={"query": c.query.model_copy(update={"okpd2": []})}) for c in cases]
 
 
+def free_text(cases: list[EvalCase]) -> list[EvalCase]:
+    """The same cases as a user types them in the UI (#490): the lot subject only (the first «; » segment of the
+    text), no ОКПД2, no customer, budget or channel."""
+    return [c.model_copy(update={"query": c.query.model_copy(update={
+        "text": c.query.text.split("; ")[0], "okpd2": [], "customer_inn": None, "budget": None, "channel": None})})
+        for c in cases]
+
+
+def free_text_bare(cases: list[EvalCase]) -> list[EvalCase]:
+    """Compatibility name for #511; both CLI modes share the same input transformation."""
+    return free_text(cases)
+
+
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
     from src.match.text import tokenizer_name, tokenizer_version
 
@@ -264,12 +277,13 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
 
 
 def _vectors(cfg: dict) -> dict | None:
-    """Model, table and rows of the vector half (pg_hybrid) the run actually used."""
-    if cfg.get("retriever") != "pg_hybrid":
+    """Model, table and rows of the vector half (pg_hybrid, or hybrid_short for short queries, #485) the run used."""
+    short = cfg.get("hybrid_short")
+    if cfg.get("retriever") != "pg_hybrid" and not short:
         return None
     from src.match import pg_retriever
 
-    return pg_retriever.coverage(cfg.get("embedding_model"))
+    return pg_retriever.coverage(short["model"] if short else cfg.get("embedding_model"))
 
 
 def _store() -> str:
@@ -372,6 +386,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="spoil the query texts (typos / Latin layout) to measure the speller (#282)")
     ap.add_argument("--no-okpd2", action="store_true",
                     help="drop the ОКПД2 of every query: the class is predicted from the text (P-02, #349)")
+    ap.add_argument("--free-text", action="store_true",
+                    help="subject only, no ОКПД2 / customer / budget / channel — the UI free text (#490)")
+    ap.add_argument("--free-text-bare", action="store_true",
+                    help="the lot subject only, no ОКПД2 / customer / budget / channel — the jury's query (#511)")
     ap.add_argument("--exact-docs", type=int, default=None,
                     help="experiment only: search.EXACT_DOCS (0 — vote only, P-01; default — P-02), #349")
     args = ap.parse_args(argv)
@@ -405,6 +423,10 @@ def main(argv: list[str] | None = None) -> int:
         cases, part = first_words(cases, args.words), f"{part}-w{args.words}"
     if args.no_okpd2:
         cases, part = drop_okpd2(cases), f"{part}-nocode"
+    if args.free_text:
+        cases, part = free_text(cases), f"{part}-free"
+    if args.free_text_bare:
+        cases, part = free_text_bare(cases), f"{part}-bare"
     if args.exact_docs is not None:
         if args.exact_docs < 0:
             print("--exact-docs: ожидается целое число ≥ 0", file=sys.stderr)

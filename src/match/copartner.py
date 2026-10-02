@@ -28,7 +28,7 @@ def _fact(partner: str, own: int, joint: int, wins: int) -> str:
     return (f"подаёт заявки вместе с ИНН {partner} в {_pct(joint / own)} своих лотов ЭМ ({joint} из {own}); "
             f"из совместных ИНН {partner} побеждает в {_pct(wins / joint)} "
             f"({wins} из {joint} {plural(joint, 'лота', 'лотов', 'лотов')}). "
-            "Сигнал для проверки: заявки этих двух участников связаны")
+            "Часто участвуют в одних лотах — сигнал для проверки, а не вывод о связи")
 
 
 def with_cobid(matches: list[CounterpartyMatch], as_of: date | None) -> list[CounterpartyMatch]:

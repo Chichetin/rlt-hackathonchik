@@ -26,6 +26,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/testset/template.xlsx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Template */
+        get: operations["get_template_api_testset_template_xlsx_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/testset/template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Template
+         * @description The filled template -> the active set (Извещения + ТРУ of the organizers' format); 422 when unusable.
+         */
+        post: operations["upload_template_api_testset_template_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/testset/predict.csv": {
         parameters: {
             query?: never;
@@ -38,6 +75,26 @@ export interface paths {
          * @description `make predict --offline` over the active set: per lot «История» and «Новые» with score and components.
          */
         get: operations["predict_testset_api_testset_predict_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/testset/predict.xlsx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Predict Xlsx
+         * @description predict.csv as an Excel book (offline) + «Ошибки»: rows not taken from the template and notes on lots.
+         */
+        get: operations["predict_xlsx_api_testset_predict_xlsx_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -130,6 +187,28 @@ export interface paths {
         put?: never;
         /** Api Search */
         post: operations["api_search_api_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/live-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Api Live Search
+         * @description The button «Искать в реальном времени» (#550): new suppliers of this purchase found by Yandex now
+         *     (discover.live_search), without the trigger «< 3 strong» and without a deadline. The UI sends the query with the
+         *     OKPD2 class «Новые» searched by. What happened — the X-Live-Note header, percent-encoded UTF-8.
+         */
+        post: operations["api_live_search_api_live_search_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -289,6 +368,10 @@ export interface components {
         Counterparty: {
             /** Inn */
             inn: string | null;
+            /** Country */
+            country?: string | null;
+            /** Foreign Id */
+            foreign_id?: string | null;
             /** Kpp */
             kpp?: string | null;
             /** Name */
@@ -631,6 +714,19 @@ export interface components {
              */
             stub: boolean;
         };
+        /** UploadTemplateRequest */
+        UploadTemplateRequest: {
+            /**
+             * Name
+             * @description имя файла (.xlsx или .csv по шаблону)
+             */
+            name: string;
+            /**
+             * Data
+             * @description содержимое файла, base64
+             */
+            data: string;
+        };
         /** UploadTestsetRequest */
         UploadTestsetRequest: {
             /** Files */
@@ -787,6 +883,59 @@ export interface operations {
             };
         };
     };
+    get_template_api_testset_template_xlsx_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description шаблон списка закупок */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": unknown;
+                };
+            };
+        };
+    };
+    upload_template_api_testset_template_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedTestset"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     predict_testset_api_testset_predict_csv_get: {
         parameters: {
             query?: {
@@ -823,6 +972,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    predict_xlsx_api_testset_predict_xlsx_get: {
+        parameters: {
+            query?: {
+                /** @description кандидатов в каждом блоке */
+                top?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description листы «Рекомендации» и «Ошибки» */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": unknown;
+                };
+            };
+            /** @description набор не загружен */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -1029,6 +1217,53 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    api_live_search_api_live_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Query"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterpartyMatch"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description живой поиск уже идёт — повторите позже */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description живой поиск не настроен (нет ключа или потолков Яндекса) или у закупки нет класса ОКПД2 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
