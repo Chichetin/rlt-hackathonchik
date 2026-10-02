@@ -1,6 +1,6 @@
 """Cross-encoder reranking of the retrieved positions (#269, E4): only the order of the top-N changes."""
 
-from src.eval.ce_bench import rank_scores, rerank
+from src.eval.ce_bench import rank_scores, rerank, rerank_ties
 
 HITS = [(10, 9.0), (11, 7.0), (12, 5.0), (13, 3.0), (14, 1.0)]
 CE = {10: -2.0, 11: 4.0, 12: 1.0, 13: 8.0, 14: 9.0}
@@ -42,3 +42,18 @@ def test_fuse_is_between_retriever_and_ce():
 def test_empty_hits():
     assert rerank([], {}, 100) == []
     assert rerank([], {}, 100, fuse=True) == []
+
+
+def test_ties_groups_move_together_and_share_a_score():
+    hits = [(1, 5.0), (2, 5.0), (3, 4.0), (4, 3.0), (5, 3.0), (6, 2.0), (7, 2.0)]
+    ce = {1: 0.0, 2: 1.0, 3: -1.0, 4: 0.5, 5: 3.0, 6: 9.0, 7: 9.0}
+    got = rerank_ties(hits, ce, 5)
+    # groups in the top-5: {1,2} max 1.0, {3} -1.0, {4,5} max 3.0 -> {4,5}, {1,2}, {3}; tail {6,7} stays last
+    assert docs(got) == [4, 5, 1, 2, 3, 6, 7]
+    sc = dict(got)
+    assert sc[4] == sc[5] > sc[1] == sc[2] > sc[3] > sc[6] == sc[7]
+
+
+def test_ties_without_ties_is_ce_order():
+    assert docs(rerank_ties(HITS, CE, 3)) == docs(rerank(HITS, CE, 3))
+    assert rerank_ties([], {}, 10) == []

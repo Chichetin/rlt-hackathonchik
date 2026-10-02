@@ -15,7 +15,9 @@ cross-encoder scores the pair (query text, document text as in the index).
 Variants per retriever: `base` — the retriever as is (BM25 scores / RRF scores); `rank_control` — the same
 order with rank scores 1/(1+r) (what a reranked list gets, so the reranker is compared without the score
 scale change); `ce@N` — the top-N documents sorted by the cross-encoder score, the tail N+1.. after them in
-the retriever order; `ce_rrf@N` — inside the top-N, RRF of the retriever rank and the cross-encoder rank.
+the retriever order; `ce_rrf@N` — inside the top-N, RRF of the retriever rank and the cross-encoder rank;
+`ce_tie@N` — the groups of equal retriever score inside the top-N ordered by their best cross-encoder score,
+a group keeps one score (the candidates SQL breaks the tie by n_lots, as for BM25).
 Retrievers: BM25 (`prefix5`) and the hybrid RRF BM25 + deepvk/USER-base (the best hybrid of #267 / #313 by
 cand_recall@200). Result: eval/results/E4-<reranker>-<lot|short>-n<n>.json (+ -per_query.json).
 """
@@ -92,6 +94,23 @@ def rerank(hits: Sequence[tuple[int, float]], ce: Mapping[int, float], n: int,
     return rank_scores(by_ce + tail)
 
 
+def rerank_ties(hits: Sequence[tuple[int, float]], ce: Mapping[int, float], n: int) -> list[tuple[int, float]]:
+    """Groups of equal retriever score inside the top-n reordered by their best cross-encoder score.
+
+    A group keeps one shared score, so the candidates SQL still breaks the tie by the number of lots
+    (BM25 under prefix5 gives many names the same score; rank_control shows the tie itself carries signal).
+    The tail n+1.. keeps the retriever order and its own ties. Group order ties keep the retriever order.
+    """
+    def groups(part: Sequence[tuple[int, float]]) -> list[list[int]]:
+        out: dict[float, list[int]] = {}
+        for d, sc in part:
+            out.setdefault(sc, []).append(d)
+        return list(out.values())
+
+    head = sorted(groups(hits[:n]), key=lambda g: -max(ce[d] for d in g))
+    return [(d, 1.0 / (1 + r)) for r, g in enumerate(head + groups(hits[n:])) for d in g]
+
+
 def _revision(model: str, cache: str | None) -> str | None:
     """Snapshot commit of the cached model (the card version the numbers belong to)."""
     from huggingface_hub import try_to_load_from_cache
@@ -149,6 +168,7 @@ def _variant_rows(store, idx, as_of: date, cases, hits: list[list[tuple[int, flo
     for n in ns:
         out[f"ce@{n}"] = rows([rerank(h, s, n) for h, s in zip(hits, ce, strict=True)])
         out[f"ce_rrf@{n}"] = rows([rerank(h, s, n, fuse=True) for h, s in zip(hits, ce, strict=True)])
+        out[f"ce_tie@{n}"] = rows([rerank_ties(h, s, n) for h, s in zip(hits, ce, strict=True)])
     return out
 
 
@@ -240,6 +260,9 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
                 "rank_control": "same order, scores 1/(1+rank)",
                 "ce@N": "top-N by cross-encoder score, tail N+1.. in retriever order, scores 1/(1+rank)",
                 "ce_rrf@N": "top-N by RRF(retriever rank, cross-encoder rank), rrf_k as pg_retriever",
+                "ce_tie@N": "groups of equal retriever score in the top-N ordered by max cross-encoder score, "
+                            "a group keeps one score (n_lots still breaks the tie); added after rank_control "
+                            "showed the BM25 ties carry signal (n=500 short, post hoc)",
             },
             "slice_def": {"new_name": "normalized first position not a name of the cutoff index",
                           "winner=new": "src.eval.run.winner_novelty", "bm25_empty": "BM25 found nothing"},
