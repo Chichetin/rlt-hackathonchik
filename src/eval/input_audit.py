@@ -14,13 +14,16 @@ import pyarrow.parquet as pq
 from src.match import ranker
 from src.match import store as store_mod
 
+FINGERPRINT_VERSION = 2
+HISTORY_FILES = ("notices.parquet", "participants.parquet", "items.parquet")
+
 
 def _sha(path: Path) -> str:
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def audit(cfg: dict, as_ofs: Iterable[date]) -> dict:
+def audit(cfg: dict, as_ofs: Iterable[date], *, store: store_mod.Store | None = None) -> dict:
     """Only inspect the selected store and snapshots; absent values are legal, absent columns are not."""
     spec = ranker.spec(cfg) if cfg.get("method", "search") == "search" else None
     if spec is None:
@@ -29,7 +32,7 @@ def audit(cfg: dict, as_ofs: Iterable[date]) -> dict:
     if not model.is_absolute():
         model = ranker.ROOT / model
     provenance = {"model": {"path": str(model), "sha256": _sha(model)}}
-    store = store_mod.get_store()
+    store = store if store is not None else store_mod.get_store()
     if not isinstance(store, store_mod.ParquetStore):
         return {**provenance, "store": store.name, "status": "not_checked",
                 "reason": "supplier profile schema and data fingerprints are checked only for ParquetStore"}
@@ -50,8 +53,14 @@ def audit(cfg: dict, as_ofs: Iterable[date]) -> dict:
                           "schema": [{"name": f.name, "type": str(f.type), "nullable": f.nullable} for f in schema]})
     manifest = store.processed / "manifest.json"
     manifest_sha = _sha(manifest)
-    fingerprint = {"manifest_sha256": manifest_sha,
+    # The manifest and supplier aggregates can stay unchanged while history is replaced.
+    # Retrieval and customer candidate counts read these files directly, so hash their bytes too.
+    history = {name: {"path": str(store.processed / name), "sha256": _sha(store.processed / name)}
+               for name in HISTORY_FILES}
+    fingerprint = {"version": FINGERPRINT_VERSION, "manifest_sha256": manifest_sha,
+                   "history": {name: item["sha256"] for name, item in history.items()},
                    "snapshots": [{"as_of": s["as_of"], "sha256": s["sha256"]} for s in snapshots]}
     return {**provenance, "store": store.name, "status": "checked",
-            "manifest": {"path": str(manifest), "sha256": manifest_sha}, "snapshots": snapshots,
+            "fingerprint_version": FINGERPRINT_VERSION,
+            "manifest": {"path": str(manifest), "sha256": manifest_sha}, "snapshots": snapshots, "history": history,
             "dataset_sha256": hashlib.sha256(json.dumps(fingerprint, sort_keys=True).encode()).hexdigest()}

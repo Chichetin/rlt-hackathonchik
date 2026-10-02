@@ -18,6 +18,20 @@ CUTOFF = date(2025, 7, 1)
 DEV_END = date(2025, 10, 1)
 
 
+def input_data() -> dict:
+    return {"status": "checked", "store": "parquet", "fingerprint_version": F.input_audit.FINGERPRINT_VERSION,
+            "dataset_sha256": "dataset-content-sha", "model": {"sha256": "source-model-content-sha"},
+            "history": {name: {"sha256": f"{name}-sha"} for name in F.input_audit.HISTORY_FILES}}
+
+
+@pytest.fixture(autouse=True)
+def current_inputs(monkeypatch):
+    # Ranking tests isolate history lookup; real file hashing is covered by test_eval_input_audit.
+    audit = Mock(return_value=input_data())
+    monkeypatch.setattr(F.input_audit, "audit", audit)
+    return audit
+
+
 def case(**query_changes) -> EvalCase:
     query = Query(query_id="lot-6", text="Бумага", okpd2=["1712"], customer_inn="buyer", as_of=CUTOFF)
     return EvalCase(query=query.model_copy(update=query_changes), date=date(2025, 8, 1),
@@ -28,6 +42,7 @@ def records() -> tuple[dict, dict]:
     text = {
         "exp_id": "E6-base", "part": "dev", "n_queries": 1,
         "commit": "frozen-commit", "config_sha256": "frozen-sha", "tokenizer_version": "prefix5-v1",
+        "input_data": input_data(),
         "store": "parquet", "config": {"k": 20, "retriever": "bm25", "tokenizer": "prefix5",
                                         "ranker": {"kind": "lgbm", "model": "frozen-model.txt"},
                                         "candidates": {"customer": 0, "okpd2": 0}},
@@ -133,6 +148,43 @@ def test_replay_refuses_cases_from_another_history_window_or_case_set(changes):
         F.replay(text, pool, [case(**changes)], CUTOFF, DEV_END, store())
 
 
+@pytest.mark.parametrize("bad", ["legacy", "unchecked", "incomplete_history", "dataset", "model"])
+def test_replay_rejects_incompatible_or_unverifiable_source_inputs_before_history_read(bad, current_inputs):
+    text, pool = records()
+    data = pool["input_data"]
+    if bad == "legacy":
+        del data["fingerprint_version"]
+    elif bad == "unchecked":
+        data["status"] = "not_checked"
+    elif bad == "incomplete_history":
+        del data["history"]["notices.parquet"]
+    elif bad == "dataset":
+        data["dataset_sha256"] = "different-dataset-sha"
+    else:
+        data["model"]["sha256"] = "different-model-sha"
+    history = store()
+    with pytest.raises(ValueError):
+        F.replay(text, pool, [case()], CUTOFF, DEV_END, history)
+    history.customer_suppliers.assert_not_called()
+    current_inputs.assert_not_called()
+
+
+@pytest.mark.parametrize("changed", ["dataset", "model"])
+def test_replay_checks_current_file_contents_before_customer_history_lookup(changed, current_inputs):
+    text, pool = records()
+    current = input_data()
+    if changed == "dataset":
+        current["dataset_sha256"] = "replaced-history-sha"
+    else:
+        current["model"]["sha256"] = "replaced-model-sha"
+    current_inputs.return_value = current
+    history = store()
+    with pytest.raises(ValueError, match="current dataset or source model differs"):
+        F.replay(text, pool, [case()], CUTOFF, DEV_END, history)
+    current_inputs.assert_called_once_with(text["config"], [CUTOFF], store=history)
+    history.customer_suppliers.assert_not_called()
+
+
 def test_cli_writes_standard_record_with_source_hashes_and_never_overwrites(tmp_path, monkeypatch):
     text, pool = records()
     text_path, pool_path = tmp_path / "text.json", tmp_path / "pool.json"
@@ -160,6 +212,7 @@ def test_cli_writes_standard_record_with_source_hashes_and_never_overwrites(tmp_
     text_hash = hashlib.sha256(text_path.read_bytes()).hexdigest()
     assert record["offline_replay"]["sources"]["text_result"]["sha256"] == text_hash
     assert record["candidate_inns"] == pool["candidate_inns"]
+    assert record["input_data"] == input_data()
     assert set(F.METRICS) | set(F.WINNER_METRICS) <= record["metrics"].keys()
     assert F.main(args) == 2
     assert out.read_bytes() == saved

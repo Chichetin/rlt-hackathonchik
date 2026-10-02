@@ -79,6 +79,44 @@ def test_collect_uses_the_expanded_search_pool_and_never_adds_a_label(search_dat
     assert other_y.sum() == 2  # labels can only annotate the candidates already found by search()
 
 
+@pytest.mark.parametrize("previous", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_collect_scopes_strict_retriever_and_restores_it_on_failure(monkeypatch, previous, fail):
+    monkeypatch.setattr(search_mod, "STRICT_RETRIEVER", previous)
+    case = EvalCase(query=Query(query_id="training", text="Бумага", as_of=AS_OF), date=AS_OF,
+                    relevant_inns=[])
+
+    def search(*args, **kwargs):
+        assert search_mod.STRICT_RETRIEVER is True
+        if fail:
+            raise RuntimeError("search failed")
+
+    monkeypatch.setattr(train, "search", search)
+    if fail:
+        with pytest.raises(RuntimeError, match="search failed"):
+            train.collect([case], {})
+    else:
+        x, y, q, _ = train.collect([case], {})
+        assert x.shape == (0, len(ranker.NAMES)) and not len(y) and not len(q)
+    assert search_mod.STRICT_RETRIEVER is previous
+
+
+def test_collect_rejects_unavailable_retriever_instead_of_caching_fallback(search_data, monkeypatch):
+    from src.match import pg_retriever
+
+    def unavailable(*args, **kwargs):
+        raise pg_retriever.VectorsUnavailable("synthetic vectors unavailable")
+
+    monkeypatch.setattr(pg_retriever, "hybrid", unavailable)
+    monkeypatch.setattr(search_mod, "STRICT_RETRIEVER", False)
+    query = Query(query_id="training", text="Бумага", as_of=UNTIL)
+    case = EvalCase(query=query, date=UNTIL, relevant_inns=[])
+    cfg = {**search_mod.load_config(), "retriever": "pg_hybrid"}
+    with pytest.raises(pg_retriever.VectorsUnavailable, match="synthetic vectors unavailable"):
+        train.collect([case], cfg)
+    assert search_mod.STRICT_RETRIEVER is False
+
+
 def _metadata():
     return train.cache_metadata({"candidates": {"customer": 30, "okpd2": 0}}, AS_OF, UNTIL, 10, 7)
 
@@ -172,6 +210,38 @@ def test_input_fingerprint_detects_changed_snapshot_without_reading_lots(tmp_pat
     after = train.input_fingerprint(tmp_path, AS_OF)
     assert before["suppliers"] != after["suppliers"] and before["manifest"] == after["manifest"]
     assert before["src/match/search.py"]
+
+
+@pytest.mark.parametrize("name", ["notices", "items", "participants"])
+def test_cache_rejects_changed_source_data_with_unchanged_manifest(tmp_path, name):
+    (tmp_path / "manifest.json").write_text('{"built_at": "synthetic"}', encoding="utf-8")
+    source = tmp_path / f"{name}.parquet"
+    source.write_bytes(b"source version 1")
+    metadata = {**_metadata(), "inputs_sha256": train.input_fingerprint(tmp_path, AS_OF)}
+    path = tmp_path / "features.npz"
+    _cache(path, metadata)
+    train.read_cache(path, metadata)
+    source.write_bytes(b"source version 2")
+    expected = {**metadata, "inputs_sha256": train.input_fingerprint(tmp_path, AS_OF)}
+    assert metadata["inputs_sha256"]["manifest"] == expected["inputs_sha256"]["manifest"]
+    assert metadata["inputs_sha256"][name] != expected["inputs_sha256"][name]
+    with pytest.raises(ValueError, match="inputs_sha256"):
+        train.read_cache(path, expected)
+
+
+def test_cache_rejects_changed_ingest_loader(tmp_path, monkeypatch):
+    monkeypatch.setattr(train, "ROOT", tmp_path)
+    loader = tmp_path / "src" / "ingest" / "load.py"
+    loader.parent.mkdir(parents=True)
+    loader.write_text("# loader version 1\n", encoding="utf-8")
+    metadata = {**_metadata(), "inputs_sha256": train.input_fingerprint(tmp_path, AS_OF)}
+    path = tmp_path / "features.npz"
+    _cache(path, metadata)
+    train.read_cache(path, metadata)
+    loader.write_text("# loader version 2\n", encoding="utf-8")
+    expected = {**metadata, "inputs_sha256": train.input_fingerprint(tmp_path, AS_OF)}
+    with pytest.raises(ValueError, match="inputs_sha256"):
+        train.read_cache(path, expected)
 
 
 def test_cli_experiment_controls_preserve_cache_and_record_model_provenance(tmp_path, monkeypatch):

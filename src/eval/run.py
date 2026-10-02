@@ -318,6 +318,39 @@ def load_method_config(exp: str, baseline: str | None = None, config_of: str | N
     return cfg
 
 
+def fresh_dev_sample(every: list[EvalCase], dev: list[EvalCase], n: int, seed: int) -> tuple[list[EvalCase], dict]:
+    """Freeze a dev-only sample after excluding every tracked dev query, independently of file order.
+
+    Membership hashes use UTF-8 JSON of sorted query IDs, with no whitespace. The result also keeps
+    the selected IDs themselves so later experiments can verify that they evaluated the same cases.
+    """
+    if n <= 0:
+        raise ValueError("--fresh-sample: нужно число кейсов > 0")
+    source_ids = [c.query.query_id for c in every]
+    excluded_ids = [c.query.query_id for c in dev]
+    for part, ids in (("dev_full", source_ids), ("dev", excluded_ids)):
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"{part}: query_id повторяется — fresh-выборка неоднозначна")
+    excluded = set(excluded_ids)
+    eligible = [c for c in every if c.query.query_id not in excluded]
+    if n > len(eligible):
+        raise ValueError(f"--fresh-sample: нужно {n}, доступно {len(eligible)} после исключения всех dev query_id")
+    picked = sorted(eligible, key=lambda c: hashlib.sha256(f"{seed}:{c.query.query_id}".encode()).hexdigest())[:n]
+    picked.sort(key=lambda c: c.query.query_id)
+    query_ids = [c.query.query_id for c in picked]
+
+    def ids_sha256(ids: list[str]) -> str:
+        return hashlib.sha256(json.dumps(sorted(ids), ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+    return picked, {
+        "n": n, "of": len(eligible), "seed": seed,
+        "selection": "lowest sha256(seed:query_id), then query_id order",
+        "source_part": "dev_full", "source_n": len(every), "source_ids_sha256": ids_sha256(source_ids),
+        "excluded_part": "dev", "excluded_n": len(dev), "excluded_ids_sha256": ids_sha256(excluded_ids),
+        "query_ids": query_ids, "query_ids_sha256": ids_sha256(query_ids),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--exp", required=True, help="experiment id, e.g. H-07 (research/EXPERIMENTS.md)")
@@ -329,6 +362,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
     ap.add_argument("--sample", type=int, default=None,
                     help="first screen on N cases of the part (fixed seed): winners only go to the full run")
+    ap.add_argument("--fresh-sample", type=int, default=None,
+                    help="N cases from dev_full excluding ALL tracked dev query IDs; requires --sample-seed")
+    ap.add_argument("--sample-seed", type=int, default=None,
+                    help="explicit seed for --fresh-sample only; ordinary --sample keeps its fixed seed")
     ap.add_argument("--candidate-audit", action="store_true",
                     help="record winner ceiling, sizes and compact INN lists of the full scored candidate pool")
     args = ap.parse_args(argv)
@@ -341,13 +378,35 @@ def main(argv: list[str] | None = None) -> int:
     if args.sample is not None and args.sample <= 0:
         print("--sample: нужно число кейсов > 0", file=sys.stderr)
         return 2
+    if args.fresh_sample is not None:
+        if args.fresh_sample <= 0:
+            print("--fresh-sample: нужно число кейсов > 0", file=sys.stderr)
+            return 2
+        if args.sample is not None or args.part != "dev" or args.sample_seed is None:
+            print("--fresh-sample требует --sample-seed, --part dev и отсутствие --sample", file=sys.stderr)
+            return 2
+    elif args.sample_seed is not None:
+        print("--sample-seed задаётся только с --fresh-sample", file=sys.stderr)
+        return 2
     try:
         cfg = load_method_config(args.exp, args.baseline, args.config_of)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    cases = load_cases(args.part, split_config())
     part = args.part
+    sample = None
+    split = split_config()
+    if args.fresh_sample is not None:
+        assert args.sample_seed is not None  # validated before loading cases
+        try:
+            cases, sample = fresh_dev_sample(load_cases("dev_full", split), load_cases("dev", split),
+                                            args.fresh_sample, args.sample_seed)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        part = f"dev-fresh-s{args.fresh_sample}-seed{args.sample_seed}"
+    else:
+        cases = load_cases(args.part, split)
     if args.sample and args.sample < len(cases):
         keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
         cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
@@ -356,6 +415,8 @@ def main(argv: list[str] | None = None) -> int:
         print("--candidate-audit доступен только для search", file=sys.stderr)
         return 2
     body = evaluate(cases, cfg, candidate_audit=True) if args.candidate_audit else evaluate(cases, cfg)
+    if sample is not None:
+        body["sample"] = sample
     rec = result_record(args.exp, part, cfg, body)
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"

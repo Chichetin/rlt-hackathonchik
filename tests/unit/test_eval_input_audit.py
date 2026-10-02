@@ -9,11 +9,23 @@ import pytest
 
 from src.contracts import Query
 from src.eval import run as R
-from src.eval.input_audit import audit
+from src.eval.input_audit import HISTORY_FILES, audit
 from src.eval.split import EvalCase
 from src.match import store as store_mod
 
 CUTOFF = date(2025, 7, 1)
+
+
+@pytest.fixture
+def profile_input(tmp_path):
+    required = (*R.ranker.PROFILE_LOG, *R.ranker.PROFILE_RAW, "top_class")
+    pq.write_table(pa.table({name: [None] for name in required}), tmp_path / f"suppliers_{CUTOFF}.parquet")
+    (tmp_path / "manifest.json").write_text('{"built_at": "fixture"}', encoding="utf-8")
+    for name in HISTORY_FILES:
+        pq.write_table(pa.table({"lot_id": [1]}), tmp_path / name)
+    model = tmp_path / "ranker.txt"
+    model.write_text("model-a", encoding="utf-8")
+    return {"ranker": {"kind": "lgbm", "model": str(model)}}
 
 
 def test_learned_eval_rejects_stale_profile_schema_before_search(tmp_path, monkeypatch):
@@ -34,16 +46,13 @@ def test_learned_eval_rejects_stale_profile_schema_before_search(tmp_path, monke
     assert not called
 
 
-def test_profile_nulls_are_legal_and_provenance_names_exact_snapshots(tmp_path, monkeypatch):
+def test_profile_nulls_are_legal_and_provenance_names_exact_snapshots(tmp_path, monkeypatch, profile_input):
     required = (*R.ranker.PROFILE_LOG, *R.ranker.PROFILE_RAW, "top_class")
     snapshot = tmp_path / f"suppliers_{CUTOFF}.parquet"
-    pq.write_table(pa.table({name: [None] for name in required}), snapshot)
     manifest = tmp_path / "manifest.json"
-    manifest.write_text('{"built_at": "fixture"}', encoding="utf-8")
     model = tmp_path / "ranker.txt"
-    model.write_text("model-a", encoding="utf-8")
     monkeypatch.setattr(store_mod, "get_store", lambda: store_mod.ParquetStore(tmp_path))
-    cfg = {"ranker": {"kind": "lgbm", "model": str(model)}}
+    cfg = profile_input
     first = audit(cfg, [CUTOFF, CUTOFF])
     assert first["status"] == "checked" and len(first["snapshots"]) == 1
     assert first["manifest"]["sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
@@ -60,6 +69,26 @@ def test_profile_nulls_are_legal_and_provenance_names_exact_snapshots(tmp_path, 
     pq.write_table(pa.table({"inn": ["7801000012"]}), tmp_path / f"suppliers_{earlier}.parquet")
     with pytest.raises(ValueError, match="2025-04-01"):
         audit(cfg, [earlier, CUTOFF])
+
+
+@pytest.mark.parametrize("name", HISTORY_FILES)
+def test_replaced_history_invalidates_fingerprint_even_with_unchanged_manifest_and_snapshot(
+        tmp_path, profile_input, name):
+    store = store_mod.ParquetStore(tmp_path)
+    before = audit(profile_input, [CUTOFF], store=store)
+    history = tmp_path / name
+    assert before["history"][name]["sha256"] == hashlib.sha256(history.read_bytes()).hexdigest()
+    pq.write_table(pa.table({"lot_id": [2]}), history)
+    after = audit(profile_input, [CUTOFF], store=store)
+    assert before["manifest"] == after["manifest"] and before["snapshots"] == after["snapshots"]
+    assert before["model"] == after["model"]
+    assert before["dataset_sha256"] != after["dataset_sha256"]
+
+
+def test_missing_history_fails_instead_of_publishing_incomplete_fingerprint(tmp_path, profile_input):
+    (tmp_path / "items.parquet").unlink()
+    with pytest.raises(FileNotFoundError, match="items.parquet"):
+        audit(profile_input, [CUTOFF], store=store_mod.ParquetStore(tmp_path))
 
 
 def test_disabled_ranker_does_not_require_a_real_store(monkeypatch):

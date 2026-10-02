@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.eval import input_audit  # noqa: E402
 from src.eval import run as R  # noqa: E402
 from src.eval.metrics import METRICS, WINNER_METRICS  # noqa: E402
 from src.eval.split import EvalCase, load_cases, split_config  # noqa: E402
@@ -71,6 +72,21 @@ def _rows(record: dict) -> dict[str, dict]:
     return by_id
 
 
+def _input_identity(data: dict) -> tuple[str, str]:
+    """Older audits lack history hashes and must be rerun before they can supply a replay."""
+    if (data.get("status") != "checked" or data.get("store") != "parquet"
+            or data.get("fingerprint_version") != input_audit.FINGERPRINT_VERSION):
+        raise ValueError("complete current-version Parquet input fingerprints are required")
+    history = data.get("history", {})
+    if (set(history) != set(input_audit.HISTORY_FILES)
+            or any(not history[name].get("sha256") for name in history)):
+        raise ValueError("complete historical parquet fingerprints are required")
+    dataset, model = data.get("dataset_sha256"), data.get("model", {}).get("sha256")
+    if not dataset or not model:
+        raise ValueError("dataset and source model fingerprints are required")
+    return dataset, model
+
+
 def validate(text: dict, pool: dict, cases: list[EvalCase], cutoff: date,
              dev_end: date) -> list[EvalCase]:
     """Fail closed on a changed case set, history window or base-method lineage."""
@@ -80,6 +96,8 @@ def validate(text: dict, pool: dict, cases: list[EvalCase], cutoff: date,
     for field in ("commit", "config_sha256", "tokenizer_version", "store"):
         if not text.get(field) or text[field] != pool.get(field):
             raise ValueError(f"incompatible base lineage: {field}")
+    if _input_identity(text.get("input_data", {})) != _input_identity(pool.get("input_data", {})):
+        raise ValueError("source results use different dataset or model contents")
     tc, pc = text["config"], pool["config"]
     for cfg, count in ((tc, 0), (pc, CUSTOMER_LIMIT)):
         if cfg.get("k") != K or cfg.get("retriever") != "bm25" or cfg.get("method", "search") != "search":
@@ -116,6 +134,9 @@ def replay(text: dict, pool: dict, cases: list[EvalCase], cutoff: date,
     selected = validate(text, pool, cases, cutoff, dev_end)
     if store.name != text["store"]:
         raise ValueError("customer-history store differs from source lineage")
+    current_inputs = input_audit.audit(text["config"], [cutoff], store=store)
+    if _input_identity(current_inputs) != _input_identity(text["input_data"]):
+        raise ValueError("current dataset or source model differs from recorded input fingerprints")
     text_rows, pool_rows = _rows(text), _rows(pool)
     ranked_queries = []
     started = time.monotonic()
@@ -148,6 +169,7 @@ def replay(text: dict, pool: dict, cases: list[EvalCase], cutoff: date,
         per_query.append(row)
     return {"n_queries": len(per_query), "elapsed_s": round(time.monotonic() - started, 1),
             "metrics": R._summary(per_query), "slices": R.slices(per_query),
+            "input_data": current_inputs,
             "candidate_inns": list(pool["candidate_inns"]), "per_query": per_query}
 
 
@@ -190,7 +212,6 @@ def main(argv: list[str] | None = None) -> int:
             "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "base_lineage": {key: text[key] for key in ("commit", "config_sha256", "tokenizer_version", "store")},
             "limitations": ["Base traces do not distinguish BM25 retrieval from fallback order.",
-                            "Source results do not fingerprint historical store contents; same snapshot is required.",
                             "Offline replay has not been validated through the product pipeline."],
         }
         RESULTS.mkdir(parents=True, exist_ok=True)

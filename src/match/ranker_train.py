@@ -44,6 +44,7 @@ import numpy as np
 from src.eval.build_cases import SEED, _h, exclusion, read_lots, stratified_sample, to_case
 from src.eval.split import split_config
 from src.match import ranker
+from src.match import search as search_mod
 from src.match.search import load_config, search
 from src.match.store import processed_dir
 
@@ -76,17 +77,21 @@ def collect(cases: list, cfg: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray,
     xs, ys, qs = [], [], []
     n_rows = 0
     t0 = time.monotonic()
-    for i, case in enumerate(cases):
-        got: list = []
-        search(case.query, k=10**6, config=cfg, features_out=got)
-        if got:
-            # Keep numerical blocks, not hundreds of thousands of Python lists/floats in RAM.
-            xs.append(np.asarray([row for _, row in got], dtype=float))
-            ys.append(np.asarray([case.grades.get(inn, 0) for inn, _ in got], dtype=np.int8))
-            qs.append(np.full(len(got), i, dtype=np.int32))
-            n_rows += len(got)
-        if (i + 1) % 100 == 0:
-            print(f"  {i + 1}/{len(cases)} запросов, {n_rows} строк, {time.monotonic() - t0:.0f} с", flush=True)
+    strict, search_mod.STRICT_RETRIEVER = search_mod.STRICT_RETRIEVER, True
+    try:
+        for i, case in enumerate(cases):
+            got: list = []
+            search(case.query, k=10**6, config=cfg, features_out=got)
+            if got:
+                # Keep numerical blocks, not hundreds of thousands of Python lists/floats in RAM.
+                xs.append(np.asarray([row for _, row in got], dtype=float))
+                ys.append(np.asarray([case.grades.get(inn, 0) for inn, _ in got], dtype=np.int8))
+                qs.append(np.full(len(got), i, dtype=np.int32))
+                n_rows += len(got)
+            if (i + 1) % 100 == 0:
+                print(f"  {i + 1}/{len(cases)} запросов, {n_rows} строк, {time.monotonic() - t0:.0f} с", flush=True)
+    finally:
+        search_mod.STRICT_RETRIEVER = strict
     return (np.concatenate(xs) if xs else np.empty((0, len(ranker.NAMES))),
             np.concatenate(ys) if ys else np.empty(0, dtype=np.int8),
             np.concatenate(qs) if qs else np.empty(0, dtype=np.int32),
@@ -108,9 +113,11 @@ def input_fingerprint(processed: Path, as_of: date) -> dict:
     """Invalidate stale feature caches after rebuilding the data or changing their extraction code."""
     paths = {"manifest": processed / "manifest.json",
              "suppliers": processed / f"suppliers_{as_of.isoformat()}.parquet"}
+    paths.update({name: processed / f"{name}.parquet" for name in ("notices", "items", "participants")})
     paths.update({f"src/{name}.py": ROOT / "src" / f"{name}.py" for name in (
         "match/ranker_train", "match/ranker", "match/search", "match/candidates", "match/store",
         "match/index", "match/text", "match/signals", "match/profiles", "match/fallback", "eval/build_cases",
+        "ingest/load",
     )})
     out = {}
     for name, path in paths.items():
