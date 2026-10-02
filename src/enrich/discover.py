@@ -1066,7 +1066,9 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
     fresh = [inn for inn in rows if inn not in known]
     cps = pool_mod.counterparties([i for i in fresh if i not in large], cache, url=url,
                                   pool_dir=pool_dir or pool_mod.POOL)
-    outside = pool_mod.large_pages([i for i in fresh if i in large], cache, pool_dir=pool_dir or pool_mod.POOL)
+    outside = {inn: row for inn, row in pool_mod.large_pages(
+        [i for i in fresh if i in large], cache, pool_dir=pool_dir or pool_mod.POOL).items()
+        if pool_mod.large_active(row)}  # a newer answer in the cache may say the company is no longer active
     cps |= {inn: from_large(row) for inn, row in outside.items()}
     target, target_note = search_mod.customer_region(query)
     out: list[CounterpartyMatch] = []

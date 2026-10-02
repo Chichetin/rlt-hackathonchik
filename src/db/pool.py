@@ -59,6 +59,10 @@ LARGE_SCHEMA = pa.schema([
     ("region_code", pa.string()), ("status", pa.string()), ("source", pa.string()),  # 'bo' | 'pb'
     ("url", pa.string()), ("fetched_at", pa.float64()), ("body", pa.string()),  # the cached page of the source
     ("msp_checked_at", pa.float64()),  # download time of the registry dump that has no record of this INN
+    # where the INN came from (scripts/large_pool.py): 'gap' — a winner of the organizers' data, picked by its
+    # wins over the whole period (never offered as new: that would leak the future into a backtest);
+    # 'candidates' — a large company that is not among the organizers' suppliers
+    ("list", pa.string()),
 ])
 # ГИР БО names a region by one upper-case word («САНКТ-ПЕТЕРБУРГ», «ЛЕНИНГРАДСКАЯ»); only the regions of
 # src/regions.py get a code, any other company stays without one and is not offered for a region
@@ -267,7 +271,8 @@ def counterparties(inns: Iterable[str], cache: SourceCache, *, url: str | None =
     return out
 
 
-def large_row(inn: str, source: str, page: CachedPage, msp_checked_at: float | None = None) -> dict[str, Any] | None:
+def large_row(inn: str, source: str, page: CachedPage, msp_checked_at: float | None = None,
+              listed: str = "candidates") -> dict[str, Any] | None:
     """A row of `large` from the cached answer of ГИР БО ('bo') or the registry card ('pb'): only what the
     page says. None when the INN fails the checksum or the page does not name the company.
     `msp_checked_at`: the caller looked the INN up in the registry dump downloaded then and found no record."""
@@ -288,10 +293,16 @@ def large_row(inn: str, source: str, page: CachedPage, msp_checked_at: float | N
         return None
     return {"inn": inn, "ogrn": ogrn, "name": name, "okved_main": okved, "region_code": region, "status": status,
             "source": source, "url": page.url, "fetched_at": page.fetched_at, "body": page.body,
-            "msp_checked_at": msp_checked_at}
+            "msp_checked_at": msp_checked_at, "list": listed}
 
 
-_LARGE_ACTIVE = "((source = 'bo' AND status = 'ACTIVE') OR (source = 'pb' AND status ILIKE 'действующ%'))"
+def large_active(row: dict[str, Any]) -> bool:
+    """The source calls the company active — the Python twin of LARGE_ACTIVE."""
+    status = row["status"] or ""
+    return status == "ACTIVE" if row["source"] == "bo" else status.lower().startswith("действующ")
+
+
+LARGE_ACTIVE = "((source = 'bo' AND status = 'ACTIVE') OR (source = 'pb' AND status ILIKE 'действующ%'))"
 
 
 def msp_absent_page(inn: str) -> str:
@@ -311,8 +322,9 @@ def _large(pool_dir: Path, where: str) -> list[dict[str, Any]]:
 def large_candidates(prefixes: Sequence[str], *, regions: Sequence[str] | None = None,
                      pool_dir: Path = POOL) -> list[dict[str, Any]]:
     """Companies outside the registry dump whose main OKVED is under one of `prefixes` — the rows of
-    `candidates()` (inn, code, main; the sources give the main code only), ordered by INN. Only companies the
-    source calls active (ГИР БО `ACTIVE`, the card «Действующая…»): one in liquidation is not offered as new."""
+    `candidates()` (inn, code, main; the sources give the main code only), ordered by INN. Only the list
+    'candidates' (see LARGE_SCHEMA) and only companies the source calls active (ГИР БО `ACTIVE`, the card
+    «Действующая…»): one in liquidation is not offered as new."""
     for p in prefixes:
         if not _PREFIX.fullmatch(p):
             raise ValueError(f"не префикс ОКВЭД: {p!r}")
@@ -322,30 +334,39 @@ def large_candidates(prefixes: Sequence[str], *, regions: Sequence[str] | None =
     if not prefixes:
         return []
     like = " OR ".join(f"okved_main LIKE {_lit(p + '%')}" for p in prefixes)  # checked: digits and dots only
-    where = f"({like}) AND {_LARGE_ACTIVE}" + (
+    where = f"({like}) AND list = 'candidates' AND {LARGE_ACTIVE}" + (
         f" AND region_code IN ({','.join(map(_lit, regions))})" if regions else "")
     return [{"inn": r["inn"], "code": r["okved_main"], "main": True} for r in _large(pool_dir, where)]
 
 
 def large_pages(inns: Iterable[str], cache: SourceCache, *, pool_dir: Path = POOL) -> dict[str, dict[str, Any]]:
-    """Rows of `large` by INN; the page of each goes to the source cache (unless a newer one is there), so
-    the Evidence built from `row["body"]` is checked like a live answer and no request is needed."""
+    """Rows of `large` by INN; the page of each goes to the source cache, so the Evidence built from
+    `row["body"]` is checked like a live answer and no request is needed. A newer answer of the source in the
+    cache wins: the whole row is read from it again (an answer that no longer names the company — no row).
+    «No record in the registry dump» is a page too (as rmsp's empty answer): our render of the lookup made by
+    scripts/large_pool.py build. It is never written over a record of the dump under the same address — then
+    the row comes back without `msp_checked_at`, and nobody calls the company «не МСП»."""
     want = sorted({i for i in inns if _INN.fullmatch(i)})
     if not want:
         return {}
     out: dict[str, dict[str, Any]] = {}
     for row in _large(pool_dir, f"inn IN ({','.join(map(_lit, want))})"):
+        inn = row["inn"]
         hit = cache.get(row["url"], allow_stale=True)
         if hit is None or hit.fetched_at < row["fetched_at"]:
             cache.put(row["url"], row["body"], fetched_at=row["fetched_at"])
-        elif hit.body != row["body"]:  # a newer answer of the source: the facts are read from it
-            row = {**row, "body": hit.body, "fetched_at": hit.fetched_at}
-        # «no record in the dump» is a page too (as rmsp's empty answer): our render of the lookup, never over
-        # a record of the dump that counterparties() may have put under the same address
-        absent = msp_dump.page_url(row["inn"])
-        if row["msp_checked_at"] is not None and cache.page_text(absent) is None:
-            cache.put(absent, msp_absent_page(row["inn"]), fetched_at=row["msp_checked_at"])
-        out[row["inn"]] = row
+        elif hit.body != row["body"]:
+            fresh = large_row(inn, row["source"], hit, row["msp_checked_at"], row["list"])
+            if fresh is None:
+                continue
+            row = fresh
+        if row["msp_checked_at"] is not None:
+            absent, body = msp_dump.page_url(inn), msp_absent_page(inn)
+            if cache.page_text(absent) is None:
+                cache.put(absent, body, fetched_at=row["msp_checked_at"])
+            elif cache.page_text(absent) != body:
+                row = {**row, "msp_checked_at": None}
+        out[inn] = row
     return out
 
 
