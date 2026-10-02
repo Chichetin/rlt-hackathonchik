@@ -92,11 +92,11 @@ test("a failed open source is shown in «Новые», not passed off as «nobod
   render(<App />);
   await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
   await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
-  // seen without opening the tab: the «Новые» button carries the mark (#287)
-  expect(await screen.findByRole("button", { name: /^Новые.*список может быть неполным/ })).toBeInTheDocument();
+  // #595: a failed source is no longer a warning — neither on the tab nor in the block
+  expect(await screen.findByRole("button", { name: /^Новые/ })).not.toHaveTextContent("список может быть неполным");
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const block = await screen.findByRole("region", { name: "Новые из открытых источников" });
-  expect(within(block).getByTestId("discovery-error")).toHaveTextContent("Источники не ответили — список может быть неполным.");
+  expect(within(block).queryByTestId("discovery-error")).toBeNull();
   // discover() failed before a class was resolved: not «the code is unknown» (#394)
   expect(block).toHaveTextContent("Поиск в открытых источниках не выполнен из-за ошибки — повторите запрос.");
   expect(block).not.toHaveTextContent("по тексту не определён");
