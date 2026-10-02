@@ -65,6 +65,7 @@ import { STATIC_DEMO } from "./staticApi";
 
 // #242: the filter is by the CUSTOMER's region (where the goods go, where the work is done), not the supplier's
 const CUSTOMER_REGIONS = ["Санкт-Петербург", "Ленинградская область"];
+const MORE_PAGE = 50; // #615: the next pages on scroll — fewer round trips to the total of 200
 const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Ноутбуки"]; // each predicts its own class from the text (D-141): no general category names
 
 function SearchIcon({ className = "" }: { className?: string }) {
@@ -576,7 +577,7 @@ export function App() {
     const seq = runSeq.current;
     setMore(true);
     try {
-      const next = await search(shownQuery, { offset: res[group].length });
+      const next = await search(shownQuery, { offset: res[group].length, limit: MORE_PAGE });
       if (seq !== runSeq.current) return;
       setRes({ ...res, [group]: [...res[group], ...next[group]], total: next.total });
     } catch (e) {

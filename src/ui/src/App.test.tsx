@@ -329,7 +329,7 @@ test("history is paged on the server: total from the header, «Показать 
   expect(searches()[0]).toBe("/api/search?limit=10&offset=0");
   await userEvent.click(within(history).getByRole("button", { name: "Показать ещё" }));
   expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
-  expect(searches()[1]).toBe("/api/search?limit=10&offset=2");
+  expect(searches()[1]).toBe("/api/search?limit=50&offset=2");
   expect(within(history).getAllByRole("listitem")).toHaveLength(3);
   expect(within(history).queryByRole("button", { name: "Показать ещё" })).not.toBeInTheDocument();
 });
