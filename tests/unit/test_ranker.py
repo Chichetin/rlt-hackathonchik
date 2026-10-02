@@ -206,7 +206,8 @@ def test_value_text_reads_like_a_card():
     assert ranker.value_text("cust_lots", math.log1p(7)) == "лоты у этого заказчика: 7"
     assert ranker.value_text("days_last", math.log1p(240)) == "давность последнего участия: 240 дн."
     # #105: days since the last purchase with similar positions — days, not a bare log number
-    assert ranker.value_text("days_similar", math.log1p(30)) == "давность последней закупки с похожими позициями: 30 дн."
+    assert ranker.value_text("days_similar", math.log1p(30)) == (
+        "давность последней закупки с похожими позициями: 30 дн.")
     assert ranker.value_text("top_class_share", 0.85) == "доля главного класса ОКПД2: 85%"
     assert ranker.value_text("region_kpp", 1.0).endswith(": да")
     assert ranker.value_text("cust_lots", math.nan).endswith(": нет данных")
