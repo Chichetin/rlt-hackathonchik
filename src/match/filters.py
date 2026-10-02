@@ -1,6 +1,7 @@
 """Hard filters (methodology step 3): user filters + legal status. Owner: MATCH.
 
-Always (legal status, `apply_legal`): an entity in liquidation or in RNP is dropped (a missing value is
+Always (legal status, `apply_legal`): an entity in liquidation, bankrupt, stopped, struck off (or about
+to be struck off) the ЕГРЮЛ, or in RNP is dropped (a missing value is
 kept and shown as "не проверено" — we do not guess).
 
 User filters (`Query.filters`, docs/ui.md; the contract is a plain dict — keys are read here), ANDed:
@@ -45,7 +46,10 @@ from typing import Literal
 from src.contracts import Counterparty, CounterpartyMatch, Query
 from src.match.purchase_type import Near, default_near, purchase_type
 
-_DEAD = ("ликвид", "банкрот", "прекращ")
+# Stems of a stopped entity in an ЕГРЮЛ/ЕГРИП or ГИР БО status: «прекращена» and «прекратило деятельность»
+# differ in the stem; «недействующее ЮЛ» and «исключено из ЕГРЮЛ» are the tax office striking it off. «Принято
+# решение о предстоящем исключении» is dropped too: the entity still exists, but the tax office considers it abandoned.
+_DEAD = ("ликвид", "банкрот", "прекращ", "прекрат", "недейств", "исключ")
 REGION_CODE = {"Санкт-Петербург": "78", "Ленинградская область": "47"}
 KINDS = ("manufacturer", "distributor", "dealer", "unknown")
 Entity = Literal["ul", "ip"]

@@ -96,7 +96,8 @@ def _picked_search(query: Query, cfg: dict) -> tuple[list[str], bool]:
     «Новые» (never relevant) and nothing from the cache — status, РНП, МСП, role there are today's facts,
     a leak in a backtest (D-097). Also: whether the user would see the weak-match warning (#281)."""
     picked = pipeline.pick(query, config=cfg, backtest=True)
-    shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
+    # a row without an INN takes its slot, as on screen
+    shown = pipeline.verified(picked.history[: cfg.get("k", 20)], open_data=False)
     return [m.counterparty.inn for m in shown if m.counterparty.inn], picked.weak_match is not None
 
 
@@ -214,6 +215,11 @@ def first_words(cases: list[EvalCase], n: int) -> list[EvalCase]:
             for c in cases]
 
 
+def drop_okpd2(cases: list[EvalCase]) -> list[EvalCase]:
+    """The same cases without the query's ОКПД2: free text as a user types it, the class is predicted (P-02, #349)."""
+    return [c.model_copy(update={"query": c.query.model_copy(update={"okpd2": []})}) for c in cases]
+
+
 def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
     from src.match.text import tokenizer_name, tokenizer_version
 
@@ -226,6 +232,7 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
         "config": cfg,
         "tokenizer_version": tokenizer_version(),
+        "exact_docs": search_mod.EXACT_DOCS,  # P-02 switch (#349): 0 = vote only (P-01)
         "config_sha256": _safe_sha(),
         "stub": bool(getattr(search_mod, "IS_STUB", False)) and cfg.get("method", "search") == "search",
         "vectors": _vectors(cfg),
@@ -326,6 +333,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="first screen on N cases of the part (fixed seed): winners only go to the full run")
     ap.add_argument("--corrupt", default=None, choices=corrupt.MODES,
                     help="spoil the query texts (typos / Latin layout) to measure the speller (#282)")
+    ap.add_argument("--no-okpd2", action="store_true",
+                    help="drop the ОКПД2 of every query: the class is predicted from the text (P-02, #349)")
+    ap.add_argument("--exact-docs", type=int, default=None,
+                    help="experiment only: search.EXACT_DOCS (0 — vote only, P-01; default — P-02), #349")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
@@ -349,6 +360,14 @@ def main(argv: list[str] | None = None) -> int:
             print("--words: ожидается целое число ≥ 1", file=sys.stderr)
             return 2
         cases, part = first_words(cases, args.words), f"{part}-w{args.words}"
+    if args.no_okpd2:
+        cases, part = drop_okpd2(cases), f"{part}-nocode"
+    if args.exact_docs is not None:
+        if args.exact_docs < 0:
+            print("--exact-docs: ожидается целое число ≥ 0", file=sys.stderr)
+            return 2
+        search_mod.EXACT_DOCS = args.exact_docs
+        part = f"{part}-x{args.exact_docs}"
     if args.corrupt:  # the text only, deterministic per query: every experiment sees the same spoiled queries
         cases = [c.model_copy(update={"query": corrupt.spoil(c.query, args.corrupt)}) for c in cases]
         part = f"{part}-{args.corrupt}"

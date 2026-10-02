@@ -128,3 +128,11 @@ def test_saturation_summary_counts_distinct_scores():
     near = [[0.9996, 0.9973, 0.9849, 0.9835, 0.9628]]
     assert summarize(near)["distinct_scores_mean"] == 5.0 and summarize(near)["share_first_at_max"] == 1.0
     assert summarize(near, decimals=2)["distinct_scores_mean"] == 3.0  # 1.00, 1.00, 0.98, 0.98, 0.96
+
+
+def test_drop_okpd2_keeps_text_and_everything_else():
+    c = case("бумага офисная", ["7801000012"])
+    c = c.model_copy(update={"query": c.query.model_copy(update={"okpd2": ["17.12.14.110", "17.12"]})})
+    (got,) = R.drop_okpd2([c])
+    assert got.query.okpd2 == [] and got.query.text == c.query.text and got.relevant_inns == c.relevant_inns
+    assert c.query.okpd2 == ["17.12.14.110", "17.12"]  # the input is not mutated
