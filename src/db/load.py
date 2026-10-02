@@ -29,6 +29,7 @@ TABLES = ("notices", "items", "participants", "suppliers")
 # (index name, table, definition) — filters by date/customer/channel/OKPD2 prefix, lookups by lot and INN.
 INDEXES = [
     ("notices_reqnum", "notices", "(reqnum)"),
+    ("notices_procedure_id", "notices", "(procedure_id)"),
     ("notices_publish_date", "notices", "(publish_date)"),
     ("notices_customer_inn", "notices", "(customer_inn)"),
     ("notices_channel_date", "notices", "(channel, publish_date)"),

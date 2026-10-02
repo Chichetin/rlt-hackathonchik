@@ -20,7 +20,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq_io
 import pytest
 
-from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
+from src.api.lots import LotDataUnavailable, LotNotFound, find_lot, find_procedure
 from src.contracts import Query
 from src.match import index as index_mod
 from src.match import store as store_mod
@@ -152,6 +152,7 @@ def test_lot_lookup_on_postgres(loaded, use):
     by_parquet = find_lot("6")
     use("postgres")
     assert find_lot("6") == by_parquet
+    assert find_procedure("106") == by_parquet  # #617: procedure 106 is lot 6 in the fixture
     with pytest.raises(LotNotFound):
         find_lot("424242")
     with pytest.raises(LotNotFound):  # longer than bigint: compared as reqnum only, not a crash

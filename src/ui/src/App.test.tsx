@@ -184,6 +184,28 @@ test("lot number fills the query from the notice", async () => {
   expect(screen.getByText(/ОКПД2: 17.12/)).toBeInTheDocument();
 });
 
+test("procedure number under the OKPD2 field opens its notice and searches (#617)", async () => {
+  const lotQuery = { query_id: "lot-9", text: "Бумага из процедуры", okpd2: ["17.12"], budget: 1000, customer_inn: "7804105239", channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).startsWith("/api/procedure/") ? lotQuery : response), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Номер процедуры"), "1841706");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  expect(await screen.findByDisplayValue("Бумага из процедуры")).toBeInTheDocument();
+  const urls = fetchMock.mock.calls.map(([u]) => String(u));
+  expect(urls).toContain("/api/procedure/1841706");
+  await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).startsWith("/api/search"))).toBe(true));
+  const [, init] = fetchMock.mock.calls.find(([u]) => String(u).startsWith("/api/search"))!;
+  expect(JSON.parse(String(init?.body))).toMatchObject({ query_id: "lot-9", text: "Бумага из процедуры", okpd2: ["17.12"], budget: 1000 });
+});
+
+test("unknown procedure number says so", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ detail: "нет" }), { status: 404 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Номер процедуры"), "42");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Процедура с таким номером не найдена");
+});
+
 test("lot 503 says data is not connected and falls back to free text", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ detail: "нет данных" }), { status: 503 }));
   window.history.replaceState(null, "", "/search?lot=9");
