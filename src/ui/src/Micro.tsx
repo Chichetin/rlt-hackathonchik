@@ -1,41 +1,44 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import "./examples.css";
 
 export function ExampleWheel({ options, value, onChange, onConfirm }: { options: string[]; value: string; onChange: (value: string) => void; onConfirm: () => void }) {
-  const reduced = useReducedMotion();
+  const captionId = useId();
+  const hintId = useId();
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const selected = options.indexOf(value);
   const [cursor, setCursor] = useState(Math.max(0, selected));
   useEffect(() => { if (selected >= 0) setCursor(selected); }, [selected]);
   const choose = (index: number, focusOption = false) => {
+    if (!options.length) return;
     const next = (index + options.length) % options.length;
-    setCursor(next); onChange(options[next]);
+    setCursor(next);
+    onChange(options[next]);
     if (focusOption) buttons.current[next]?.focus();
   };
-  return <div className="example-wheel" role="group" aria-label="Примеры закупок" onKeyDown={e => {
-    const delta = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+  return <div className="example-choices" role="group" aria-labelledby={captionId} aria-describedby={hintId} onKeyDown={e => {
+    const delta = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
     if (delta) { e.preventDefault(); choose(cursor + delta, true); }
     if (e.key === "Home" || e.key === "End") { e.preventDefault(); choose(e.key === "Home" ? 0 : options.length - 1, true); }
   }}>
-    <div className="wheel-caption"><span>Примеры запросов</span><small>Можно ввести любую закупку выше</small></div>
-    <div className="wheel-window">
-      <div className="wheel-track" aria-hidden="true" />
-      {options.map((option, i) => {
-        let offset = i - cursor;
-        if (offset > options.length / 2) offset -= options.length;
-        if (offset < -options.length / 2) offset += options.length;
-        return <motion.button ref={el => { buttons.current[i] = el; }} type="button" key={option} aria-pressed={option === value}
-          className={`wheel-option${offset === 0 ? " wheel-center" : ""}`} onClick={() => { choose(i); onConfirm(); }}
-          initial={false} animate={{ y: offset * 36, scale: offset === 0 ? 1 : .91, opacity: offset === 0 ? 1 : .56, rotateX: offset * -18 }}
-          transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 270, damping: 30 }}>
-          {option}
-        </motion.button>;
-      })}
+    <div className="example-caption">
+      <span id={captionId}>Примеры закупок</span>
+      <span id={hintId}>Можно ввести любую закупку выше</span>
     </div>
-    <div className="wheel-controls">
-      <button type="button" aria-label="Предыдущий пример" onClick={() => choose(cursor - 1)}>↑</button>
-      <button type="button" aria-label="Следующий пример" onClick={() => choose(cursor + 1)}>↓</button>
+    <div className="example-options">
+      {options.map((option, i) => <button
+        ref={el => { buttons.current[i] = el; }}
+        type="button"
+        key={option}
+        className="example-option"
+        aria-pressed={option === value}
+        onFocus={() => setCursor(i)}
+        onClick={() => { choose(i); onConfirm(); }}
+      >
+        <span className="example-check" aria-hidden="true">{option === value ? "✓" : ""}</span>
+        {option}
+      </button>)}
     </div>
   </div>;
 }

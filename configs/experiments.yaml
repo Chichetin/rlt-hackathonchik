@@ -46,8 +46,23 @@ H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (гео�
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+# Профили весов по типу закупки (#104, src/match/profiles.py, weights_by_type). Сравнение — по срезам type=.
+H-104b:          # H-15f + профиль: для товаров география 0.05 и регион ИП по ИНН, для услуг 0 (как в H-15f)
+  weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
+  signals: {inn_region: 1.0}
+  options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
+  weights_by_type: {goods: {geography: 0.05}}
+H-104g:          # дефолт D-077 + профиль: для товаров география 0.048 (= 0.05 / 1.05) и регион ИП по ИНН, для услуг 0
+  signals: {inn_region: 1.0}
+  weights_by_type: {goods: {geography: 0.048}}
 # #196: потолки насыщения experience поверх дефолта H-15f (в дефолте 20 лотов / 10 побед).
 H-196-sat100:
   options: {sat_lots: 100, sat_wins: 50}
 H-196-sat500:
   options: {sat_lots: 500, sat_wins: 250}
+# Ступень 2 сравнения моделей (#98, ступень 1 — #115): гибрид BM25 + векторы (RRF), остальное — продукт.
+S2-hyb-e5s:      # pg_hybrid, intfloat/multilingual-e5-small (vec.names_e5_small)
+  retriever: pg_hybrid
+S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — лучший гибрид ступени 1 на коротких запросах
+  retriever: pg_hybrid
+  embedding_model: deepvk/USER-base

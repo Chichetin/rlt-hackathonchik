@@ -182,7 +182,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Api Counterparty */
+        /**
+         * Api Counterparty
+         * @description The card by INN: from the cache at once, otherwise the registries are asked inside the request, so at most
+         *     COUNTERPARTY_LIVE_MAX of those at once (F-10).
+         */
         get: operations["api_counterparty_api_counterparty__inn__get"];
         put?: never;
         post?: never;
@@ -201,7 +205,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Api Enqueue */
+        /**
+         * Api Enqueue
+         * @description Queue the enrichment of an INN for the worker; a new INN over ENRICH_QUEUE_MAX waiting tasks is a 429 (F-10).
+         */
         post: operations["api_enqueue_api_enrich__inn__post"];
         delete?: never;
         options?: never;
@@ -967,7 +974,10 @@ export interface operations {
     api_counterparty_api_counterparty__inn__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description ключ API, если на сервере задан API_KEY */
+                "x-api-key"?: string | null;
+            };
             path: {
                 inn: string;
             };
@@ -984,6 +994,13 @@ export interface operations {
                     "application/json": components["schemas"]["Counterparty"];
                 };
             };
+            /** @description нужен ключ API (X-API-Key), если на сервере задан API_KEY */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -993,12 +1010,22 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description лимит очереди или живых обогащений; повторите через Retry-After секунд */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     api_enqueue_api_enrich__inn__post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description ключ API, если на сервере задан API_KEY */
+                "x-api-key"?: string | null;
+            };
             path: {
                 inn: string;
             };
@@ -1015,6 +1042,13 @@ export interface operations {
                     "application/json": components["schemas"]["EnqueueResult"];
                 };
             };
+            /** @description нужен ключ API (X-API-Key), если на сервере задан API_KEY */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1023,6 +1057,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description лимит очереди или живых обогащений; повторите через Retry-After секунд */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import logging
+import random
 import subprocess
 import sys
 import time
@@ -24,12 +25,14 @@ from src.eval.metrics import METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import pipeline
 from src.match import search as search_mod
+from src.match.profiles import procurement_type
 
 log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 # Baselines (T-08): experiment id -> method and its parameters; configs/search.yaml stays the product method.
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
 # Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
+SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
 RANKED_LIMIT = 5000  # per-case top-k lists are stored for parts up to this size
 RESULTS = ROOT / "eval" / "results"
@@ -130,10 +133,12 @@ def winner_novelty(cases: list[EvalCase], cutoff: date) -> list[bool | None] | N
 
 
 def slice_names(q: dict) -> list[str]:
-    """Slices a per_query row belongs to: channel, winner novelty and their combination."""
+    """Slices a per_query row belongs to: channel, winner novelty, their combination and procurement
+    type by the case's OKPD2 (#104: goods | services | unknown; rows of older results have no type)."""
     ch = f"channel={q['channel']}" if q.get("channel") else None
     nov = {True: "winner=new", False: "winner=known"}.get(q.get("winner_new"))  # type: ignore[arg-type]
-    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None) if name]
+    kind = f"type={q['type']}" if q.get("type") else None
+    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind) if name]
 
 
 def slices(per_query: list[dict]) -> dict:
@@ -166,12 +171,16 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             if audit is not None:
                 audit.add(ranked, rel)
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
-                         "channel": case.query.channel}
+                         "channel": case.query.channel, "type": procurement_type(case.query.okpd2) or "unknown"}
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:
                 row["ranked"] = ranked
             per_query.append(row)
+            if (i + 1) % 50 == 0 or i + 1 == len(cases):  # progress for `Get-Content logs/<run>.log -Wait`
+                el = time.monotonic() - started
+                log.warning("eval %d/%d, %.1f с/запрос, осталось ≈ %.0f мин", i + 1, len(cases), el / (i + 1),
+                            el / (i + 1) * (len(cases) - i - 1) / 60)
     finally:
         search_mod.STRICT_RETRIEVER = strict
     out = {"n_queries": len(per_query), "elapsed_s": round(time.monotonic() - started, 1),
@@ -207,7 +216,7 @@ def _vectors(cfg: dict) -> dict | None:
         return None
     from src.match import pg_retriever
 
-    return pg_retriever.coverage()
+    return pg_retriever.coverage(cfg.get("embedding_model"))
 
 
 def _store() -> str:
@@ -281,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25); default — the --exp id if it is one")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
+    ap.add_argument("--sample", type=int, default=None,
+                    help="first screen on N cases of the part (fixed seed): winners only go to the full run")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
@@ -293,7 +304,13 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    rec = result_record(args.exp, args.part, cfg, evaluate(load_cases(args.part, split_config()), cfg))
+    cases = load_cases(args.part, split_config())
+    part = args.part
+    if args.sample and args.sample < len(cases):
+        keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
+        cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
+        part = f"{args.part}-s{args.sample}"
+    rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(dump_record(rec), encoding="utf-8")

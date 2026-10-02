@@ -31,15 +31,14 @@ export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext
       <button type="button" className="secondary" disabled={!onPrevious} onClick={onPrevious}>← Предыдущий</button>
       {onMore ? <button type="button" className="secondary" disabled={loadingMore} onClick={onMore}>{loadingMore ? "Загружаем…" : "Загрузить ещё"}</button> : <button type="button" className="secondary" disabled={!onNext} onClick={onNext}>Следующий →</button>}
     </div>
-    <div className="inspector-topline">
-      <span>{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</span>
-      <span className={`inspector-score score-level-${levelOf(match.score)}`}><span>Соответствие</span><strong>{match.score.toFixed(2)}</strong><RelevanceTag score={match.score} /></span>
-    </div>
+    <p className="inspector-origin">{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</p>
     <h2>{cp.name}</h2>
     <p className="inspector-meta">{KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}{relationToCustomer(cp, customerRegion) && <> — {relationToCustomer(cp, customerRegion)}</>}</p>
     <p className="inspector-inn">ИНН {cp.inn ?? "не подтверждён"}</p>
+    <div className="inspector-topline">
+      <span className={`inspector-score score-level-${levelOf(match.score)}`}><span>Соответствие</span><strong>{match.score.toFixed(2)}</strong><RelevanceTag score={match.score} /></span>
     <button type="button" className="inspector-open" onClick={() => onOpen(match)}>Открыть полную карточку <span aria-hidden="true">↗</span></button>
-    <Ratings inn={cp.inn} />
+    </div>
     <h3>Почему подходит</h3>
     {weightsNote && <p className="inspector-note">Оценка с вашими весами: «{weightsNote}».</p>}
     <ul className="inspector-reasons">
@@ -53,5 +52,6 @@ export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext
       {(cp.evidence ?? []).slice(0,4).map((e,i) => <li key={i}><p>{e.fact}</p><a href={e.url} target="_blank" rel="noreferrer">{e.source}</a>{e.fetched_at && <small className="inspector-date"> · {new Date(e.fetched_at).toLocaleDateString("ru-RU")}</small>}</li>)}
     </ul> : <p className="inspector-note">Подтверждённых фактов с источниками пока нет.</p>}
     {(cp.evidence ?? []).length > 4 && <p className="inspector-note">Все источники доступны в полной карточке.</p>}
+    <Ratings inn={cp.inn} />
   </aside>;
 }
