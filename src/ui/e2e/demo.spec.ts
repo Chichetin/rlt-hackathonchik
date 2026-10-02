@@ -122,7 +122,9 @@ test("демо: запрос → два блока → карточка → фи
     else expect(m.counterparty.inn).toMatch(/^(78|47)\d{10}$/);
   }
   await expect(history.locator(".item")).toHaveCount(body.history.length);
-  for (const meta of await history.locator(".item .meta").allTextContents()) expect(meta).toMatch(/в регионе заказчика|соседний регион/);
+  const metadata = history.locator(".item .supplier-meta");
+  await expect(metadata).toHaveCount(body.history.length);
+  for (const meta of await metadata.allTextContents()) expect(meta).toMatch(/в регионе заказчика|соседний регион/);
   // what the choice hides is said, and it adds up: shown = kept by «near», hidden = all − kept (X-Facets near, D-030)
   const nf = JSON.parse(nearResponse.headers()["x-facets"]);
   const all = nf.history.near.any + nf.discovered.near.any;
