@@ -157,7 +157,7 @@ def test_export_xlsx(search_client):
     header = [c.value for c in ws[1]]
     assert header[:3] == ["Блок", "Наименование", "ИНН"] and ws.max_row > 1
     assert ws.cell(row=2, column=3).value == "7801000012"
-    # the order and the relevance are two columns (#278, D-154): the place is the block's order, not the score's
+    # the order and the relevance are two columns (#278, D-156): the place is the block's order, not the score's
     place, score = header.index("Место в блоке") + 1, header.index("Релевантность (формула критериев)") + 1
     assert "Выше следующего" in header and "Score" not in header
     history = [r for r in range(2, ws.max_row + 1) if ws.cell(row=r, column=1).value == "С опытом госзакупок"]
