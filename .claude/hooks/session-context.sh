@@ -45,6 +45,12 @@ if [ -f "$tl" ]; then
 fi
 
 [ -f "$root/scripts/issues.sh" ] || exit 0
+# No GitHub remote: say so here, without starting issues.sh under `timeout 10` — on a slow Windows machine
+# that start alone can outlive the timeout, and the warning never came (#450). Same pattern as issues.sh.
+if ! git remote get-url origin 2>/dev/null | grep -qE '^(https?://([^@/]+@)?github\.com/|git@github\.com:)[^/]+/[^/]+$'; then
+  echo "[issues] нет remote origin на GitHub — задачи недоступны (git remote add origin …)"
+  exit 0
+fi
 if ! ISSUES_TIMEOUT=6 timeout 10 bash "$root/scripts/issues.sh" board 2>&1; then
   echo "[issues] GitHub недоступен — занятость не видна (bash scripts/issues.sh mine)."
 fi

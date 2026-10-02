@@ -26,6 +26,11 @@
 и лимиты на домен) или остаётся «ИНН …». Записи старше `SOURCE_CACHE_TTL_S` (7 суток) при наличии сети обновляются, при
 `ENRICH_OFFLINE=1` читаются как есть.
 
+**ГИСП — `make data PART=gisp`** (#459): реестр российской промышленной продукции (D-153) в `data/external/gisp` — ассеты `gisp-products.parquet` и
+`gisp-meta.json` релиза `data-2026-10-02`, суммы `SHA256SUMS.gisp`; повторный запуск — «уже на месте». Проверка: `uv run python -m src.sources.gisp stats` → `products` = 480166.
+Не входит в `make data` без части. Запасной путь — `uv run python -m src.sources.gisp build <pp719_valid.xlsx>`.
+Что даёт ГИСП: ступень `product_fit` по реестру Минпромторга и основание роли «производитель» в «Новых» (D-153); своя сборка `gisp build` заменяется файлами релиза — это эталонный снимок для показа.
+
 Проверка: `make demo` → `curl localhost:8000/api/health` (`status: ok`) → поиск в UI.
 Скриншоты: `BASE=http://127.0.0.1:8000 node scripts/screenshots.mjs [лот]` → `pitch/screenshots/`.
 

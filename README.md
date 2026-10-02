@@ -17,7 +17,7 @@ RLT.Hack (Росэлторг), 1–2 октября 2026. Сервис подб�
 
 ```bash
 git clone https://github.com/Chichetin/rlt-hackathonchik.git && cd rlt-hackathonchik
-make data PART=processed && make data PART=cache   # parquet (216 МБ) и снимок кеша источников, со сверкой SHA256
+make data PART=processed && make data PART=cache && make data PART=gisp   # parquet (216 МБ), снимок кеша источников и реестр ГИСП (480 166 позиций), со сверкой SHA256
 # быстрее для жюри: без `PART=processed` `make data` скачает ещё сырые CSV (+680 МБ), для демо они не нужны
 make demo                           # зависимости по lockfile, UI, API + воркер → http://127.0.0.1:8000
 ```
@@ -40,7 +40,7 @@ make demo                           # зависимости по lockfile, UI, 
 | `make up` / `make down` | docker-compose: `api`, `worker`, `db` (Postgres) |
 | `make openapi` | `docs/openapi.json` и TS-типы UI из `src/contracts.py` |
 | `make setup-ml`, `make models` | эмбеддинги (torch CPU) и скачивание моделей |
-| `make data` | датасет организаторов из релиза `data-2026-10-02` этого репозитория: `data/processed` (parquet) и `data/raw` (CSV), со сверкой SHA256; `make data PART=processed` — только parquet; `make data PART=cache` — снимок кеша источников в `cache/sources.sqlite` (влился в локальный кеш: его записи не затираются; `CACHE_FORCE=1` заменит целиком) |
+| `make data` | датасет организаторов из релиза `data-2026-10-02` этого репозитория: `data/processed` (parquet) и `data/raw` (CSV), со сверкой SHA256; `make data PART=processed` — только parquet; `make data PART=cache` — снимок кеша источников в `cache/sources.sqlite` (влился в локальный кеш: его записи не затираются; `CACHE_FORCE=1` заменит целиком); `make data PART=gisp` — реестр ГИСП (D-153) в `data/external/gisp` (ассеты `gisp-products.parquet`, `gisp-meta.json`, суммы `SHA256SUMS.gisp`; без него «Новые» идут без ступени ГИСП) |
 
 ## Как устроено
 

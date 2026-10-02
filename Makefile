@@ -29,7 +29,7 @@ setup-ml:          ## + sentence-transformers/torch (CPU) для эмбедди�
 models:            ## скачать эмбеддинг-модели в кеш HF (до площадки!)
 	bash scripts/download-models.sh
 
-data:              ## датасет организаторов из релиза репозитория: make data [PART=processed|raw|cache]
+data:              ## датасет организаторов из релиза репозитория: make data [PART=processed|raw|cache|gisp]
 	bash scripts/data.sh $(PART)
 
 lint:

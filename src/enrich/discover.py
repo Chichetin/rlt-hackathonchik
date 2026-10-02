@@ -52,6 +52,7 @@ import duckdb
 import httpx
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
+from src.enrich import web_discover
 from src.enrich.enrich import enrich, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.ingest.load import suppliers_path
@@ -442,6 +443,7 @@ def leads_enabled() -> bool:
 def lead_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], cache: SourceCache,
     weights: dict[str, float], predicted: bool, processed: Path, region: str, region_note: str | None,
+    leads: dict[str, web_leads.Lead] | None = None,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """Web leads of the query's classes (#108, src/sources/web_leads.py): companies outside the МСП registry.
 
@@ -451,9 +453,10 @@ def lead_matches(
     region by KPP (or the registry) is the query's region or its neighbour, and the INN type is one of
     DISCOVERY_NP_TYPES — the same rules as the registry channel, so product_fit keeps its steps (D-036).
     Returns the matches, their relation, the new INNs without a cached card (for the queue) and one line
-    for `Discovery.leads`.
+    for `Discovery.leads`. `leads` — INN → lead given by the caller (the Yandex fallback, src/enrich/web_discover.py);
+    None — the lead files of the query's classes.
     """
-    leads = web_leads.for_classes(list(classes), web_leads.load())
+    leads = dict(web_leads.for_classes(list(classes), web_leads.load()) if leads is None else leads)
     for inn in skip:  # already found in the МСП registry: one row per company
         leads.pop(inn, None)
     if not leads:
@@ -508,6 +511,41 @@ def lead_matches(
             f"тип ИНН не из DISCOVERY_NP_TYPES {other_type}, ОКВЭД не подтвердил класс {other_okved}, "
             f"другой регион {other_region}, регион не установлен {no_region}, в блок {len(out)}")
     return out, relation, no_card, line
+
+
+def yandex_matches(
+    query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], history: Sequence[CounterpartyMatch],
+    current: Sequence[CounterpartyMatch], cache: SourceCache, weights: dict[str, float], predicted: bool,
+    processed: Path, region: str, region_note: str | None, *, offline: bool, deadline: float,
+) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
+    """The paid fallback (#194, src/enrich/web_discover.py): Yandex → company site → INN → the road of a web lead.
+
+    Asked only when the free sources — the first MAX_SHOWN of the history block and every «Новые» found so far —
+    hold fewer strong candidates than `min_strong`. The lot of the per-lot ceiling is `query.query_id`. `deadline` —
+    the one of the whole discover(): after it Yandex and the sites are read from their caches only. Leads answer the
+    first class of the query. A company already in `skip` (found by the registry or a lead file) is not repeated.
+    Returns what `lead_matches` returns.
+    """
+    strong = web_discover.strong_count([*history[:MAX_SHOWN], *apply_legal(list(current))])
+    fb = web_discover.lot_leads(query.query_id, query.text, classes[0], strong, okpd2=codes, cache=cache,
+                                offline=offline, deadline=deadline)
+    if not fb.used:
+        return [], {}, [], f"Яндекс (запасной путь): {fb.reason}"
+    leads = {lead.inn: lead for lead in fb.leads if lead.inn and lead.inn not in skip}
+    found, relation, no_card, line = lead_matches(query, codes, classes, skip, cache, weights, predicted, processed,
+                                                  region, region_note, leads=leads)
+    out: list[CounterpartyMatch] = []
+    for m in found:
+        s = fb.check(m.counterparty.inn or "")
+        if s is None:
+            continue
+        comps = [c.model_copy(update={"explanation": c.explanation.replace(
+            "Найдена веб-поиском по товару", f"Найдена в Яндекс Поиске по запросу «{s.query}», ИНН указан на сайте "
+            f"{s.domain}")}) if c.name == "product_fit" else c for c in m.components]
+        out.append(m.model_copy(update={"counterparty": web_discover.with_site(m.counterparty, s, cache),
+                                        "components": comps}))
+    head = f"Яндекс (запасной путь): {fb.reason}"
+    return out, relation, no_card, head + (f"; {line.removeprefix('веб-лиды: ')}" if line else "")
 
 
 GISP_MARK = "реестру Минпромторга (ГИСП)"  # in product_fit of a product confirmed by the registry (#74)
@@ -906,6 +944,19 @@ def discover(
         except Exception as e:  # noqa: BLE001 — a broken export never takes the other channels down
             log.exception("discovery: ГИСП пропущен из-за ошибки")
             res.gisp.append(f"ГИСП: выгрузка не прочитана ({type(e).__name__}) — канал пропущен")
+    if res.history_checked and res.okpd_classes and web_discover.enabled():  # off by default: no work, no network
+        try:
+            found_web, web_relation, web_no_card, line = yandex_matches(
+                query, codes, res.okpd_classes, {m.counterparty.inn or "" for m in matches}, history, matches, cache,
+                weights, res.predicted, processed, target, target_note, offline=offline, deadline=deadline)
+        except Exception:  # noqa: BLE001 — the paid fallback never takes the free channels down
+            log.exception("discovery: запасной путь Яндекс пропущен из-за ошибки")
+            found_web, web_relation, web_no_card, line = [], {}, [], None
+        matches.extend(found_web)
+        relation.update(web_relation)
+        lead_no_card += web_no_card
+        if line:
+            res.leads.append(line)
     order = _order(res.gisp_backed)
     res.candidates = sorted(apply_legal(matches), key=order)
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
