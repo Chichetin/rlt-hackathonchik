@@ -1,0 +1,7 @@
+.backtest { margin-top: 12px; }
+.backtest-head { margin: 12px 0 4px; font-size: 15px; font-weight: 600; color: var(--g-new, #7fd1b9); }
+.backtest-note { margin: 0 0 8px; font-size: 12px; color: var(--muted, #8b939d); }
+.backtest-list { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.backtest-list li { display: grid; grid-template-columns: 9em 1fr auto; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line, #ffffff14); }
+.backtest-list li.hit b { color: var(--g-new, #7fd1b9); }
+.backtest-inn { font-variant-numeric: tabular-nums; }

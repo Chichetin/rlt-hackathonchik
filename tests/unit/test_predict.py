@@ -159,3 +159,65 @@ def test_duplicate_lot_rows_and_empty_okpd2_cells(tmp_path):
     ts = load_testset(d)
     assert len(ts.lots) == 1 and ts.lots[0].query.text == "Бумага"  # first row of a lot, as in ingest
     assert ts.lots[0].query.okpd2 == ["17.12.14.110"]
+
+
+@pytest.mark.parametrize(
+    ("value", "cell"),
+    [
+        ("- Аренда анализатора", "'- Аренда анализатора"),
+        ('=HYPERLINK("http://x")', '\'=HYPERLINK("http://x")'),
+        ("+7 812 000-00-00", "'+7 812 000-00-00"),
+        ("@SUM(1)", "'@SUM(1)"),
+        ("\tx", "'\tx"),
+        ("\rx", "'\rx"),
+        ("Бумага -1", "Бумага -1"),
+        ("-0.5", "-0.5"),  # a number is not a formula: stays a number in Excel
+        ("", ""),
+        (3, 3),
+    ],
+)
+def test_csv_cell_never_starts_a_formula(value, cell):
+    assert P.csv_cell(value) == cell
+
+
+def test_formula_like_texts_are_escaped_in_the_file(search_data, tmp_path):
+    """docs/REVIEW.md F-08: 5 subjects of the organizers' data start with «-»; in Excel such a cell is a formula."""
+    d = _copy(tmp_path)
+    (d / "Извещения_24-25.csv").write_text(
+        'lot_id;subject\n1;- Аренда анализатора\n2;=HYPERLINK("http://x")\n3;+7 бумага\n4;@SUM(1)\n'
+        "5;Бумага -1\n=6;Бумага А4\n", encoding="utf-8")
+    out = tmp_path / "o.csv"
+    P.run(d, out, top=2, offline=True)
+    rows = _rows(out)
+    texts = {r["lot_id"]: r["query_text"] for r in rows}
+    assert texts == {"1": "'- Аренда анализатора", "2": "'=HYPERLINK(\"http://x\")", "3": "'+7 бумага",
+                     "4": "'@SUM(1)", "5": "Бумага -1", "'=6": "Бумага А4"}
+    assert all(r["score"] == "" or not r["score"].startswith("'") for r in rows)
+    stats = P.run(d, out, top=2, offline=True)
+    assert stats["skipped"] == 6  # resume recognizes an escaped lot_id: no duplicate rows
+    assert len(_rows(out)) == len(rows)
+
+
+def test_predict_uses_the_search_pipeline_hard_filters_and_evidence_check(search_data, tmp_path, monkeypatch):
+    """#220, D-097: predict drops a supplier liquidated by its cached ФНС card and passes the Evidence check."""
+    from src.contracts import Counterparty
+    from src.match import pipeline
+
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources.sqlite"))
+    first = tmp_path / "first.csv"
+    P.run(FIX, first, top=5, offline=True)
+    top = next(r["inn"] for r in _rows(first) if r["lot_id"] == "9001" and r["block"] == "История" and r["inn"])
+
+    def cached(inn, cache=None, offline=False):
+        if inn != top:
+            raise KeyError(inn)
+        return Counterparty(inn=inn, name="ООО Тест", status="Организация ликвидирована")
+
+    checked: list[int] = []
+    real_verified = pipeline.verified
+    monkeypatch.setattr(pipeline.enrich_mod, "enrich", cached)
+    monkeypatch.setattr(pipeline, "verified", lambda ms: checked.append(len(ms)) or real_verified(ms))
+    second = tmp_path / "second.csv"
+    P.run(FIX, second, top=5, offline=True)
+    assert top not in {r["inn"] for r in _rows(second) if r["lot_id"] == "9001"}
+    assert len(checked) == 3  # one Evidence check per lot

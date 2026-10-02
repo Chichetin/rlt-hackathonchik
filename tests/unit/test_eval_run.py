@@ -98,6 +98,7 @@ def test_repository_experiments_are_valid_configs():
 @pytest.mark.parametrize(("exp", "result"), [
     ("v1", "E-002"), ("H-15a-03", "H-15a-03"), ("H-15a-06", "H-15a-06"), ("H-15b", "H-15b"), ("H-15c", "H-15c"),
     ("H-15d-tie", "H-15d-tie"), ("H-15e", "H-15e"), ("H-15f", "H-15f"), ("H-15g", "H-15g"), ("H-15f-geo", "H-15f-geo"),
+    ("H-196-sat100", "H-196-sat100"), ("H-196-sat500", "H-196-sat500"), ("v2", "v2"), ("R-198-gbm", "R-198-gbm"),
 ])
 def test_experiment_entries_reproduce_recorded_configs(exp, result):
     """The product default moved to H-15f (#174): every entry of configs/experiments.yaml still gives the
@@ -109,3 +110,19 @@ def test_experiment_entries_reproduce_recorded_configs(exp, result):
     from src.match.signals import signal_shares
     assert signal_shares(cfg) == signal_shares(rec)
     assert (cfg["retriever"], cfg["k"]) == (rec["retriever"], rec["k"])
+    from src.match import ranker
+    assert ranker.spec(cfg) == ranker.spec(rec)  # the default has the ranker on (#198): older entries turn it off
+
+
+def test_saturation_summary_counts_distinct_scores():
+    from src.eval.saturation import summarize
+
+    rec = summarize([[1.0] * 10, [1.0, 0.9, 0.9, 0.5], [0.7, 0.6, 0.5, 0.4, 0.3], []])
+    assert rec == {"cases": 3, "distinct_scores_mean": 3.0, "share_le_3_distinct": 0.667, "share_all_equal": 0.333,
+                   "share_first_at_max": 0.667}
+    assert summarize([[1.0, 0.5, 0.4]], k=1)["distinct_scores_mean"] == 1.0  # only the top-k is looked at
+    assert summarize([])["cases"] == 0
+    # the screen shows two decimals: scores that differ in the API can be equal there
+    near = [[0.9996, 0.9973, 0.9849, 0.9835, 0.9628]]
+    assert summarize(near)["distinct_scores_mean"] == 5.0 and summarize(near)["share_first_at_max"] == 1.0
+    assert summarize(near, decimals=2)["distinct_scores_mean"] == 3.0  # 1.00, 1.00, 0.98, 0.98, 0.96
