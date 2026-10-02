@@ -25,10 +25,11 @@ Agents never call the live API (decision of IR630): tests use fixtures and `http
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -50,6 +51,7 @@ from src.sources.cache import SourceCache
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs" / "yandex_discovery.yaml"
+THIN_RESULT = ROOT / "eval" / "results" / "T-thin-v1.json"  # the metric of thin categories (#122)
 SOURCE = "Яндекс Поиск → сайт компании"
 STRONG_FIT = 0.8  # product_fit 1.0 / 0.8 — a strong candidate (the human, 02.10)
 REGION_SPB = "2"  # the Yandex region of Saint Petersburg (lr)
@@ -72,6 +74,36 @@ def load_config(path: Path = CONFIG) -> dict:
 def enabled() -> bool:
     """The client may send a live request (key and ceilings set). Off → the fallback is not even planned."""
     return yandex_search.disabled_reason() is None
+
+
+# --- the order of lots under the ceiling of a run (#263) ----------------------------------------------------
+
+def thin_classes(path: Path | None = None) -> frozenset[str]:
+    """OKPD2 groups (XX.XX) of the thin categories of #122; no metric file → empty set, the order stays as it was."""
+    try:
+        return frozenset(g["okpd2"] for g in json.loads((path or THIN_RESULT).read_text(encoding="utf-8"))["thin"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return frozenset()
+
+
+def is_thin(okpd2: Sequence[str], thin: frozenset[str]) -> bool:
+    return any(code.strip()[:5] in thin for code in okpd2)
+
+
+def thin_first[T](items: Sequence[T], okpd2_of: Callable[[T], Sequence[str]],
+                  thin: frozenset[str] | None = None) -> tuple[list[T], str]:
+    """Lots of thin categories first, the given order inside each part, and the line for the log (#263).
+
+    Only the ORDER under the ceiling of the run (`YANDEX_MAX_PER_RUN`): whether a lot asks Yandex at all is still
+    `needed()` (fewer than `min_strong` strong candidates) — a thin lot with enough free candidates spends nothing.
+    """
+    thin = thin_classes() if thin is None else thin
+    if not thin:
+        return list(items), "метрика тонких категорий недоступна — порядок лотов прежний"
+    first = [x for x in items if is_thin(okpd2_of(x), thin)]
+    rest = [x for x in items if not is_thin(okpd2_of(x), thin)]
+    return [*first, *rest], (f"из {len(items)} лотов в тонких категориях {len(first)} — они первыми под потолком "
+                             "прогона Яндекса")
 
 
 # --- queries ------------------------------------------------------------------------------------------------

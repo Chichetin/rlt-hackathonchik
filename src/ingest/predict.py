@@ -441,8 +441,14 @@ def run(csv_dir: Path, out: Path, top: int = 10, offline: bool | None = None, mo
             log.info("predict full: РНП ЕИС — crawl-delay 60 с на запрос, до %d проверок на лот: ≈ %d–%d мин на лот "
                      "без кеша (NO_RNP=1 — без РНП)", 2 * top * CHECK_FACTOR, 2 * top, 2 * top * CHECK_FACTOR)
     rw = _Csv(report_path(out), REPORT_COLUMNS) if mode == "full" else None
+    from src.enrich import web_discover  # L3 from a tool (L4), lazily: `make predict` only
+
+    lots = ts.lots
+    if not offline and web_discover.enabled():  # the paid fallback is on: its ceiling per run goes to thin lots first
+        lots, line = web_discover.thin_first(ts.lots, lambda lot: lot.query.okpd2)
+        log.info("predict: Яндекс (запасной путь) — %s", line)
     try:
-        for i, lot in enumerate(ts.lots, start=1):
+        for i, lot in enumerate(lots, start=1):
             if csv_cell(lot.lot_id) in done:  # the file holds the escaped id
                 stats["skipped"] += 1
                 continue
