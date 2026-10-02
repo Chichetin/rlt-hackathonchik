@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import random
 import sys
 from collections import defaultdict
@@ -34,6 +33,7 @@ from src.eval import run as R
 from src.eval.metrics import bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match.index import processed_dir
+from src.settings import get_settings
 
 JUDGE_DIR = ROOT / "eval" / "judge" / "hist"  # git-ignored (eval/judge/): packets are derived, answers are imported
 LABELS = ROOT / "eval" / "labels" / "judge_hist.json"  # tracked: score reproduces from it without the judge or key.json
@@ -64,8 +64,8 @@ null — определить нельзя (в расчёт не идёт).
 def sample(n: int, cfg: dict | None = None) -> list[EvalCase]:
     """n dev_full cases outside the tuning sample (as scripts/fresh_eval.py), seeded; the free-text UI path."""
     cfg = cfg or split_config()
-    if os.environ.get("DEV_FULL"):  # a worktree without data/, as in scripts/fresh_eval.py
-        cfg = {**cfg, "cases": {**cfg["cases"], "dev_full": os.environ["DEV_FULL"]}}
+    if dev_full := get_settings().dev_full:  # a worktree without data/, as in scripts/fresh_eval.py
+        cfg = {**cfg, "cases": {**cfg["cases"], "dev_full": dev_full}}
     tuned = {c.query.query_id for c in load_cases("dev", cfg)}
     pool = sorted((c for c in load_cases("dev_full", cfg) if c.query.query_id not in tuned),
                   key=lambda c: c.query.query_id)

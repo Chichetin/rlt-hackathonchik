@@ -9,8 +9,9 @@ provider's current docs, not from memory. Until then only LLM_PROVIDER=none is i
 
 from __future__ import annotations
 
-import os
 from typing import Protocol
+
+from src.settings import get_settings
 
 
 class LLMProvider(Protocol):
@@ -29,7 +30,7 @@ class NoLLM:
 
 
 def get_provider() -> LLMProvider:
-    name = os.environ.get("LLM_PROVIDER", "none").strip().lower()
+    name = get_settings().llm_provider
     if name in ("", "none"):
         return NoLLM()
     raise NotImplementedError(f"LLM_PROVIDER={name!r}: провайдер ещё не подключён ([СПРОСИТЬ Q-13])")

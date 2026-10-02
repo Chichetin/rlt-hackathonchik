@@ -84,6 +84,16 @@ def test_gate_refuses_stub_search(repo, monkeypatch):
         F.gate(R.config_sha256(repo), repo, repo / "log.md")
 
 
+def test_gate_refuses_a_tokenizer_override_but_not_an_empty_one(repo, monkeypatch):
+    """BM25_TOKENIZER replaces the tokenizer of configs/search.yaml, so eval-final refuses it. An empty value is
+    «not set» for search() too (src/settings.py), so it no longer blocks the gate (#297)."""
+    monkeypatch.setenv("BM25_TOKENIZER", "snowball")
+    with pytest.raises(PermissionError, match="BM25_TOKENIZER"):
+        F.gate(R.config_sha256(repo), repo, repo / "log.md")
+    monkeypatch.setenv("BM25_TOKENIZER", "")
+    assert F.gate(R.config_sha256(repo), repo, repo / "log.md") == R.config_sha256(repo)
+
+
 def test_gate_passes_frozen_clean_config(repo):
     assert F.gate(R.config_sha256(repo), repo, repo / "log.md") == R.config_sha256(repo)
 

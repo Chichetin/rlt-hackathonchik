@@ -89,13 +89,15 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
     # `config` only when given: the product reads configs/search.yaml on every call (and tests stub search())
     kw = {"config": config, "weights": config.get("weights")} if config is not None else {}
     found = search_mod.search(query, k=search_mod.CANDIDATES, **kw)
+    predicted = search_mod.predicted_code()  # the class of «Новые» for a query without a code (#394)
     weak = confidence.weak_match(search_mod.fit_signals(), has_code=bool(query.okpd2))
     out = Picked(matches=[], note=fallback.search_note(), correction=correction, weak_match=weak)
     candidates: list[CounterpartyMatch] | None = None  # «Новые» before the user filters, None — no discovery
     if not is_stub() and not backtest:
         discovered: list[CounterpartyMatch] = []
         if discovery:
-            discovered, candidates, out.discovery, out.discovery_error = _discovered(query, found, enqueue, offline)
+            discovered, candidates, out.discovery, out.discovery_error = _discovered(query, found, enqueue, offline,
+                                                                                    predicted)
         found = [*enriched(found, out.uncached), *discovered]
         # services and works (#188): the role is `unknown` with its basis — before the filters and the chips
         found = _for_purchase(found, query)
@@ -197,14 +199,16 @@ def enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[Count
 
 
 def _discovered(query: Query, history: list[CounterpartyMatch], enqueue: Callable[[str], object] | None,
-                offline: bool | None
+                offline: bool | None, predicted: str | None = None
                 ) -> tuple[list[CounterpartyMatch], list[CounterpartyMatch], discover_mod.Discovery | None, str | None]:
     """Block «Новые» (#16, D-037): open sources via the cache; a failing source never breaks the search.
 
-    Returns the block (top MAX_SHOWN), every candidate before the user filters (X-Facets) and the Discovery.
+    `predicted` — the OKPD2 code search() predicted from the text (search.predicted_code(), P-02): the class of
+    the block for a query without a code (#394). Returns the block (top MAX_SHOWN), every candidate before the
+    user filters (X-Facets) and the Discovery.
     """
     try:
-        res = discover_mod.discover(query, history, enqueue=enqueue, offline=offline)
+        res = discover_mod.discover(query, history, enqueue=enqueue, offline=offline, predicted_code=predicted)
     except Exception as e:  # noqa: BLE001 — the history block must be shown whatever happens to an open source
         log.exception("discovery: блок «Новые» пуст из-за ошибки")
         return [], [], None, type(e).__name__
