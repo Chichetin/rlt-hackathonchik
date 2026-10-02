@@ -3,9 +3,9 @@
 Электронный магазин СПб is explicitly NOT a source of enrich() (D-061): nothing here touches
 its removed client (D-067).
 
-РНП is only ever allowed to reach the network from the worker: the API always resolves either the
-overall `offline` or the dedicated `rnp_offline` to True (src/api/app.py), so `enrich(inn,
-offline=True)` must never touch the network — the guard test below is the contract."""
+A live РНП request costs the 60 s Crawl-delay of zakupki.gov.ru, so enrich() reads the РНП from the cache only
+unless asked with `rnp_offline=False`: the worker, prefetch, the API and the search all get the cached answer, and
+the РНП pass of the shortlist (`python -m src.worker.prefetch --rnp`, D-150) fills that cache."""
 
 from __future__ import annotations
 
@@ -142,6 +142,44 @@ def test_rnp_offline_overrides_a_live_main_enrich(pb_cache, monkeypatch):
     # the pb card is already cached (fresh): no live pb/rmsp/bo call happens either
     cp = enrich(UL, pb_cache, rnp_offline=True)
     assert cp.in_rnp is None  # nothing cached for РНП, cache-only -> quiet KeyError
+
+
+def _zakupki_guard(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    asked: list[str] = []
+
+    def guard(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        if "dishonestsupplier" in str(request.url):
+            asked.append(str(request.url))
+            return httpx.Response(200, text=NEG_PAGE)
+        return httpx.Response(200, text="<html></html>")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guard)
+    return asked
+
+
+def test_enrich_of_the_worker_never_asks_rnp_live(pb_cache, monkeypatch):
+    """The worker and prefetch call `enrich(inn)`: the card may go live, РНП may not (60 s per INN, D-150)."""
+    monkeypatch.delenv("ENRICH_OFFLINE", raising=False)
+    asked = _zakupki_guard(monkeypatch)
+    cp = enrich(UL, pb_cache)
+    assert asked == [] and cp.in_rnp is None
+    pb_cache.put(eis_rnp.search_url(UL), NEG_PAGE)  # after the РНП pass the same call reads its answer
+    assert enrich(UL, pb_cache).in_rnp is False and asked == []
+
+
+def test_enrich_asks_rnp_live_only_when_told(pb_cache, monkeypatch):
+    monkeypatch.delenv("ENRICH_OFFLINE", raising=False)
+    asked = _zakupki_guard(monkeypatch)
+    assert enrich(UL, pb_cache, rnp_offline=False).in_rnp is False and len(asked) == 1
+
+
+def test_a_page_that_breaks_the_parser_leaves_the_card_whole(cache, monkeypatch):
+    def broken(*a: object, **kw: object) -> eis_rnp.RnpResult:
+        raise IndexError("layout changed")
+
+    monkeypatch.setattr(eis_rnp, "check", broken)
+    cp = _merge_rnp(NOT_IN_RNP, _bare(NOT_IN_RNP), cache, offline=True)
+    assert cp == _bare(NOT_IN_RNP)  # no 500 from /api/counterparty, in_rnp stays «не проверено»
 
 
 # --- strip_unverified / check_counterparty on in_rnp (honest and forged) -----------------------

@@ -226,18 +226,19 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
 def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) -> Counterparty:
     """ЕИС РНП → `Counterparty.in_rnp` + Evidence (D-150, #111). `offline` is passed through
     explicitly (never the `ENRICH_OFFLINE` environment variable) so the caller — not a process-wide
-    flag — decides whether a live request (paced, under lock, Crawl-delay 60 s) may happen at all:
-    the API always passes `offline=True` via `rnp_offline` below, the worker does not, and only the
-    worker is where a live РНП request is allowed to happen (research/SOURCES.md).
+    flag — decides whether a live request (paced, Crawl-delay 60 s) may happen at all.
     `KeyError` (offline, nothing cached yet) is the normal state of a not-yet-checked INN — quiet.
-    Any other failure (`Blocked`, HTTP, a bad INN) leaves `in_rnp` as is (None, "не проверено"),
-    never guesses `False`: a logged warning is the only effect."""
+    Any other failure (`Blocked`, HTTP, a bad INN, a page that breaks the parser) leaves `in_rnp` as is
+    (None, "не проверено"), never guesses `False` and never fails the card: a logged warning is the only effect."""
     try:
         res = eis_rnp.check(inn, cache, offline=offline)
     except KeyError:
         return cp
     except (eis_rnp.Blocked, httpx.HTTPError, ValueError) as e:
         log.warning("enrich %s: РНП ЕИС недоступен: %s", inn, e)
+        return cp
+    except Exception:  # noqa: BLE001 — a broken cached page must not turn the card into a 500
+        log.exception("enrich %s: страница РНП ЕИС не разобрана", inn)
         return cp
     update: dict[str, object] = {}
     if res.evidence:
@@ -259,28 +260,27 @@ def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counter
 
 
 def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
-           open_data: bool = True, rnp_offline: bool | None = None) -> Counterparty:
+           open_data: bool = True, rnp_offline: bool = True) -> Counterparty:
     """The base card (below), then РНП ЕИС merged in (D-150, #111), plus add_open_data(); `open_data=False` —
     no ФНС open-data facts (the search loop over 200 candidates needs none: the page and the export add them to
     what they show). Электронный магазин СПб (its client was removed, D-067) is NOT a source here (D-061).
-    `rnp_offline` governs the РНП step only; None follows `offline`. The API passes `rnp_offline=True`
-    explicitly (src/api/app.py `api_counterparty`), so a direct card lookup never waits on the 60 s
-    Crawl-delay pause — only the worker (`src/worker/worker.py`, `src/worker/prefetch.py`), which calls
-    `enrich(inn)` with neither flag set, may do a live РНП request."""
+    `rnp_offline` governs the РНП step only and defaults to True — the cached РНП answer only, for every caller:
+    API, search, worker, prefetch, discover, web leads. A live РНП request costs the 60 s Crawl-delay of
+    zakupki.gov.ru (+ up to TIMEOUT_S), i.e. at most 1 INN/min, so it never rides along with the card:
+    the РНП pass of the shortlist (`python -m src.worker.prefetch --rnp`, D-150) fills the cache, or a caller
+    asks for it explicitly with `rnp_offline=False`."""
     cache = cache or SourceCache()
     cp = _enrich(inn, cache, offline, rnp_offline)
     return add_open_data([cp], cache)[0] if open_data else cp
 
 
-def _enrich(inn: str, cache: SourceCache, offline: bool | None, rnp_offline: bool | None) -> Counterparty:
+def _enrich(inn: str, cache: SourceCache, offline: bool | None, rnp_offline: bool) -> Counterparty:
     """The base card, then РНП ЕИС. `offline=True` — cache only (KeyError when nothing is cached); None — by
     `ENRICH_OFFLINE`."""
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
     if offline is None:
         offline = get_settings().enrich_offline
-    if rnp_offline is None:
-        rnp_offline = offline
     result = _primary(inn, cache, offline)
     return _merge_rnp(inn, result, cache, rnp_offline)
 

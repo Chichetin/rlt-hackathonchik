@@ -39,6 +39,7 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     # enrich() merges РНП ЕИС (#111): a test that calls enrich() live (the worker's own call shape) twice must not
     # sit out the real 60 s Crawl-delay pause before `no_network` above even raises. Pacing tests set it back.
     monkeypatch.setattr(eis_rnp, "MIN_INTERVAL_S", 0.0)
+    monkeypatch.setattr(eis_rnp, "_ANSWERS", {})  # parsed РНП answers are memoized per page: none from another test
     # web leads (#108): no test depends on the real configs/leads; tests/unit/test_web_leads.py sets its own
     from src.sources import web_leads
 

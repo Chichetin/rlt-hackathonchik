@@ -65,7 +65,7 @@ def warm(leads: list[Lead], max_n: int, pause_s: float) -> int:
     for n, inn in enumerate(todo, start=1):
         try:
             # ФНС cards only: a live РНП check here would add its 60 s Crawl-delay to every lead (D-150);
-            # РНП for the leads is the worker's job
+            # РНП is the separate pass of the shortlist (`python -m src.worker.prefetch --rnp`)
             enrich(inn, cache, rnp_offline=True)
             done += 1
             log.info("лид %s: карточка получена (%d/%d)", inn, n, len(todo))
