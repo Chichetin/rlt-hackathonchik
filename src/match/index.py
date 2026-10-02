@@ -163,6 +163,10 @@ def get_index(store: Store | None, as_of: date | None) -> LotIndex:
     `store`: a Store or None — the store of the environment (organizers' data only through Store, #293)."""
     if store is None:
         store = get_store()
+    if as_of is not None:  # a lot published after the data (#589: defense lots of 2026): its history is all of it,
+        full = get_index(store, None)  # the same index — not a new one per date
+        if full.data_end is not None and as_of > full.data_end:
+            return full
     key = index_key(store.manifest(), as_of)
     with _lock:
         if key in _cache:

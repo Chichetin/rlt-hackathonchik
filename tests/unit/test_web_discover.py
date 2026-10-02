@@ -358,3 +358,24 @@ def test_a_lead_already_shown_does_not_count_toward_the_top_up(cache):
     fb = W.lot_leads("lot-1", LOT_TEXT, "21.20", 4, cache=cache, client=api.client(), site_client=_sites(),
                      known={MAKER, KNOWN, OTHER}, cfg={**W.load_config(), "max_sites": 50})
     assert fb.used and len(api.queries) > 1
+
+
+def test_live_button_takes_an_entrepreneur_retailer_from_another_region(tmp_path):
+    """#583: the button takes an ИП (whatever DISCOVERY_NP_TYPES), a goods retailer (47.x) with product_fit 0.4,
+    and a company of another region (the geography scores it); the automatic fallback still drops all three."""
+    from datetime import date
+
+    from src.match.store import store_for
+    c = SourceCache(tmp_path / "s.sqlite")
+    c.put(pb_nalog.card_url(IP_INN), _card(IP_INN, "47.41", "Торговля розничная компьютерами", kpp="500101001"))
+    lead = web_leads.Lead(okpd2_class="21.20", inn=IP_INN, name="ip.ru", site="ip.ru", role_claim="unknown",
+                          region=None, source_url="https://ip.ru/", search_query="q", found_at=date.today())
+    store = store_for(_processed(tmp_path, []))
+    args = (QUERY, ["21.20.10.110"], ["21.20"], set(), c, WEIGHTS, False, store, "Санкт-Петербург", None)
+    off, _, _, off_line = D.lead_matches(*args, leads={IP_INN: lead})
+    assert off == [] and off_line and "тип ИНН не из DISCOVERY_NP_TYPES 1" in off_line
+    on, _, _, _ = D.lead_matches(*args, leads={IP_INN: lead}, live=True)
+    (m,) = on
+    fit = m.components[0]
+    assert fit.value == D.RETAIL_FIT and "розничная торговля" in fit.explanation
+    assert next(x for x in m.components if x.name == "geography").value == 0.0  # Московская область: scored, kept

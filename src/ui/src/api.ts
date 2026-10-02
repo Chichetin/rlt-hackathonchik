@@ -38,7 +38,8 @@ export function filtersActive(f: Filters): boolean {
 }
 
 // Дополнительный контекст готового извещения. ОКПД2 также можно ввести в строку поиска.
-export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "budget">;
+// as_of: the lot's publish date from a test export (#589) — the search sees history strictly before it
+export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "budget" | "as_of">;
 // customer_region: the customer's region when there is no customer INN (#242) — goes to Query.region
 export type Extra = { okpd2?: string; budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
 
@@ -69,6 +70,7 @@ export function buildQuery(text: string, filters: Filters, extra?: Extra): Query
   if (enteredCode) q.okpd2 = [enteredCode];
   else if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
   if (extra?.lot?.channel) q.channel = extra.lot.channel;
+  if (extra?.lot?.as_of) q.as_of = extra.lot.as_of;
   const budget = Number(extra?.budget.replace(/\s/g, "").replace(",", "."));
   if (extra?.budget.trim() && Number.isFinite(budget) && budget > 0) q.budget = budget;
   const inn = (extra?.customer_inn ?? "").trim();

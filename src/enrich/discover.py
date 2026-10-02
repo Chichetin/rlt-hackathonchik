@@ -61,6 +61,7 @@ from src.match import new_fit
 from src.match import search as search_mod
 from src.match.filters import apply_filters, apply_legal
 from src.match.index import processed_dir
+from src.match.purchase_type import purchase_type
 from src.match.store import Store, get_store, store_for
 from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_NAME
 from src.settings import get_settings
@@ -77,6 +78,7 @@ MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
 FIT = {"class": 1.0, "wholesale": 0.6}  # product_fit of a discovered company (D-036)
+RETAIL_OKVED, RETAIL_FIT = "47", 0.4  # the live button only (#583): a retailer of goods found by the product
 COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geography", "price")
 
 # OKPD2 prefix (longest wins) → OKVED2 wholesale codes for these goods, the main one first. A hand-made
@@ -262,6 +264,15 @@ def _lots_class(history: Sequence[CounterpartyMatch], store: Store | None = None
 def known_inns(inns: Sequence[str], as_of: date | None, store: Store | None = None) -> set[str] | None:
     """INNs present in organizers' data (before as_of) — the suppliers table of `store` (default: the store
     search() reads, Postgres in `make up`); None — the data is absent, nothing checked."""
+    if as_of is not None:  # a lot after the data (#589, defense export): everyone in the data is before it
+        from src.match.index import get_index
+
+        try:
+            end = get_index(store, None).data_end
+        except _STORE_ERRORS:
+            end = None
+        if end is not None and as_of > end:
+            as_of = None
     try:
         everyone = (store or get_store()).supplier_inns(as_of)
     except _STORE_ERRORS as e:  # StoreUnavailable (no table for as_of, Postgres down) is an OSError
@@ -381,7 +392,7 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
         rel_why = "Состоит в реестре МСП; статус в ЕГРЮЛ ещё не проверен (обогащение в очереди) — в score не входит"
 
     want, code = REGION_CODE.get(region), row.get("regioncode", "")
-    where = REGION_NAME.get(code, f"регион с кодом {code}")
+    where = REGION_NAME.get(code, f"регион с кодом {code}") if code else "регион не установлен"
     if want is not None and code == want:
         geo, geo_why = 1.0, f"Реестр МСП: {where}"
     elif want is not None and NEIGHBOUR.get(want) == code:
@@ -447,7 +458,7 @@ def leads_enabled() -> bool:
 def lead_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], cache: SourceCache,
     weights: dict[str, float], predicted: bool, store: Store, region: str, region_note: str | None,
-    leads: dict[str, web_leads.Lead] | None = None,
+    leads: dict[str, web_leads.Lead] | None = None, *, live: bool = False,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """Web leads of the query's classes (#108, src/sources/web_leads.py): companies outside the МСП registry.
 
@@ -458,7 +469,9 @@ def lead_matches(
     DISCOVERY_NP_TYPES — the same rules as the registry channel, so product_fit keeps its steps (D-036).
     Returns the matches, their relation, the new INNs without a cached card (for the queue) and one line
     for `Discovery.leads`. `leads` — INN → lead given by the caller (the Yandex fallback, src/enrich/web_discover.py);
-    None — the lead files of the query's classes.
+    None — the lead files of the query's classes. `live` (#583, the button «Искать в реальном времени»): an
+    individual entrepreneur is taken whatever DISCOVERY_NP_TYPES says, and for goods any region (the geography stays a
+    component of the score, not a filter — the organizers' expert: for goods the region does not matter).
     """
     leads = dict(web_leads.for_classes(list(classes), web_leads.load()) if leads is None else leads)
     for inn in skip:  # already found in the МСП registry: one row per company
@@ -468,7 +481,8 @@ def lead_matches(
     known = known_inns(list(leads), query.as_of, store) or set()
     plan = okved_plan(codes)
     regions = _regions(query)
-    np_types = _np_types()
+    np_types = ["UL", "IP"] if live else _np_types()
+    any_region = live and purchase_type(codes) == "goods"
     out: list[CounterpartyMatch] = []
     relation: dict[str, Relation] = {}
     no_card: list[str] = []
@@ -486,14 +500,19 @@ def lead_matches(
             continue
         code = cp.okved[0] if cp.okved else ""
         ch = next((c for c in plan if c.okpd_class == lead.okpd2_class and code.startswith(c.okved)), None)
+        retail = ch is None and live and any_region and code.startswith(RETAIL_OKVED)
+        if retail:  # #583: the button takes a retailer of goods (47.x) found by the product, with a lower fit
+            ch = Channel(okved=RETAIL_OKVED, okpd_class=lead.okpd2_class, relation="wholesale")
         if ch is None:  # the registry does not confirm the category the search found it for
             other_okved += 1
             continue
         regioncode = cp.kpp[:2] if cp.kpp else REGION_CODE.get(cp.region or "", "")
-        if not regioncode or regioncode == "99":  # ГИР БО without KPP; KPP 99 of the largest taxpayers
+        if any_region:  # #583: goods from anywhere; an unknown region scores 0 in «География»
+            regioncode = "" if regioncode == "99" else regioncode
+        elif not regioncode or regioncode == "99":  # ГИР БО without KPP; KPP 99 of the largest taxpayers
             no_region += 1
             continue
-        if regioncode not in regions:
+        elif regioncode not in regions:
             other_region += 1
             continue
         # the OKVED name only from a fact «Основной ОКВЭД <code> — <name>» (ГИР БО gives the code alone)
@@ -503,10 +522,14 @@ def lead_matches(
         comps = []
         for c in _components(cp, row, ch, predicted, True, region, weights, region_note):
             why = c.explanation
-            if c.name == "product_fit":
+            if c.name == "product_fit" and retail:
+                c = c.model_copy(update={"value": RETAIL_FIT})
+                why = (f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: основной ОКВЭД {code} — "
+                       "розничная торговля, производство и опт по реестру не подтверждены")
+            elif c.name == "product_fit":
                 why = f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: {why}"
-            elif c.name == "geography" and cp.kpp:
-                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)")
+            elif c.name == "geography":  # the region comes from the card, not from a registry row
+                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)") if cp.kpp else why.replace("Реестр МСП: ", "")
             comps.append(c.model_copy(update={"explanation": why}))
         relation[inn] = ch.relation
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
@@ -546,7 +569,7 @@ def yandex_matches(
     leads = {lead.inn: lead for lead in fb.leads if lead.inn and lead.inn not in skip}
     if fetch_card is not None:  # only a company the lead road could show: not in organizers' data, an allowed type
         known = known_inns(list(leads), query.as_of, store) or set()
-        np_types = _np_types()
+        np_types = ["UL", "IP"] if force else _np_types()  # the button takes an individual entrepreneur too (#583)
         for inn in leads:
             if inn in known or ("UL" if len(inn) == 10 else "IP") not in np_types:
                 continue
@@ -556,7 +579,7 @@ def yandex_matches(
                 except Exception:  # noqa: BLE001 — a card that fails stays «без карточки», the rest go on
                     log.exception("живой поиск: карточка ФНС %s не получена", inn)
     found, relation, no_card, line = lead_matches(query, codes, classes, skip, cache, weights, predicted, store,
-                                                  region, region_note, leads=leads)
+                                                  region, region_note, leads=leads, live=force)
     out: list[CounterpartyMatch] = []
     for m in found:
         s = fb.check(m.counterparty.inn or "")
