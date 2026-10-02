@@ -37,10 +37,15 @@ export function filtersActive(f: Filters): boolean {
   return f.only_msp || f.kinds.length > 0 || !!f.entity || !!f.min_level;
 }
 
-// Поля закупки, которые не вводятся руками: приходят из извещения (okpd2, канал, ИНН заказчика).
+// Дополнительный контекст готового извещения. ОКПД2 также можно ввести в строку поиска.
 export type LotContext = Pick<Query, "okpd2" | "channel" | "customer_inn" | "budget">;
 // customer_region: the customer's region when there is no customer INN (#242) — goes to Query.region
-export type Extra = { budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
+export type Extra = { okpd2?: string; budget: string; customer_inn: string; lot: LotContext | null; query_id?: string; customer_region?: string };
+
+export function enteredOkpd2(text: string): string | undefined {
+  const code = text.trim().replace(/^ОКПД2\s*[:—-]?\s*/i, "");
+  return /^\d{2}(?:\.\d|\.\d{2}(?:\.\d|\.\d{2}(?:\.\d{1,3})?)?)?$/.test(code) ? code : undefined;
+}
 
 export function buildQuery(text: string, filters: Filters, extra?: Extra): Query {
   const f: Record<string, string | boolean | number> = {};
@@ -58,7 +63,11 @@ export function buildQuery(text: string, filters: Filters, extra?: Extra): Query
     filters: f,
     region: extra?.customer_region || "Санкт-Петербург",
   };
-  if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
+  // A code-only query goes through the existing OKPD2 search path. Product
+  // dimensions/model numbers inside prose must not become category filters.
+  const enteredCode = extra?.okpd2?.trim() ? enteredOkpd2(extra.okpd2) : enteredOkpd2(text);
+  if (enteredCode) q.okpd2 = [enteredCode];
+  else if (extra?.lot?.okpd2?.length) q.okpd2 = extra.lot.okpd2;
   if (extra?.lot?.channel) q.channel = extra.lot.channel;
   const budget = Number(extra?.budget.replace(/\s/g, "").replace(",", "."));
   if (extra?.budget.trim() && Number.isFinite(budget) && budget > 0) q.budget = budget;
@@ -116,7 +125,7 @@ async function post(path: string, body: unknown): Promise<Response> {
 
 // Пагинация и фильтры — на сервере (D-024): страница каждого блока, размер блока после фильтров —
 // в заголовках X-Total-History / X-Total-Discovered (в замороженном SearchResponse поля total нет).
-export const PAGE = 20;
+export const PAGE = 10;
 export const ALL = 200; // все кандидаты запроса (search.CANDIDATES): для подсчёта скрытых фильтром
 export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)

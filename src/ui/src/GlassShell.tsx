@@ -6,8 +6,7 @@ import { glide } from "./Motion";
 type Link = (to: string) => AnchorHTMLAttributes<HTMLAnchorElement>;
 const pages = [
   { to: "/", label: "Главная", hint: "Возможности Митрандира", icon: "home" },
-  { to: "/search", label: "Подбор", hint: "Опишите закупку или загрузите извещение", icon: "search" },
-  { to: "/results", label: "Результаты", hint: "Найденные компании и основания подбора", icon: "results" },
+  { to: "/search", label: "Подбор", hint: "Название товара или ОКПД2 → поставщики", icon: "search" },
   { to: "/settings", label: "Фильтры", hint: "Требования к поставщикам и оценка", icon: "settings" },
   { to: "/about", label: "О сервисе", hint: "Источники данных и критерии оценки", icon: "about" },
 ];

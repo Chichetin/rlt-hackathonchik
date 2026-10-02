@@ -18,6 +18,7 @@ SCRIPT = ROOT / "scripts" / "data.sh"
 BASH = shutil.which("bash")
 PROCESSED = ("notices.parquet", "participants.parquet", "items.parquet", "suppliers.parquet",
              "suppliers_2025-07-01.parquet", "manifest.json")
+POOL_ASSETS = ("pool-companies.parquet", "pool-okved.parquet", "pool-large.parquet", "pool-manifest.json")
 CSVS = ("Извещения_24-25.csv", "Поставщики_24-25.csv", "ТРУ_24-25.csv")
 
 pytestmark = pytest.mark.skipif(BASH is None or sys.platform == "win32", reason="needs a POSIX bash")
@@ -55,6 +56,9 @@ def release(tmp_path: Path) -> dict[str, str]:
     (assets / "gisp-meta.json").write_text('{"rows": 1}\n', encoding="utf-8")
     (assets / "SHA256SUMS.gisp").write_text(
         "".join(f"{sha(assets / n)}  {n}\n" for n in ("gisp-products.parquet", "gisp-meta.json")), encoding="utf-8")
+    for n in POOL_ASSETS:
+        (assets / n).write_text(f"pool {n}\n", encoding="utf-8")
+    (assets / "SHA256SUMS.pool").write_text("".join(f"{sha(assets / n)}  {n}\n" for n in POOL_ASSETS), encoding="utf-8")
     gh = bin_dir / "gh"
     gh.write_text(FAKE_GH, encoding="utf-8")
     gh.chmod(0o755)
@@ -62,6 +66,7 @@ def release(tmp_path: Path) -> dict[str, str]:
             "FAKE_LOG": str(tmp_path / "gh.log"), "DATA_PROCESSED_DIR": str(tmp_path / "out" / "processed"),
             "DATA_RAW_DIR": str(tmp_path / "out" / "raw dir"),
             "GISP_DIR": str(tmp_path / "out" / "gisp dir"),
+            "POOL_DIR": str(tmp_path / "out" / "pool dir"),
             "SOURCE_CACHE": str(tmp_path / "out" / "cache dir" / "sources.sqlite")}  # a space in the path on purpose
 
 
@@ -259,3 +264,32 @@ def test_gisp_default_directory_is_next_to_data_processed_dir(release):
     res = run(["gisp"], env)
     assert res.returncode == 0, res.stderr
     assert (Path(env["DATA_PROCESSED_DIR"]).parent / "external" / "gisp" / "products.parquet").exists()
+
+
+def test_pool_takes_every_listed_asset_under_its_table_name(release):
+    out = Path(release["POOL_DIR"])
+    res = run(["pool"], release)
+    assert res.returncode == 0, res.stderr
+    assert sorted(p.name for p in out.iterdir()) == ["companies.parquet", "large.parquet", "manifest.json",
+                                                     "okved.parquet"]  # no .download.* left
+    assert (out / "okved.parquet").read_text(encoding="utf-8") == "pool pool-okved.parquet\n"
+    assert downloads(release) == ["SHA256SUMS.pool", *POOL_ASSETS]  # the list of the checksums, not a fixed set
+    again = run(["pool"], release)
+    assert again.returncode == 0 and again.stdout.count("уже на месте") == len(POOL_ASSETS)
+    assert downloads(release) == ["SHA256SUMS.pool"]
+
+
+def test_pool_with_wrong_checksum_or_bad_name_is_refused_and_not_part_of_all(release):
+    assets = Path(release["FAKE_ASSETS"])
+    (assets / "pool-okved.parquet").write_text("tampered", encoding="utf-8")
+    res = run(["pool"], release)
+    assert res.returncode == 1 and "контрольная сумма pool-okved.parquet не сошлась" in res.stderr
+    assert not (Path(release["POOL_DIR"]) / "okved.parquet").exists()
+    downloads(release)
+    assert run([], release).returncode == 0 and "SHA256SUMS.pool" not in downloads(release)
+    (assets / "SHA256SUMS.pool").write_text(f"{'0' * 64}  pool-../evil\n", encoding="utf-8")
+    bad = run(["pool"], release)
+    assert bad.returncode == 1 and "недопустимое имя" in bad.stderr
+    (assets / "SHA256SUMS.pool").write_text(f"{'0' * 64}  other.parquet\n", encoding="utf-8")
+    empty = run(["pool"], release)
+    assert empty.returncode == 1 and "нет файлов pool-*" in empty.stderr
