@@ -217,3 +217,6 @@ F-511-v2:        # база: формула v2 как есть
 F-511-sat100:    # + насыщение опыта 100 лотов / 50 побед только на этом пути (как H-196-sat100)
   ranker: null
   no_customer_options: {sat_lots: 100, sat_wins: 50}
+F-511-sat-act:   # + давность по последнему лоту с похожими позициями (activity_by: similar, как в H-105-combo)
+  ranker: null
+  no_customer_options: {sat_lots: 100, sat_wins: 50, activity_by: similar}
