@@ -79,7 +79,7 @@ def vec_files(model: str, gpu_dir: Path = GPU_DIR) -> list[Path]:
 
 
 def load_model(model: str, device: str | None = None):
-    from sentence_transformers import SentenceTransformer, models  # pyright: ignore[reportMissingImports]
+    from sentence_transformers import SentenceTransformer, models  # pyright: ignore[reportMissingImports, reportAttributeAccessIssue]
 
     try:
         m = SentenceTransformer(model, device=device)
@@ -105,7 +105,7 @@ def encode_corpus(model: str, gpu_dir: Path = GPU_DIR, chunk: int = 50_000) -> P
     m = load_model(model)
     dim = m.get_sentence_embedding_dimension()
     passage = PREFIX[model][1]
-    bs = 512 if dim <= 384 else 256
+    bs = 512 if dim <= 384 else 256  # pyright: ignore[reportOptionalOperand]
     out = gpu_dir / f"vecs-{slug(model)}.parquet"
     schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), dim))],
                        metadata={"model": model, "prefix": passage})
