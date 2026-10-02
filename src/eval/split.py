@@ -19,13 +19,12 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.contracts import Query
+from src.ingest.split_config import split_config  # src/ingest since #294; the eval tools keep importing it from here
 
 ROOT = Path(__file__).resolve().parents[2]
-SPLIT_CONFIG = ROOT / "configs" / "split.yaml"
 
 _unsealed: contextvars.ContextVar[bool] = contextvars.ContextVar("holdout_unsealed", default=False)
 
@@ -41,10 +40,6 @@ class EvalCase(BaseModel):
     date: date  # procurement date; decides dev/holdout
     # Graded relevance per INN (winner 2, other offer 1); empty = every relevant INN has grade 1.
     grades: dict[str, int] = Field(default_factory=dict)
-
-
-def split_config(path: Path = SPLIT_CONFIG) -> dict:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 PARTS = ("dev", "dev_full", "real", "holdout")

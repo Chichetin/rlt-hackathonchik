@@ -41,7 +41,7 @@ LAYERS: dict[str, int] = {
     "src.sources": 1,
     "src.db": 1,
     "src.llm": 1,
-    "src.ingest": 1,  # build, load, notice, okpd2, profile, testset
+    "src.ingest": 1,  # build, load, notice, okpd2, profile, split_config, testset
     "src.worker.queue": 1,
     # L2: the match core (store, index, search, fallback, filters, signals, profiles, text)
     "src.match": 2,

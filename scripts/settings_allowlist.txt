@@ -18,7 +18,7 @@ src/sources/eis_rnp.py
 src/sources/pb_nalog.py
 src/sources/rmsp.py
 
-# Появились на main, пока #290 была в ревью (кроме lots.py — его правка main пересеклась); переводятся в #297.
+# Появились на main, пока #290 была в ревью (lots.py: перевод потерян при слиянии с main, повторить); переводятся в #297.
 src/api/lots.py
 src/eval/pool_recall.py
 src/match/ranker_train.py

@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import duckdb
 
-    from src.eval.split import split_config
+    from src.ingest.split_config import split_config
     from src.match import speller
     from src.match.search import prebuild_doc_codes
 
