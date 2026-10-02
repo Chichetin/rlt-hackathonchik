@@ -211,8 +211,29 @@ def test_dirty_tree_and_other_data_source_are_warned_about(tmp_path, capsys):
 def test_same_commit_says_that_a_difference_is_nondeterminism(tmp_path, capsys):
     b = {**BASE, "q1": list(reversed(BASE["q1"]))}
     code, out, _ = run_parity(tmp_path, rec("A", BASE), rec("B", b), capsys)  # both runs: the same commit
-    assert code == 1 and "недетерминизм" in out
+    assert code == 1 and "недетерминизм прогона" in out and "не установлен" not in out
     code, out, _ = run_parity(tmp_path, rec("A", BASE), rec("B", b, commit="deadbeef" * 5), capsys)
+    assert code == 1 and "недетерминизм" not in out  # other commits: the difference may be the change itself
+
+
+@pytest.mark.parametrize("other", [
+    {"config": {"k": 10}},  # other configuration (H-15b against H-15f, B-pop against B-inc)
+    {"store": "postgres"},  # other data source
+    {"part": "real"},
+    {"dirty": True},  # the tree of the run was not the commit
+], ids=["config", "store", "part", "dirty"])
+def test_same_commit_but_other_input_is_not_called_nondeterminism(tmp_path, capsys, other):
+    """One commit, another config / data / tree: the input differs, the verdict is «not established»."""
+    b = {**BASE, "q1": list(reversed(BASE["q1"]))}
+    same = {"store": "parquet"}
+    code, out, _ = run_parity(tmp_path, rec("A", BASE, **same), rec("B", b, **{**same, **other}), capsys)
+    assert code == 1
+    assert "ПРЕДУПРЕЖДЕНИЕ" in out
+    assert "недетерминизм прогона" not in out
+    assert "недетерминизм не установлен" in out and "коммит один" in out
+    # the same runs under other commits: no verdict at all
+    code, out, _ = run_parity(tmp_path, rec("A", BASE, **same),
+                              rec("B", b, **{**same, **other, "commit": "deadbeef" * 5}), capsys)
     assert code == 1 and "недетерминизм" not in out
 
 

@@ -150,8 +150,9 @@ def main(argv: list[str] | None = None, results: Path = RESULTS) -> int:
         print(e, file=sys.stderr)
         return 2
     diffs = diff_rankings(ra, rb)
+    warned = warnings(a, b)
     print(f"parity {_title(a, 'A')} vs {_title(b, 'B')} | part={a.get('part')} | кейсов сравнено: {len(ra)}")
-    for w in warnings(a, b):
+    for w in warned:
         print(f"ПРЕДУПРЕЖДЕНИЕ: {w}")
     print(f"расхождений: {len(diffs)} из {len(ra)} ({100 * len(diffs) / len(ra):.2f}%)")
     if not diffs:
@@ -163,10 +164,13 @@ def main(argv: list[str] | None = None, results: Path = RESULTS) -> int:
         print(format_diff(d))
     if len(diffs) > args.show:
         print(f"  … ещё {len(diffs) - max(args.show, 0)} (-n {len(diffs)} — показать все)")
-    same_commit = a.get("commit") and a.get("commit") == b.get("commit") and not (a.get("dirty") or b.get("dirty"))
-    if same_commit:
-        print("один и тот же коммит без правок: расхождение — недетерминизм прогона (поиск или хранилище), "
-              "не следствие правки")
+    if a.get("commit") and a.get("commit") == b.get("commit"):
+        if warned:  # another config / data / tree: the input differs, so the difference is not the search's own
+            print("коммит один, но различаются конфигурация или данные (см. ПРЕДУПРЕЖДЕНИЕ) — "
+                  "недетерминизм не установлен")
+        else:
+            print("один и тот же коммит, конфигурация и данные: расхождение — недетерминизм прогона "
+                  "(поиск или хранилище), не следствие правки")
     print("PARITY: FAIL — выдачи различаются")
     return 1
 
