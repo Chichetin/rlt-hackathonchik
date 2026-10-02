@@ -527,7 +527,8 @@ def yandex_matches(
     """The paid fallback (#194, src/enrich/web_discover.py): Yandex → company site → INN → the road of a web lead.
 
     Asked only when the free sources — every history candidate and every «Новые» found so far, after the legal
-    filters — hold fewer strong candidates than `min_strong` (#558: 5, topped up to it). The lot of the per-lot ceiling is `query.query_id`. `deadline` —
+    filters — hold fewer strong candidates than `min_strong` (#558: 5, topped up to it). The lot of the per-lot
+    ceiling is `query.query_id`. `deadline` —
     the one of the whole discover(): after it Yandex and the sites are read from their caches only. Leads answer the
     first class of the query. A company already in `skip` (found by the registry or a lead file) is not repeated.
     Returns what `lead_matches` returns. `force` (#550, the button «Искать в реальном времени») — asked whatever the
