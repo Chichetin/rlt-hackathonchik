@@ -7,15 +7,21 @@ Per lot: «Новые» non-empty, any product_fit 1.0, a registry-confirmed pro
 top-10), a company added by the registry alone, the Evidence check of every registry-confirmed candidate.
 
   uv run python scripts/gisp_coverage.py --gisp-dir /mnt/storage/rlt236/gisp \\
-      --cases eval/cases/dev.jsonl --out eval/results/K3-gisp-dev.json
+      --cases eval/cases/dev.jsonl --out eval/results/K3-gisp-dev.json \\
+      --sample 30 --seed 74 --pairs-out eval/labels/gisp_pairs_<версия>.csv
+
+`--pairs-out`: a seeded random sample of the shown registry-confirmed pairs (lot × company × product) for hand
+labelling «поставляет ли этот товар» (the label column is empty: a person or a reviewer fills it).
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
-import os
+import random
+import re
 import shutil
 import subprocess
 import sys
@@ -26,18 +32,33 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.contracts import Query  # noqa: E402
+from src.contracts import CounterpartyMatch, Query  # noqa: E402
 from src.enrich import discover as D  # noqa: E402
 from src.enrich.evidence import check_counterparty  # noqa: E402
+from src.settings import get_settings  # noqa: E402
 from src.sources import gisp  # noqa: E402
 from src.sources.cache import SourceCache  # noqa: E402
 
+_PRODUCT = re.compile(r"«(.*)» — ОКПД2 (\S+),")
 
-def _run(query: Query, cache: SourceCache, gisp_dir: Path) -> dict:
+
+def _pair(query: Query, m: CounterpartyMatch) -> dict:
+    """What the user sees for one registry-confirmed company: the lot, the company, its product and the step."""
+    fact = next((e.fact for e in m.counterparty.evidence
+                 if e.source == gisp.SOURCE and e.fact.startswith("Производит")), "")
+    found = _PRODUCT.search(fact)
+    return {"lot": query.query_id, "lot_okpd2": " ".join(query.okpd2), "lot_text": query.text[:400],
+            "inn": m.counterparty.inn, "company": m.counterparty.name, "product": found.group(1) if found else "",
+            "product_okpd2": found.group(2) if found else "", "product_fit": m.components[0].value, "label": ""}
+
+
+def _run(query: Query, cache: SourceCache, gisp_dir: Path, pairs: list[dict] | None = None) -> dict:
     gisp.DIR = gisp_dir
     res = D.discover(query, cache=cache, offline=True)
     shown = res.matches
     backed = [m for m in shown if (m.counterparty.inn or "") in res.gisp_backed]
+    if pairs is not None:
+        pairs.extend(_pair(query, m) for m in backed)
     fails = sum(bool(check_counterparty(m.counterparty, cache.page_text)) for m in backed)
     return {"new": len(shown), "fit1": sum(m.components[0].value >= 1.0 for m in shown), "gisp": len(backed),
             "gisp_only": sum(not any(e.source != gisp.SOURCE for e in m.counterparty.evidence) for m in backed),
@@ -50,6 +71,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gisp-dir", type=Path, required=True)
     ap.add_argument("--limit", type=int, default=0, help="first N lots (0 — all)")
     ap.add_argument("--out", type=Path)
+    ap.add_argument("--pairs-out", type=Path, help="CSV: a random sample of shown registry-confirmed pairs")
+    ap.add_argument("--sample", type=int, default=30)
+    ap.add_argument("--seed", type=int, default=74)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.ERROR)
     if not gisp.available(args.gisp_dir):
@@ -57,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     lines = args.cases.read_text(encoding="utf-8").splitlines()
     cases = [json.loads(x) for x in lines if x.strip()][: args.limit or None]
-    src = Path(os.environ.get("SOURCE_CACHE", ROOT / "cache" / "sources.sqlite"))
+    src = get_settings().source_cache
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                             cwd=ROOT).stdout.strip()  # at the start: the code that is measured
     t0 = time.time()
@@ -68,10 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         cache = SourceCache(copy)
         absent = Path(tmp) / "no-gisp"
         per: list[dict] = []
+        pairs: list[dict] = []
         for case in cases:
             q = Query(**case["query"])
             per.append({"lot": q.query_id, "okpd2": q.okpd2, "before": _run(q, cache, absent),
-                        "after": _run(q, cache, args.gisp_dir)})
+                        "after": _run(q, cache, args.gisp_dir, pairs)})
     with_code = [p for p in per if p["okpd2"]]
 
     def lots(when: str, key: str) -> int:
@@ -91,6 +116,13 @@ def main(argv: list[str] | None = None) -> int:
               "source_cache": str(src), "offline": True, "seconds": round(time.time() - t0, 1),
               "summary": summary, "per_lot": per}
     print(json.dumps({k: v for k, v in result.items() if k != "per_lot"}, ensure_ascii=False, indent=1))
+    if args.pairs_out:
+        sample = random.Random(args.seed).sample(pairs, min(args.sample, len(pairs)))
+        with args.pairs_out.open("w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(sample[0]) if sample else ["lot"])
+            w.writeheader()
+            w.writerows(sample)
+        result["pairs"] = {"shown": len(pairs), "sampled": len(sample), "seed": args.seed, "file": str(args.pairs_out)}
     if args.out:
         args.out.write_text(json.dumps(result, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return 0

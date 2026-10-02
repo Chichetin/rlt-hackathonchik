@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import re
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -135,7 +134,8 @@ class Discovery:
     candidates: list[CounterpartyMatch] = field(default_factory=list)
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
     leads: list[str] = field(default_factory=list)  # web leads (#108): what happened to them, one line
-    relation: dict[str, str] = field(default_factory=dict)  # INN → why it matched: class / wholesale (STEP)
+    # INN → why it matched, a key of STEP: class / wholesale / extra, registry / registry_kind (ГИСП, #74)
+    relation: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     # product_fit_new (#77, src/match/new_fit.py): off — not computed; shadow — computed here only;
     # on — it IS product_fit of every match (experiment only, confirmation №3 to make it the default)
@@ -512,6 +512,13 @@ def lead_matches(
 
 GISP_MARK = "реестру Минпромторга (ГИСП)"  # in product_fit of a product confirmed by the registry (#74)
 _LETTERS = re.compile(r"[^\W\d_]+", re.UNICODE)
+# Stems that do not tell a product (review of PR #429 on dev lots): «вакцина» met «препараты», «материалы»,
+# «медицинский», «применения»; Dr.Web met «электропитание». Compared by 5 letters, as configs/discover.yaml.
+GISP_STOPWORDS = ("через", "около", "после", "между", "перед", "медиц", "приме", "препа", "матер", "однор", "компл",
+                  "средс", "защит", "элект", "издел", "марки", "массо", "форма", "разме", "назна", "испол")
+GISP_STEP = {"code": "registry", "kind": "registry_kind"}  # match level → key of STEP
+GISP_MIN_SHARED = {"code": 1, "kind": 2}  # a neighbour code needs two words of the items in the product's name
+MIN_STEM = 4  # a stem of ≤ 3 letters («при», «лот», «мнн») is not a word of the product
 
 
 def _stem(word: str) -> str:
@@ -519,14 +526,22 @@ def _stem(word: str) -> str:
     return word[:max(3, min(new_fit.PREFIX, len(word) - 1))]
 
 
+def items_text(text: str) -> str:
+    """The items of a lot (after the first «;»: «Поставка … для нужд <заказчик>; <позиция>; <позиция>»); a free-text
+    query has no «;» and is all items."""
+    head, sep, tail = text.partition(";")
+    return tail if sep and tail.strip() else head
+
+
 def query_stems(text: str) -> list[str]:
-    """Words of the query that may name the product: 3+ letters, minus the service words of a purchase
-    (configs/discover.yaml `query_stopwords`, compared by 5 letters as in src/match/new_fit.py)."""
-    stop = {str(w).lower()[:new_fit.PREFIX] for w in new_fit.config().get("query_stopwords", ())}
+    """Stems of the lot's ITEMS that may name the product: stems of ≥ MIN_STEM letters, minus the service words of a
+    purchase (configs/discover.yaml `query_stopwords`) and GISP_STOPWORDS, compared by 5 letters."""
+    stop = {str(w).lower()[:new_fit.PREFIX] for w in (*new_fit.config().get("query_stopwords", ()), *GISP_STOPWORDS)}
     out: list[str] = []
-    for w in _LETTERS.findall(text.lower().replace("ё", "е")):
-        if len(w) >= 3 and w[:new_fit.PREFIX] not in stop and _stem(w) not in out:
-            out.append(_stem(w))
+    for w in _LETTERS.findall(items_text(text).lower().replace("ё", "е")):
+        st = _stem(w)
+        if len(st) >= MIN_STEM and w[:new_fit.PREFIX] not in stop and st not in out:
+            out.append(st)
     return out
 
 
@@ -536,33 +551,66 @@ def shared_words(stems: Sequence[str], name: str) -> list[str]:
     return [s for s in stems if any(w.startswith(s) for w in words)]
 
 
-def gisp_split(hits: dict[str, list[gisp.Product]], stems: Sequence[str]
-               ) -> tuple[dict[str, list[gisp.Product]], dict[str, list[gisp.Product]]]:
-    """Registry makers of the query's code → (the product is named like the query: a word of the query in the
-    product's name — products with such a word first; the code alone). A code is not enough: «прочие» codes are
-    wide (32.50.50.190 holds both UV irradiators and incontinence pads)."""
-    named: dict[str, list[gisp.Product]] = {}
+@dataclass(frozen=True)
+class GispHit:
+    """Products of one maker that answer the lot, the best first, and the level of the best one."""
+
+    level: str  # "code" | "kind" (gisp.match_level)
+    products: list[gisp.Product]
+
+    @property
+    def step(self) -> str:
+        return GISP_STEP[self.level]
+
+
+def _level(codes: Sequence[str], p: gisp.Product) -> str | None:
+    levels = {gisp.match_level(c, p.okpd2) for c in codes}
+    return "code" if "code" in levels else "kind" if "kind" in levels else None
+
+
+def gisp_split(by_code: dict[str, list[gisp.Product]], codes: Sequence[str], stems: Sequence[str]
+               ) -> tuple[dict[str, GispHit], dict[str, list[gisp.Product]]]:
+    """Registry makers of the lot's code → (the product answers the lot: the same code and a word of the items in
+    its name, or a code of the same kind and two such words; the rest — the code alone, a role basis only).
+    A code is not enough: «прочие» codes are wide (32.50.50.190 holds UV irradiators and incontinence pads), and
+    a kind holds neighbours (17.12.14: office paper and till rolls)."""
+    hits: dict[str, GispHit] = {}
     code_only: dict[str, list[gisp.Product]] = {}
-    for inn, products in hits.items():
-        ranked = sorted(products, key=lambda p: not shared_words(stems, p.name))  # stable: closeness kept
-        (named if shared_words(stems, ranked[0].name) else code_only)[inn] = ranked
-    return named, code_only
+    for inn, products in by_code.items():
+        good: list[tuple[int, int, gisp.Product]] = []
+        for p in products:
+            level, n = _level(codes, p), len(shared_words(stems, p.name))
+            if level is not None and n >= GISP_MIN_SHARED[level]:
+                good.append((0 if level == "code" else 1, -n, p))
+        if good:
+            good.sort(key=lambda t: (t[0], t[1]))  # stable: the closest code first within a rank
+            ranked = [p for _, _, p in good]
+            hits[inn] = GispHit("code" if good[0][0] == 0 else "kind", ranked)
+        else:
+            code_only[inn] = products
+    return hits, code_only
 
 
-def _gisp_why(p: gisp.Product, codes: Sequence[str], predicted: bool, stems: Sequence[str] = ()) -> str:
-    """product_fit 1.0 by the registry: which product, its code against the query's one, the shared words."""
-    near = max(codes, key=lambda c: (gisp.agrees(c, p.okpd2), len(os.path.commonprefix([c, p.okpd2]))))
+def _common(a: str, b: str) -> str:
+    n = 0
+    while n < min(len(a), len(b)) and a[n] == b[n]:
+        n += 1
+    return a[:n]
+
+
+def _gisp_why(p: gisp.Product, level: str, codes: Sequence[str], predicted: bool, stems: Sequence[str] = ()) -> str:
+    """product_fit by the registry: which product, its code against the query's one, the shared words."""
+    near = max(codes, key=lambda c: (gisp.match_level(c, p.okpd2) is not None, len(_common(c, p.okpd2))))
     # a predicted code is never presented as the code of the query (#63, #394: it is defined by the text)
     label = "ОКПД2, определённым по тексту запроса," if predicted else "ОКПД2 запроса"
-    if p.okpd2 == near:
-        agree = f"совпадает с {label} {near}"
-    else:
-        common = os.path.commonprefix([near, p.okpd2])[:gisp.KIND_DEPTH].rstrip(".")
-        agree = f"совпадает с {label} {near} до {common}"
     named = [w for w in _LETTERS.findall(p.name) if any(w.lower().replace("ё", "е").startswith(s) for s in stems)]
-    said = f"; слова запроса в наименовании продукции: {', '.join(dict.fromkeys(named))}" if named else ""
-    return (f"Производит этот товар по {GISP_MARK}: «{p.name}», ОКПД2 {p.okpd2} — {agree}{said}; "
-            f"реестровая запись № {p.reg_number}")
+    said = f"; слова позиций в наименовании продукции: {', '.join(dict.fromkeys(named))}" if named else ""
+    if level == "code":
+        return (f"Производит этот товар по {GISP_MARK}: «{p.name}», ОКПД2 {p.okpd2} — совпадает с {label} {near}"
+                f"{said}; реестровая запись № {p.reg_number}")
+    kind = _common(near, p.okpd2)[:gisp.KIND_DEPTH].rstrip(".")
+    return (f"Производит товар того же вида {kind} по {GISP_MARK}: «{p.name}», ОКПД2 {p.okpd2} — код не совпадает "
+            f"с {label} {near}{said}; реестровая запись № {p.reg_number}")
 
 
 def _rescore(m: CounterpartyMatch, cp: Counterparty, comps: list[ScoreComponent]) -> CounterpartyMatch:
@@ -570,17 +618,16 @@ def _rescore(m: CounterpartyMatch, cp: Counterparty, comps: list[ScoreComponent]
                                 "score": round(sum(c.value * c.weight for c in comps), 4)})
 
 
-def gisp_confirm(m: CounterpartyMatch, hit: Sequence[gisp.Product], other: Sequence[gisp.Product],
-                 codes: Sequence[str], predicted: bool, cache: SourceCache, stems: Sequence[str] = ()
-                 ) -> CounterpartyMatch:
-    """A candidate of another channel and the registry: its product of the query's code (`hit`) → product_fit
-    1.0 with the registry as the reason, the channel's own sentence kept; any registry product (`other`) →
-    the role «производитель» by the registry. Neither → the match as it was."""
+def gisp_confirm(m: CounterpartyMatch, hit: GispHit | None, other: Sequence[gisp.Product], codes: Sequence[str],
+                 predicted: bool, cache: SourceCache, stems: Sequence[str] = ()) -> CounterpartyMatch:
+    """A candidate of another channel and the registry: its product answers the lot (`hit`) → product_fit at least
+    the registry's step (1.0 the same code, 0.8 the same kind) with the registry as the first reason, the channel's
+    own sentence kept; any registry product (`other`) → the role «производитель» by the registry only."""
     cp = m.counterparty
-    if hit:
-        cp = gisp.with_role(cp, hit, cache)
-        comps = [c.model_copy(update={"value": 1.0, "explanation": f"{_gisp_why(hit[0], codes, predicted, stems)}. "
-                                                                   f"{c.explanation}"})
+    if hit is not None:
+        cp = gisp.with_role(cp, hit.products, cache)
+        why = _gisp_why(hit.products[0], hit.level, codes, predicted, stems)
+        comps = [c.model_copy(update={"value": max(c.value, STEP[hit.step]), "explanation": f"{why}. {c.explanation}"})
                  if c.name == "product_fit" else c for c in m.components]
         return _rescore(m, cp, comps)
     if other:
@@ -589,7 +636,7 @@ def gisp_confirm(m: CounterpartyMatch, hit: Sequence[gisp.Product], other: Seque
 
 
 def gisp_matches(
-    query: Query, codes: Sequence[str], hits: dict[str, list[gisp.Product]], skip: set[str], cache: SourceCache,
+    query: Query, codes: Sequence[str], hits: dict[str, GispHit], skip: set[str], cache: SourceCache,
     weights: dict[str, float], predicted: bool, processed: Path, region: str, region_note: str | None,
     okpd_class: str, stems: Sequence[str] = (),
 ) -> tuple[list[CounterpartyMatch], list[str], str]:
@@ -597,21 +644,21 @@ def gisp_matches(
     organizers' data, of an INN type of DISCOVERY_NP_TYPES and of the query's region or its neighbour — by the
     KPP of a cached ФНС card, else by the INN's tax office code (said to be unconfirmed; the card is queued).
     Returns the matches, the INNs without a cached card and one line for `Discovery.gisp`."""
-    fresh = {inn: products for inn, products in hits.items() if inn not in skip}
+    fresh = {inn: hit for inn, hit in hits.items() if inn not in skip}
     known = known_inns(list(fresh), query.as_of, processed) or set()
     regions, np_types = _regions(query), _np_types()
     out: list[CounterpartyMatch] = []
     no_card: list[str] = []
     other_type = other_region = 0
     ch = Channel(okved="", okpd_class=okpd_class, relation="class")
-    for inn, products in fresh.items():
+    for inn, hit in fresh.items():
         if inn in known:
             continue
         np_type = "UL" if len(inn) == 10 else "IP"
         if np_type not in np_types:
             other_type += 1
             continue
-        cp = gisp.counterparty(inn, products, cache)
+        cp = gisp.counterparty(inn, hit.products, cache)
         if cp is None:
             continue
         cp = cp.model_copy(update={"name": display_name({"name_ex": cp.name, "nptype": np_type}) or cp.name})
@@ -626,22 +673,23 @@ def gisp_matches(
         row = {"okved1": "", "regioncode": code}
         comps = []
         for c in _components(cp, row, ch, predicted, has_card, region, weights, region_note):
-            why = c.explanation
+            update: dict[str, object] = {}
             if c.name == "product_fit":
-                why = _gisp_why(products[0], codes, predicted, stems)
+                update = {"value": STEP[hit.step], "explanation": _gisp_why(hit.products[0], hit.level, codes,
+                                                                            predicted, stems)}
             elif c.name == "geography":
-                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)") if by_kpp else why.replace(
-                    "Реестр МСП", f"По ИНН (код налогового органа {code}; регион не подтверждён карточкой ФНС)")
+                update = {"explanation": c.explanation.replace("Реестр МСП", "Карточка ФНС (КПП)") if by_kpp else
+                          c.explanation.replace("Реестр МСП", f"По ИНН (код налогового органа {code}; регион не "
+                                                              "подтверждён карточкой ФНС)")}
             elif c.name == "reliability" and not (has_card and cp.status):
-                why = ("Изготовитель в реестре Минпромторга; статус в ЕГРЮЛ ещё не проверен (обогащение в очереди) — "
-                       "в score не входит")
-            comps.append(c.model_copy(update={"explanation": why}))
+                update = {"explanation": "Изготовитель в реестре Минпромторга; статус в ЕГРЮЛ ещё не проверен "
+                                         "(обогащение в очереди) — в score не входит"}
+            comps.append(c.model_copy(update=update))
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                      score=round(sum(c.value * c.weight for c in comps), 4)))
-    line = (f"ГИСП: изготовителей продукции с ОКПД2 запроса и словом запроса в её наименовании {len(hits)}, "
-            "уже найдены другими каналами "
-            f"{len(hits) - len(fresh)}, уже в данных {len(known)}, тип ИНН не из DISCOVERY_NP_TYPES {other_type}, "
-            f"другой регион {other_region}, в блок {len(out)}")
+    line = (f"ГИСП: изготовителей, чья продукция отвечает позициям (код и слово / вид и два слова) {len(hits)}, "
+            f"уже найдены другими каналами {len(hits) - len(fresh)}, уже в данных {len(known)}, "
+            f"тип ИНН не из DISCOVERY_NP_TYPES {other_type}, другой регион {other_region}, в блок {len(out)}")
     return out, no_card, line
 
 
@@ -829,27 +877,32 @@ def discover(
         try:
             stems = query_stems(query.text)
             by_code = gisp.by_okpd2(codes)
-            hits, code_only = gisp_split(by_code, stems)
+            hits, code_only = gisp_split(by_code, codes, stems)
             shown = [m.counterparty.inn for m in matches if m.counterparty.inn]
             any_product = {**gisp.by_inn([i for i in shown if i not in by_code]), **code_only}
-            matches = [gisp_confirm(m, hits.get(m.counterparty.inn or "", []),
+            matches = [gisp_confirm(m, hits.get(m.counterparty.inn or ""),
                                     any_product.get(m.counterparty.inn or "", []), codes, res.predicted, cache,
                                     stems)
                        for m in matches]
             res.gisp_backed = {i for i in shown if i in hits}
-            for inn in res.gisp_backed:
-                relation[inn] = "class"  # a maker of this product by the registry takes a producer's slot
-            extra, gisp_no_card, line = gisp_matches(
-                query, codes, hits, set(shown), cache, weights, res.predicted, processed, target, target_note,
-                res.okpd_classes[0], stems)
+            extra: list[CounterpartyMatch] = []
+            if res.history_checked:  # «новые» only after the history check, as the web leads
+                extra, gisp_no_card, line = gisp_matches(
+                    query, codes, hits, set(shown), cache, weights, res.predicted, processed, target, target_note,
+                    res.okpd_classes[0], stems)
+                res.gisp.append(line)
+            else:
+                res.gisp.append("ГИСП: данные организаторов не загружены — компании только из реестра не добавлены")
             matches.extend(extra)
             for m in extra:
-                relation[m.counterparty.inn or ""] = "class"
+                relation[m.counterparty.inn or ""] = "class"  # a maker by the registry takes a producer's slot
                 res.gisp_backed.add(m.counterparty.inn or "")
+            for inn in res.gisp_backed:
+                gisp_step[inn] = hits[inn].step
+                relation[inn] = "class"  # a maker of this product takes a producer's slot of _mix
             no_card.update(gisp_no_card)
-            res.gisp.append(f"{line}; подтверждён товар у найденных по ОКВЭД или веб-поиском "
-                            f"{len(res.gisp_backed) - len(extra)}; только код ОКПД2 без слова запроса "
-                            f"{len(code_only)} — не добавлены")
+            res.gisp.append(f"ГИСП: подтверждён товар у найденных по ОКВЭД или веб-поиском "
+                            f"{len(res.gisp_backed) - len(extra)}; код без слов позиций (только роль) {len(code_only)}")
         except Exception as e:  # noqa: BLE001 — a broken export never takes the other channels down
             log.exception("discovery: ГИСП пропущен из-за ошибки")
             res.gisp.append(f"ГИСП: выгрузка не прочитана ({type(e).__name__}) — канал пропущен")
@@ -882,7 +935,10 @@ def discover(
 # Step of product_fit by the basis of a «Новые» match (#186, human decision 01.10; v0): the name of the query
 # literally on the company's site 1.0, the goods in a catalog / marketplace 0.8, the main OKVED of the class
 # 0.6, an additional OKVED of the class 0.5 (decision 22), a wholesale OKVED 0.4. `make predict` shows by it.
-STEP = {"site": 1.0, "catalog": 0.8, "class": 0.6, "extra": 0.5, "wholesale": 0.4}
+STEP = {"site": 1.0, "catalog": 0.8, "class": 0.6, "extra": 0.5, "wholesale": 0.4,
+        # ГИСП (#74, decision of IR630 02.10 in the body of #74): the registry names this code with a word of the
+        # items — 1.0; a code of the same kind with two words — 0.8, as a product in a catalog
+        "registry": 1.0, "registry_kind": 0.8}
 POOL_LIMIT = 400  # pool candidates per region read for one query (main OKVED first)
 POOL_EXTRA_FIT = 0.5  # an additional OKVED of the class (decision 22 of IR630): below the 0.6 step of «Новые»
 

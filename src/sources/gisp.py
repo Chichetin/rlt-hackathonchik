@@ -45,6 +45,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
+from src.sources import role as role_mod
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -161,6 +162,21 @@ def agrees(query_code: str, product_code: str) -> bool:
     return q.startswith(p) or p.startswith(q)
 
 
+def match_level(query_code: str, product_code: str) -> str | None:
+    """How the product's OKPD2 answers the lot's code (#74, review of PR #429):
+    "code" — the same code, or the product's code holds the lot's one and is not wider than the kind XX.XX.XX;
+    "kind" — another code of the same kind XX.XX.XX (a neighbour: office paper 17.12.14.160 for 17.12.14.110, but
+    also till rolls), or the lot names only the kind; None — a wider lot code (class, subgroup) or another kind."""
+    q, p = query_code.strip(), product_code.strip()
+    if not (_CODE.fullmatch(q) and _CODE.fullmatch(p)):
+        return None
+    if p == q or (len(p) >= KIND_DEPTH and q.startswith(p)):  # a prefix of a valid code is a level boundary
+        return "code"
+    if len(p) >= KIND_DEPTH and len(q) >= KIND_DEPTH and p[:KIND_DEPTH] == q[:KIND_DEPTH]:
+        return "kind"
+    return None
+
+
 def _closeness(codes: Sequence[str], product_code: str) -> int:
     """How deep the product's code agrees with the lot's closest code (longer common prefix is better)."""
     best = 0
@@ -270,10 +286,18 @@ def product_fact(p: Product) -> str:
             f"{f', действует до {till}' if till else ''} (реестр российской промышленной продукции Минпромторга, ГИСП)")
 
 
+def role_text(p: Product, okved: str | None = None) -> str:
+    """The role by role.decide(): the registry first (#186); a main OKVED of another role is named as a disagreement."""
+    registry = role_mod.registry_basis(f"«{p.name}», ОКПД2 {p.okpd2}, реестровая запись № {p.reg_number} "
+                                       "(реестр российской промышленной продукции Минпромторга, ПП РФ № 719)")
+    return role_mod.decide(registry=registry, okved=role_mod.okved_basis(okved)).explanation()
+
+
 def product_evidence(products: Sequence[Product], cache: SourceCache, directory: Path | None = None,
-                     *, role: bool = True) -> list[Evidence]:
-    """Facts of the best products (up to MAX_PRODUCTS) and, with `role`, the basis of the role on the first one.
-    Every page goes to the cache first. Empty without the export's meta."""
+                     *, role: bool = True, okved: str | None = None) -> list[Evidence]:
+    """Facts of the best products (up to MAX_PRODUCTS) and, with `role`, the basis of the role on the first one
+    (its text — role_text() with the company's main OKVED). Every page goes to the cache first. Empty without the
+    export's meta."""
     info = meta(directory)
     if info is None or not products:
         return []
@@ -284,8 +308,7 @@ def product_evidence(products: Sequence[Product], cache: SourceCache, directory:
                            value=basis_value(p)))
         if role and i == 0:
             ev.append(Evidence(source=SOURCE, url=url, fetched_at=at, field="product", value=basis_value(p),
-                               fact=f"Роль — производитель: продукция «{p.name}» внесена в реестр российской "
-                                    "промышленной продукции Минпромторга (ПП РФ № 719) — госреестр производителей"))
+                               fact=role_text(p, okved)))
     return ev
 
 
@@ -309,12 +332,16 @@ def counterparty(inn: str, products: Sequence[Product], cache: SourceCache,
 
 def with_role(cp: Counterparty, products: Sequence[Product], cache: SourceCache,
               directory: Path | None = None) -> Counterparty:
-    """The registry is the first basis of the role (#186): a company with a product in it is a manufacturer.
-    Its other bases (the main OKVED) stay in the card; facts already present are not repeated."""
+    """The registry is the first basis of the role (#186, role.decide): a company with a product in it is a
+    manufacturer; a main OKVED of another role is named in the same fact as a disagreement, its own fact stays.
+    A card that already has registry facts is returned as it is (the card after discovery: no second role)."""
     if not products or cp.inn is None or any(p.inn != cp.inn for p in products):
         return cp
+    if any(e.source == SOURCE for e in cp.evidence):
+        return cp
     have = {(e.url, e.fact) for e in cp.evidence}
-    new = [e for e in product_evidence(products, cache, directory) if (e.url, e.fact) not in have]
+    okved = cp.okved[0] if cp.okved else None
+    new = [e for e in product_evidence(products, cache, directory, okved=okved) if (e.url, e.fact) not in have]
     if not new:
         return cp
     return cp.model_copy(update={"kind": "manufacturer", "evidence": [*cp.evidence, *new]})
