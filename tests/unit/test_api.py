@@ -214,9 +214,8 @@ def test_enqueue(client):
 def test_reliability_is_read_for_the_shown_page_and_the_export_rows_only(search_client, monkeypatch):
     """#127 review: shadow reliability is one history SQL over the page (≤ limit INNs) — not over the ≤ 200
     candidates the pipeline scores; the export reads it for its own rows."""
-    from src.match.store import ParquetStore
-
     from src.match import search as search_mod
+    from src.match.store import ParquetStore
 
     cfg = search_mod.load_config()
     monkeypatch.setattr(search_mod, "load_config", lambda: {**cfg, "reliability": {"mode": "shadow"}})  # on since #585
