@@ -198,3 +198,47 @@ def test_source_defaults_are_the_ones_the_modules_had() -> None:
                                   "YANDEX_SEARCH_API_KEY": " key "})
     assert (over.yandex_search_daily_max, over.rnp_min_interval_s, over.pb_disabled, over.yandex_search_api_key) == \
         (7, 2.5, True, "key")
+
+
+def test_discovery_and_llm_defaults_are_the_ones_the_modules_had() -> None:
+    """src/enrich, src/llm moved here (#297): DISCOVERY_LEADS is on unless «0», NP types UL, LLM none."""
+    s = settings.get_settings({})
+    assert (s.discovery_offline, s.discovery_leads, s.discovery_np_types, s.llm_provider) == (False, True, "UL", "none")
+    over = settings.get_settings({"DISCOVERY_LEADS": "0", "DISCOVERY_NP_TYPES": "UL,IP", "LLM_PROVIDER": " None "})
+    assert (over.discovery_leads, over.discovery_np_types, over.llm_provider) == (False, "UL,IP", "none")
+
+
+def test_module_constants_read_their_own_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A constant bound to a wrong field passes the defaults test (review #425): each one gets its own value."""
+    import importlib
+
+    from src.sources import bo_nalog, pb_nalog, rmsp
+
+    values = {"BO_MIN_INTERVAL_S": "11", "BO_TIMEOUT_S": "12", "PB_MIN_INTERVAL_S": "13", "RMSP_MIN_INTERVAL_S": "14",
+              "RMSP_TIMEOUT_S": "15", "RMSP_QUICK_TIMEOUT_S": "16", "RMSP_DOWN_COOLDOWN_S": "17"}
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    try:
+        for m in (bo_nalog, pb_nalog, rmsp):
+            importlib.reload(m)
+        got = (bo_nalog.MIN_INTERVAL_S, bo_nalog.TIMEOUT_S, pb_nalog.MIN_INTERVAL_S, rmsp.MIN_INTERVAL_S,
+               rmsp.TIMEOUT_S, rmsp.QUICK_TIMEOUT_S, rmsp.DOWN_COOLDOWN_S)
+        assert got == (11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0)
+    finally:
+        for name in values:
+            monkeypatch.delenv(name)
+        for m in (bo_nalog, pb_nalog, rmsp):
+            importlib.reload(m)  # back to the defaults for the other tests
+
+
+def test_load_dotenv_does_not_override_a_set_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = tmp_path / ".env"
+    env.write_text('# comment\nRLT_TEST_A="from file"\nRLT_TEST_B=from file\n', encoding="utf-8")
+    monkeypatch.setenv("RLT_TEST_B", "already set")
+    monkeypatch.setenv("RLT_TEST_A", "placeholder")
+    monkeypatch.delenv("RLT_TEST_A")  # unset, restored by monkeypatch after the test
+    settings.load_dotenv(env)
+    environ = settings.os.environ
+    assert (environ["RLT_TEST_A"], environ["RLT_TEST_B"]) == ("from file", "already set")
+    del environ["RLT_TEST_A"]
+
