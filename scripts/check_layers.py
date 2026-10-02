@@ -35,7 +35,7 @@ SKIP_DIRS = frozenset({"node_modules", "dist", "__pycache__", ".venv"})
 LAYERS: dict[str, int] = {
     # L0: types and settings every layer may read
     "src.contracts": 0,
-    "src.regions": 0,  # not there yet (#292)
+    "src.regions": 0,  # one table of regions (#292)
     "src.settings": 0,
     # L1: external sources, storage, the ingest core, the task queue
     "src.sources": 1,
