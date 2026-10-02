@@ -210,3 +210,25 @@ def test_value_text_reads_like_a_card():
     row[ranker.NAMES.index("channel_share")] = math.nan
     contrib[ranker.NAMES.index("channel_share")] = -2.0
     assert ranker.explain(ranker.Model("lgbm", ranker.ROOT, {}), contrib, row) == text
+
+
+def test_ablate_feeds_features_as_missing():
+    import numpy as np
+    import pytest
+
+    sp = ranker.spec({"ranker": {"kind": "logreg", "model": "m.json", "ablate": ["win_rate"]}})
+    assert sp is not None and sp["ablate"] == ["win_rate"]
+    with pytest.raises(ValueError):
+        ranker.spec({"ranker": {"kind": "logreg", "model": "m.json", "ablate": ["no_such_feature"]}})
+    n = len(ranker.NAMES)
+    params = {"fill": np.full(n, 0.5), "mean": np.zeros(n), "std": np.ones(n), "coef": np.arange(n, dtype=float),
+              "intercept": 0.0}
+    full = ranker.Model("logreg", ranker.ROOT, params)
+    i = ranker.NAMES.index("win_rate")
+    ablated = ranker.Model("logreg", ranker.ROOT, params, ablate=(i,))
+    x = np.ones((2, n))
+    missing = x.copy()
+    missing[:, i] = np.nan
+    assert np.allclose(ablated.raw(x), full.raw(missing))
+    assert not np.allclose(ablated.raw(x), full.raw(x))
+    assert np.allclose(ablated.contrib(x)[:, i], 0.5 * i)  # missing -> fill, the same as for any NaN

@@ -5,6 +5,7 @@ eval ranked bare search() (no enrichment, no hard filters — the slide was not 
 sees), predict wrote facts that never passed the Evidence check. Now all three call `pick()` and differ
 only in options:
 
+    spelling of the query                        layout and typos, config `spell` (src/match/speller.py, #282)
     search(k = CANDIDATES)                       organizers' history, scored (src/match/search.py)
       → enrichment from the cache                status, МСП, role, name — never the network here
       → block «Новые» (discover)                 optional: eval has no use for it (never relevant)
@@ -29,9 +30,10 @@ from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
-from src.match import fallback, ranker
+from src.match import confidence, fallback, ranker, speller
 from src.match import search as search_mod
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
+from src.match.index import get_index
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,8 @@ class Picked:
     uncached: set[str] = field(default_factory=set)  # history INNs without a cached card (queue them)
     discovery: discover_mod.Discovery | None = None  # None — the block was not asked for or failed
     discovery_error: str | None = None  # the exception type when discover() failed
+    correction: speller.Correction | None = None  # the query was searched as corrected (#282)
+    weak_match: str | None = None  # X-Weak-Match (#281): the match with past lots is weak — the sentence for the user
 
     @property
     def history(self) -> list[CounterpartyMatch]:
@@ -76,10 +80,14 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
         uf = parse_filters(query.filters)
         if uf.only_msp or uf.kinds is not None:
             raise ValueError(f"{query.query_id}: фильтр МСП / роли в backtest — это факты кеша на сегодня (D-097)")
+    correction = _spelled(query, config)
+    if correction is not None:
+        query = query.model_copy(update={"text": correction.text})
     # `config` only when given: the product reads configs/search.yaml on every call (and tests stub search())
     kw = {"config": config, "weights": config.get("weights")} if config is not None else {}
     found = search_mod.search(query, k=search_mod.CANDIDATES, **kw)
-    out = Picked(matches=[], note=fallback.search_note())
+    weak = confidence.weak_match(search_mod.fit_signals(), has_code=bool(query.okpd2))
+    out = Picked(matches=[], note=fallback.search_note(), correction=correction, weak_match=weak)
     candidates: list[CounterpartyMatch] | None = None  # «Новые» before the user filters, None — no discovery
     if not is_stub() and not backtest:
         discovered: list[CounterpartyMatch] = []
@@ -103,12 +111,38 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
     return out
 
 
-def verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
-    """What the card, the xlsx and the predict CSV show: only facts and contacts that pass the Evidence check."""
+def _spelled(query: Query, config: dict | None) -> speller.Correction | None:
+    """The query with its layout and typos fixed by the dictionary of the index it is searched in (#282).
+
+    On when the configuration says `spell: true` and the user did not ask for the query as typed
+    (`filters.spell = "off"`); None — nothing changed, off, or the speller failed (the search goes on as typed).
+    """
+    if is_stub() or str(query.filters.get("spell", "")).lower() == "off":
+        return None
+    try:
+        cfg = config if config is not None else search_mod.load_config()
+        if not cfg.get("spell", False):
+            return None
+        fixed = speller.for_index(get_index(None, query.as_of).path).correct(query.text)
+    except Exception:  # noqa: BLE001 — no index / a broken dictionary never breaks the search (data absent: search says so)
+        log.exception("speller: запрос %s ищется как введён", query.query_id)
+        return None
+    return fixed if fixed.changed else None
+
+
+def verified(matches: list[CounterpartyMatch], open_data: bool = True) -> list[CounterpartyMatch]:
+    """What the card, the xlsx and the predict CSV show: ФНС open data added (only here, not in the loop over all
+    candidates), then only facts and contacts that pass the Evidence check. `open_data=False` in a backtest:
+    the facts are dated today, later than `as_of` (D-097)."""
     if is_stub():
         return matches
-    pages = cached_pages(SourceCache().page_text)  # one read and one normalization per page per call
-    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in matches]
+    cache = SourceCache()
+    # one query for the whole list; before cached_pages(), because the facts' texts land in the cache here
+    cards = enrich_mod.add_open_data([m.counterparty for m in matches], cache) if open_data else None
+    shown = ([m.model_copy(update={"counterparty": cp}) for m, cp in zip(matches, cards, strict=True)]
+             if cards is not None else matches)
+    pages = cached_pages(cache.page_text)  # one read and one normalization per page per call
+    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in shown]
 
 
 def enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[CounterpartyMatch]:
@@ -127,7 +161,7 @@ def enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[Count
             continue
         try:
             # filters see only facts that pass the Evidence check, as the card does (strip before filters)
-            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True), pages)
+            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True, open_data=False), pages)
         except KeyError:  # nothing cached for this INN
             uncached.add(cp.inn)
             out.append(m)
@@ -187,7 +221,7 @@ class TodayAudit:
             if inn not in self._cards:
                 cache = cache or SourceCache()
                 try:
-                    self._cards[inn] = legal_ok(enrich_mod.enrich(inn, cache, offline=True))
+                    self._cards[inn] = legal_ok(enrich_mod.enrich(inn, cache, offline=True, open_data=False))
                 except KeyError:  # nothing cached
                     self._cards[inn] = None
                 except Exception:  # noqa: BLE001 — a broken cached page is «no card», never a failed eval

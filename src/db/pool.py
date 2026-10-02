@@ -7,7 +7,7 @@
 
 Tables (the same in parquet and in Postgres):
 - `companies` — one record per INN (the latest `ДатаСост` when the dump repeats an INN), every column as in
-  src/sources/msp_dump.py, ИП without locality, role by the main OKVED (`kind`, `kind_why`, src/enrich/role.py),
+  src/sources/msp_dump.py, ИП without locality, role by the main OKVED (`kind`, `kind_why`, src/sources/role.py),
   `fetched_at` of the dump download; sorted by INN;
 - `okved` — (code, inn, main, region_code): the main and every additional OKVED of a company, one row per
   (inn, code); the candidate index by an OKVED prefix (human decision 01.10: an additional OKVED counts too);
@@ -41,8 +41,7 @@ import pyarrow as pa
 
 from src.contracts import Counterparty
 from src.db.load import pg_dsn
-from src.enrich import role
-from src.sources import msp_dump
+from src.sources import msp_dump, role
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
