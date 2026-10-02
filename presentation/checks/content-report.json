@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T10:50:19.358Z",
+  "checked_at": "2026-10-02T11:10:10.328Z",
   "checks": [
     {
       "name": "Opening contains case, solution, team; supplier belongs to the example",
@@ -18,15 +18,27 @@
       "passed": true
     },
     {
-      "name": "Corpus counts agree with manifest",
+      "name": "Candidate ceilings explicitly labelled as limits",
       "passed": true
     },
     {
-      "name": "New-company example on S3/B4 comes from example-new.json (#415)",
+      "name": "Candidate ceilings match source constants",
       "passed": true
     },
     {
-      "name": "Example score and evidence preserved",
+      "name": "Concrete legal and user filters are displayed",
+      "passed": true
+    },
+    {
+      "name": "Unknown legal status is distinguished from positive user-filter confirmation",
+      "passed": true
+    },
+    {
+      "name": "Routing decision is grounded in paired reports, with winner denominator",
+      "passed": true
+    },
+    {
+      "name": "Both active ranking paths are explicit",
       "passed": true
     },
     {

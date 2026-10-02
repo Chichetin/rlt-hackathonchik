@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T10:49:10.287Z",
+  "checked_at": "2026-10-02T11:10:15.240Z",
   "browser": "153.0.8010.12",
   "checks": [
     {
@@ -11,11 +11,11 @@
       "passed": true
     },
     {
-      "name": "285 seconds of content",
+      "name": "300 seconds of content",
       "passed": true
     },
     {
-      "name": "15 seconds of reserve, no extra slide",
+      "name": "No time outside the 300-second script",
       "passed": true
     },
     {
@@ -47,7 +47,23 @@
       "passed": true
     },
     {
+      "name": "s2/3: all text within safe area",
+      "passed": true
+    },
+    {
       "name": "s3/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s3/1: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s3/2: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s3/3: all text within safe area",
       "passed": true
     },
     {
@@ -56,6 +72,18 @@
     },
     {
       "name": "s5/0: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s5/1: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s5/2: all text within safe area",
+      "passed": true
+    },
+    {
+      "name": "s5/3: all text within safe area",
       "passed": true
     },
     {
@@ -87,27 +115,39 @@
       "passed": true
     },
     {
-      "name": "S2 begins with input",
+      "name": "S2 introduces supplier candidate pipeline",
       "passed": true
     },
     {
-      "name": "Right reveals supplier",
+      "name": "s2: step 1",
       "passed": true
     },
     {
-      "name": "Right reveals evidence",
+      "name": "s2: step 2",
       "passed": true
     },
     {
-      "name": "Refresh preserves scenario phase",
+      "name": "s2: step 3",
       "passed": true
     },
     {
-      "name": "Next arrow leaves completed scenario for data sources",
+      "name": "s2: refresh preserves emphasis",
       "passed": true
     },
     {
-      "name": "Back returns to final phase of scenario",
+      "name": "s3: step 1",
+      "passed": true
+    },
+    {
+      "name": "s3: step 2",
+      "passed": true
+    },
+    {
+      "name": "s3: step 3",
+      "passed": true
+    },
+    {
+      "name": "s3: refresh preserves emphasis",
       "passed": true
     },
     {
@@ -131,19 +171,19 @@
       "passed": true
     },
     {
-      "name": "Score step 1",
+      "name": "Filter step 1",
       "passed": true
     },
     {
-      "name": "Score step 2",
+      "name": "Filter step 2",
       "passed": true
     },
     {
-      "name": "Score step 3",
+      "name": "Filter step 3",
       "passed": true
     },
     {
-      "name": "Explanation has no formula or numeric score; details stay in reserve",
+      "name": "Old UI walkthrough removed",
       "passed": true
     },
     {
@@ -225,8 +265,28 @@
       "issues": []
     },
     {
+      "id": "s2",
+      "step": 3,
+      "issues": []
+    },
+    {
       "id": "s3",
       "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s3",
+      "step": 1,
+      "issues": []
+    },
+    {
+      "id": "s3",
+      "step": 2,
+      "issues": []
+    },
+    {
+      "id": "s3",
+      "step": 3,
       "issues": []
     },
     {
@@ -237,6 +297,21 @@
     {
       "id": "s5",
       "step": 0,
+      "issues": []
+    },
+    {
+      "id": "s5",
+      "step": 1,
+      "issues": []
+    },
+    {
+      "id": "s5",
+      "step": 2,
+      "issues": []
+    },
+    {
+      "id": "s5",
+      "step": 3,
       "issues": []
     },
     {

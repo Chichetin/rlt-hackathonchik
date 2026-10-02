@@ -130,10 +130,10 @@
   }
   const objects = {
     s1:'.brand-title, .hero .lead, .hero-result',
-    s3:'.candidate-branch, .new-example, .corpus-strip',
-    s2:'.scenario-rail, .demo-panel:not([hidden])',
+    s3:'.decision-track article, .decision-measure',
+    s2:'.candidate-track article, .pipeline-conclusion',
     s4:'.lane-label, .prep .node, .query-flow .node, .architecture-foot',
-    s5:'.evidence-card, .factor, .score-total, .takeaway',
+    s5:'.filter-track article, .pipeline-conclusion',
     s6:'.chart, .eval-context, .eval-boundary',
     s7:'.final-route > div, .next-step, .qa-links',
     b1:'.formula-main, .backup-grid .node, .backup-note',

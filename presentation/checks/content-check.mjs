@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url)), deck=path.resolve(here,'..'), repo=process.env.RLT_EVIDENCE_ROOT||path.resolve(deck,'..');
 const read=p=>JSON.parse(fs.readFileSync(path.join(repo,p),'utf8'));
-const baseline=read('eval/results/B-bm25.json'),current=read('eval/results/L-long.json'),manifest=read('data/processed/manifest.json'),example=read('presentation/assets/example.json');const exampleNew=read('presentation/assets/example-new.json');
+const baseline=read('eval/results/B-bm25.json'),current=read('eval/results/L-long.json');
 const browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1600,height:900},offline:true});
 await page.emulateMedia({reducedMotion:'reduce'});await page.goto(pathToFileURL(path.join(deck,'index.html')).href);await page.evaluate(()=>document.fonts.ready);
 const checks=[];function check(ok,name){checks.push({name,passed:!!ok});}
@@ -16,10 +16,14 @@ check(text('s1').includes('Митрандир')&&text('s1').includes('ИИ бл�
 check(baseline.n_queries===current.n_queries&&JSON.stringify(baseline.per_query.map(q=>q.query_id))===JSON.stringify(current.per_query.map(q=>q.query_id)),'Comparison uses identical query IDs');
 check(text('b2').includes(baseline.metrics['recall@10'].value.toFixed(3).replace('.',','))&&text('b2').includes(current.metrics['recall@10'].value.toFixed(3).replace('.',',')),'Backup Recall values agree with reports');
 check(text('b2').includes('2 000')&&current.n_queries===2000,'Backup evaluation sample size agrees');
-check(text('s3').includes(manifest.rows.notices.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.suppliers.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.items.toLocaleString('en-US').replaceAll(',',' ')),'Corpus counts agree with manifest');
-const newMs=exampleNew.discovered.map(m=>m.counterparty),newGisp=newMs.find(c=>c.evidence.some(e=>e.source.includes('ГИСП'))),newFirst=newMs.find(c=>c.okved.length&&!c.evidence.some(e=>e.source.includes('ГИСП'))),newKinds=exampleNew.discovered.reduce((n,m)=>(n[m.counterparty.kind]=(n[m.counterparty.kind]||0)+1,n),{}),newDate=newGisp.evidence[0].fetched_at.slice(0,10).split('-').reverse().join('.'),newName=newFirst.name.replace(/^ООО "(.*)"$/,'ООО «$1»');
-check(exampleNew.discovered.length>0&&!!newGisp&&!!newFirst&&text('s3').includes(newGisp.inn)&&text('s3').includes(newGisp.name.replace(/^ООО "(.*)"$/,'ООО «$1»'))&&text('s3').includes('ГИСП')&&text('s3').includes(newFirst.inn)&&text('s3').includes(exampleNew.lot)&&text('s3').includes(newName)&&text('s3').includes(newFirst.okved[0])&&text('s3').includes(newDate)&&text('s3').includes(`${newKinds.manufacturer||0} производителей, ${newKinds.distributor||0} дистрибьюторов`)&&text('b4').includes(String(exampleNew.discovered.length)+' новых'),'New-company example on S3/B4 comes from example-new.json (#415)');
-check(text('b1').includes(String(example.result.score))&&text('s5').includes('126')&&text('s5').includes('36'),'Example score and evidence preserved');
+check(text('s2').includes('500')&&text('s2').includes('≤ 200')&&text('s2').includes('лимиты'),'Candidate ceilings explicitly labelled as limits');
+const search=fs.readFileSync(path.join(repo,'src/match/search.py'),'utf8');
+check(/TOP_DOCS = 500/.test(search)&&/CANDIDATES = 200/.test(search),'Candidate ceilings match source constants');
+check(text('s5').includes('РНП')&&text('s5').includes('Банкротство')&&text('s5').includes('Ликвидация')&&text('s5').includes('МСП')&&text('s5').includes('ЮЛ / ИП')&&text('s5').includes('Мин. score'),'Concrete legal and user filters are displayed');
+check(text('s5').includes('Неизвестный статус')&&text('s5').includes('сам по себе не исключает')&&text('s5').includes('подтверждения'),'Unknown legal status is distinguished from positive user-filter confirmation');
+const off=read('eval/results/G-490L-free-off.json'),on=read('eval/results/G-490L-free.json');
+check(text('s3').includes(ru(off.metrics['winner@10'].value*100)+'%')&&text('s3').includes(ru(on.metrics['winner@10'].value*100)+'%')&&off.n_queries===2000&&on.metrics['winner@10'].n===1978&&JSON.stringify(off.per_query.map(x=>x.query_id))===JSON.stringify(on.per_query.map(x=>x.query_id)),'Routing decision is grounded in paired reports, with winner denominator');
+check(text('s3').includes('Нет заказчика')&&text('s3').includes('формула')&&text('s3').includes('LightGBM'),'Both active ranking paths are explicit');
 check(['mrr','ndcg@10'].every(k=>[baseline,current].every(r=>text('b2').includes(r.metrics[k].value.toFixed(3).replace('.',',')))),'Backup metrics agree with saved reports');
 check(!/НАСТОЯЩИЙ РЕЗУЛЬТАТ|СЛЕДУЮЩИЙ ПРАКТИЧЕСКИЙ ШАГ|К ВОПРОСАМ/.test(all.map(s=>s.text).join(' ')),'Removed redundant editorial labels');
 check(await page.locator('#b3 .tech-brand img').count()===12,'Twelve technology pictograms in component groups');
