@@ -7,6 +7,7 @@ import { componentText, nextReason, rankerReason } from "./ranker";
 import { SupplierScore } from "./SupplierScore";
 import { COMPONENT_LABEL, regionLabel, relationToCustomer, type CounterpartyMatch } from "./api";
 import { RoleBadge } from "./roles";
+import { Requisites } from "./Requisites";
 
 /** A persistent reading pane. Full provenance and reviews remain in the full card. */
 export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext, onBack, onMore, loadingMore, customerRegion }: {
@@ -82,7 +83,8 @@ function InspectorBody({ match, onOpen, weightsNote, customerRegion }: {
     <p className="inspector-origin">{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</p>
     <div className="inspector-identity"><SupplierAvatar cp={cp} /><h2>{cp.name}</h2></div>
     <p className="inspector-meta"><RoleBadge kind={cp.kind} /> · {regionLabel(cp)}{relationToCustomer(cp, customerRegion) && <> — {relationToCustomer(cp, customerRegion)}</>}</p>
-    <p className="inspector-inn"><SupplierId cp={cp} /></p>
+    {!cp.inn && <p className="inspector-inn"><SupplierId cp={cp} /></p>}
+    <Requisites cp={cp} />
     <div className="inspector-topline">
       <SupplierScore score={match.score} inspector />
     <button type="button" className="inspector-open" onClick={() => onOpen(match)}>Открыть полную карточку <span aria-hidden="true">↗</span></button>
