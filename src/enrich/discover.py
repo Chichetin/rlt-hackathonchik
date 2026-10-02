@@ -52,7 +52,7 @@ import duckdb
 import httpx
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
-from src.enrich import web_discover
+from src.enrich import eaeu, web_discover
 from src.enrich.enrich import enrich, from_bo, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.match import new_fit
@@ -147,6 +147,7 @@ class Discovery:
     source_failed: bool = False  # a registry request was refused or failed: the block may be incomplete (#287)
     gisp: list[str] = field(default_factory=list)  # ГИСП (#74): what the registry of industrial products gave
     gisp_backed: set[str] = field(default_factory=set)  # INNs whose product the registry confirms (product_fit 1.0)
+    eaeu: list[str] = field(default_factory=list)  # EAEU companies (#200): what happened to the leads, one line
 
 
 def predicted_class_allowed() -> bool:
@@ -966,6 +967,17 @@ def discover(
     res.relation = dict(relation)
     res.relation.update(gisp_step)  # the registry's step for make predict (STEP), over the OKVED one
     res.matches = _mix(matches, relation, res.gisp_backed)
+    if res.history_checked and res.okpd_classes and eaeu.enabled():  # EAEU (#200): goods only, cache only
+        try:
+            abroad, line = eaeu.matches(codes, res.okpd_classes, cache, weights, res.predicted)
+        except Exception:  # noqa: BLE001 — the EAEU rows never take the block down
+            log.exception("discovery: компании ЕАЭС пропущены из-за ошибки")
+            abroad, line = [], None
+        if line:
+            res.eaeu.append(line)
+        # after the block's own rows: confirmed by a registry as a company, not as a maker of the product
+        res.candidates = [*res.candidates, *apply_legal(abroad)]
+        res.matches = [*res.matches, *apply_filters(abroad, query)]
     if res.fit_new:
         log.info("discovery %s: product_fit_new (%s), профиль ОКПД2 %s: %s", query.query_id, res.fit_mode,
                  res.profile.code if res.profile else "—",
