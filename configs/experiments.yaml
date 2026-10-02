@@ -130,6 +130,23 @@ S-282-nospell:   # #282: запрос как введён — база заме�
 # #361: абляция признака win_rate в обученном ранжировщике (без переобучения) — у 59 % поставщиков (только АИС ГЗ) он 1.0 по построению
 A361-no-winrate:
   ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate]}
+# Абляция компонент (#191): формула v2 (как `v2`) с весом одной компоненты = 0; ранжировщик выключен — у него вес
+# компоненты = 0 без переобучения не определён. `abl-base` — та же база на том же коде (парное сравнение).
+abl-base:
+  spell: false
+  ranker: null
+abl-product_fit:
+  spell: false
+  ranker: null
+  weights: {product_fit: 0.0}
+abl-experience:
+  spell: false
+  ranker: null
+  weights: {experience: 0.0}
+abl-activity:
+  spell: false
+  ranker: null
+  weights: {activity: 0.0}
 # #105: компонента price — масштаб НМЦК запроса против медианы НМЦК лотов поставщика до as_of
 # (src/match/search.py::_price), поверх дефолта H-15f; вес price добавляется к сумме (баллы не нормированы).
 H-105-price05:
