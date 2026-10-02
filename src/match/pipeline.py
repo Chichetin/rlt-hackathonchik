@@ -30,7 +30,7 @@ from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
-from src.match import confidence, fallback, speller
+from src.match import confidence, fallback, ranker, speller
 from src.match import search as search_mod
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
 from src.match.index import get_index
@@ -97,7 +97,8 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
                                                                                     predicted)
         found = [*enriched(found, out.uncached), *discovered]
     legal = found if backtest else apply_legal(found)
-    shown = apply_user_filters(legal, query)
+    # why above the next one — against the neighbour left after the filters, the one the customer sees (#278)
+    shown = ranker.reasons(apply_user_filters(legal, query))
     hidden = sum(m.origin == "history" for m in found) - sum(m.origin == "history" for m in shown)
     if hidden and not any(m.origin == "history" for m in shown):
         out.note = f"фильтры скрыли {hidden}"
