@@ -25,7 +25,7 @@ test("пресет весов пересчитывает выдачу тольк
 
   // «Сбросить настройки» also drops a preset left from a rehearsal
   await page.getByRole("radio", { name: /Опытные исполнители/ }).click();
-  await page.getByRole("button", { name: "Сбросить настройки и сохранённый запрос" }).click();
+  await page.getByRole("button", { name: "Сбросить фильтры и сохранённый запрос" }).click();
   await expect(page.getByRole("radio", { name: /Стандарт/ })).toHaveAttribute("aria-checked", "true");
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mitrandir.weights") ?? "{}").preset)).toBe("standard");
 });

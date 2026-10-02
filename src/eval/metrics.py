@@ -37,6 +37,22 @@ METRICS: dict[str, Callable[[Sequence[str], set[str]], float]] = {
 }
 
 
+def winner_at_k(ranked: Sequence[str], winners: set[str], k: int) -> float:
+    """1 if a winner of the lot is in the top-k (the «winner in top-10» other teams report), else 0."""
+    return float(bool(set(ranked[:k]) & winners))
+
+
+def winner_reciprocal_rank(ranked: Sequence[str], winners: set[str]) -> float:
+    return reciprocal_rank(ranked, winners)
+
+
+# Computed over the cases that have a winner (grade 2); a case without one gives None and is skipped (#280).
+WINNER_METRICS: dict[str, Callable[[Sequence[str], set[str]], float]] = {
+    **{f"winner@{k}": (lambda r, w, k=k: winner_at_k(r, w, k)) for k in (1, 5, 10, 20)},
+    "winner_mrr": winner_reciprocal_rank,
+}
+
+
 def bootstrap_ci(values: Sequence[float], n: int = BOOTSTRAP_N, seed: int = BOOTSTRAP_SEED,
                  alpha: float = 0.05) -> tuple[float, float]:
     """Percentile bootstrap over queries. Fewer than 2 queries -> the point value twice."""

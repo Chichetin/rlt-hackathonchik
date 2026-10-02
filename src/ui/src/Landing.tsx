@@ -77,11 +77,11 @@ export function Landing({ searchLink, aboutLink, onStart }: { searchLink: LinkPr
       <WaveField />
       <div className="landing-copy">
         <motion.p className="landing-intro" initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>Подбор поставщиков для закупок</motion.p>
-        <h1 id="landing-title">{["Поставщики,", "которых стоит", "пригласить."].map((line, i) => <span className="title-line" key={line}>
+        <h1 id="landing-title">{["Митрандир"].map((line, i) => <span className="title-line" key={line}>
           <motion.span initial={reduced ? false : { y: "110%", opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: reduced ? 0 : 0.12 + i * 0.1, duration: reduced ? 0 : 0.85, ease: easeOut }}>{line}</motion.span>
         </span>)}</h1>
         <motion.div initial={reduced ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduced ? 0 : 0.4, duration: 0.6, ease: easeOut }}>
-          <p className="landing-description">Митрандир находит компании с опытом поставок и расширяет поиск за счёт открытых реестров. Вы видите основания и выбираете, кого пригласить.</p>
+          <p className="landing-description">Находит компании с опытом поставок и расширяет поиск за счёт открытых реестров. Вы видите основания и выбираете, кого пригласить.</p>
           <div className="landing-actions">
             <motion.a className="primary-link" {...searchLink} whileHover={reduced ? undefined : { y: -3 }} whileTap={reduced ? undefined : { scale: 0.97 }}>Начать подбор <span aria-hidden="true">↗</span></motion.a>
             <a className="quiet-link" {...aboutLink}>Как работает подбор <span aria-hidden="true">↗</span></a>

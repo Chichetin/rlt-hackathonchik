@@ -3,6 +3,7 @@
 import duckdb
 import pytest
 
+from src.match.store import ParquetStore, clear_stores
 from src.sources.pb_nalog import CaptchaRequired
 from src.worker import prefetch
 from src.worker.queue import engine_from_env, status_counts
@@ -18,7 +19,8 @@ def eng(tmp_path, monkeypatch):
 
 @pytest.fixture
 def suppliers(tmp_path):
-    p = tmp_path / "s.parquet"
+    """An ingest directory with suppliers.parquet only: the top is read through the store (#293)."""
+    p = tmp_path / "suppliers.parquet"
     duckdb.sql(
         "COPY (SELECT * FROM (VALUES "
         "('7811756312', true, 10, 5, DATE '2025-01-01'),"
@@ -29,7 +31,7 @@ def suppliers(tmp_path):
         ") t(inn, inn_valid, lots_participated, lots_won, last_seen)) "
         f"TO '{p.as_posix()}' (FORMAT parquet)"
     )
-    return p
+    return ParquetStore(tmp_path)
 
 
 def test_top_order(suppliers):
@@ -95,7 +97,13 @@ def test_run_after_stop_processes_the_rest(eng):
 
 def test_exit_code_nonzero_when_incomplete(eng, suppliers, monkeypatch):
     monkeypatch.setattr(prefetch, "enrich", lambda inn: (_ for _ in ()).throw(RuntimeError("x")))
-    assert prefetch.main(["--top", "2", "--pause", "0", "--suppliers", str(suppliers)]) == 1
+    monkeypatch.setenv("DATA_STORE", "parquet")  # the store of the environment, as the worker reads it
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(suppliers.processed))
+    clear_stores()
+    try:
+        assert prefetch.main(["--top", "2", "--pause", "0"]) == 1
+    finally:
+        clear_stores()
 
 
 def test_enqueue_only_fills_queue_idempotently(eng):

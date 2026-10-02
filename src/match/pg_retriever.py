@@ -1,7 +1,8 @@
 """retriever `pg_hybrid` (#39, D-034): BM25 (src/match/index.py) + pgvector kNN, fused by RRF over doc_id.
 
-The vector half: the query `query: normalize(text)` (e5-small, src/db/embed.py) → KNN nearest normalized
-product names in `vec.names_e5_small` (HNSW) → doc_ids of the SAME BM25 index (same as_of): a name
+The vector half: the query `query: normalize(text)` (`embedding_model` of the config, default e5-small;
+src/db/embed.py SPECS, #98) → KNN nearest normalized product names in that model's table (HNSW)
+→ doc_ids of the SAME BM25 index (same as_of): a name
 that is not in that index (only in lots after as_of) is dropped, so no leak. One name may map to
 several doc_ids (raw texts differing in case/whitespace); `notices.subject` documents have no vectors
 and come only from BM25. The fused list feeds the existing `_retrieve` and scoring of search.py.
@@ -13,15 +14,15 @@ search() falls back to BM25 with a warning in the API and fails in eval (search.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 
 import pyarrow.parquet as pq
 
-from src.db.embed import MODEL, QUERY, TABLE, Encoder, model_encoder, nearest
+from src.db.embed import MODEL, Encoder, model_encoder, nearest, spec
 from src.db.norm import normalize
 from src.match.index import LotIndex
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 RRF_K = 60
@@ -35,7 +36,9 @@ class VectorsUnavailable(RuntimeError):
 
 _lock = threading.Lock()
 _maps: dict[str, dict[str, list[int]]] = {}  # LotIndex.key -> normalized text -> doc_ids (~1 GB each, keep 2)
-_state: dict = {}  # conn, encoder, coverage, down_until/down_why (negative cache)
+_state: dict = {}  # conn, down_until/down_why (negative cache); per model: encoders, coverage
+_encoders: dict[str, Encoder] = {}
+_coverage: dict[str, dict] = {}  # model -> checked table
 RETRY_S = 30  # unavailable vectors: fall back without re-checking the table on every request
 
 
@@ -57,17 +60,19 @@ def _down(why: str) -> VectorsUnavailable:
     """Forget the connection and remember the failure for RETRY_S (the next check reconnects)."""
     if conn := _state.pop("conn", None):
         conn.close()
-    _state.pop("coverage", None)
+    _coverage.clear()
     _state["down_until"], _state["down_why"] = time.monotonic() + RETRY_S, why
     return VectorsUnavailable(why)
 
 
-def _conn():
-    if "conn" in _state:
+def _conn(model: str | None = None):
+    """Connection with the model's table checked once (complete and indexed)."""
+    name, sp = model or MODEL, spec(model)
+    if "conn" in _state and name in _coverage:
         return _state["conn"]
     if time.monotonic() < _state.get("down_until", 0.0):
         raise VectorsUnavailable(_state["down_why"])
-    url = os.environ.get("DATABASE_URL", "")
+    url = get_settings().database_url
     if not url.startswith("postgres"):
         raise _down("DATABASE_URL не указывает на Postgres")
     import psycopg
@@ -76,53 +81,56 @@ def _conn():
     from src.db.load import pg_dsn
 
     try:
-        _state["conn"] = conn = psycopg.connect(pg_dsn(url), autocommit=True, connect_timeout=3)
+        if "conn" not in _state:
+            _state["conn"] = psycopg.connect(pg_dsn(url), autocommit=True, connect_timeout=3)
+            _state["conn"].execute(sql.SQL("SET hnsw.ef_search = {}").format(KNN))
+        conn = _state["conn"]
         total, missing = conn.execute(sql.SQL("SELECT count(*), count(*) FILTER (WHERE emb IS NULL) FROM {}")
-                                      .format(sql.Identifier(VEC_SCHEMA, TABLE))).fetchone()  # type: ignore[misc]
+                                      .format(sql.Identifier(VEC_SCHEMA, sp.table))).fetchone()  # type: ignore[misc]
         indexed = conn.execute("SELECT 1 FROM pg_indexes WHERE schemaname = %s AND indexname = %s",
-                               [VEC_SCHEMA, f"{TABLE}_hnsw"]).fetchone()
-        conn.execute(sql.SQL("SET hnsw.ef_search = {}").format(KNN))
+                               [VEC_SCHEMA, f"{sp.table}_hnsw"]).fetchone()
     except psycopg.Error as e:  # no server, no table: the hybrid is not available
-        raise _down(f"векторы недоступны: {e}") from e
+        raise _down(f"векторы {name} недоступны: {e}") from e
     if total == 0 or missing:
-        raise _down(f"векторы заполнены не полностью: {total - missing} из {total} (make db-embed)")
+        raise _down(f"векторы {name} заполнены не полностью: {total - missing} из {total} (src.db.embed --import)")
     if not indexed:
-        raise _down(f"нет индекса HNSW {VEC_SCHEMA}.{TABLE}_hnsw (src.db.embed --index)")
+        raise _down(f"нет индекса HNSW {VEC_SCHEMA}.{sp.table}_hnsw (src.db.embed --index)")
     _state.pop("down_until", None)
-    _state["coverage"] = {"model": MODEL, "table": f"{VEC_SCHEMA}.{TABLE}", "rows": total}
+    _coverage[name] = {"model": name, "table": f"{VEC_SCHEMA}.{sp.table}", "rows": total}
     return conn
 
 
-def _encoder() -> Encoder:
-    if "encoder" not in _state:
+def _encoder(model: str | None = None) -> Encoder:
+    name = model or MODEL
+    if name not in _encoders:
         try:
-            _state["encoder"] = model_encoder(prefix=QUERY)
+            _encoders[name] = model_encoder(prefix=spec(model).query, name=name)
         except Exception as e:  # no torch / no weights offline
-            raise VectorsUnavailable(f"модель {MODEL} недоступна: {e}") from e
-    return _state["encoder"]
+            raise VectorsUnavailable(f"модель {name} недоступна: {e}") from e
+    return _encoders[name]
 
 
-def warm() -> dict:
+def warm(model: str | None = None) -> dict:
     """Connect, check coverage and load the query model once (FastAPI lifespan, Q-24)."""
     with _lock:
-        _conn()
-        _encoder()(["прогрев"])
-        return dict(_state["coverage"])
+        _conn(model)
+        _encoder(model)(["прогрев"])
+        return dict(_coverage[model or MODEL])
 
 
-def coverage() -> dict | None:
-    return dict(_state["coverage"]) if "coverage" in _state else None
+def coverage(model: str | None = None) -> dict | None:
+    return dict(_coverage[model or MODEL]) if (model or MODEL) in _coverage else None
 
 
-def vector_docs(idx: LotIndex, text: str, k: int = KNN) -> list[int]:
+def vector_docs(idx: LotIndex, text: str, k: int = KNN, model: str | None = None) -> list[int]:
     """doc_ids of this index nearest to the query by meaning, best first."""
     import psycopg
 
     with _lock:
-        conn = _conn()
-        q = _encoder()([normalize(text)])[0]
+        conn = _conn(model)
+        q = _encoder(model)([normalize(text)])[0]
         try:
-            rows = conn.execute(*nearest(VEC_SCHEMA, q, k)).fetchall()
+            rows = conn.execute(*nearest(VEC_SCHEMA, q, k, table=spec(model).table)).fetchall()
         except psycopg.Error as e:  # db restarted / connection lost: fall back now, reconnect later
             raise _down(f"векторный поиск прервался: {e}") from e
     m = norm_map(idx)
@@ -144,7 +152,7 @@ def rrf(bm25_hits: list[tuple[int, float]], vec: list[int], top: int) -> list[tu
 
 
 def hybrid(idx: LotIndex, text: str, bm25_hits: list[tuple[int, float]],
-           top: int) -> tuple[list[tuple[int, float]], bool]:
+           top: int, model: str | None = None) -> tuple[list[tuple[int, float]], bool]:
     """(fused hits, whether the vector half contributed any document of this index)."""
-    vec = vector_docs(idx, text)
+    vec = vector_docs(idx, text, model=model)
     return rrf(bm25_hits, vec, top), bool(vec)

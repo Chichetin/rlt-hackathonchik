@@ -15,10 +15,13 @@ CUTOFF = date(2025, 7, 1)
 
 
 @pytest.fixture(autouse=True)
-def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """No test talks to an open source by accident: discovery is cache-only and the cache is per test."""
     monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
     monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources-default.sqlite"))
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(tmp_path / "no-fns-opendata.parquet"))  # not the dev machine's
+    # a test export uploaded in the UI (cache/testsets/active) must not answer /api/lot in tests (#207)
+    monkeypatch.setenv("TESTSETS_DIR", str(tmp_path / "testsets-default"))
     # no real network: only httpx.MockTransport answers (a request to a source in a test is a bug)
     import httpx
 
@@ -26,11 +29,20 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         raise httpx.ConnectError(f"network is closed in unit tests: {request.url}")
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", no_network)
-    # a captcha / refusal seen by one test must not block the next one (module-level cooldowns)
-    from src.sources import bo_nalog, pb_nalog, rmsp
+    # a captcha / refusal seen by one test must not block the next one, and a request of one test must not
+    # make the next one wait (the pacers are module-level, src/sources/pacing.py)
+    from src.sources import bo_nalog, eis_rnp, pb_nalog, rmsp
 
-    for mod in (bo_nalog, pb_nalog, rmsp):
-        monkeypatch.setattr(mod, "_blocked_until", 0.0)
+    pacers = [mod.PACER for mod in (bo_nalog, eis_rnp, pb_nalog, rmsp)]
+    for pacer in pacers:
+        pacer.reset()
+    # web leads (#108): no test depends on the real configs/leads; tests/unit/test_web_leads.py sets its own
+    from src.sources import web_leads
+
+    monkeypatch.setattr(web_leads, "LEADS_DIR", tmp_path / "leads-default")
+    yield
+    for pacer in pacers:
+        pacer.reset()
 
 
 @pytest.fixture(scope="session")
@@ -51,3 +63,17 @@ def search_data(fixture_processed: Path, tmp_path: Path, monkeypatch: pytest.Mon
     index.clear_memory_cache()
     yield fixture_processed
     index.clear_memory_cache()
+
+
+@pytest.fixture
+def v2_formula(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The product config without the learned ranker (#198): tests of the v2 formula itself — scores as the
+    weighted sum of components, the fallback ladder depths. The ranker on top is tested in test_ranker.py."""
+    from src.match import search as search_mod
+
+    plain = search_mod.load_config
+
+    def load_config(*args, **kwargs) -> dict:
+        return {k: v for k, v in plain(*args, **kwargs).items() if k != "ranker"}
+
+    monkeypatch.setattr(search_mod, "load_config", load_config)

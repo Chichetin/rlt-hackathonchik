@@ -200,16 +200,20 @@ def llm_trusted(rows: Sequence[dict[str, str]]) -> bool:
     return n >= MIN_OVERLAP and share is not None and share >= MIN_AGREEMENT
 
 
-def precision_body(rows: Sequence[dict[str, str]], shown: dict[str, int] | None = None) -> dict:
+def precision_body(rows: Sequence[dict[str, str]], shown: dict[str, int] | None = None,
+                   allow_llm: bool = False) -> dict:
     """precision@10 per query = labeled 1 / labeled (the table has <= 10 rows per query), mean over queries.
 
     `shown` = rows per selected query from `prepare` (empty blocks included): n_selected, empty_blocks, shown.
+    Human labels only by default (D-133: a third-party LLM judge is not part of the solution, its labels do not
+    go to slides); `allow_llm` adds `llm:*` labels once they agree with the human (EVAL.md B).
     """
     has_llm = any(_kind(r) == LLM and (r.get("label") or "").strip() in ("0", "1") for r in rows)
-    use_llm = llm_trusted(rows)
+    use_llm = allow_llm and llm_trusted(rows)
     if has_llm and not use_llm:
-        log.warning("метки LLM исключены из метрики: согласие с человеком не подтверждено (нужно >= %d пар, >= %.0f%%)",
-                    MIN_OVERLAP, MIN_AGREEMENT * 100)
+        why = (f"согласие с человеком не подтверждено (нужно >= {MIN_OVERLAP} пар, >= {MIN_AGREEMENT * 100:.0f}%)"
+               if allow_llm else "только метки человека (D-133)")
+        log.warning("метки LLM исключены из метрики: %s", why)
     resolved = resolve(rows, use_llm)
     per: dict[str, list[int]] = {}
     for (qid, _), (label, _) in resolved.items():
@@ -232,12 +236,12 @@ def precision_body(rows: Sequence[dict[str, str]], shown: dict[str, int] | None 
     }
 
 
-def score(exp: str, labels: Path) -> int:
+def score(exp: str, labels: Path, allow_llm: bool = False) -> int:
     if not labels.exists():
         print(f"нет файла разметки {labels}: сначала заполните label в {TODO_PATH.name} и сохраните как {labels.name}")
         return 1
     shown = json.loads(SHOWN_PATH.read_text(encoding="utf-8")) if SHOWN_PATH.exists() else None
-    body = precision_body(read_labels(labels), shown)
+    body = precision_body(read_labels(labels), shown, allow_llm)
     if not body["n_queries"]:
         print("в файле нет ни одной метки 0/1 — считать нечего")
         return 1
@@ -260,11 +264,13 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("score", help="precision@10 по eval/labels/new_suppliers.csv")
     s.add_argument("--exp", default="N-new-p10")
     s.add_argument("--labels", type=Path, default=LABELS_PATH)
+    s.add_argument("--with-llm", action="store_true",
+                   help="add llm:* labels after >= 20 pairs agree >= 80 %% with the human; not for slides (D-133)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     if args.cmd == "prepare":
         return prepare(args.n, args.offline or discover_mod.offline_mode())
-    return score(args.exp, args.labels)
+    return score(args.exp, args.labels, args.with_llm)
 
 
 if __name__ == "__main__":

@@ -40,8 +40,9 @@ test("результаты и запрос сохраняются при пер�
 
 
 test("главная и подбор — отдельные страницы, движение меню и reduced motion не ломают переходы", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" }); // the project default is reduce (#255)
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Поставщики,");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Митрандир");
   await expect(page.getByLabel("Что нужно закупить")).toHaveCount(0);
   await page.getByRole("link", { name: "Начать подбор" }).click();
   await expect(page).toHaveURL(/\/search$/);
@@ -50,8 +51,8 @@ test("главная и подбор — отдельные страницы, д
   await expect(nav.getByRole("link", { name: "Подбор", exact: true })).toHaveAttribute("aria-current", "page");
   await page.reload();
   await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
-  await nav.getByRole("link", { name: "Настройки" }).click();
-  await expect(page.getByRole("heading", { name: "Настройки подбора" })).toBeVisible();
+  await nav.getByRole("link", { name: "Фильтры" }).click();
+  await expect(page.getByRole("heading", { name: "Фильтры подбора" })).toBeVisible();
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   await page.setViewportSize({ width: 375, height: 812 });
