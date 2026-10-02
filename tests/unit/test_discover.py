@@ -814,3 +814,34 @@ def test_e2e_fixtures_give_the_demo_lot_a_filled_block(tmp_path):
     assert sorted({m.score for m in res.matches}) == [0.31, 0.45]  # distributors and producers of СПб
     assert all(check_counterparty(m.counterparty, c.page_text) == [] for m in res.matches)
     assert all(m.counterparty.evidence[0].fetched_at.date().isoformat() == "2026-10-01" for m in res.matches)
+
+
+def test_block_beyond_ten_keeps_every_candidate_above_min_score(tmp_path):
+    """#549: after the mixed top MAX_SHOWN the block keeps every candidate scoring at least min_score, best first."""
+    makers = ["7801000012", "7801000020", "7801000037", "7801000044", "7801000051", "4701000038", "7804428656",
+              "7805772436", "7807032363", "7810400592", "7811777270", "4703173460"]
+    traders = ["7707049388", "7805336905", "7806602902"]
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("17.12", "78"),
+          rmsp.flatten("17.12", "78", "UL", _rows(makers, "17.12", "Производство бумаги и картона")))
+    c.put(rmsp.search_url("46.49.33", "78"),
+          rmsp.flatten("46.49.33", "78", "UL", _rows(traders, "46.49.33", "Торговля оптовая канцелярскими товарами")))
+    q = _query(okpd2=["17.12.14.110"])
+    processed = _processed(tmp_path, [])
+    top = _run(c, processed, query=q)
+    floor = min(m.score for m in top.pool)
+    every = _run(c, processed, query=q, min_score=floor, max_shown=200)
+    assert [m.counterparty.inn for m in every.matches[:D.MAX_SHOWN]] == [m.counterparty.inn for m in top.matches]
+    assert len(every.matches) == len(makers) + len(traders)  # nothing cut at ten
+    rest = every.matches[D.MAX_SHOWN:]
+    assert [m.score for m in rest] == sorted((m.score for m in rest), reverse=True)
+    above = _run(c, processed, query=q, min_score=floor + 1e-6, max_shown=200)
+    assert len(above.matches) == D.MAX_SHOWN + sum(m.score > floor for m in every.matches[D.MAX_SHOWN:])
+    capped = _run(c, processed, query=q, min_score=floor, max_shown=12)
+    assert len(capped.matches) == 12
+
+
+def test_block_config_has_the_api_limits():
+    cfg = D.block_config()
+    assert cfg["min_score"] == 0.45 and cfg["max_shown"] >= D.MAX_SHOWN
+    assert cfg["budget_s"] is None and cfg["max_requests"] is None and cfg["pages"] > 1

@@ -561,14 +561,14 @@ export function App() {
   }
 
   // the next page of the history block from the server, for the same query and filters
-  async function showMore() {
+  async function showMore(group: "history" | "discovered" = "history") {
     if (!res || !shownQuery) return;
     const seq = runSeq.current;
     setMore(true);
     try {
-      const next = await search(shownQuery, { offset: res.history.length });
+      const next = await search(shownQuery, { offset: res[group].length });
       if (seq !== runSeq.current) return;
-      setRes({ ...res, history: [...res.history, ...next.history], total: next.total });
+      setRes({ ...res, [group]: [...res[group], ...next[group]], total: next.total });
     } catch (e) {
       if (seq !== runSeq.current) return; // a new search replaced this page
       setError(String(e));
@@ -1002,6 +1002,8 @@ export function App() {
             chip={res.discoveryClass?.predicted ? `ОКПД2 определён по тексту: ${okpd2Text(res.discoveryClass.classes, discoveryLabels)}` : undefined}
             rows={newRows}
             total={newTotal}
+            onMore={weights ? undefined : () => void showMore("discovered")}
+            loadingMore={more}
             onOpen={selectResult}
             empty={
               hiddenNew(res, base, shownQuery) ??
