@@ -86,7 +86,8 @@ def coverage(processed: Path, fns: Path, msp: Path | None = None, msp_inn: str =
         FROM read_parquet('{(processed / "participants.parquet").as_posix()}') WHERE inn_valid
         GROUP BY supplier_inn, lot_id""")
     if msp is not None:
-        con.execute(f"CREATE TABLE msp AS SELECT DISTINCT {msp_inn} AS inn FROM read_parquet('{msp.as_posix()}')")
+        con.execute(f"""CREATE TABLE msp AS SELECT DISTINCT {msp_inn} AS inn FROM read_parquet('{msp.as_posix()}')
+                        WHERE {msp_inn} IS NOT NULL""")  # a NULL would empty every NOT IN below
         registry = "CASE WHEN m.inn IS NULL THEN 'not_in_sme_registry' ELSE 'in_sme_registry' END"
         join = "LEFT JOIN msp m USING (inn)"
     else:
@@ -122,7 +123,8 @@ def coverage(processed: Path, fns: Path, msp: Path | None = None, msp_inn: str =
         # legal entities in neither the registry nor the datasets: how few INNs hold most of their wins
         neither = con.execute("""
             WITH w AS (SELECT inn, sum(win::INT) AS wins FROM p WHERE length(inn) = 10
-                         AND inn NOT IN (SELECT inn FROM msp) AND inn NOT IN (SELECT inn FROM fns) GROUP BY inn)
+                         AND inn NOT IN (SELECT inn FROM msp)
+                         AND inn NOT IN (SELECT inn FROM fns WHERE inn IS NOT NULL) GROUP BY inn)
             SELECT count(*), coalesce(sum(wins), 0), count(*) FILTER (wins >= 100),
                    coalesce(sum(wins) FILTER (wins >= 100), 0),
                    coalesce((SELECT sum(wins) FROM (SELECT wins FROM w ORDER BY wins DESC, inn LIMIT 100)), 0)
