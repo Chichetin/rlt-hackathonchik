@@ -350,11 +350,21 @@ class Ranked:
 # key -> Ranked of the last rerank() in this context (search() clears it): pipeline.pick() explains the order
 # of what is left after the hard and user filters, not of the list before them.
 _ranked: ContextVar[dict[str, Ranked] | None] = ContextVar("ranked", default=None)
+# key -> order key of the formula path under options.order_weights (#612, src/match/search.py): a row above a
+# higher score says what put it there
+_ordered: ContextVar[dict[str, float] | None] = ContextVar("ordered", default=None)
 SAME = 1e-9
+ORDER_REASON = "выше следующего: соответствие товару и опыт — {a:.2f} против {b:.2f}"
 
 
 def forget() -> None:
     _ranked.set(None)
+    _ordered.set(None)
+
+
+def set_order(matches: list[CounterpartyMatch], keys: list[float]) -> None:
+    """The order keys of a formula answer ordered not by its score (#612): reasons() explains them."""
+    _ordered.set({_key(m): o for m, o in zip(matches, keys, strict=True)})
 
 
 def _key(m: CounterpartyMatch) -> str:
@@ -447,11 +457,27 @@ def reason(a: Ranked, b: Ranked) -> str:
 def reasons(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     """rank_reason of each supplier the model ordered, against the next such supplier of THIS list — after the
     filters it is the neighbour the customer sees. Others («Новые», v2 without a model) pass unchanged."""
+    if not _ranked.get() and (ordered := _ordered.get()):
+        return _order_reasons(matches, ordered)
     seen = _ranked.get() or {}
     at = [j for j, m in enumerate(matches) if m.origin == "history" and _key(m) in seen]
     out = list(matches)
     for n, a in enumerate(at):
         b = at[n + 1] if n + 1 < len(at) else None
         why = None if b is None else reason(seen[_key(matches[a])], seen[_key(matches[b])])
+        out[a] = matches[a].model_copy(update={"rank_reason": why})
+    return out
+
+
+def _order_reasons(matches: list[CounterpartyMatch], ordered: dict[str, float]) -> list[CounterpartyMatch]:
+    """rank_reason of a formula answer ordered by options.order_weights (#612): only where the next supplier of THIS
+    list has a higher score — there the number does not explain the order; elsewhere it does, no reason."""
+    at = [j for j, m in enumerate(matches) if m.origin == "history" and _key(m) in ordered]
+    out = list(matches)
+    for n, a in enumerate(at):
+        b = at[n + 1] if n + 1 < len(at) else None
+        why = None
+        if b is not None and matches[b].score > matches[a].score:
+            why = ORDER_REASON.format(a=ordered[_key(matches[a])], b=ordered[_key(matches[b])])
         out[a] = matches[a].model_copy(update={"rank_reason": why})
     return out
