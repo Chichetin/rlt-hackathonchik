@@ -25,12 +25,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 
 from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
-from src.match import confidence, fallback, speller
+from src.match import confidence, fallback, ranker, speller
 from src.match import search as search_mod
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
 from src.match.index import get_index
@@ -97,7 +98,8 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
                                                                                     predicted)
         found = [*enriched(found, out.uncached), *discovered]
     legal = found if backtest else apply_legal(found)
-    shown = apply_user_filters(legal, query)
+    # why above the next one — against the neighbour left after the filters, the one the customer sees (#278)
+    shown = ranker.reasons(apply_user_filters(legal, query))
     hidden = sum(m.origin == "history" for m in found) - sum(m.origin == "history" for m in shown)
     if hidden and not any(m.origin == "history" for m in shown):
         out.note = f"фильтры скрыли {hidden}"
@@ -129,6 +131,12 @@ def _spelled(query: Query, config: dict | None) -> speller.Correction | None:
         log.exception("speller: запрос %s ищется как введён", query.query_id)
         return None
     return fixed if fixed.changed else None
+
+
+def with_reliability(matches: list[CounterpartyMatch], as_of: date | None) -> list[CounterpartyMatch]:
+    """The reliability of what the user sees (#72, shadow): the page of /api/search, the rows of an export — not
+    every candidate pick() scored. Weight 0: score and order stay."""
+    return search_mod.shadow_reliability(matches, as_of)
 
 
 def verified(matches: list[CounterpartyMatch], open_data: bool = True) -> list[CounterpartyMatch]:

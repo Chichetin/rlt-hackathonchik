@@ -1,7 +1,7 @@
 import type { CounterpartyMatch, ScoreComponent } from "./api";
 
 // The learned ranker (#198, D-103) appends its reason to the product_fit explanation after this marker
-// (src/match/ranker.py MARKER): the order and the score are the model's, the components are its inputs.
+// (src/match/ranker.py MARKER): the order is the model's, the score is the formula's (#278, D-156), the components are its inputs.
 const MARKER = "почему на этом месте — ";
 
 /** The model's reason for the position («модель …: за — …; против — …»), or null when the order is the formula's. */
@@ -25,7 +25,11 @@ export function componentText(c: ScoreComponent): string {
   return i < 0 ? c.explanation : c.explanation.slice(0, i).replace(/;\s*$/, "");
 }
 
-/** Σ value × weight — what the formula alone would give; with the ranker on it differs from the score. */
-export function formulaScore(m: CounterpartyMatch): number {
-  return m.components.reduce((s, c) => s + c.value * c.weight, 0);
+const NEXT_PREFIX = "выше следующего: ";
+
+/** Why the model put this supplier above the next visible one (#278), without the common prefix; null when absent. */
+export function nextReason(m: CounterpartyMatch): string | null {
+  const r = m.rank_reason;
+  if (!r) return null;
+  return r.startsWith(NEXT_PREFIX) ? r.slice(NEXT_PREFIX.length) : r;
 }

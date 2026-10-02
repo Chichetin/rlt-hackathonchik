@@ -47,8 +47,8 @@ import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleB
 import "./filters.css";
 import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
-import { componentText, formulaScore, rankerReason, rankerShort } from "./ranker";
-import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
+import { componentText, nextReason, rankerReason, rankerShort } from "./ranker";
+import { activeWeights, COMPONENT_COLOR, COMPONENTS, offNote, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 import { STATIC_DEMO } from "./staticApi";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
@@ -1078,7 +1078,8 @@ function Block(props: {
                     <WorkedWith cp={cp} customerRegion={props.customerRegion} />
                   </span>
                   <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
-                  {rankerShort(m) ? <span className="why" title={rankerReason(m) ?? ""}><span className="why-label">Почему на этом месте</span>{rankerShort(m)}</span>
+                  {nextReason(m) ? <span className="why" title={rankerReason(m) ?? m.rank_reason ?? ""}><span className="why-label">Выше следующего</span>{nextReason(m)}</span>
+                    : rankerShort(m) ? <span className="why" title={rankerReason(m) ?? ""}><span className="why-label">Почему на этом месте</span>{rankerShort(m)}</span>
                     : top && <span className="why" title={componentText(top)}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{componentText(top)}</span>}
                 </motion.button>
               </motion.li>
@@ -1182,10 +1183,9 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
       <h3>Почему в списке</h3>
       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
       {rankerReason(m) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(m)}</p>}
+      {nextReason(m) && <p className="ranker-reason"><strong>Выше следующего:</strong> {nextReason(m)}</p>}
       <p className="hint">{rankerReason(m)
-        ? (Math.abs(formulaScore(m) - m.score) < 0.005
-          ? "Порядок задаёт модель, критерии ниже — её входы; число — соответствие по формуле «критерий × вес»."
-          : `Порядок задаёт модель, критерии ниже — её входы. По формуле «критерий × вес» — ${formulaScore(m).toFixed(2)}; в списке число не выше, чем у стоящего выше.`)
+        ? "Порядок задаёт модель, обученная на истории закупок; оценка — сумма критериев × вес ниже, как и без модели."
         : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
         {m.components.map((c) => (
@@ -1274,7 +1274,7 @@ const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa
 function Breakdown({ m }: { m: CounterpartyMatch }) {
   const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }));
   return (
-    <figure className="breakdown" aria-label={rankerReason(m) ? "Критерии — входы модели" : "Из чего сложилась оценка"}>
+    <figure className="breakdown" aria-label={rankerReason(m) ? "Из чего сложилась оценка (порядок задаёт модель)" : "Из чего сложилась оценка"}>
       <div className="stack" aria-hidden="true">
         {parts.map(({ c, v, color }) =>
           v > 0 ? <span key={c.name} style={{ width: `${v * 100}%`, background: color }} title={`${COMPONENT_LABEL[c.name]}: +${v.toFixed(2)}`} /> : null,
@@ -1389,7 +1389,7 @@ function WeightsSettings({ value, onChange }: { value: WeightSettings; onChange:
                 <i style={{ background: COMPONENT_COLOR[c] }} aria-hidden="true" />
                 {COMPONENT_LABEL[c]}
               </span>
-              <span className="slider-off">нет данных — в оценку не входит</span>
+              <span className="slider-off">{offNote(c)}</span>
               <span className="slider-share">0 %</span>
             </div>
           ) : (

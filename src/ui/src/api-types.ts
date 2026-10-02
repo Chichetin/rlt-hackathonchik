@@ -328,6 +328,8 @@ export interface components {
              * @enum {string}
              */
             origin: "history" | "discovered";
+            /** Rank Reason */
+            rank_reason?: string | null;
         };
         /** EnqueueResult */
         EnqueueResult: {

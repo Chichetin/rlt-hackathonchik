@@ -35,6 +35,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
 from typing import Any
@@ -64,6 +65,7 @@ from src.match import pipeline
 from src.match import search as search_mod
 from src.match.filters import entity_of, kind_of, near_of, parse_filters
 from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
+from src.match.reliability import reliability_mode
 from src.match.store import get_store
 from src.settings import get_settings
 from src.sources.cache import SourceCache
@@ -84,14 +86,28 @@ MAX_CORRECTIONS = 10  # X-Query-Corrected: pairs (typed, searched) shown to the 
 HISTORY_UNCHECKED = "history_unchecked"  # X-Discovery-Error: found, but novelty not checked (#287)
 SOURCE_UNAVAILABLE = "source_unavailable"  # X-Discovery-Error: a registry request was refused or failed (#287)
 
+def _warm_reliability() -> None:
+    """The reliability prior (#72: one SQL over every supplier, cached per process) before the first search — on
+    Postgres it costs 1–1.5 s. Background thread: start-up does not wait; no data / no store — the first search
+    pays it (or shows «Нет данных»), the start-up never fails."""
+    try:
+        search_mod.reliability_prior(get_store(), None)
+    except Exception:  # noqa: BLE001 — a warm-up only
+        log.info("reliability: prior не прогрет при старте", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Q-24: with retriever pg_hybrid load the query model and check the vectors before the first request."""
+    """Q-24: with retriever pg_hybrid load the query model and check the vectors before the first request;
+    with reliability shadow / on warm its prior in the background (#72)."""
     try:
         cfg = search_mod.load_config()
         retriever, model = cfg["retriever"], cfg.get("embedding_model")
+        reliability = reliability_mode(cfg)
     except (OSError, ValueError, KeyError):
-        retriever = model = None
+        retriever = model = reliability = None
+    if reliability in ("shadow", "on") and not _is_stub():
+        threading.Thread(target=_warm_reliability, name="warm-reliability", daemon=True).start()
     if retriever == "pg_hybrid":
         from src.match import pg_retriever
 
@@ -269,7 +285,7 @@ def api_search(query: Query, response: Response,
     _queue_uncached(page, uncached)
     return SearchResponse(
         query=query,
-        history=_verified(page),
+        history=_verified(pipeline.with_reliability(page, query.as_of)),  # shadow: the shown page only (#72)
         discovered=_verified(discovered[offset:offset + limit]),
         stub=_is_stub(),
     )
@@ -364,22 +380,25 @@ def api_enqueue(inn: str) -> EnqueueResult:
 
 @app.post("/api/export")
 def api_export(query: Query) -> StreamingResponse:
-    matches = _verified(_found(query).matches)
+    matches = _verified(pipeline.with_reliability(_found(query).matches, query.as_of))  # the rows exported (#72)
     res = SearchResponse(query=query, history=[m for m in matches if m.origin == "history"],
                          discovered=[m for m in matches if m.origin == "discovered"], stub=_is_stub())
     wb = Workbook()
     ws = wb.active
     assert ws is not None
     ws.title = "Поставщики"
-    ws.append(["Блок", "Наименование", "ИНН", "Роль", "ЮЛ/ИП", "Регион", "МСП", "Score", "Почему в списке",
-               "Источники"])
+    # «Место» — the order of the block («С опытом» — the ranker's, D-103); «Релевантность» — the formula of the
+    # components, as the card's sum (D-156): a lower row may have a higher one, «Выше следующего» says why
+    ws.append(["Блок", "Наименование", "ИНН", "Роль", "ЮЛ/ИП", "Регион", "МСП", "Место в блоке",
+               "Релевантность (формула критериев)", "Выше следующего", "Почему в списке", "Источники"])
     for block, rows in (("С опытом госзакупок", res.history), ("Новые из открытых источников", res.discovered)):
-        for m in rows:
+        for place, m in enumerate(rows, 1):
             cp = m.counterparty
             ws.append([
                 block, cp.name, cp.inn or "ИНН не подтверждён",
                 KIND_LABEL[kind_of(cp)], ENTITY_LABEL.get(entity_of(cp) or "", "не определено"), cp.region or "",
-                {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], round(m.score, 3),
+                {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], place, round(m.score, 3),
+                m.rank_reason or "",
                 "; ".join(c.explanation for c in m.components),
                 "; ".join(f"{e.source}: {e.url}" for e in cp.evidence),
             ])

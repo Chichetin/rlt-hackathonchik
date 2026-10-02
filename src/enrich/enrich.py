@@ -4,7 +4,9 @@ Main source: ФНС «Прозрачный бизнес» (src/sources/pb_nalog.
 works on cache without internet. While pb asks for a captcha (#58, D-052) the fallback is the registry
 of МСП by INN (src/sources/rmsp.py), then ГИР БО (src/sources/bo_nalog.py): fewer facts, each with its
 own source and url. On top of any of them: offline facts from ФНС open data (src/sources/fns_opendata.py:
-headcount, income, tax regime, tax debt) when its parquet is built. Every fact is an Evidence whose `value`
+headcount, income, tax regime, tax debt) when its parquet is built, and the registry of Russian industrial
+products (src/sources/gisp.py, #74): a product of the INN there makes it a manufacturer with the state registry as
+the basis (the OKVED basis stays). Every fact is an Evidence whose `value`
 literally occurs in the cached card text (src/enrich/evidence.py checks it; the API shows only what passes).
 Organizers' data stats (`Counterparty.stats`) come from search(), not from here.
 
@@ -27,7 +29,7 @@ import httpx
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
 from src.regions import label_by_code, name_by_code
 from src.settings import get_settings
-from src.sources import bo_nalog, eis_rnp, fns_opendata, pb_nalog, rmsp, role
+from src.sources import bo_nalog, eis_rnp, fns_opendata, gisp, pb_nalog, rmsp, role
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
 
@@ -249,13 +251,21 @@ def _merge_rnp(inn: str, cp: Counterparty, cache: SourceCache, offline: bool) ->
 
 
 def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counterparty]:
-    """The cards plus the offline facts of ФНС open data, each with its own url (one query for all, no network)."""
-    facts = fns_opendata.lookup_many([c.inn for c in cards if c.inn and inn_is_valid(c.inn)], cache)
+    """The cards plus the offline facts of ФНС open data, each with its own url, and the role «производитель» by the
+    registry of industrial products (ГИСП) — one query per source for all, no network."""
+    inns = [c.inn for c in cards if c.inn and inn_is_valid(c.inn)]
+    facts = fns_opendata.lookup_many(inns, cache)
+    try:
+        products = gisp.by_inn(inns)
+    except Exception:  # noqa: BLE001 — a broken registry export never takes the card down
+        log.exception("ГИСП: выгрузка не прочитана — роль по реестру не добавлена")
+        products = {}
 
     def merged(c: Counterparty) -> Counterparty:
         have = {(e.url, e.field, e.value) for e in c.evidence}  # a card that already has them gets them once
         new = [e for e in facts.get(c.inn or "", []) if (e.url, e.field, e.value) not in have]
-        return c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
+        c = c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
+        return gisp.with_role(c, products.get(c.inn or "", [])[:1], cache)  # facts already there are not repeated
     return [merged(c) for c in cards]
 
 

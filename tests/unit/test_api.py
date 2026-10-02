@@ -149,6 +149,26 @@ def test_enqueue(client):
     assert r.status_code == 202 and r.json()["task_id"] >= 1
 
 
+def test_reliability_is_read_for_the_shown_page_and_the_export_rows_only(search_client, monkeypatch):
+    """#127 review: shadow reliability is one history SQL over the page (≤ limit INNs) — not over the ≤ 200
+    candidates the pipeline scores; the export reads it for its own rows."""
+    from src.match.store import ParquetStore
+
+    calls: list[int] = []
+    real = ParquetStore.supplier_history
+    monkeypatch.setattr(ParquetStore, "supplier_history", lambda self, inns, as_of: calls.append(len(inns))
+                        or real(self, inns, as_of))
+    q = {"query_id": "q", "text": "бумага офисная"}
+    r = search_client.post("/api/search?limit=2", json=q)
+    page = r.json()["history"]
+    assert int(r.headers["X-Total-History"]) > 2 and calls == [len(page)] == [2]
+    rel = [c for m in page for c in m["components"] if c["name"] == "reliability"]
+    assert all(c["weight"] == 0 and c["explanation"].endswith("справочно, в оценку не входит") for c in rel)
+    calls.clear()
+    search_client.post("/api/export", json=q)
+    assert calls == [int(r.headers["X-Total-History"])]  # the exported rows, once
+
+
 def test_export_xlsx(search_client):
     r = search_client.post("/api/export", json={"query_id": "q", "text": "бумага"})
     assert r.status_code == 200
@@ -157,6 +177,12 @@ def test_export_xlsx(search_client):
     header = [c.value for c in ws[1]]
     assert header[:3] == ["Блок", "Наименование", "ИНН"] and ws.max_row > 1
     assert ws.cell(row=2, column=3).value == "7801000012"
+    # the order and the relevance are two columns (#278, D-156): the place is the block's order, not the score's
+    place, score = header.index("Место в блоке") + 1, header.index("Релевантность (формула критериев)") + 1
+    assert "Выше следующего" in header and "Score" not in header
+    history = [r for r in range(2, ws.max_row + 1) if ws.cell(row=r, column=1).value == "С опытом госзакупок"]
+    assert [ws.cell(row=r, column=place).value for r in history] == list(range(1, len(history) + 1))
+    assert all(isinstance(ws.cell(row=r, column=score).value, float) for r in history)
 
 
 def test_export_kind_column_in_russian(client, monkeypatch):

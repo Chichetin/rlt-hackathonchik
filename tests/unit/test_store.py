@@ -117,6 +117,8 @@ def test_store_rows_are_identical(loaded):
         assert pq.customer_lots(inns, "7801000051", as_of)  # not vacuous
         for level, codes in ((4, ["17.12.14.110"]), (2, ["17.12", "26.20"]), (1, ["99"])):  # #113 ladder
             assert pg.okpd2_suppliers(level, codes, as_of, 200) == pq.okpd2_suppliers(level, codes, as_of, 200)
+        assert pg.supplier_history(inns + ["0000000000"], as_of) == pq.supplier_history(inns + ["0000000000"], as_of)
+        assert pq.supplier_history(inns, as_of)  # not vacuous
     assert pg.lot_codes([1, 2, 3, 6]) == pq.lot_codes([1, 2, 3, 6])
     assert pg.lot_codes([]) == pq.lot_codes([]) == []
     assert pg.lot_names(1) == pq.lot_names(1) and pq.lot_names(1)
@@ -267,6 +269,7 @@ DIRECT_PARQUET_OK = {
     "src/eval/judge_hist.py": "eval tool (#301): item history for blind judge packets, not the product path",
     "src/sources/msp_dump.py": "the SMB register dump, not organizers' data",
     "src/sources/fns_opendata.py": "FNS open data, not organizers' data",
+    "src/sources/gisp.py": "the GISP export of the registry of industrial products (#74), not organizers' data",
     "src/enrich/discover.py": "waits for PR #131 and #258 — the second part of #293",
     "src/match/new_fit.py": "OKPD2 item profile of «Новые» (#77, shadow) — the second part of #293",
     "src/ingest/predict.py": "make predict (#229): offline batch over a test upload: known OKPD2 classes and sections "

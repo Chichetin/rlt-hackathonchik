@@ -20,8 +20,14 @@ export const DEFAULT_WEIGHTS: Weights = {
   price: 0.0,
 };
 
-/** No data yet: the server scores them with weight 0 (UNAVAILABLE in src/match/search.py, D-029). */
+/** Out of the score: the server gives them weight 0 — price: no data (UNAVAILABLE in src/match/search.py, D-029);
+ * reliability: computed for the shown rows, for reference only (reliability.mode shadow, #72). */
 export const UNAVAILABLE: ComponentName[] = ["reliability", "price"];
+
+/** Why a component is out of the score — the text of its row in the advanced mode. */
+export function offNote(c: ComponentName): string {
+  return c === "reliability" ? "справочно — в оценку не входит" : "нет данных — в оценку не входит";
+}
 export const AVAILABLE: ComponentName[] = COMPONENTS.filter((c) => !UNAVAILABLE.includes(c));
 
 export const COMPONENT_COLOR: Record<ComponentName, string> = {
@@ -83,7 +89,7 @@ export function normalize(w: Weights): Weights {
 /** The same match with the user's weights: each component keeps its value, the score is Σ value × weight.
  *  The weight the server gave to the components with data is redistributed (a weight of 0 by decision, like
  *  geography in H-15f, may be raised; no-data components stay at 0), so the scale of the score stays the same as
- *  with the standard weights and only the order changes. The learned ranker's reason (#198) is dropped. */
+ *  with the standard weights and only the order changes. The learned ranker's reasons (#198, #278) are dropped. */
 export function reweight(m: CounterpartyMatch, w: Weights): CounterpartyMatch {
   const scored = m.components.filter((c) => !UNAVAILABLE.includes(c.name));
   const mass = scored.reduce((a, c) => a + c.weight, 0);
@@ -94,7 +100,7 @@ export function reweight(m: CounterpartyMatch, w: Weights): CounterpartyMatch {
     weight: !UNAVAILABLE.includes(c.name) && share > 0 ? Math.round((Math.max(0, w[c.name] ?? 0) / share) * mass * 1e4) / 1e4 : 0,
   }));
   const score = Math.round(components.reduce((a, c) => a + c.value * c.weight, 0) * 1e4) / 1e4;
-  return { ...m, components, score };
+  return { ...m, components, score, rank_reason: null };
 }
 
 /** Re-weighted and re-sorted by the new score; ties keep the server order. */

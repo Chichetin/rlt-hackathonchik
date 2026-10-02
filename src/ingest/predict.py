@@ -15,10 +15,13 @@ Mode `demo` — the old behaviour (cache, the budget of /api/search).
 
 One CSV (`;`, UTF-8 BOM for Excel): per lot the top-N suppliers from organizers' history
 (block «История») and the companies from open sources (block «Новые»), score and every component
-(value × weight, explanation). A lot without candidates gets one row with the reason — never a
-silent gap. Idempotent: lots already in the output are skipped (resume after a crash); progress
-goes to the log. Exit 2 on a broken export (message, no traceback). A text cell starting with
-= + - @ (tab, CR) gets a leading «'» so Excel does not run it as a formula (docs/REVIEW.md F-08).
+(value × weight, explanation). `rank` is the order within the block («История» — the ranker's, D-103);
+`score` is the relevance — the formula of the components, the card's sum (D-156), so in «История» a lower
+rank may have a higher score.
+A lot without candidates gets one row with the reason — never a silent gap. Idempotent: lots already in the
+output are skipped (resume after a crash); progress goes to the log. Exit 2 on a broken export (message, no
+traceback). A text cell starting with = + - @ (tab, CR) gets a leading «'» so Excel does not run it as a
+formula (docs/REVIEW.md F-08).
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ import logging
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -131,7 +134,8 @@ def recommend(lot: TestLot, top: int, offline: bool | None = None) -> tuple[list
         notes.append("«Новые» не установлены: нет сверки с данными организаторов")
     if res is not None and not discovered:
         notes.extend(res.notes or ["открытые источники не дали новых компаний"])
-    return pipeline.verified([*history, *discovered]), notes
+    # reliability (shadow, #72) of the exported rows only
+    return pipeline.verified(pipeline.with_reliability([*history, *discovered], lot.query.as_of)), notes
 
 
 # --- full mode (#229) ---------------------------------------------------------------------------------
@@ -314,6 +318,8 @@ def full_recommend(lot: TestLot, top: int, *, offline: bool = False, rnp: bool =
         shown = []
     if history and not shown:
         notes.append(f"в истории {len(history)} кандидатов, ни один не прошёл проверку (статус, РНП)")
+    rows = search_mod.shadow_reliability([c.match for c in shown], lot.query.as_of)  # the exported rows only (#72)
+    shown = [replace(c, match=m) for c, m in zip(shown, rows, strict=True)]
 
     try:
         res = discover_mod.discover(query, history if for_new is None else for_new, offline=offline,

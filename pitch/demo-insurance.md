@@ -126,4 +126,4 @@ DATA_STORE=parquet DATA_PROCESSED_DIR=<data/processed> INDEX_DIR=<indexes> SOURC
 OUT_DIR=<папка> BASE=http://127.0.0.1:8010 node scripts/record_demo.mjs 5903085
 ```
 
-Кеш — `make data PART=cache` (553 страницы, D-152; без снимка вместо названий «ИНН …»). Видео не заменяет живое демо и не доказывает работу на других запросах.
+Кеш — `make data PART=cache` (553 страницы, D-152; без снимка вместо названий «ИНН …»). ГИСП (D-153) — на машине показа реальные файлы в `data/external/gisp` (не ссылка: `make up` монтирует `./data:ro`): `uv run python -m src.sources.gisp build <pp719_valid.xlsx>` (выгрузка — `/mnt/storage/rlt236/gisp` на стенде M1hairu); без них «Новые» идут без ступени ГИСП, как до D-153. Видео не заменяет живое демо и не доказывает работу на других запросах.
