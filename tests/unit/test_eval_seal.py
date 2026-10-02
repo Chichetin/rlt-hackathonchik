@@ -322,3 +322,14 @@ def test_dev_results_are_dirty_on_an_uncommitted_ranker_model(repo):
     assert R.tree_dirty() is True
     assert R.result_record("x", "dev", {}, {})["dirty"] is True
     assert F.FROZEN_PATHS == R.FROZEN_PATHS  # one list for the gate and for the results
+
+
+
+def test_dirty_is_computed_in_one_place():
+    """A new eval tool copied from an old one would compute `dirty` over its own paths again (#455): `git status
+    --porcelain` stays in run.tree_dirty, the eval-final gate and fns_coverage (whole repo, tracked files on purpose,
+    #396 — it already sees a modified tracked model)."""
+    allowed = {"src/eval/run.py", "src/eval/final.py", "src/eval/fns_coverage.py"}
+    found = {p.relative_to(ROOT).as_posix() for d in ("src", "scripts") for p in (ROOT / d).rglob("*.py")
+             if "node_modules" not in p.parts and '"--porcelain"' in p.read_text(encoding="utf-8")}
+    assert found <= allowed, f"dirty считается вне run.tree_dirty: {sorted(found - allowed)}"
