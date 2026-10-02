@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url)), deck=path.resolve(here,'..'), repo=process.env.RLT_EVIDENCE_ROOT||path.resolve(deck,'..');
 const read=p=>JSON.parse(fs.readFileSync(path.join(repo,p),'utf8'));
-const baseline=read('eval/results/B-bm25.json'),current=read('eval/results/E-003.json'),manifest=read('data/processed/manifest.json'),example=read('presentation/assets/example.json');
+const baseline=read('eval/results/B-bm25.json'),current=read('eval/results/A361-base.json'),manifest=read('data/processed/manifest.json'),example=read('presentation/assets/example.json');
 const browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1600,height:900},offline:true});
 await page.emulateMedia({reducedMotion:'reduce'});await page.goto(pathToFileURL(path.join(deck,'index.html')).href);await page.evaluate(()=>document.fonts.ready);
 const checks=[];function check(ok,name){checks.push({name,passed:!!ok});}
@@ -14,7 +14,7 @@ const text=id=>all.find(s=>s.id===id).text;
 const ru=n=>n.toFixed(1).replace('.',',');
 check(baseline.n_queries===current.n_queries&&JSON.stringify(baseline.per_query.map(q=>q.query_id))===JSON.stringify(current.per_query.map(q=>q.query_id)),'Comparison uses identical query IDs');
 check(text('s6').includes(ru(baseline.metrics['recall@10'].value*100)+'%')&&text('s6').includes(ru(current.metrics['recall@10'].value*100)+'%'),'Main percentages agree with both saved reports');
-check(text('s6').includes('+'+((current.metrics['recall@10'].value-baseline.metrics['recall@10'].value)*100).toFixed(1).replace('.',',')),'Percentage point delta agrees with pitch/facts.md (+0.041, one decimal)');
+check(text('s6').includes('+'+((current.metrics['recall@10'].value-baseline.metrics['recall@10'].value)*100).toFixed(1).replace('.',',')),'Percentage point delta agrees with pitch/facts.md (+0.123, one decimal)');
 check(text('s6').includes('2 000')&&current.n_queries===2000,'Displayed evaluation sample size agrees');
 check(text('s3').includes(manifest.rows.notices.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.suppliers.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.items.toLocaleString('en-US').replaceAll(',',' ')),'Corpus counts agree with manifest');
 check(text('b1').includes(String(example.result.score))&&text('s5').includes('126')&&text('s5').includes('36'),'Example score and evidence preserved');
