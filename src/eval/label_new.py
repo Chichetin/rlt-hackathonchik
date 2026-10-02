@@ -183,15 +183,40 @@ def resolve(rows: Sequence[dict[str, str]], use_llm: bool = True) -> dict[tuple[
     return out
 
 
-def agreement(rows: Sequence[dict[str, str]]) -> tuple[int, float | None]:
-    """Human vs LLM on the overlap: (companies labeled by both, share of equal labels)."""
+def _pairs(rows: Sequence[dict[str, str]]) -> list[dict[str, int]]:
+    """Companies labeled 0/1 by both the human and the LLM: {HUMAN: label, LLM: label} each."""
     by: dict[tuple[str, str], dict[str, int]] = {}
     for row in rows:
         label = (row.get("label") or "").strip()
         if label in ("0", "1") and _key(row) and _kind(row):
             by.setdefault(((row.get("query_id") or "").strip(), _key(row)), {})[str(_kind(row))] = int(label)
-    both = [v for v in by.values() if HUMAN in v and LLM in v]
+    return [v for v in by.values() if HUMAN in v and LLM in v]
+
+
+def agreement(rows: Sequence[dict[str, str]]) -> tuple[int, float | None]:
+    """Human vs LLM on the overlap: (companies labeled by both, share of equal labels)."""
+    both = _pairs(rows)
     return len(both), (sum(v[HUMAN] == v[LLM] for v in both) / len(both) if both else None)
+
+
+def kappa(rows: Sequence[dict[str, str]]) -> float | None:
+    """Cohen's kappa human vs LLM on the overlap: the share of equal labels corrected for chance (#82)."""
+    both = _pairs(rows)
+    if not both:
+        return None
+    n = len(both)
+    observed = sum(v[HUMAN] == v[LLM] for v in both) / n
+    h1, j1 = sum(v[HUMAN] for v in both) / n, sum(v[LLM] for v in both) / n
+    chance = h1 * j1 + (1 - h1) * (1 - j1)
+    return None if chance == 1 else (observed - chance) / (1 - chance)
+
+
+def confusion(rows: Sequence[dict[str, str]]) -> dict[str, int]:
+    """Human × LLM labels on the overlap, keys `human<h>_llm<j>` (#82)."""
+    out = {f"human{h}_llm{j}": 0 for h in (0, 1) for j in (0, 1)}
+    for v in _pairs(rows):
+        out[f"human{v[HUMAN]}_llm{v[LLM]}"] += 1
+    return out
 
 
 def llm_trusted(rows: Sequence[dict[str, str]]) -> bool:
@@ -229,7 +254,8 @@ def precision_body(rows: Sequence[dict[str, str]], shown: dict[str, int] | None 
         "metrics": {"precision@10": {"value": sum(values) / len(values) if values else 0.0, "ci95": [lo, hi]}},
         "labeled": len(resolved),
         "labeled_by": dict(Counter(kind for _, kind in resolved.values())),
-        "agreement_human_llm": {"overlap": n_both, "share": agree, "llm_used": use_llm and has_llm},
+        "agreement_human_llm": {"overlap": n_both, "share": agree, "kappa": kappa(rows),
+                                "confusion": confusion(rows), "llm_used": use_llm and has_llm},
         "n_selected": len(shown) if shown else None,
         "empty_blocks": sorted(q for q, n in (shown or {}).items() if n == 0),
         "per_query": per_query,
@@ -245,7 +271,7 @@ def score(exp: str, labels: Path, allow_llm: bool = False) -> int:
     if not body["n_queries"]:
         print("в файле нет ни одной метки 0/1 — считать нечего")
         return 1
-    cfg = {"block": "discovered", "k": TOP_K, "labels": labels.name}
+    cfg = {"block": "discovered", "k": TOP_K, "labels": labels.name, "with_llm": allow_llm}
     rec = eval_run.result_record(exp, "new-suppliers", cfg, {"elapsed_s": 0.0, **body})
     out = ROOT / "eval" / "results" / f"{exp}.json"
     out.write_text(eval_run.dump_record(rec), encoding="utf-8")
