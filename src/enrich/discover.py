@@ -519,8 +519,8 @@ def lead_matches(
                        "розничная торговля, производство и опт по реестру не подтверждены")
             elif c.name == "product_fit":
                 why = f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: {why}"
-            elif c.name == "geography" and cp.kpp:
-                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)")
+            elif c.name == "geography":  # the region comes from the card, not from a registry row
+                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)") if cp.kpp else why.replace("Реестр МСП: ", "")
             comps.append(c.model_copy(update={"explanation": why}))
         relation[inn] = ch.relation
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,

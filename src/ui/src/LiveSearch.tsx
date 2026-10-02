@@ -22,17 +22,16 @@ export function LiveSearch({ live, onRun }: { live: LiveState; onRun: () => void
   }, [live.state]);
   return (
     <div className="live-search" data-testid="live-search">
-      {live.state === "loading" ? (
+      <button type="button" className="live-button" onClick={onRun} disabled={live.state === "loading"}
+        title="Яндекс Поиск → сайт компании → ИНН на сайте → карточка ФНС; сниппет выдачи фактом не становится">
+        <span className="live-dot" aria-hidden="true" />Искать в реальном времени
+      </button>
+      {live.state === "loading" && (
         <div className="live-loader" role="status" aria-live="polite">
           <span className="live-radar" aria-hidden="true"><span /><span /><span /></span>
           <span className="live-step" key={step}>{LIVE_STEPS[step]}…</span>
           <span className="live-bar" aria-hidden="true"><span /></span>
         </div>
-      ) : (
-        <button type="button" className="live-button" onClick={onRun}
-          title="Яндекс Поиск → сайт компании → ИНН на сайте → карточка ФНС; сниппет выдачи фактом не становится">
-          <span className="live-dot" aria-hidden="true" />Искать в реальном времени
-        </button>
       )}
       {live.state !== "loading" && live.text && (
         <div className={live.state === "error" ? "stub block-alert" : "live-result"} role="status">

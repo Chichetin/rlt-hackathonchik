@@ -12,10 +12,10 @@ describe("LiveSearch (#583)", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
-  it("while searching: no button, the steps of the server one after another", () => {
+  it("while searching: the button stays disabled, the steps of the server one after another", () => {
     vi.useFakeTimers();
     render(<LiveSearch live={{ ...LIVE_IDLE, state: "loading" }} onRun={() => undefined} />);
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("button")).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent(LIVE_STEPS[0]);
     act(() => { vi.advanceTimersByTime(2700); });
     expect(screen.getByRole("status")).toHaveTextContent(LIVE_STEPS[1]);
