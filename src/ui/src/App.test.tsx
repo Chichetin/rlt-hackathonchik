@@ -97,6 +97,9 @@ test("a failed open source is shown in «Новые», not passed off as «nobod
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const block = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(within(block).getByTestId("discovery-error")).toHaveTextContent("Источники не ответили — список может быть неполным.");
+  // discover() failed before a class was resolved: not «the code is unknown» (#394)
+  expect(block).toHaveTextContent("Поиск в открытых источниках не выполнен из-за ошибки — повторите запрос.");
+  expect(block).not.toHaveTextContent("по тексту не определён");
   expect(discoveryAlert("history_unchecked")).toContain("сверка с историей закупок не выполнена");
   expect(discoveryAlert(undefined)).toBeUndefined();
 });
@@ -284,7 +287,7 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const discovered = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(discovered).toHaveTextContent(
-    "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках",
+    "Код ОКПД2 не указан и по тексту не определён — уточните запрос или загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках",
   );
   await toggleManufacturer();
   expect(await screen.findByText("Роль ещё не определена у 1 из 1 — признак появится после обогащения; они скрыты фильтром роли.")).toBeInTheDocument();
@@ -445,6 +448,36 @@ test("lot chip names the OKPD2 class", async () => {
   await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
   await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
   expect(await screen.findByText("ОКПД2: 17.12 «Бумага и картон»")).toBeInTheDocument();
+});
+
+test("«Новые» of a free-text query names the OKPD2 class determined from the text (#394)", async () => {
+  const empty = { ...structuredClone(response), stub: false, discovered: [] };
+  const header = (predicted: boolean) => ({ "X-Discovery-Class": JSON.stringify({ classes: ["17.12"], predicted }) });
+  let predicted = true;
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+    String(url).startsWith("/api/okpd2")
+      ? new Response(JSON.stringify(LABELS), { status: 200 })
+      : new Response(JSON.stringify(empty), { status: 200, headers: header(predicted) }));
+  const { unmount } = render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
+  const block = await screen.findByRole("region", { name: "Новые из открытых источников" });
+  expect(await within(block).findByTestId("discovery-class")).toHaveTextContent("ОКПД2 определён по тексту: 17.12 «Бумага и картон»");
+  // the block was searched by that class: «nobody found», not «no code»
+  expect(block).toHaveTextContent("В открытых источниках новых компаний по этому запросу не найдено");
+  expect(block).not.toHaveTextContent("Код ОКПД2 не указан");
+  unmount();
+  predicted = false; // the class of the query itself (a loaded notice): no chip
+  window.history.replaceState(null, "", "/search");
+  render(<App />);
+  await userEvent.clear(screen.getByLabelText("Что нужно закупить"));
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
+  const own = await screen.findByRole("region", { name: "Новые из открытых источников" });
+  expect(own).toHaveTextContent("В открытых источниках новых компаний по этому запросу не найдено");
+  expect(within(own).queryByTestId("discovery-class")).toBeNull();
 });
 
 test("card names the supplier's main OKPD2 classes", async () => {

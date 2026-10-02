@@ -19,20 +19,19 @@ the answer is None («not checked»), never False:
 Error, captcha, 403/429 and a page that is not a РНП search page never reach the answer: `_get`
 raises `Blocked` (or an HTTP error), and nothing is cached or turned into «not in РНП». A refusal
 (`Blocked`) also leaves the host alone for BLOCK_COOLDOWN_S (15 min): no request until then, a stale
-cached answer is still served (D-141, #111 — enrich() asks РНП inside the worker's batch).
+cached answer is still served (D-150, #111 — enrich() asks РНП inside the worker's batch).
 
 robots.txt: `Crawl-delay: 60` → at most one request per MIN_INTERVAL_S (60 s, the environment can
 only raise it, never lower), blocking; for the
 final shortlist only. Pages go to SourceCache as is (Evidence values literally occur there);
 a cached answer older than MAX_AGE_S is refetched. `ENRICH_OFFLINE=1` — cache only; `enrich()`
-(D-141, #111) passes `offline` explicitly instead so the API (always offline for РНП) and the
+(D-150, #111) passes `offline` explicitly instead so the API (always offline for РНП) and the
 worker (live) do not depend on process-wide environment state.
 """
 
 from __future__ import annotations
 
 import html
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -43,6 +42,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from src.contracts import Evidence, inn_is_valid
+from src.settings import get_settings
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.pacing import HostPacer
 from src.sources.tls import gov_ssl_context
@@ -51,14 +51,14 @@ BASE = "https://zakupki.gov.ru"
 SOURCE = "ЕИС, реестр недобросовестных поставщиков"
 UA = "Mozilla/5.0 (compatible; RLTHack-Enrich/0.1; hackathon, cached, paced)"
 CRAWL_DELAY_S = 60.0  # robots.txt of zakupki.gov.ru: Crawl-delay
-MIN_INTERVAL_S = max(CRAWL_DELAY_S, float(os.environ.get("RNP_MIN_INTERVAL_S") or CRAWL_DELAY_S))
-MAX_AGE_S = float(os.environ.get("RNP_MAX_AGE_S", str(24 * 3600)))
+MIN_INTERVAL_S = max(CRAWL_DELAY_S, get_settings().rnp_min_interval_s or CRAWL_DELAY_S)
+MAX_AGE_S = get_settings().rnp_max_age_s
 TIMEOUT_S = 40.0
 NO_RESULTS = "Поиск не дал результатов"
 MSK = ZoneInfo("Europe/Moscow")  # the date in the fact is the one the user sees on site
 
 # A refusal (403/429, a page that is not a РНП search) raises Blocked and leaves the host alone for
-# BLOCK_COOLDOWN_S: since enrich() asks РНП inside the worker's batch (D-141, #111), the next INN must not knock
+# BLOCK_COOLDOWN_S: since enrich() asks РНП inside the worker's batch (D-150, #111), the next INN must not knock
 # again a minute later. The refusal is never cached; a 5xx or a timeout is not a refusal (the Crawl-delay paces it).
 # MIN_INTERVAL_S is read at every request (a test may override the module value).
 BLOCK_COOLDOWN_S = 900.0
@@ -159,14 +159,14 @@ def _get(client: httpx.Client, url: str) -> tuple[int, str]:
     return r.status_code, r.text
 
 
-def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None,
+def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None, *,
           offline: bool | None = None) -> CachedPage:
-    """`offline` explicit (passed by enrich(), D-141) wins; None falls back to `ENRICH_OFFLINE`
-    (CLI / standalone use) — cache only either way, never a live request."""
+    """Cached RNP page. `offline=True` (None — by ENRICH_OFFLINE) — cache only, KeyError when not cached;
+    enrich() passes it explicitly (D-150) so the API and the worker do not depend on process-wide state."""
     cache = cache or SourceCache()
     url = search_url(inn)
     hit = cache.get(url, allow_stale=True)
-    if offline if offline is not None else os.environ.get("ENRICH_OFFLINE") == "1":
+    if (get_settings().enrich_offline if offline is None else offline):
         if hit is None:
             raise KeyError(url)
         return hit
@@ -190,7 +190,7 @@ def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | Non
     return cache.put(url, body, status)
 
 
-def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None,
+def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None, *,
           offline: bool | None = None) -> RnpResult:
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")

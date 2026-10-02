@@ -14,12 +14,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 from pathlib import Path
 
 import duckdb
+
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -115,11 +116,11 @@ def load(processed: Path, url: str, schema: str = "data") -> dict[str, int]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ingest parquet → Postgres (D-054)")
-    default = Path(os.environ.get("DATA_PROCESSED_DIR") or ROOT / "data/processed")
+    default = get_settings().data_processed_dir
     ap.add_argument("--processed", type=Path, default=default)
     ap.add_argument("--schema", default="data")
     args = ap.parse_args(argv)
-    url = os.environ.get("DATABASE_URL", "")
+    url = get_settings().database_url
     if not url.startswith("postgres"):
         print("нужен DATABASE_URL=postgresql://… (docker compose up -d db)", file=sys.stderr)
         return 2

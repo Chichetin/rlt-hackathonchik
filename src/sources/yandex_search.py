@@ -11,6 +11,10 @@ Every request costs money, so the cache is the point of this module, not an extr
 - Spend ledger (`spend` table of the same file): one row per ATTEMPT, written before the request leaves —
   a timeout after sending counts too. `spent_today()` counts the rows since local midnight; at
   `YANDEX_SEARCH_DAILY_MAX` nothing is sent (`BudgetExceeded`) and the stale cache, if any, is returned.
+  The same transaction holds the all-time cap of the hackathon, `YANDEX_SEARCH_MAX_REQUESTS` (2500, D-149, #438).
+- OFF until the human sets the ceilings (D-149, #438): a live request needs the key AND `YANDEX_MAX_PER_LOT`,
+  `YANDEX_MAX_PER_RUN` (positive integers in `.env`); otherwise `Disabled`, no network. Per lot (the caller's
+  `lot=`) and per run (this process) are counted in memory (`Caps`); a cached answer counts nowhere.
   Within a process a lock makes «check the cap, pay, store» one step; separate processes share the file
   but not the lock (two of them may each pay once for the same miss — no batch consumer runs in parallel yet).
 - Offline (`YANDEX_SEARCH_OFFLINE=1` or `ENRICH_OFFLINE=1`, tests, demo without internet) — cache only.
@@ -24,7 +28,7 @@ the plain text of the answer, so src/enrich/evidence.py finds an extracted INN i
 
 CLI (loads .env of the worktree, then of the main checkout; the second identical run is free):
   python -m src.sources.yandex_search "поставщик канцтоваров Санкт-Петербург" [-n 10] [--region 2]
-  python -m src.sources.yandex_search --stats          # attempts today / the daily cap
+  python -m src.sources.yandex_search --stats          # on/off and why; attempts today, all time, left of 2500
 """
 
 from __future__ import annotations
@@ -32,7 +36,6 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import os
 import re
 import sqlite3
 import threading
@@ -48,6 +51,7 @@ from urllib.parse import quote
 import httpx
 
 from src.contracts import inn_is_valid
+from src.settings import get_settings, load_dotenv
 from src.sources.cache import SourceCache
 from src.sources.pacing import HostPacer
 
@@ -63,29 +67,56 @@ MAX_DOCS = 50  # groups on one page; more is a separate (paid) page
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _env_float(name: str, default: str) -> float:
-    return float(os.environ.get(name) or default)
-
-
-# read at every call: tests, the CLI (.env) and an operator may set them after import
+# read at every call: tests, the CLI (.env) and an operator may set them after import (src/settings.py)
 def api_key() -> str:
-    return os.environ.get("YANDEX_SEARCH_API_KEY", "").strip()
+    return get_settings().yandex_search_api_key
 
 
 def folder_id() -> str:
-    return os.environ.get("YANDEX_SEARCH_FOLDER_ID", "").strip()
+    return get_settings().yandex_search_folder_id
 
 
 def ttl_s() -> int:
-    return int(_env_float("YANDEX_SEARCH_TTL_S", str(30 * 24 * 3600)))
+    return get_settings().yandex_search_ttl_s
 
 
 def daily_max() -> int:
-    return int(_env_float("YANDEX_SEARCH_DAILY_MAX", "100"))
+    return get_settings().yandex_search_daily_max
+
+
+def max_requests() -> int:
+    return get_settings().yandex_search_max_requests
+
+
+def _ceiling(raw: str) -> int | None:
+    """A ceiling of `.env`: a positive integer; empty or anything else → None (the client stays off)."""
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+def ceilings() -> tuple[int | None, int | None]:
+    """(per lot, per run) set by the human in `.env` (D-149); None — not set or not a positive integer."""
+    s = get_settings()
+    return _ceiling(s.yandex_max_per_lot), _ceiling(s.yandex_max_per_run)
+
+
+def disabled_reason() -> str | None:
+    """Why no live request may leave, None — the client is on. No network either way."""
+    if not api_key():
+        return "YANDEX_SEARCH_API_KEY не задан (.env)"
+    lot, run = ceilings()
+    missing = [name for name, v in (("YANDEX_MAX_PER_LOT", lot), ("YANDEX_MAX_PER_RUN", run)) if v is None]
+    if missing:
+        return f"выключен: не задан {', '.join(missing)} (целое > 0 в .env, D-149)"
+    return None
 
 
 def offline() -> bool:
-    return os.environ.get("YANDEX_SEARCH_OFFLINE") == "1" or os.environ.get("ENRICH_OFFLINE") == "1"
+    s = get_settings()
+    return s.yandex_search_offline or s.enrich_offline
 
 
 def main_checkout(root: Path = ROOT) -> Path:
@@ -96,14 +127,14 @@ def main_checkout(root: Path = ROOT) -> Path:
 
 
 def cache_path() -> Path:
-    return Path(os.environ.get("YANDEX_SEARCH_CACHE") or main_checkout() / "cache" / "yandex_search.sqlite")
+    return get_settings().yandex_search_cache or main_checkout() / "cache" / "yandex_search.sqlite"
 
 
 def default_cache() -> SourceCache:
     return SourceCache(cache_path(), ttl_s=ttl_s())
 
 
-PACER = HostPacer(lambda: _env_float("YANDEX_SEARCH_MIN_INTERVAL_S", "1.0"), BLOCK_COOLDOWN_S)
+PACER = HostPacer(lambda: get_settings().yandex_search_min_interval_s, BLOCK_COOLDOWN_S)
 _LOCK = threading.Lock()  # one «cap check → paid request → cache» at a time in this process
 
 
@@ -116,7 +147,47 @@ class YandexSearchError(RuntimeError):
 
 
 class BudgetExceeded(YandexSearchError):
-    """The daily cap of live requests is reached: no request was sent."""
+    """A cap of live requests is reached (daily, all-time, per lot or per run): no request was sent."""
+
+
+class Disabled(YandexSearchError):
+    """The client is off: no key or no ceilings in `.env` (D-149). No request was sent."""
+
+
+class Caps:
+    """Per-lot and per-run counters of live requests in this process (one run = one process, D-149).
+
+    A cached answer costs nothing and counts nowhere: `check()` and `add()` run only for a request about to
+    leave — `check()` before the ledger row (a refused ceiling spends nothing), `add()` after it.
+    """
+
+    def __init__(self) -> None:
+        self.run = 0
+        self.lots: dict[str, int] = {}
+
+    def check(self, lot: str | None) -> None:
+        per_lot, per_run = ceilings()
+        if per_lot is None or per_run is None:
+            raise Disabled(f"Яндекс Search API: {disabled_reason()}")
+        if self.run >= per_run:
+            raise BudgetExceeded(f"Яндекс Search API: потолок прогона {per_run} живых запросов (YANDEX_MAX_PER_RUN)")
+        if lot is not None and self.lots.get(lot, 0) >= per_lot:
+            raise BudgetExceeded(f"Яндекс Search API: потолок {per_lot} живых запросов на лот {lot} "
+                                 "(YANDEX_MAX_PER_LOT)")
+
+    def add(self, lot: str | None) -> None:
+        self.run += 1
+        if lot is not None:
+            self.lots[lot] = self.lots.get(lot, 0) + 1
+
+
+RUN_CAPS = Caps()
+
+
+def reset_run_caps() -> None:
+    """A new run within one process (tests, a long-lived worker between batches)."""
+    global RUN_CAPS
+    RUN_CAPS = Caps()
 
 
 @dataclass(frozen=True)
@@ -214,11 +285,13 @@ def _midnight(now: float | None = None) -> float:
         hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
-def _reserve(cache: SourceCache, url: str, limit: int) -> int:
-    """Count today's rows and insert ours in ONE write transaction: threads and processes cannot both pass.
+def _reserve(cache: SourceCache, url: str, limit: int, total: int | None = None) -> int:
+    """Count today's and all rows and insert ours in ONE write transaction: threads and processes cannot both pass.
 
-    The row stays whatever the request returns (a request that left may be billed). At the limit: no row.
+    `limit` — the daily cap, `total` — the all-time cap of the hackathon (None — `max_requests()`).
+    The row stays whatever the request returns (a request that left may be billed). At a cap: no row.
     """
+    total = max_requests() if total is None else total
     c = _ledger(cache)
     c.isolation_level = None  # explicit BEGIN IMMEDIATE below
     try:
@@ -228,6 +301,10 @@ def _reserve(cache: SourceCache, url: str, limit: int) -> int:
             if n >= limit:
                 raise BudgetExceeded(f"Яндекс Search API: дневной лимит {limit} живых запросов исчерпан "
                                      "(YANDEX_SEARCH_DAILY_MAX)")
+            (n_all,) = c.execute("SELECT COUNT(*) FROM spend").fetchone()
+            if n_all >= total:
+                raise BudgetExceeded(f"Яндекс Search API: потолок {total} живых запросов на весь хакатон исчерпан "
+                                     "(YANDEX_SEARCH_MAX_REQUESTS)")
             cur = c.execute("INSERT INTO spend (sent_at, url, outcome) VALUES (?, ?, 'sent')", (time.time(), url))
             attempt = int(cur.lastrowid or 0)
         except BaseException:
@@ -251,19 +328,28 @@ def spent_today(cache: SourceCache, now: float | None = None) -> int:
     return int(n)
 
 
+def spent_total(cache: SourceCache) -> int:
+    """Attempts of all days — against the all-time cap `YANDEX_SEARCH_MAX_REQUESTS`."""
+    with closing(_ledger(cache)) as c:
+        (n,) = c.execute("SELECT COUNT(*) FROM spend").fetchone()
+    return int(n)
+
+
 def _ready() -> None:
-    """Nothing to pay for when the request cannot go: no key, or the API is on pause."""
-    if not api_key():
-        raise YandexSearchError("YANDEX_SEARCH_API_KEY не задан (.env)")
+    """Nothing to pay for when the request cannot go: the client is off (no key, no ceilings), or on pause."""
+    why = disabled_reason()
+    if why is not None:
+        raise Disabled(f"Яндекс Search API: {why}")
     if PACER.blocked():
         raise YandexSearchError("Яндекс Search API: пауза после отказа или таймаута ещё не истекла")
 
 
 def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
-              client: httpx.Client | None = None, on_send: Callable[[], None] | None = None) -> str:
+              client: httpx.Client | None = None, *, on_send: Callable[[], None]) -> str:
     """One live, paid POST. The decoded XML; YandexSearchError on a refusal (no key, 4xx/5xx, timeout).
 
-    `on_send` runs inside the pacer slot right before the POST (the spend reservation); it may raise.
+    `on_send` runs inside the pacer slot right before the POST — the spend reservation and the ceilings; it may
+    raise. Required: a paid request never leaves without them (use search(), it passes them).
     """
     _ready()
     body: dict[str, object] = {
@@ -279,8 +365,7 @@ def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
     client = client or httpx.Client(timeout=TIMEOUT_S)
     try:
         with PACER.slot():
-            if on_send is not None:
-                on_send()
+            on_send()
             # bytes, not str: the body must leave as UTF-8 whatever the console encoding is
             r = client.post(ENDPOINT, content=json.dumps(body, ensure_ascii=False).encode("utf-8"),
                             headers={"Authorization": f"Api-Key {api_key()}",
@@ -304,11 +389,12 @@ def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
 
 def search(query: str, n: int = 10, region: str | None = None, page: int = 0, *,
            cache: SourceCache | None = None, client: httpx.Client | None = None,
-           offline_only: bool | None = None) -> SearchAnswer | None:
+           offline_only: bool | None = None, lot: str | None = None) -> SearchAnswer | None:
     """Cached search. Offline → cache only (stale is fine), None when the question was never asked.
 
-    Live: fresh cache → cache, free; else, within the daily cap, one paid request; the request failed or
-    the cap is reached → stale cache if any, else the error.
+    Live: fresh cache → cache, free; else, within every cap (per lot `lot` and per run in this process, daily,
+    all-time), one paid request; the request failed or a cap is reached → stale cache if any, else the error.
+    `lot` — the lot the caller searches for (its per-lot ceiling); None — only the run ceiling applies.
     """
     if not 1 <= n <= MAX_DOCS:
         raise ValueError(f"n должно быть от 1 до {MAX_DOCS}")
@@ -330,7 +416,9 @@ def search(query: str, n: int = 10, region: str | None = None, page: int = 0, *,
         attempts: list[int] = []
 
         def reserve() -> None:  # inside the pacer slot, atomic with the cap check
+            RUN_CAPS.check(lot)  # per lot / per run: refused → no ledger row, nothing spent
             attempts.append(_reserve(cache, url, daily_max()))
+            RUN_CAPS.add(lot)
 
         try:
             xml = fetch_raw(q, n, region, page, client, on_send=reserve)
@@ -356,31 +444,25 @@ def search(query: str, n: int = 10, region: str | None = None, page: int = 0, *,
     return SearchAnswer(q, url, found, hits, page_.fetched_at, from_cache=not live)
 
 
-def _load_dotenv(path: Path) -> None:
-    """KEY=VALUE lines of .env into the environment; a variable already set wins. CLI only."""
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        name, sep, value = line.strip().partition("=")
-        if sep and name and not name.startswith("#"):
-            os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
-
-
 def main(argv: list[str] | None = None) -> int:
     for env in dict.fromkeys((ROOT / ".env", main_checkout() / ".env")):  # the worktree's own first
-        _load_dotenv(env)
+        load_dotenv(env)
     ap = argparse.ArgumentParser(description="Яндекс Search API через кеш (каждый живой запрос платный)")
     ap.add_argument("query", nargs="?")
     ap.add_argument("-n", type=int, default=10, help="результатов (групп) на странице, 1–50")
-    ap.add_argument("--region", default=os.environ.get("YANDEX_SEARCH_REGION") or None,
+    ap.add_argument("--region", default=get_settings().yandex_search_region or None,
                     help="регион Яндекса (lr), СПб — 2")
     ap.add_argument("--page", type=int, default=0)
     ap.add_argument("--offline", action="store_true", help="только кеш, без сети и без трат")
-    ap.add_argument("--stats", action="store_true", help="живых запросов сегодня / дневной лимит")
+    ap.add_argument("--stats", action="store_true", help="включён ли клиент; живых запросов сегодня и всего")
     args = ap.parse_args(argv)
     cache = default_cache()
     if args.stats or not args.query:
-        print(f"живых запросов сегодня: {spent_today(cache)} из {daily_max()}; кеш: {cache.path}")
+        why = disabled_reason()
+        lot, run = ceilings()
+        print("клиент: " + (why or f"включён, потолки: на лот {lot}, на прогон {run}"))
+        print(f"живых запросов сегодня: {spent_today(cache)} из {daily_max()}; всего: {spent_total(cache)} из "
+              f"{max_requests()} (осталось {max(max_requests() - spent_total(cache), 0)}); кеш: {cache.path}")
         return 0
     answer = search(args.query, args.n, args.region, args.page, cache=cache, offline_only=args.offline or None)
     if answer is None:

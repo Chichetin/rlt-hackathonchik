@@ -20,13 +20,11 @@ def mod() -> ModuleType:
     return m
 
 
-def tree(root: Path, files: dict[str, str], allow: str = "") -> Path:
+def tree(root: Path, files: dict[str, str]) -> Path:
     for rel, text in files.items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
-    (root / "scripts").mkdir(exist_ok=True)
-    (root / "scripts" / "settings_allowlist.txt").write_text(allow, encoding="utf-8")
     return root
 
 
@@ -45,32 +43,26 @@ def tree(root: Path, files: dict[str, str], allow: str = "") -> Path:
 ])
 def test_every_way_to_read_the_environment_is_found(mod: ModuleType, tmp_path: Path, code: str) -> None:
     root = tree(tmp_path, {"src/match/x.py": code})
-    violations, stale = mod.check(root)
-    assert violations == ["src/match/x.py"] and stale == []
+    assert mod.readers(root) == ["src/match/x.py"]
 
 
 def test_mentions_in_strings_and_comments_do_not_count(mod: ModuleType, tmp_path: Path) -> None:
     root = tree(tmp_path, {"src/match/x.py": '"""reads os.environ["A"] later"""\n# os.getenv("B")\nX = "os.environ"\n'})
-    assert mod.check(root) == ([], [])
+    assert mod.readers(root) == []
 
 
 def test_settings_module_and_the_ui_are_exempt(mod: ModuleType, tmp_path: Path) -> None:
     root = tree(tmp_path, {"src/settings.py": "import os\nX = os.environ\n",
                            "src/ui/e2e/x.py": "import os\nX = os.environ\n",
                            "src/ui/node_modules/p/x.py": "import os\nX = os.environ\n"})
-    assert mod.check(root) == ([], [])
+    assert mod.readers(root) == []
 
 
-def test_an_allowlisted_file_is_tolerated(mod: ModuleType, tmp_path: Path) -> None:
-    root = tree(tmp_path, {"src/sources/old.py": "import os\nX = os.getenv('A')\n"},
-                allow="# migrated in #297\n\nsrc/sources/old.py\n")
-    assert mod.check(root) == ([], [])
-
-
-def test_an_allowlist_entry_that_no_longer_reads_the_environment_is_stale(mod: ModuleType, tmp_path: Path) -> None:
-    root = tree(tmp_path, {"src/sources/old.py": "X = 1\n"}, allow="src/sources/old.py\nsrc/gone.py\n")
-    violations, stale = mod.check(root)
-    assert violations == [] and stale == ["src/gone.py", "src/sources/old.py"]
+def test_a_leftover_allowlist_does_not_excuse_a_file(mod: ModuleType, tmp_path: Path) -> None:
+    """The allowlist is gone (#297): a file put back on it still fails the check."""
+    root = tree(tmp_path, {"src/sources/old.py": "import os\nX = os.getenv('A')\n",
+                           "scripts/settings_allowlist.txt": "src/sources/old.py\n"})
+    assert mod.main(["--root", str(root)]) == 1
 
 
 def test_main_exit_codes(mod: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -81,7 +73,8 @@ def test_main_exit_codes(mod: ModuleType, tmp_path: Path, capsys: pytest.Capture
     assert "src/x.py" in capsys.readouterr().out
 
 
-def test_the_repository_has_no_new_environment_reads(mod: ModuleType) -> None:
-    """The real tree: every read outside src/settings.py is on the allowlist, and the list has no dead lines."""
-    violations, stale = mod.check(SCRIPT.parents[1])
-    assert violations == [] and stale == []
+def test_the_repository_reads_the_environment_only_in_settings(mod: ModuleType) -> None:
+    """The real tree: no file under src/ but src/settings.py reads the environment, and the allowlist is gone."""
+    root = SCRIPT.parents[1]
+    assert mod.readers(root) == []
+    assert not (root / "scripts" / "settings_allowlist.txt").exists()

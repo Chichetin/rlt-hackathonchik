@@ -64,7 +64,7 @@ def warm(leads: list[Lead], max_n: int, pause_s: float) -> int:
     done = 0
     for n, inn in enumerate(todo, start=1):
         try:
-            # ФНС cards only: a live РНП check here would add its 60 s Crawl-delay to every lead (D-141);
+            # ФНС cards only: a live РНП check here would add its 60 s Crawl-delay to every lead (D-150);
             # РНП for the leads is the worker's job
             enrich(inn, cache, rnp_offline=True)
             done += 1

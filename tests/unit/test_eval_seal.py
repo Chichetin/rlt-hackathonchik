@@ -84,6 +84,16 @@ def test_gate_refuses_stub_search(repo, monkeypatch):
         F.gate(R.config_sha256(repo), repo, repo / "log.md")
 
 
+def test_gate_refuses_a_tokenizer_override_but_not_an_empty_one(repo, monkeypatch):
+    """BM25_TOKENIZER replaces the tokenizer of configs/search.yaml, so eval-final refuses it. An empty value is
+    «not set» for search() too (src/settings.py), so it no longer blocks the gate (#297)."""
+    monkeypatch.setenv("BM25_TOKENIZER", "snowball")
+    with pytest.raises(PermissionError, match="BM25_TOKENIZER"):
+        F.gate(R.config_sha256(repo), repo, repo / "log.md")
+    monkeypatch.setenv("BM25_TOKENIZER", "")
+    assert F.gate(R.config_sha256(repo), repo, repo / "log.md") == R.config_sha256(repo)
+
+
 def test_gate_passes_frozen_clean_config(repo):
     assert F.gate(R.config_sha256(repo), repo, repo / "log.md") == R.config_sha256(repo)
 
@@ -218,3 +228,15 @@ def test_the_cutoff_reader_is_in_the_hashed_method_code():
     rel = Path(sc.__file__).resolve().relative_to(R.ROOT).as_posix()
     assert any(rel == p or rel.startswith(p + "/") for p in R.METHOD_PATHS), rel
     assert split_config is sc.split_config  # the eval tools read the very same function
+
+
+def test_tokenizer_override_changes_the_signature(repo, monkeypatch):
+    """#440: BM25_TOKENIZER changes the method, so it changes the signature; without it the hash is as before."""
+    monkeypatch.delenv("BM25_TOKENIZER", raising=False)
+    plain = R.config_sha256(repo)
+    monkeypatch.setenv("BM25_TOKENIZER", "snowball")
+    snowball = R.config_sha256(repo)
+    monkeypatch.setenv("BM25_TOKENIZER", "prefix5")
+    assert len({plain, snowball, R.config_sha256(repo)}) == 3
+    monkeypatch.delenv("BM25_TOKENIZER")
+    assert R.config_sha256(repo) == plain
