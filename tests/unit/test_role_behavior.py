@@ -28,10 +28,15 @@ def test_fact_text_and_source():
                        "на главный приходится 12%")
     assert ev.url == f"data:suppliers#{INN}" and ev.source == "data:suppliers" and ev.fetched_at == AT
 
+def _fact(cp) -> str:
+    ev = role.behavior_fact(cp)
+    assert ev is not None
+    return ev.fact
+
 
 @pytest.mark.parametrize("n,word", [(15, "классов"), (21, "класс"), (22, "класса"), (111, "классов"), (112, "классов")])
 def test_plural(n, word):
-    assert f" {n} {word} ОКПД2" in role.behavior_fact(_cp(classes=n)).fact
+    assert f" {n} {word} ОКПД2" in _fact(_cp(classes=n))
 
 
 @pytest.mark.parametrize("classes,share", [(14, 0.1), (15, 0.30), (40, 0.5), (None, 0)])
@@ -49,11 +54,11 @@ def test_no_data_evidence_no_fact():
 
 def test_manufacturer_names_disagreement():
     assert "По ОКВЭД — производитель, по истории закупок — похож на посредника" in \
-        role.behavior_fact(_cp(kind="manufacturer")).fact
+        _fact(_cp(kind="manufacturer"))
     gisp = Evidence(source="ГИСП", url="https://x/1", fetched_at=AT, fact="f", field="product", value="v")
     cp = _cp(kind="manufacturer")
     cp = cp.model_copy(update={"evidence": [*cp.evidence, gisp]})
-    assert role.behavior_fact(cp).fact.startswith("По реестру ГИСП — производитель")
+    assert _fact(cp).startswith("По реестру ГИСП — производитель")
 
 
 def test_with_behavior_keeps_kind_once_and_goods_only():
