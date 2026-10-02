@@ -73,7 +73,7 @@ scripts/              # issues.sh, download-models.sh, check_stubs.py, check_lay
 | L3 | обогащение | `enrich/` — enrich, discover, evidence, role |
 | L4 | сценарии поверх ядра | `match/pipeline.py`, `ingest/predict.py` |
 | L5 | точки входа | `api/`, `worker/` (кроме `queue.py`) |
-| L6 | инструменты | `eval/` — импортирует продукт; продукт `eval/` не импортирует |
+| L6 | инструменты | `eval/`, `match/ranker_train.py` (обучение ранжировщика, #198) — импортируют продукт; продукт их не импортирует |
 
 - Слой модуля — по самому длинному префиксу из `LAYERS` в `scripts/check_layers.py`: новый модуль
   внутри пакета получает слой пакета, исключение — отдельная строка (так `match/pipeline.py` — L4,
