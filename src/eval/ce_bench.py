@@ -66,6 +66,7 @@ log = logging.getLogger(__name__)
 RERANK_N = (50, 100, 200)
 CE_MAX_LEN = 256  # query + position name; a long lot text is truncated first (longest_first)
 HYBRID_MODEL = "deepvk/USER-base"
+STOP_MS = 10_000  # latency: a larger N is not measured once p50 at a smaller one exceeds this (only slower)
 # Checked on the HF model cards (02.10): bge-reranker-v2-m3 — Apache-2.0, multilingual (bge-m3 base), score =
 # raw logit, sigmoid maps it to [0, 1] (monotone: the order is the same), fp16 as the card's FlagReranker;
 # ru-reranker-modernbert-small — MIT, Russian, RuModernBERT-small 34M (#254: the only one that may fit CPU).
@@ -314,15 +315,20 @@ def cpu_latency(model: str, n_queries: int, seed: int, out_dir: Path, ns: Sequen
         hits = [idx.retrieve(tokenize(t), max(ns)) for t in raw]
         scorer.score([(raw[0], idx.text(d)) for d, _ in hits[0][:8]], batch_size)  # warm-up
         for n in ns:
-            ms = []
+            if any(v["p50"] > STOP_MS for k, v in res["ms"].items() if k.startswith(kind)):
+                res["ms"][f"{kind}@{n}"] = {"skipped": f"p50 at a smaller N > {STOP_MS} ms"}
+                continue
+            ms, sizes = [], []
             for q, h in zip(raw, hits, strict=True):
                 pairs = [(q, idx.text(d)) for d, _ in h[:n]]
                 t0 = time.perf_counter()
                 scorer.score(pairs, batch_size)
                 ms.append((time.perf_counter() - t0) * 1000)
+                sizes.append(len(pairs))
             p50, p95 = np.percentile(ms, [50, 95])
             res["ms"][f"{kind}@{n}"] = {"p50": round(float(p50), 1), "p95": round(float(p95), 1),
-                                       "mean": round(float(np.mean(ms)), 1), "pairs_mean": n}
+                                       "mean": round(float(np.mean(ms)), 1),
+                                       "pairs_mean": round(float(np.mean(sizes)), 1)}
             log.info("%s CPU %s@%d: p50 %.0f ms, p95 %.0f ms", slug(model), kind, n, p50, p95)
     res["loadavg_after"] = [round(x, 2) for x in os.getloadavg()]
     out_dir.mkdir(parents=True, exist_ok=True)
