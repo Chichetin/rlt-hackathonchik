@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-02T04:38:04.917Z",
+  "base": "http://127.0.0.1:8010",
+  "lot": "5903085",
+  "query": {
+    "query_id": "lot-5903085",
+    "text": "Поставка  хозяйственных шкафов",
+    "okpd2": [
+      "31.01.11.120"
+    ],
+    "ktru": null,
+    "region": "Санкт-Петербург",
+    "budget": 588920,
+    "customer_inn": "7820078536",
+    "channel": "ЭМ",
+    "as_of": null,
+    "filters": {}
+  },
+  "size": {
+    "width": 1920,
+    "height": 1080
+  },
+  "seconds": {
+    "form": 4.1,
+    "results": 10.8,
+    "card": 32.2,
+    "filter": 51.1,
+    "export": 62.1,
+    "end": 67.2
+  },
+  "health": {
+    "status": "ok",
+    "stub": false,
+    "llm": "none",
+    "queue": {
+      "pending": 177
+    },
+    "store": "parquet"
+  },
+  "download": "suppliers.xlsx",
+  "totals": {
+    "history": "200",
+    "discovered": "10"
+  }
+}
