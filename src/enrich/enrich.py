@@ -20,13 +20,12 @@ from datetime import UTC, datetime
 import httpx
 
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
-from src.enrich import role
-from src.sources import bo_nalog, fns_opendata, pb_nalog, rmsp
+from src.sources import bo_nalog, fns_opendata, pb_nalog, rmsp, role
 from src.sources.cache import CachedPage, SourceCache
+from src.sources.rmsp import MSP_CATEGORY
 
 log = logging.getLogger(__name__)
 
-MSP_CATEGORY = {"1": "микропредприятие", "2": "малое предприятие", "3": "среднее предприятие"}
 
 
 def _region(kpp: str) -> str | None:

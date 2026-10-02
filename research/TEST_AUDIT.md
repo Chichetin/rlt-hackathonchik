@@ -33,7 +33,7 @@
 |---|---|---|
 | Evidence | `src/enrich/evidence.py`, весь файл | test_evidence, test_role, test_enrich, test_enrich_fallback, test_eis_rnp, test_discover, test_web_leads, test_ingest, test_msp_dump, test_db_pool |
 | Фильтры | `src/match/filters.py`, весь файл | test_filters, test_core, test_role, test_api_enrich |
-| Роль | `src/enrich/role.py`, весь файл | test_role, test_discover |
+| Роль | `src/sources/role.py`, весь файл | test_role, test_discover |
 | ИНН | `src/contracts.py`: `inn_is_valid`, `_control`, веса контрольных сумм (строки 30–32) | test_evidence, test_api_limits, test_thin |
 | Скоринг | `src/match/search.py`: `_sat`, `_product_fit`, `_experience`, `_activity`, `_inn_geography`, `customer_region`, `_geography`, `_component` (имена сверены с кодом на 0b7a6c1; `search()` целиком, `_predict_okpd2`, `_class_history` не входят) | test_search, test_search_edge, test_profiles, test_baselines, test_signals |
 
@@ -352,7 +352,7 @@ EOT
 }
 
 for pass in $PASSES; do
-  audit role      src/enrich/role.py      all "$T/test_role.py $T/test_discover.py" $pass
+  audit role      src/sources/role.py      all "$T/test_role.py $T/test_discover.py" $pass
   audit contracts src/contracts.py        inn_is_valid,_control "$T/test_evidence.py $T/test_api_limits.py $T/test_thin.py" $pass 30-32
   audit evidence  src/enrich/evidence.py  all "$T/test_evidence.py $T/test_role.py $T/test_enrich.py $T/test_enrich_fallback.py $T/test_eis_rnp.py $T/test_discover.py $T/test_web_leads.py $T/test_ingest.py $T/test_msp_dump.py $T/test_db_pool.py" $pass
   audit filters   src/match/filters.py    all "$T/test_filters.py $T/test_core.py $T/test_role.py $T/test_api_enrich.py" $pass

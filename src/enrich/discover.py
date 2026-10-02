@@ -45,15 +45,15 @@ import duckdb
 import httpx
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
-from src.enrich import role
-from src.enrich.enrich import MSP_CATEGORY, enrich, from_card
+from src.enrich.enrich import enrich, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.ingest.load import suppliers_path
 from src.match import search as search_mod
 from src.match.filters import REGION_CODE, apply_filters, apply_legal
 from src.match.index import processed_dir
-from src.sources import pb_nalog, rmsp, web_leads
+from src.sources import pb_nalog, rmsp, role, web_leads
 from src.sources.cache import CachedPage, SourceCache
+from src.sources.rmsp import MSP_CATEGORY
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -72,7 +72,7 @@ COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geog
 # OKPD2 prefix (longest wins) → OKVED2 wholesale codes for these goods, the main one first. A hand-made
 # table, not an official key (D-036; second codes and new rows — #108). The name of the code shown to the
 # user always comes from the registry row. Every code here is «46.x except 46.1» — a distributor by
-# src/enrich/role.py.
+# src/sources/role.py.
 WHOLESALE: dict[str, tuple[str, ...]] = {
     "10": ("46.3",), "11": ("46.34",),
     "13": ("46.41",), "14": ("46.42",), "15": ("46.42",),
@@ -359,7 +359,7 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
     # A predicted class is never presented as the class of the query (#63: the prediction can be wrong).
     cls = (f"ОКПД2 {ch.okpd_class} (в запросе ОКПД2 не указан — класс определён автоматически по похожим "
            "закупкам в данных АИС ГЗ)") if predicted else f"ОКПД2 запроса {ch.okpd_class}"
-    if ch.relation == "class":  # the same rule as the role of the card (src/enrich/role.py, D-057)
+    if ch.relation == "class":  # the same rule as the role of the card (src/sources/role.py, D-057)
         what = ("вероятно производитель (по ОКВЭД)" if cp.kind == "manufacturer"
                 else "основной вид деятельности соответствует предмету закупки")
         fit_why = f"{head} совпадает с классом {cls} — {what}; совпадение по классу ОКВЭД (4 знака), не по товару"
