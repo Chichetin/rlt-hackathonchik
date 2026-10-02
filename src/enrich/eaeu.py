@@ -5,8 +5,9 @@ Goods only: goods of the EAEU are admitted on the national regime, for a service
 the national identifier as the company's own page shows it, the page. A lead is a CANDIDATE, not a fact (as
 src/sources/web_leads.py): nothing of the row is shown as a fact. The block takes a lead only when the national
 registry confirms the identifier — its answer is in the source cache — and names the company as active; the name,
-the address and the status then come from that answer with its own Evidence. Registries connected: Belarus — the register of payers,
-src/sources/by_grp.py; Armenia — the register of legal entities, src/sources/am_register.py (#533). Recorded answers
+the address and the status then come from that answer with its own Evidence. Registries connected: Belarus — the
+register of payers, src/sources/by_grp.py; Armenia — the register of legal entities, src/sources/am_register.py
+(#533). Recorded answers
 of the registries (`configs/eaeu/grp/<УНП>.json`, `configs/eaeu/am/<ՀՎՀՀ>.json`, real requests) are put into the
 cache when it has none, so the demo shows the companies without the network.
 
