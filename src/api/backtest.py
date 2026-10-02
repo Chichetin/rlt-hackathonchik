@@ -84,7 +84,7 @@ def lot_backtest(ident: str) -> Backtest:
     if not relevant:
         raise NotBacktestable("у закупки нет победителя с верным ИНН в данных — сравнивать не с чем")
     # the eval pipeline in its backtest mode: nothing from today's cache, no «Новые» (#220, D-097)
-    found = pipeline.verified(pipeline.pick(query, backtest=True).history)
+    found = pipeline.verified(pipeline.pick(query, backtest=True).history, open_data=False)
     order = [m.counterparty.inn for m in found if m.counterparty.inn]
     place = {inn: i + 1 for i, inn in reversed(list(enumerate(order)))}
     people = sorted((ParticipantRank(inn=inn, is_winner=win, rank=place.get(inn)) for inn, win in relevant),

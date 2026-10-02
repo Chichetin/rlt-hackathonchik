@@ -21,6 +21,9 @@ src.sources.web_leads -> src.enrich.discover    # L1 -> L3; ленивый, _new
 src.sources.web_leads -> src.enrich.enrich      # L1 -> L3; ленивый, warm()
 src.sources.web_leads -> src.match.index        # L1 -> L2; ленивый, processed_dir()
 
+# Офлайн-источник ФНС сверяет факты своей CLI-командой `lookup` с проверкой Evidence (#59): check_evidence — вниз, в contracts.
+src.sources.fns_opendata -> src.enrich.evidence  # L1 -> L3; ленивый, только в main() (`lookup`)
+
 # Загрузчик данных читает через хранилище match: counterparties() должна опираться на parquet, а не на ParquetStore.
 src.ingest.load -> src.match.store      # L1 -> L2; ленивый, counterparties()
 
