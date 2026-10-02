@@ -40,7 +40,8 @@ signals:
 # окна строго до его начала); dev 2 000 и свежие 2 000 — значимо выше R-198-gbm. Прежняя модель — R-198-gbm.txt.
 # customer_only (#490, D-172): запрос без ИНН заказчика — порядок v2: модель обучена только на запросах с заказчиком;
 # на свободном тексте без него R-198 хуже v2: dev 2 000, `--free-text`, winner@10 0.425 → 0.467
-# (eval/results/G-490-free-off.json → G-490-free.json); R-long — G-490L-* в research/EXPERIMENTS.md.
+# (eval/results/G-490-free-off.json → G-490-free.json); R-long: 0.413 → 0.467, Δ +0.055 [+0.037, +0.071]
+# (G-490L-free-off.json → G-490L-free.json, research/EXPERIMENTS.md, строка G-490).
 ranker: {kind: lgbm, model: models/ranker/R-long-gbm.txt, customer_only: true}
 # Профили весов по типу закупки (#104, src/match/profiles.py): тип — по классу ОКПД2 запроса (явного или
 # предсказанного): товар — 01–32, 35; работы/услуги — 33, 36–99; смешанный или неизвестный — веса выше.
