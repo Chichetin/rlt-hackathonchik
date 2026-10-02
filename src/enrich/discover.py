@@ -77,7 +77,8 @@ MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wh
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
-FIT = {"class": 1.0, "wholesale": 0.6}  # product_fit of a discovered company (D-036)
+FIT = {"class": 0.7, "wholesale": 0.42}  # product_fit of a discovered company (D-036); ×0.7 (#614, human decision
+# 02.10): an OKVED match is a class, not the product — 1.0 only for a product confirmed by ГИСП or the site
 RETAIL_OKVED, RETAIL_FIT = "47", 0.4  # the live button only (#583): a retailer of goods found by the product
 COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geography", "price")
 
@@ -1145,7 +1146,7 @@ STEP = {"site": 1.0, "catalog": 0.8, "class": 0.6, "extra": 0.5, "wholesale": 0.
         # body of #74); a code of the same kind with two words — 0.8, our reading within that decision (as a catalog)
         "registry": 1.0, "registry_kind": 0.8}
 POOL_LIMIT = 400  # pool candidates per region read for one query (main OKVED first)
-POOL_EXTRA_FIT = 0.5  # an additional OKVED of the class (decision 22 of IR630): below the 0.6 step of «Новые»
+POOL_EXTRA_FIT = 0.35  # an additional OKVED of the class (decision 22 of IR630): below the 0.42 step of «Новые» (#614)
 
 
 LARGE_SOURCE = {"bo": "ГИР БО", "pb": "Карточка ФНС"}  # who names the region of a company outside the registry
