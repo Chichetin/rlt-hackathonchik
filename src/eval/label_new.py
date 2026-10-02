@@ -271,7 +271,7 @@ def score(exp: str, labels: Path, allow_llm: bool = False) -> int:
     if not body["n_queries"]:
         print("в файле нет ни одной метки 0/1 — считать нечего")
         return 1
-    cfg = {"block": "discovered", "k": TOP_K, "labels": labels.name}
+    cfg = {"block": "discovered", "k": TOP_K, "labels": labels.name, "with_llm": allow_llm}
     rec = eval_run.result_record(exp, "new-suppliers", cfg, {"elapsed_s": 0.0, **body})
     out = ROOT / "eval" / "results" / f"{exp}.json"
     out.write_text(eval_run.dump_record(rec), encoding="utf-8")
