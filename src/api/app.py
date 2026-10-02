@@ -19,6 +19,8 @@ X-Search-Note header, percent-encoded UTF-8 (HTTP headers are latin-1): decodeUR
 What the speller changed in the query (#282, layout or typos) is the X-Query-Corrected header: percent-encoded
 UTF-8 JSON `[[typed, searched], …]`, at most MAX_CORRECTIONS pairs — never the whole text (a notice is up to 20 000
 characters); `filters.spell = "off"` searches the query as typed.
+A short query whose best match with past lots is weak (#281, src/match/confidence.py) gets the X-Weak-Match header:
+the sentence for the user, percent-encoded UTF-8; the score and the order do not change.
 Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error header: the exception type when
 discover() failed (no message, no path), `source_unavailable` when a registry request was refused or failed and
 discover() went on with the rest, or `history_unchecked` when the companies were found but could not be checked
@@ -195,7 +197,7 @@ def _discovery_error(res: pipeline.Picked) -> str | None:
 
 def _found(query: Query, uncached: set[str] | None = None) -> pipeline.Picked:
     """Every candidate of the query after the filters, best first (`matches`); why history is empty (#113,
-    `note`); X-Facets (`facets`); X-Discovery-Error and X-Query-Corrected come from it as well.
+    `note`); X-Facets (`facets`); X-Discovery-Error, X-Query-Corrected and X-Weak-Match (#281) come from it as well.
 
     The selection itself is src/match/pipeline.py — the same for make eval and make predict (#220).
     """
@@ -239,8 +241,11 @@ def api_search(query: Query, response: Response,
     uncached: set[str] = set()
     res = _found(query, uncached)
     matches, note, chips, discovery_error = res.matches, res.note, res.facets, _discovery_error(res)
+    weak = res.weak_match
     if note:
         response.headers["X-Search-Note"] = quote(note)
+    if weak:  # a short query with a weak match (#281): the UI warns above the history block
+        response.headers["X-Weak-Match"] = quote(weak)
     if discovery_error:
         response.headers["X-Discovery-Error"] = discovery_error
     if res.correction is not None:  # searched as corrected: the UI says so and offers the query as typed (#282)
