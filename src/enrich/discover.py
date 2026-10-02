@@ -550,15 +550,16 @@ def gisp_split(hits: dict[str, list[gisp.Product]], stems: Sequence[str]
 def _gisp_why(p: gisp.Product, codes: Sequence[str], predicted: bool, stems: Sequence[str] = ()) -> str:
     """product_fit 1.0 by the registry: which product, its code against the query's one, the shared words."""
     near = max(codes, key=lambda c: (gisp.agrees(c, p.okpd2), len(os.path.commonprefix([c, p.okpd2]))))
+    # a predicted code is never presented as the code of the query (#63, #394: it is defined by the text)
+    label = "ОКПД2, определённым по тексту запроса," if predicted else "ОКПД2 запроса"
     if p.okpd2 == near:
-        agree = f"совпадает с ОКПД2 {'класса' if predicted else 'запроса'} {near}"
+        agree = f"совпадает с {label} {near}"
     else:
         common = os.path.commonprefix([near, p.okpd2])[:gisp.KIND_DEPTH].rstrip(".")
-        agree = f"ОКПД2 {'класса' if predicted else 'запроса'} {near} — тот же товар до {common}"
-    auto = " (в запросе ОКПД2 не указан — класс определён автоматически)" if predicted else ""
+        agree = f"совпадает с {label} {near} до {common}"
     named = [w for w in _LETTERS.findall(p.name) if any(w.lower().replace("ё", "е").startswith(s) for s in stems)]
     said = f"; слова запроса в наименовании продукции: {', '.join(dict.fromkeys(named))}" if named else ""
-    return (f"Производит этот товар по {GISP_MARK}: «{p.name}», ОКПД2 {p.okpd2} — {agree}{auto}{said}; "
+    return (f"Производит этот товар по {GISP_MARK}: «{p.name}», ОКПД2 {p.okpd2} — {agree}{said}; "
             f"реестровая запись № {p.reg_number}")
 
 

@@ -235,6 +235,17 @@ def test_the_code_alone_is_not_this_product(gdir, cache, tmp_path, text, shown):
         assert "слова запроса в наименовании продукции: Конверты, почтовые;" in res.matches[0].components[0].explanation
 
 
+def test_a_code_defined_by_the_text_is_not_called_the_query_code(gdir, cache, tmp_path):
+    """#394: a free-text query gets its code from the text; the reason says so and names how deep it agrees."""
+    res = D.discover(Query(query_id="q", text="папки картонные"), cache=cache, weights=WEIGHTS,
+                     processed=_processed(tmp_path, []), offline=True, predicted_code="17.23.13.193")
+    assert res.predicted and {m.counterparty.inn for m in res.matches} == {EKO, PONI}
+    why = next(m for m in res.matches if m.counterparty.inn == EKO).components[0].explanation
+    assert "совпадает с ОКПД2, определённым по тексту запроса, 17.23.13.193" in why and "ОКПД2 запроса" not in why
+    poni = next(m for m in res.matches if m.counterparty.inn == PONI).components[0].explanation
+    assert "«Папка адресная формат А4», ОКПД2 17.23.13.193" in poni
+
+
 def test_query_words_and_shared_words():
     stems = D.query_stems("Поставка папок канцелярских для нужд ГБОУ СОШ № 5 Санкт-Петербурга; папки")
     assert stems == ["папо", "канце", "сош", "папк"]  # service words of a purchase are dropped
