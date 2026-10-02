@@ -14,9 +14,9 @@ import pytest
 
 from src.contracts import Query
 from src.match import index as index_mod
-from src.match.store import ParquetStore
 from src.match import pg_retriever
 from src.match import search as search_mod
+from src.match.store import ParquetStore
 from tests.unit.test_db_embed import fake_encode
 
 CUTOFF = date(2025, 7, 1)

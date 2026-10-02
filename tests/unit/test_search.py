@@ -16,9 +16,9 @@ import pytest
 from src.contracts import Counterparty, Query, inn_is_valid
 from src.ingest.build import build
 from src.match import index as index_mod
-from src.match.store import ParquetStore
 from src.match import search as search_mod
 from src.match.search import search
+from src.match.store import ParquetStore
 from src.match.text import tokenize, tokenizer_version
 
 pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py

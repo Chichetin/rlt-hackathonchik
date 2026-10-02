@@ -285,8 +285,8 @@ def test_lot_without_price_gives_no_budget(client, monkeypatch, tmp_path):
 ])
 def test_lot_template_subject_falls_back_to_procedure_name(client, monkeypatch, tmp_path, procedure, text):
     _lots(tmp_path, monkeypatch,
-          [{"lot_id": 7, "procedure_name": procedure, "subject": "Закупка у единственного поставщика частью 12 статьи 93",
-            "start_price": 1000.0, "channel": "АИС ГЗ"}],
+          [{"lot_id": 7, "procedure_name": procedure, "start_price": 1000.0, "channel": "АИС ГЗ",
+            "subject": "Закупка у единственного поставщика частью 12 статьи 93"}],
           [{"lot_id": 7, "product_name": "Тонер", "okpd2_code": "20.59"},
            {"lot_id": 7, "product_name": "Картридж", "okpd2_code": "26.20"}])
     assert client.get("/api/lot/7").json()["text"] == text

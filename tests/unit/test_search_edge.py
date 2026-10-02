@@ -15,9 +15,9 @@ import pytest
 from src.contracts import Query
 from src.match import fallback
 from src.match import index as index_mod
-from src.match.store import ParquetStore
 from src.match import search as search_mod
 from src.match.search import search
+from src.match.store import ParquetStore
 
 pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py
 
@@ -129,7 +129,8 @@ def test_parallel_first_build_builds_the_index_once(search_data, monkeypatch):
     build = index_mod._build
     monkeypatch.setattr(index_mod, "_build", lambda *a: (calls.append(1), build(*a))[1])
     got: list = []
-    threads = [threading.Thread(target=lambda: got.append(index_mod.get_index(ParquetStore(search_data), None))) for _ in range(3)]
+    store = ParquetStore(search_data)
+    threads = [threading.Thread(target=lambda: got.append(index_mod.get_index(store, None))) for _ in range(3)]
     for t in threads:
         t.start()
     for t in threads:

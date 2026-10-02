@@ -18,10 +18,9 @@ from src.contracts import Query
 from src.eval import okpd2_predict
 from src.ingest.build import build
 from src.match import index as index_mod
-from src.match.store import ParquetStore
 from src.match import search as search_mod
 from src.match.search import search
-from src.match.store import get_store
+from src.match.store import ParquetStore, get_store
 
 SUPPLIER = "7801000012"
 PAPER, PAINT = "17.12.14.110", "20.30.23.110"

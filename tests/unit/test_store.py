@@ -272,8 +272,9 @@ def test_organizers_data_is_read_only_through_the_store():
     pattern = re.compile(r"read_parquet|ParquetStore\(")
     found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "src").rglob("*.py")
              if pattern.search(p.read_text(encoding="utf-8"))}
-    assert found <= DIRECT_PARQUET_OK.keys(), f"прямое чтение parquet вне Store: {sorted(found - DIRECT_PARQUET_OK.keys())}"
-    assert DIRECT_PARQUET_OK.keys() <= found, f"уже через Store — убрать из списка: {sorted(DIRECT_PARQUET_OK.keys() - found)}"
+    allowed = DIRECT_PARQUET_OK.keys()
+    assert found <= allowed, f"прямое чтение parquet вне Store: {sorted(found - allowed)}"
+    assert allowed <= found, f"уже через Store — убрать из списка: {sorted(allowed - found)}"
 
 
 def test_parquet_store_names_the_command_for_a_missing_table(tmp_path):
@@ -290,12 +291,12 @@ def test_baseline_tables_on_the_fixture(search_data):
     assert 0 < past.num_rows < full.num_rows and full.schema == store_mod.PARTICIPATIONS
     con = duckdb.connect()
     con.register("p", past)
-    assert con.execute("SELECT count(*) FROM (SELECT DISTINCT lot_id, inn, customer_inn FROM p)").fetchone()[0] \
-        == past.num_rows
-    dates = con.execute(
+    (distinct,), = con.execute("SELECT count(*) FROM (SELECT DISTINCT lot_id, inn, customer_inn FROM p)").fetchall()
+    assert distinct == past.num_rows
+    (last,), = con.execute(
         f"SELECT max(publish_date) FROM read_parquet('{(search_data / 'participants.parquet').as_posix()}') "
-        "WHERE lot_id IN (SELECT lot_id FROM p)").fetchone()[0]
-    assert dates < CUTOFF
+        "WHERE lot_id IN (SELECT lot_id FROM p)").fetchall()
+    assert last < CUTOFF
     classes = pq.lot_classes()
     assert classes.num_rows and classes.schema == store_mod.LOT_CLASSES and None not in classes.column("l2").to_pylist()
 
