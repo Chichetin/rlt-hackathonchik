@@ -14,6 +14,7 @@ Ordering is part of the result (ties, the BM25 doc numbering): every ORDER BY on
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -679,8 +680,9 @@ class PgStore:
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
     def supplier_inns(self, as_of: date | None) -> frozenset[str]:
-        table = self._suppliers_table(as_of)  # the version: built_at of the loaded ingest (a new db-load is re-read)
-        return _supplier_inns((self.name, self.dsn, self.schema, table), self.manifest().get("built_at"),
+        table = self._suppliers_table(as_of)  # version: built_at of the manifest (db-load seen within MANIFEST_TTL_S)
+        db = hashlib.sha256(self.dsn.encode()).hexdigest()[:16]  # the key never holds the password
+        return _supplier_inns((self.name, db, self.schema, table), self.manifest().get("built_at"),
                               lambda: self._fetch(_SUPPLIER_INNS, {}, suppliers=table)[1])
 
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,

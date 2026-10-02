@@ -300,7 +300,8 @@ def test_organizers_data_is_read_only_through_the_store():
 
     Sees the explicit forms only (`read_parquet`, `ParquetStore(`): an implicit DuckDB `FROM '<file>.parquet'`
     (src/eval/build_cases.py, an eval tool) is not caught — a wider pattern hits the index and embedding files,
-    which are not organizers' data."""
+    which are not organizers' data. Nor is `store_for(<dir>)` (D-165): an explicit dir is read as parquet — tests and
+    `from_pool` in `make predict`; the product path passes None (the store of the environment)."""
     pattern = re.compile(r"read_parquet|ParquetStore\(")
     found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "src").rglob("*.py")
              if pattern.search(p.read_text(encoding="utf-8"))}

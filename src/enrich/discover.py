@@ -211,6 +211,18 @@ def stated_class(history: Sequence[CounterpartyMatch]) -> str | None:
     return max(votes, key=lambda c: votes[c]) if votes else None  # ties: the higher-ranked match wins
 
 
+def _store_errors() -> tuple[type[Exception], ...]:
+    """What a failed read of organizers' data raises on either store: the same «not checked» note on both."""
+    try:
+        import psycopg
+    except ImportError:  # no pg extra: parquet only
+        return (OSError, duckdb.Error)
+    return (OSError, duckdb.Error, psycopg.Error)
+
+
+_STORE_ERRORS = _store_errors()
+
+
 def predict_class(history: Sequence[CounterpartyMatch], store: Store | None = None) -> str | None:
     """OKPD2 class of a query without codes: stated by search(), else voted by the lots behind the
     top history matches (their positions from `store`, default — the store search() read); None when
@@ -229,7 +241,7 @@ def _lots_class(history: Sequence[CounterpartyMatch], store: Store | None = None
         return None
     try:
         rows = (store or get_store()).lot_codes(sorted(lots))
-    except (OSError, duckdb.Error) as e:  # StoreUnavailable is an OSError: no data, Postgres down
+    except _STORE_ERRORS as e:  # StoreUnavailable is an OSError: no data, Postgres down
         log.warning("discovery: позиции лотов не прочитаны: %s", e)
         return None
     by_lot: dict[int, set[str]] = {}
@@ -249,7 +261,7 @@ def known_inns(inns: Sequence[str], as_of: date | None, store: Store | None = No
     search() reads, Postgres in `make up`); None — the data is absent, nothing checked."""
     try:
         everyone = (store or get_store()).supplier_inns(as_of)
-    except (OSError, duckdb.Error) as e:  # StoreUnavailable (no table for as_of, Postgres down) is an OSError
+    except _STORE_ERRORS as e:  # StoreUnavailable (no table for as_of, Postgres down) is an OSError
         log.warning("discovery: ИНН данных организаторов не прочитаны: %s", e)
         return None
     return set(inns) & everyone
