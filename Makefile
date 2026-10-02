@@ -64,7 +64,7 @@ seal-check:        ## holdout читают только src/eval/split.py и fin
 layers:            ## импорты в src/ идут вниз по слоям, не вверх (D-106); допущенные нарушения - scripts/layers_allowlist.txt
 	$(PY) python scripts/check_layers.py
 
-settings-check:    ## окружение читает только src/settings.py (остальные файлы — scripts/settings_allowlist.txt)
+settings-check:    ## окружение читает только src/settings.py, исключений нет (#297)
 	$(PY) python scripts/check_settings.py
 
 check: lint typecheck test test-ui hooks-test openapi-check seal-check layers settings-check stubs   ## всё целиком: общие файлы, freeze, сдача

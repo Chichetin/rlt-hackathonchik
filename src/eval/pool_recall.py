@@ -33,7 +33,6 @@ import argparse
 import json
 import logging
 import math
-import os
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -52,6 +51,7 @@ from src.match import search as search_mod
 from src.match.filters import REGION_CODE
 from src.match.profiles import procurement_type
 from src.match.store import processed_dir
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 K = 10
@@ -62,7 +62,7 @@ SIGNALS = ("fit", "main", "report", "link", "size", "geo")  # features of `order
 
 
 def pool_dir(cfg: dict) -> Path:
-    raw = os.environ.get("POOL_DIR") or cfg.get("pool_dir")
+    raw = get_settings().pool_dir or cfg.get("pool_dir")
     return Path(raw) if raw else POOL
 
 

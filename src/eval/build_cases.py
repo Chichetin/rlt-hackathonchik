@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -38,7 +37,8 @@ from pathlib import Path
 import duckdb
 
 from src.contracts import Query
-from src.eval.split import ROOT, EvalCase, split_config, write_cases
+from src.eval.split import EvalCase, split_config, write_cases
+from src.settings import get_settings
 
 MAX_ITEMS = 10  # position names in Query.text; lots have p90 = 8 positions (D-018)
 SAMPLE_N = 2000
@@ -253,8 +253,7 @@ def build_all(processed: Path, cfg: dict, sample_n: int = SAMPLE_N, seed: int = 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--processed", type=Path,
-                    default=Path(os.environ.get("DATA_PROCESSED_DIR") or ROOT / "data" / "processed"))
+    ap.add_argument("--processed", type=Path, default=get_settings().data_processed_dir)
     ap.add_argument("--sample", type=int, default=SAMPLE_N)
     ap.add_argument("--seed", type=int, default=SEED)
     args = ap.parse_args(argv)
