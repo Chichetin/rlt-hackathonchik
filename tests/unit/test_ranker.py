@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 
@@ -171,3 +172,58 @@ def test_default_ranker_model_loads_and_ranks(search_data):
     assert res
     assert any(ranker.MARKER in c.explanation for m in res for c in m.components)
     assert "ранжировщик недоступен" not in (fallback.search_note() or "")
+
+
+def test_data_without_supplier_profile_is_counted_and_warned_once(monkeypatch, caplog):
+    """Data built before the profile (#114; the release data-2026-10-01) leaves its 16 features NaN for every
+    candidate: the ranker then loses quality silently (dev recall@10 0.503 against 0.572, #421) — count and warn."""
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    full = np.ones((3, len(ranker.NAMES)))
+    ranker._check_profile(full)
+    bare = full.copy()
+    bare[:, ranker.PROFILE_IDX] = np.nan
+    one = bare.copy()
+    one[1, ranker.PROFILE_IDX[-1]] = 0.0  # one candidate with one profile key: the data has the profile
+    with caplog.at_level(logging.WARNING, logger=ranker.__name__):
+        ranker._check_profile(bare)
+        ranker._check_profile(bare)
+        ranker._check_profile(one)
+    assert ranker.without_profile == 2
+    assert sum("нет профиля поставщика" in r.getMessage() for r in caplog.records) == 1
+    assert {ranker.NAMES[i] for i in ranker.PROFILE_IDX} == {*ranker.PROFILE_LOG, *ranker.PROFILE_RAW}
+
+
+def test_fixture_data_has_the_supplier_profile(search_data, monkeypatch):
+    """The current ingest (the fixture is built by it) gives every ranked query a profile: nothing is counted."""
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    assert search(Q, config=search_mod.load_config())
+    assert ranker.without_profile == 0
+
+
+# the 12 columns of suppliers*.parquet in the release data-2026-10-01 (ingest before the profile, #114)
+RELEASE_COLUMNS = ["inn", "kpp", "inn_valid", "lots_participated", "lots_won", "win_rate", "customers", "customers_spb",
+                   "first_seen", "last_seen", "median_start_price", "top_okpd2"]
+
+
+def test_search_on_data_built_before_the_profile_is_counted(fixture_processed, tmp_path, monkeypatch, caplog):
+    """The whole chain on the release's columns: store → stats without the profile → features → rerank (#421)."""
+    import shutil
+
+    import pyarrow.parquet as pq
+
+    from src.match import index
+
+    old = tmp_path / "processed"
+    shutil.copytree(fixture_processed, old)
+    for f in old.glob("suppliers*.parquet"):
+        pq.write_table(pq.read_table(f, columns=RELEASE_COLUMNS), f)
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(old))
+    monkeypatch.setenv("DATA_STORE", "parquet")
+    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "indexes"))
+    monkeypatch.setattr(ranker, "without_profile", 0)
+    index.clear_memory_cache()
+    with caplog.at_level(logging.WARNING, logger=ranker.__name__):
+        assert search(Q, config=search_mod.load_config())
+    index.clear_memory_cache()
+    assert ranker.without_profile == 1
+    assert sum("нет профиля поставщика" in r.getMessage() for r in caplog.records) == 1
