@@ -36,8 +36,10 @@ import io
 import json
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
@@ -162,6 +164,57 @@ class EnqueueResult(BaseModel):
     task_id: int
 
 
+# Health runs one search the way /api/search does (#492): a green health while every search answers 500 is a dead
+# demo that looks alive. Offline — no «Новые» (registries), no enrichment queue; the result is kept PROBE_TTL seconds.
+PROBE_QUERY = Query(query_id="health-probe", text="бумага для офисной техники А4")
+PROBE_TTL = 60.0
+PROBE_TIMEOUT = 10.0  # a cold search on the full data takes ~1.3 s
+
+
+@dataclass
+class Probe:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    status: str = ""
+    at: float | None = None  # time.monotonic() of the last finished probe
+    running: threading.Event | None = None  # set when the probe in flight finishes
+
+
+_probe = Probe()
+
+
+def _run_probe(probe: Probe, done: threading.Event) -> None:
+    status = "search_failed"
+    try:
+        pipeline.pick(PROBE_QUERY, discovery=False)
+        status = "ok"
+    except FileNotFoundError as e:
+        log.warning("health: данные организаторов недоступны: %s", e)
+        status = "no_data"
+    except Exception:  # noqa: BLE001 — health reports any failure of the search, it does not raise it
+        log.exception("health: пробный поиск упал")
+    finally:  # even a BaseException must not leave every later health waiting on a probe that is gone
+        with probe.lock:
+            probe.status, probe.at, probe.running = status, time.monotonic(), None
+        done.set()
+
+
+def _search_status() -> str:
+    """ok | no_data | search_failed | search_timeout. A hung probe is not started again: the next call waits for it."""
+    probe = _probe
+    with probe.lock:
+        if probe.at is not None and time.monotonic() - probe.at < PROBE_TTL:
+            return probe.status
+        done = probe.running
+        if done is None:
+            done = probe.running = threading.Event()
+            threading.Thread(target=_run_probe, args=(probe, done), name="health-probe", daemon=True).start()
+    if not done.wait(PROBE_TIMEOUT):
+        log.warning("health: пробный поиск не уложился в %s с", PROBE_TIMEOUT)
+        return "search_timeout"
+    with probe.lock:
+        return probe.status
+
+
 @app.get("/api/health", response_model=Health)
 def health() -> Health:
     try:
@@ -169,7 +222,8 @@ def health() -> Health:
     except (FileNotFoundError, ImportError, ValueError) as e:
         log.warning("health: %s", e)
         store = "unavailable"
-    return Health(status="ok", stub=_is_stub(), llm=get_provider().name, queue=status_counts(_queue()), store=store)
+    return Health(status=_search_status(), stub=_is_stub(), llm=get_provider().name, queue=status_counts(_queue()),
+                  store=store)
 
 
 def _accepted(query: Query) -> None:

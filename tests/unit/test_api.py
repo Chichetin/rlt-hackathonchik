@@ -18,6 +18,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(app_mod, "_engine", None)
     # no ingest unless a test builds one (_lots): /api/lot reads the store only (#293)
     monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "no-processed"))
+    monkeypatch.setattr(app_mod, "_probe", app_mod.Probe())  # the health probe result is cached per process (#492)
     return TestClient(app_mod.app)
 
 
@@ -27,9 +28,64 @@ def search_client(client, search_data):
     return client
 
 
-def test_health_reports_no_stub(client):
-    body = client.get("/api/health").json()
+def test_health_reports_no_stub(search_client):
+    body = search_client.get("/api/health").json()
     assert body["status"] == "ok" and body["stub"] is False and body["llm"] == "none"
+
+
+def test_health_is_not_ok_when_search_fails(search_client, monkeypatch, caplog):
+    """#492: a green health while every search answers 500 is a dead demo that looks alive."""
+    from src.match import search as search_mod
+
+    def broken(*a, **kw):
+        raise RuntimeError("index is broken")
+
+    monkeypatch.setattr(search_mod, "search", broken)
+    assert search_client.get("/api/health").json()["status"] == "search_failed"
+    assert "index is broken" in caplog.text
+
+
+def test_health_is_not_ok_without_data(client):
+    assert client.get("/api/health").json()["status"] == "no_data"
+
+
+def test_health_reuses_the_probe_result(search_client, monkeypatch):
+    from src.match import search as search_mod
+
+    calls = []
+    real = search_mod.search
+    monkeypatch.setattr(search_mod, "search", lambda *a, **kw: calls.append(1) or real(*a, **kw))
+    assert search_client.get("/api/health").json()["status"] == "ok"
+    assert search_client.get("/api/health").json()["status"] == "ok"
+    assert len(calls) == 1
+
+
+def test_health_probe_is_offline(search_client, monkeypatch):
+    """The probe is the /api/search path without «Новые» (registries) and without the enrichment queue."""
+    from src.match import pipeline
+
+    seen = []
+    real = pipeline.pick
+    monkeypatch.setattr(pipeline, "pick", lambda q, **kw: seen.append(kw) or real(q, **kw))
+    assert search_client.get("/api/health").json()["status"] == "ok"
+    assert seen == [{"discovery": False}]
+
+
+def test_health_times_out_on_a_hung_search(search_client, monkeypatch):
+    import threading
+
+    from src.match import search as search_mod
+
+    release = threading.Event()
+    monkeypatch.setattr(app_mod, "PROBE_TIMEOUT", 0.05)
+    monkeypatch.setattr(search_mod, "search", lambda *a, **kw: release.wait(5) and [])
+    try:
+        assert search_client.get("/api/health").json()["status"] == "search_timeout"
+    finally:
+        release.set()
+        for t in threading.enumerate():  # the probe ends before the fixtures are torn down
+            if t.name == "health-probe":
+                t.join(5)
 
 
 def test_search_two_blocks_real_inns(search_client):
