@@ -228,7 +228,8 @@ make parity A=parity-base-<sha> B=parity-new-<sha>
 ## Как это устроено в коде
 
 - `make eval EXP=<id>` → таблица в терминал и `eval/results/<id>.json`: `exp_id`, `part`,
-  `created_at`, `commit`, `dirty`, `config` (`configs/search.yaml`), `config_sha256`, `stub`,
+  `created_at`, `commit`, `dirty` (незакоммиченная правка в тех же путях, что замораживает eval-final: `src`, `configs`,
+  `models/ranker`, `pyproject.toml`, `uv.lock` — `run.FROZEN_PATHS`, #455), `config` (`configs/search.yaml`), `config_sha256`, `stub`,
   `n_queries`, `elapsed_s`, `metrics` (`value`, `ci95`), `slices`, `per_query` — по строке на кейс:
   метрики, `channel`, `winner_new` и `ranked` — выданные top-k ИНН по порядку (для частей до 5 000
   кейсов; `dev_full` пишется без `ranked`, иначе файл не пройдёт стража 5 МБ). Любая цифра на слайде воспроизводится этой

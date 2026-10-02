@@ -21,7 +21,7 @@ import sys
 import time
 from datetime import UTC, datetime
 
-from src.eval.run import RESULTS, git
+from src.eval.run import RESULTS, git, tree_dirty
 from src.eval.split import load_cases, split_config
 
 WARMUP = 5
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         "part": args.part,
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": git("rev-parse", "HEAD"),
-        "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
+        "dirty": tree_dirty(),
         "machine": {"platform": platform.platform(), "python": platform.python_version(), "cpus": os.cpu_count()},
         **body,
     }
