@@ -13,6 +13,8 @@ import pytest
 from src.sources import yandex_search as ys
 from src.sources.cache import SourceCache
 
+# A real answer of 02.10 (3 results); the INN of a natural person in <extended-text> is replaced by a
+# synthetic checksum-valid one (152-ФЗ).
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "yandex_search" / "kanc_spb_3.xml"
 QUERY = "поставщик канцтоваров Санкт-Петербург ИНН"
 
@@ -23,7 +25,10 @@ def xml() -> str:
 
 
 @pytest.fixture(autouse=True)
-def _env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # a fresh pacer: a block() of one test must not pause the next one
+    monkeypatch.setattr(ys, "PACER", ys.HostPacer(0.0, ys.BLOCK_COOLDOWN_S))
+    monkeypatch.setenv("YANDEX_SEARCH_CACHE", str(tmp_path / "default-ys.sqlite"))
     monkeypatch.setenv("YANDEX_SEARCH_API_KEY", "test-key")
     monkeypatch.delenv("YANDEX_SEARCH_FOLDER_ID", raising=False)
     monkeypatch.delenv("YANDEX_SEARCH_OFFLINE", raising=False)
@@ -35,8 +40,8 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
 class Api:
     """A fake endpoint: counts paid requests, remembers the last body."""
 
-    def __init__(self, xml: str, status: int = 200) -> None:
-        self.xml, self.status, self.calls = xml, status, 0
+    def __init__(self, xml: str, status: int = 200, timeout: bool = False) -> None:
+        self.xml, self.status, self.timeout, self.calls = xml, status, timeout, 0
         self.last: dict = {}
 
     def client(self) -> httpx.Client:
@@ -44,6 +49,8 @@ class Api:
             self.calls += 1
             self.last = json.loads(request.content.decode("utf-8"))
             assert request.headers["Authorization"] == "Api-Key test-key"
+            if self.timeout:  # the request left, the answer did not come
+                raise httpx.ReadTimeout("timed out", request=request)
             if self.status != 200:
                 return httpx.Response(self.status, text="refused")
             return httpx.Response(200, json={"rawData": base64.b64encode(self.xml.encode("utf-8")).decode()})
@@ -59,7 +66,7 @@ def test_parse_real_answer(xml: str) -> None:
     assert first.url == "https://www.rusprofile.ru/id/6812177"
     assert first.title.startswith('ООО "Канцпроф СПБ" Санкт-Петербург (ИНН 7813553580)')  # tags gone, entities decoded
     assert "7813553580" in first.inns
-    assert "470300328581" not in first.inns  # extended-text of another person is not a snippet
+    assert "770000000082" not in first.inns  # extended-text (synthetic INN in the fixture) is not a snippet
     assert all(ys.inn_is_valid(i) for h in hits for i in h.inns)
 
 
@@ -133,7 +140,7 @@ def test_refusal_is_not_cached(tmp_path: Path, xml: str) -> None:
     with pytest.raises(ys.YandexSearchError, match="HTTP 401"):
         ys.search(QUERY, 3, cache=cache, client=Api(xml, status=401).client())
     assert cache.get(ys.search_url(QUERY, 3), allow_stale=True) is None
-    assert ys.spent_today(cache) == 0
+    assert ys.spent_today(cache) == 1  # the request left: counted (conservatively), not cached
 
 
 def test_no_key_sends_nothing(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,3 +158,52 @@ def test_dotenv_does_not_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     ys._load_dotenv(env)
     assert ys.api_key() == "test-key"
     assert os.environ["YANDEX_SEARCH_REGION"] == "2"
+
+
+RATE_ERROR = ("<yandexsearch><response><error code=\"55\">Превышено число запросов в секунду</error>"
+              "</response></yandexsearch>")
+
+
+def test_xml_error_is_not_cached_but_counted_and_pauses(tmp_path: Path) -> None:
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(RATE_ERROR)
+    with pytest.raises(ys.YandexSearchError, match="ошибка 55"):
+        ys.search(QUERY, 3, cache=cache, client=api.client())
+    assert cache.get(ys.search_url(QUERY, 3), allow_stale=True) is None
+    assert ys.spent_today(cache) == 1  # the request left: it may be billed
+    with pytest.raises(ys.YandexSearchError, match="пауза"):
+        ys.search("другой запрос", 3, cache=cache, client=api.client())
+    assert api.calls == 1 and ys.spent_today(cache) == 1  # paused: nothing sent, nothing counted
+
+
+def test_429_pauses_the_next_request(tmp_path: Path, xml: str) -> None:
+    cache = SourceCache(tmp_path / "s.sqlite")
+    with pytest.raises(ys.YandexSearchError, match="HTTP 429"):
+        ys.search(QUERY, 3, cache=cache, client=Api(xml, status=429).client())
+    api = Api(xml)
+    with pytest.raises(ys.YandexSearchError, match="пауза"):
+        ys.search(QUERY, 3, cache=cache, client=api.client())
+    assert api.calls == 0
+
+
+def test_timeout_after_sending_counts_and_pauses(tmp_path: Path, xml: str) -> None:
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml, timeout=True)
+    with pytest.raises(ys.YandexSearchError, match="ReadTimeout"):
+        ys.search(QUERY, 3, cache=cache, client=api.client())
+    assert ys.spent_today(cache) == 1
+    assert ys.PACER.blocked()
+
+
+def test_every_payment_is_counted(tmp_path: Path, xml: str) -> None:
+    api = Api(xml)
+    expired = SourceCache(tmp_path / "s.sqlite", ttl_s=0)  # every call misses: every call pays
+    ys.search(QUERY, 3, cache=expired, client=api.client())
+    ys.search(QUERY, 3, cache=expired, client=api.client())
+    assert api.calls == 2 and ys.spent_today(expired) == 2
+
+
+def test_default_cache_is_shared_by_worktrees(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    main = tmp_path / "repo"
+    assert ys.main_checkout(main / ".claude" / "worktrees" / "344-x") == main
+    assert ys.main_checkout(main) == main
+    monkeypatch.delenv("YANDEX_SEARCH_CACHE")
+    assert ys.cache_path() == ys.main_checkout() / "cache" / "yandex_search.sqlite"

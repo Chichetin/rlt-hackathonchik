@@ -2,23 +2,29 @@
 
 Every request costs money, so the cache is the point of this module, not an extra:
 
-- Every answer (an empty one too) goes to `SourceCache` under the key `search_url()` — the same question
+- Every answer (an empty one too) goes to the cache under the key `search_url()` — the same question
   within `YANDEX_SEARCH_TTL_S` (30 days by default) is never paid twice. The query is normalized first
   (case, ё, spaces), so «Канцтовары  СПб» and «канцтовары спб» are one question and one payment.
-- Next to the parsed answer the raw XML of every live request is stored (`raw_url()`); those rows are
-  also the spend ledger: `spent_today()` counts them, and above `YANDEX_SEARCH_DAILY_MAX` live requests a
-  day nothing is sent (`BudgetExceeded`) — the stale cache, if any, is returned instead.
+- ONE cache for every worktree of the machine: `YANDEX_SEARCH_CACHE`, default `cache/yandex_search.sqlite`
+  of the main checkout (a worktree `.claude/worktrees/<name>` resolves to it). An answer paid in a worktree
+  stays when the worktree is removed and reaches the demo.
+- Spend ledger (`spend` table of the same file): one row per ATTEMPT, written before the request leaves —
+  a timeout after sending counts too. `spent_today()` counts the rows since local midnight; at
+  `YANDEX_SEARCH_DAILY_MAX` nothing is sent (`BudgetExceeded`) and the stale cache, if any, is returned.
+  Within a process a lock makes «check the cap, pay, store» one step; separate processes share the file
+  but not the lock (two of them may each pay once for the same miss — no batch consumer runs in parallel yet).
 - Offline (`YANDEX_SEARCH_OFFLINE=1` or `ENRICH_OFFLINE=1`, tests, demo without internet) — cache only.
-- Errors (401, 429, an XML error) are not cached: a failure is not an answer.
+- Errors (401, 429, timeout, an XML error) are not cached: a failure is not an answer. 429, a timeout and the
+  XML rate-limit errors (32, 55) pause the API (`HostPacer.block`): the next request of a batch is not sent.
 
 A hit is a LEAD, not a fact: title and snippet are what the search engine showed. `inns` are the
 10/12-digit numbers of the title and snippet that pass the checksum — a candidate for the ФНС card
 (src/sources/web_leads.py, src/enrich), never an Evidence of a company by itself. The cached body is
 the plain text of the answer, so src/enrich/evidence.py finds an extracted INN in it literally.
 
-CLI (loads .env; the second identical run is free):
+CLI (loads .env of the worktree, then of the main checkout; the second identical run is free):
   python -m src.sources.yandex_search "поставщик канцтоваров Санкт-Петербург" [-n 10] [--region 2]
-  python -m src.sources.yandex_search --stats          # live requests today / the daily cap
+  python -m src.sources.yandex_search --stats          # attempts today / the daily cap
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 import xml.etree.ElementTree as ET
 from contextlib import closing
@@ -47,9 +54,12 @@ ENDPOINT = "https://searchapi.api.cloud.yandex.net/v2/web/search"
 SOURCE = "Яндекс Поиск (Search API)"
 RAW_PREFIX = "yandex-search-raw://"
 TIMEOUT_S = 30.0
-BLOCK_COOLDOWN_S = 300.0  # after 429: leave the API alone for 5 minutes
+BLOCK_COOLDOWN_S = 300.0  # after 429 / a rate-limit error: leave the API alone for 5 minutes
+DOWN_COOLDOWN_S = 60.0  # after a timeout or a broken connection
 NO_RESULTS_CODE = "15"  # «Искомая комбинация слов нигде не встречается» — an answer, cached as empty
+RATE_LIMIT_CODES = frozenset({"32", "55"})  # quota exhausted / too many requests per second
 MAX_DOCS = 50  # groups on one page; more is a separate (paid) page
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _env_float(name: str, default: str) -> float:
@@ -77,11 +87,31 @@ def offline() -> bool:
     return os.environ.get("YANDEX_SEARCH_OFFLINE") == "1" or os.environ.get("ENRICH_OFFLINE") == "1"
 
 
+def main_checkout(root: Path = ROOT) -> Path:
+    """The main checkout of a worktree `<main>/.claude/worktrees/<name>`; any other root is itself."""
+    if root.parent.name == "worktrees" and root.parent.parent.name == ".claude":
+        return root.parents[2]
+    return root
+
+
+def cache_path() -> Path:
+    return Path(os.environ.get("YANDEX_SEARCH_CACHE") or main_checkout() / "cache" / "yandex_search.sqlite")
+
+
+def default_cache() -> SourceCache:
+    return SourceCache(cache_path(), ttl_s=ttl_s())
+
+
 PACER = HostPacer(lambda: _env_float("YANDEX_SEARCH_MIN_INTERVAL_S", "1.0"), BLOCK_COOLDOWN_S)
+_LOCK = threading.Lock()  # one «cap check → paid request → cache» at a time in this process
 
 
 class YandexSearchError(RuntimeError):
     """The API refused or answered with an error: nothing is cached."""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code  # the XML error code, when the answer carried one
 
 
 class BudgetExceeded(YandexSearchError):
@@ -138,9 +168,10 @@ def parse_xml(xml: str) -> tuple[int | None, list[SearchHit]]:
     root = ET.fromstring(xml)
     error = root.find("response/error")
     if error is not None:
-        if error.get("code") == NO_RESULTS_CODE:
+        code = error.get("code")
+        if code == NO_RESULTS_CODE:
             return 0, []
-        raise YandexSearchError(f"Яндекс Search API: ошибка {error.get('code')}: {_text(error)}")
+        raise YandexSearchError(f"Яндекс Search API: ошибка {code}: {_text(error)}", code=code)
     found_text = root.findtext("response/found[@priority='all']") or ""
     found = int(found_text) if found_text.isdigit() else None
     hits: list[SearchHit] = []
@@ -168,24 +199,47 @@ def _from_body(body: str) -> tuple[int | None, tuple[SearchHit, ...]]:
     return data["found"], hits
 
 
+# --- spend ledger: one row per attempt, written before the request leaves ---------------------------------
+
+def _ledger(cache: SourceCache) -> sqlite3.Connection:
+    c = sqlite3.connect(cache.path)
+    c.execute("CREATE TABLE IF NOT EXISTS spend (id INTEGER PRIMARY KEY AUTOINCREMENT, sent_at REAL NOT NULL, "
+              "url TEXT NOT NULL, outcome TEXT NOT NULL)")
+    return c
+
+
+def _reserve(cache: SourceCache, url: str) -> int:
+    with closing(_ledger(cache)) as c, c:
+        cur = c.execute("INSERT INTO spend (sent_at, url, outcome) VALUES (?, ?, 'sent')", (time.time(), url))
+        return int(cur.lastrowid or 0)
+
+
+def _settle(cache: SourceCache, attempt: int, outcome: str) -> None:
+    with closing(_ledger(cache)) as c, c:
+        c.execute("UPDATE spend SET outcome = ? WHERE id = ?", (outcome[:200], attempt))
+
+
 def spent_today(cache: SourceCache, now: float | None = None) -> int:
-    """Live requests since local midnight: the raw rows written today."""
+    """Attempts since local midnight — every request that left, whatever came back."""
     midnight = datetime.fromtimestamp(time.time() if now is None else now).replace(
         hour=0, minute=0, second=0, microsecond=0).timestamp()
-    with closing(sqlite3.connect(cache.path)) as c:
-        (n,) = c.execute("SELECT COUNT(*) FROM pages WHERE url LIKE ? AND fetched_at >= ?",
-                         (RAW_PREFIX + "%", midnight)).fetchone()
+    with closing(_ledger(cache)) as c:
+        (n,) = c.execute("SELECT COUNT(*) FROM spend WHERE sent_at >= ?", (midnight,)).fetchone()
     return int(n)
+
+
+def _ready() -> None:
+    """Nothing to pay for when the request cannot go: no key, or the API is on pause."""
+    if not api_key():
+        raise YandexSearchError("YANDEX_SEARCH_API_KEY не задан (.env)")
+    if PACER.blocked():
+        raise YandexSearchError("Яндекс Search API: пауза после отказа или таймаута ещё не истекла")
 
 
 def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
               client: httpx.Client | None = None) -> str:
-    """One live, paid POST. The decoded XML; YandexSearchError on a refusal (no key, 4xx/5xx)."""
-    key = api_key()
-    if not key:
-        raise YandexSearchError("YANDEX_SEARCH_API_KEY не задан (.env)")
-    if PACER.blocked():
-        raise YandexSearchError("Яндекс Search API: пауза после 429 ещё не истекла")
+    """One live, paid POST. The decoded XML; YandexSearchError on a refusal (no key, 4xx/5xx, timeout)."""
+    _ready()
     body: dict[str, object] = {
         "query": {"searchType": "SEARCH_TYPE_RU", "queryText": normalize(query), "page": str(page)},
         "groupSpec": {"groupMode": "GROUP_MODE_DEEP", "groupsOnPage": str(n), "docsInGroup": "1"},
@@ -201,8 +255,11 @@ def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
         with PACER.slot():
             # bytes, not str: the body must leave as UTF-8 whatever the console encoding is
             r = client.post(ENDPOINT, content=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-                            headers={"Authorization": f"Api-Key {key}",
+                            headers={"Authorization": f"Api-Key {api_key()}",
                                      "Content-Type": "application/json; charset=utf-8"})
+    except httpx.TransportError as e:
+        PACER.block(DOWN_COOLDOWN_S)
+        raise YandexSearchError(f"Яндекс Search API: {type(e).__name__} — пауза {DOWN_COOLDOWN_S:.0f} с") from e
     finally:
         if own:
             client.close()
@@ -211,7 +268,10 @@ def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
         raise YandexSearchError("Яндекс Search API: HTTP 429 — пауза 5 минут")
     if r.status_code != 200:
         raise YandexSearchError(f"Яндекс Search API: HTTP {r.status_code}: {r.text[:300]}")
-    return base64.b64decode(r.json()["rawData"]).decode("utf-8")
+    try:
+        return base64.b64decode(r.json()["rawData"]).decode("utf-8")
+    except (ValueError, KeyError, TypeError) as e:
+        raise YandexSearchError(f"Яндекс Search API: ответ без rawData: {r.text[:200]}") from e
 
 
 def search(query: str, n: int = 10, region: str | None = None, page: int = 0, *,
@@ -225,7 +285,7 @@ def search(query: str, n: int = 10, region: str | None = None, page: int = 0, *,
     if not 1 <= n <= MAX_DOCS:
         raise ValueError(f"n должно быть от 1 до {MAX_DOCS}")
     q = normalize(query)
-    cache = cache or SourceCache(ttl_s=ttl_s())
+    cache = cache or default_cache()
     url = search_url(q, n, region, page)
     if offline() if offline_only is None else offline_only:
         cached = cache.get(url, allow_stale=True)
@@ -238,16 +298,29 @@ def search(query: str, n: int = 10, region: str | None = None, page: int = 0, *,
 
     def fetcher(_: str) -> tuple[int, str]:
         nonlocal live
+        _ready()
         if spent_today(cache) >= daily_max():
             raise BudgetExceeded(f"Яндекс Search API: дневной лимит {daily_max()} живых запросов исчерпан "
                                  "(YANDEX_SEARCH_DAILY_MAX)")
-        xml = fetch_raw(q, n, region, page, client)
-        found, hits = parse_xml(xml)  # an XML error raises before anything is cached
+        attempt = _reserve(cache, url)
+        try:
+            xml = fetch_raw(q, n, region, page, client)
+            found, hits = parse_xml(xml)  # an XML error raises before anything is cached
+        except YandexSearchError as e:
+            if e.code in RATE_LIMIT_CODES:
+                PACER.block()
+            _settle(cache, attempt, f"error: {e}")
+            raise
+        except Exception as e:
+            _settle(cache, attempt, f"error: {type(e).__name__}")
+            raise
+        _settle(cache, attempt, "ok")
         cache.put(raw_url(q, n, region, page), xml)
         live = True
         return 200, _body(q, found, hits)
 
-    page_ = cache.fetch(url, fetcher)
+    with _LOCK:  # the second of two identical misses waits and then finds the answer in the cache
+        page_ = cache.fetch(url, fetcher)
     found, hits = _from_body(page_.body)
     return SearchAnswer(q, url, found, hits, page_.fetched_at, from_cache=not live)
 
@@ -263,6 +336,8 @@ def _load_dotenv(path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for env in dict.fromkeys((ROOT / ".env", main_checkout() / ".env")):  # the worktree's own first
+        _load_dotenv(env)
     ap = argparse.ArgumentParser(description="Яндекс Search API через кеш (каждый живой запрос платный)")
     ap.add_argument("query", nargs="?")
     ap.add_argument("-n", type=int, default=10, help="результатов (групп) на странице, 1–50")
@@ -272,8 +347,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--offline", action="store_true", help="только кеш, без сети и без трат")
     ap.add_argument("--stats", action="store_true", help="живых запросов сегодня / дневной лимит")
     args = ap.parse_args(argv)
-    _load_dotenv(Path(__file__).resolve().parents[2] / ".env")
-    cache = SourceCache(ttl_s=ttl_s())
+    cache = default_cache()
     if args.stats or not args.query:
         print(f"живых запросов сегодня: {spent_today(cache)} из {daily_max()}; кеш: {cache.path}")
         return 0
