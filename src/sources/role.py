@@ -195,3 +195,51 @@ def decide(registry: Basis | None = None, site: Basis | None = None, okved: Basi
     if winner is None:
         return RoleDecision(None, None, (), False)
     return RoleDecision(winner.kind, winner, bases, any(b.kind != winner.kind for b in definite))
+
+
+# --- the second basis: behaviour in the organizers' data (#509) ----------------------------------------------
+
+# Thresholds checked on data/processed/suppliers.parquet (44 196 suppliers; median 1 class, p90 5, p99 17): the draft
+# 30 classes / 20% matches 7 suppliers — too few to show anything, 15 / 30% matches 191 (0.43%) (research/DECISIONS.md).
+BEHAVIOR_MIN_CLASSES = 15
+BEHAVIOR_MAX_TOP_SHARE = 0.30
+BEHAVIOR_FIELD = "role_behavior"
+
+
+def _classes_word(n: int) -> str:
+    tail = n % 100
+    if 11 <= tail <= 14 or n % 10 in (0, 5, 6, 7, 8, 9):
+        return "классов"
+    return "класс" if n % 10 == 1 else "класса"
+
+
+def behavior_fact(cp: Counterparty) -> Evidence | None:
+    """«По истории закупок — торговый посредник»: a wide assortment (many OKPD2 classes, no main one) in the
+    organizers' data. A second basis next to the role of `decide()`, not a replacement: it never changes
+    `Counterparty.kind`, and it is a `data:` Evidence (the profile of the supplier, `Counterparty.stats`, D-064).
+    None — no profile, a profile under the thresholds, or no data Evidence of the INN to take `fetched_at` from."""
+    classes, share = cp.stats.get("okpd2_classes"), cp.stats.get("top_class_share")
+    if not cp.inn or not isinstance(classes, int | float) or not isinstance(share, int | float):
+        return None
+    if classes < BEHAVIOR_MIN_CLASSES or share >= BEHAVIOR_MAX_TOP_SHARE:
+        return None
+    src = next((e for e in cp.evidence if e.field == "inn" and e.url.startswith("data:")), None)
+    if src is None:
+        return None
+    n = int(classes)
+    tail = f"широкий ассортимент, {n} {_classes_word(n)} ОКПД2, на главный приходится {round(share * 100)}%"
+    if cp.kind == "manufacturer":
+        by = "реестру ГИСП" if any(e.field == GISP_KEY for e in cp.evidence) else "ОКВЭД"
+        text = f"По {by} — производитель, по истории закупок — похож на посредника: {tail}"
+    else:
+        text = f"По истории закупок — торговый посредник: {tail}"
+    return Evidence(source="data:suppliers", url=f"data:suppliers#{cp.inn}", fetched_at=src.fetched_at,
+                    fact=text, field=BEHAVIOR_FIELD, value=f"{n}/{round(share, 4)}")
+
+
+def with_behavior(cp: Counterparty, purchase: str | None) -> Counterparty:
+    """`cp` plus the behaviour fact — goods only (services and works have no roles, #188); added once."""
+    if purchase in SERVICE_DATIVE or any(e.field == BEHAVIOR_FIELD for e in cp.evidence):
+        return cp
+    ev = behavior_fact(cp)
+    return cp if ev is None else cp.model_copy(update={"evidence": [*cp.evidence, ev]})
