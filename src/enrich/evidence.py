@@ -40,6 +40,7 @@ FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/s
 FIELDS |= {"review"}  # a quote of a public review (src/enrich/reviews.py), a normalized substring of the page
 FIELDS |= {"licence"}  # src/sources/msp_dump.py: licences of the МСП dump (#188)
 FIELDS |= {"product"}  # src/sources/gisp.py: a product of the company in the registry of industrial products
+FIELDS |= {"sro"}  # src/sources/nostroy.py: membership in an SRO of builders (#368)
 ROLE_FIELDS = ("okved", "product")  # Evidence that may hold the basis of the role (src/sources/role.py)
 MIN_TEXT = 6
 
