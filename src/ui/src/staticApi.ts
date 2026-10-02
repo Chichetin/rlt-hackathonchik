@@ -28,6 +28,14 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
 }
 
 const UNAVAILABLE = (what: string) => json({ detail: `${what} недоступна в статическом стенде — запустите сервис (make demo)` }, 503);
+// what buildQuery() sends with no filter chosen (NO_FILTERS) and «искать как введено» — the recorded answers are these
+const NEUTRAL_FILTERS: Record<string, unknown> = { near_customer: "auto" };
+
+/** A filter the recorded answer was not built with: the stand cannot apply it and must not pretend it did. */
+export function hasFilters(filters: Record<string, unknown> | undefined): boolean {
+  return Object.entries(filters ?? {}).some(([k, v]) => k !== "spell" && v !== undefined && v !== "" && v !== false
+    && NEUTRAL_FILTERS[k] !== v);
+}
 
 /** One answer of the stand for one request of the UI; null — not an API request, the real fetch handles it. */
 export function staticAnswer(data: StaticData, url: string, init?: RequestInit): Response | null {
@@ -37,7 +45,10 @@ export function staticAnswer(data: StaticData, url: string, init?: RequestInit):
   if (!path.startsWith("/api/")) return null;
   if (path === "/api/health") return json({ status: "ok", stub: false, llm: "none", queue: {}, store: "static" });
   if (path === "/api/search" && method === "POST") {
-    const q = JSON.parse(String(init?.body ?? "{}")) as { text?: string; okpd2?: string[]; query_id?: string };
+    const q = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+      text?: string; okpd2?: string[]; query_id?: string; filters?: Record<string, unknown>;
+    };
+    if (hasFilters(q.filters)) return json({ detail: "Фильтры недоступны в статическом стенде: выдача записана без них — снимите фильтр или запустите сервис (make demo)" }, 503);
     const rec = data.searches[staticKey(q.text ?? "", q.okpd2)];
     const offset = Number(u.searchParams.get("offset") ?? 0);
     const limit = Number(u.searchParams.get("limit") ?? 20);
@@ -54,7 +65,11 @@ export function staticAnswer(data: StaticData, url: string, init?: RequestInit):
   const lot = path.match(/^\/api\/lot\/([^/]+)(\/backtest)?$/);
   if (lot && method === "GET") {
     const id = decodeURIComponent(lot[1]).trim();
-    const found = lot[2] ? data.backtests[id] : data.lots[id];
+    if (lot[2] && id in data.backtests) {  // recorded with its status: «this lot cannot be checked» stays a 4xx with its reason
+      const b = data.backtests[id] as { status?: number; body?: unknown };
+      return b && typeof b === "object" && "status" in b && "body" in b ? json(b.body, Number(b.status)) : json(b);
+    }
+    const found = lot[2] ? undefined : data.lots[id];
     if (found) return json(found);
     return json({ detail: `в статическом стенде нет закупки ${id}; есть: ${data.lot_ids.join(", ")}` }, 404);
   }
@@ -84,6 +99,9 @@ export function installStaticApi(load: (real: typeof fetch) => Promise<StaticDat
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (!new URL(url, window.location.href).pathname.startsWith("/api/")) return real(input, init);
     data ??= load(real);
-    return staticAnswer(await data, url, init) ?? real(input, init);
+    // a Request object carries its own method and body
+    const req = typeof input === "object" && !(input instanceof URL)
+      ? { method: input.method, body: await input.clone().text(), ...init } : init;
+    return staticAnswer(await data, url, req) ?? real(input, init);
   };
 }

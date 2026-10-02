@@ -14,7 +14,9 @@ from pathlib import Path
 class SpaHandler(SimpleHTTPRequestHandler):
     def send_head(self):  # noqa: ANN201 — the base class signature
         path = Path(self.translate_path(self.path))
-        if not path.exists():  # /results, /search … are routes of the UI, not files
+        # /results, /search … are routes of the UI, not files; a missing FILE (with an extension) stays a 404,
+        # so a stand without static-demo.json says so instead of handing index.html to the JSON parser
+        if not path.exists() and not Path(self.path.split("?", 1)[0]).suffix:
             self.path = "/index.html"
         return super().send_head()
 

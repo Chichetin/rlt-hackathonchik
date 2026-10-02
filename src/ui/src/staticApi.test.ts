@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { installStaticApi, staticAnswer, staticKey, type StaticData } from "./staticApi";
+import { hasFilters, installStaticApi, staticAnswer, staticKey, type StaticData } from "./staticApi";
 
 const row = (inn: string) => ({ counterparty: { inn, name: inn }, score: 0.5, origin: "history", components: [] });
 const data: StaticData = {
@@ -20,9 +22,26 @@ const data: StaticData = {
 };
 const post = (body: unknown) => ({ method: "POST", body: JSON.stringify(body) });
 
-test("the key ignores case, ё, spaces and the order of codes — as scripts/static_demo.py", () => {
-  expect(staticKey("  Бумага   ОФИСНАЯ ", ["2", "1"])).toBe(staticKey("бумага офисная", ["1", "2"]));
-  expect(staticKey("ёлка", null)).toBe("елка|");
+test("the key is the one scripts/static_demo.py writes — one table for both (tests/fixtures/static_demo/keys.json)", () => {
+  const table = JSON.parse(readFileSync(resolve(__dirname, "../../../tests/fixtures/static_demo/keys.json"), "utf-8"));
+  for (const c of table as Array<{ text: string; okpd2: string[] | null; key: string }>) expect(staticKey(c.text, c.okpd2)).toBe(c.key);
+});
+
+test("a filter the answer was not recorded with is refused, not shown as applied", async () => {
+  expect(hasFilters({ near_customer: "auto" })).toBe(false); // what the UI sends with no filter chosen
+  expect(hasFilters({ near_customer: "auto", spell: "off" })).toBe(false);
+  for (const f of [{ kinds: "manufacturer" }, { entity: "ul" }, { min_score: 0.5 }, { only_msp: true }, { near_customer: "worked" }]) {
+    const r = staticAnswer(data, "/api/search?limit=20", post({ text: "Бумага офисная А4", filters: { near_customer: "auto", ...f } }))!;
+    expect(r.status).toBe(503);
+    expect((await r.json()).detail).toContain("Фильтры недоступны в статическом стенде");
+  }
+});
+
+test("a backtest is answered with its recorded status", async () => {
+  const d = { ...data, backtests: { "5779719": { status: 422, body: { detail: "проверить нельзя" } } } };
+  const r = staticAnswer(d, "/api/lot/5779719/backtest")!;
+  expect(r.status).toBe(422);
+  expect((await r.json()).detail).toBe("проверить нельзя");
 });
 
 test("a recorded search comes back paged with its headers and the user's query", async () => {
@@ -74,5 +93,9 @@ test("installed, fetch answers /api/* from the data loaded once, other paths go 
   expect(load).toHaveBeenCalledTimes(1);
   expect(await (await fetch("/index.html")).text()).toBe("file");
   expect(real).toHaveBeenCalledTimes(1);
+  // a Request object: its own method and body
+  const req = new Request("http://stand.local/api/search?limit=1", { method: "POST", body: JSON.stringify({ text: "Бумага офисная А4" }) });
+  const body = await (await fetch(req)).json();
+  expect(body.history).toHaveLength(1);
   vi.unstubAllGlobals();
 });

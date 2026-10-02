@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -31,6 +32,7 @@ EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная ме�
 HEADERS = ("X-Total-History", "X-Total-Discovered", "X-Facets", "X-Search-Context", "X-Search-Note", "X-Excluded-Lot",
            "X-Discovery-Error", "X-Query-Corrected", "X-Weak-Match")
 UI_FILTERS = {"near_customer": "auto"}  # what buildQuery() sends with NO_FILTERS (src/ui/src/api.ts)
+OKPD2_PER_REQUEST = 50  # OKPD2_LABELS_MAX of src/api/app.py, PER_REQUEST of src/ui/src/okpd2.ts
 _CODE = re.compile(r"\d{2}\.\d{2}(?:\.\d{1,2}(?:\.\d{3})?)?")
 
 
@@ -65,9 +67,8 @@ def record(client, examples: list[str], lots: list[str]) -> dict:  # noqa: ANN00
         out["lots"][lot] = q
         out["lot_ids"].append(lot)
         queries.append({**q, "filters": UI_FILTERS})
-        b = client.get(f"/api/lot/{lot}/backtest")
-        if b.status_code == 200:
-            out["backtests"][lot] = b.json()
+        b = client.get(f"/api/lot/{lot}/backtest")  # kept with its status: «cannot be checked» is an answer too
+        out["backtests"][lot] = {"status": b.status_code, "body": b.json()}
     codes: set[str] = set()
     for q in queries:
         r = client.post(f"/api/search?limit={search_mod.CANDIDATES}&offset=0", json=q)
@@ -81,10 +82,13 @@ def record(client, examples: list[str], lots: list[str]) -> dict:  # noqa: ANN00
         for m in body["history"] + body["discovered"]:
             codes.update(_CODE.findall(str(m["counterparty"].get("stats", {}).get("top_okpd2", ""))))
         print(f"«{q['text'][:60]}»: история {len(body['history'])}, новые {len(body['discovered'])}")
-    if codes:
-        r = client.get(f"/api/okpd2?codes={quote(','.join(sorted(codes)))}")
+    ordered = sorted(codes)
+    for i in range(0, len(ordered), OKPD2_PER_REQUEST):  # the API takes at most OKPD2_LABELS_MAX codes per call
+        r = client.get(f"/api/okpd2?codes={quote(','.join(ordered[i:i + OKPD2_PER_REQUEST]))}")
         if r.status_code == 200:
-            out["okpd2"] = r.json()
+            out["okpd2"].update(r.json())
+        else:
+            print(f"названия ОКПД2: {r.status_code} {r.text[:200]} — коды без названий", file=sys.stderr)
     return out
 
 
@@ -96,6 +100,11 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     os.environ.setdefault("DISCOVERY_OFFLINE", "1")  # cache only: the stand shows what the cache holds
     os.environ.setdefault("ENRICH_OFFLINE", "1")
+    # /api/search queues the enrichment of the shown page: recording 200 rows × 11 queries must not fill the real
+    # queue of the worker (#38) — a throwaway queue
+    tmp_queue = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
+    tmp_queue.close()
+    os.environ["DATABASE_URL"] = f"sqlite:///{Path(tmp_queue.name).as_posix()}"
     from fastapi.testclient import TestClient
 
     from src.api.app import app
