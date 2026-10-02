@@ -1,0 +1,95 @@
+{
+  "exp_id": "L-okved-link-v1",
+  "part": "dev (cold winners in the MSP pool)",
+  "created_at": "2026-10-02T02:03:53+00:00",
+  "commit": "0120a69893ec6b46f4d9acbf7b5dec485fc838e9",
+  "dirty": false,
+  "config": {
+    "cutoff": "2025-07-01",
+    "holdout_from": "2025-10-01",
+    "min_lift": 10.0,
+    "min_suppliers": 2,
+    "top": 10,
+    "regions": [
+      "78",
+      "47"
+    ]
+  },
+  "n": 2279,
+  "cold_winner_pairs": 3441,
+  "cold_in_pool_share": 0.6623,
+  "rules": {
+    "class": {
+      "hit": 0.1106,
+      "ci95": [
+        0.0983,
+        0.1233
+      ],
+      "candidates_median": 405.0,
+      "candidates_mean": 1347.4
+    },
+    "d036": {
+      "hit": 0.1632,
+      "ci95": [
+        0.1483,
+        0.1786
+      ],
+      "candidates_median": 969.0,
+      "candidates_mean": 1861.9
+    },
+    "learned": {
+      "hit": 0.2089,
+      "ci95": [
+        0.1926,
+        0.226
+      ],
+      "candidates_median": 1015.0,
+      "candidates_mean": 4330.2
+    },
+    "class+learned": {
+      "hit": 0.2211,
+      "ci95": [
+        0.2045,
+        0.2383
+      ],
+      "candidates_median": 1359.0,
+      "candidates_mean": 4593.7
+    },
+    "d036+learned": {
+      "hit": 0.2598,
+      "ci95": [
+        0.2427,
+        0.2773
+      ],
+      "candidates_median": 2341.0,
+      "candidates_mean": 5019.7
+    }
+  },
+  "deltas": {
+    "class+learned - d036": {
+      "delta": 0.0579,
+      "ci95": [
+        0.043,
+        0.0733
+      ]
+    },
+    "d036+learned - d036": {
+      "delta": 0.0965,
+      "ci95": [
+        0.0847,
+        0.1093
+      ]
+    },
+    "learned - d036": {
+      "delta": 0.0456,
+      "ci95": [
+        0.0307,
+        0.0619
+      ]
+    }
+  },
+  "link": {
+    "rows": 20979,
+    "classes": 504
+  }
+}
