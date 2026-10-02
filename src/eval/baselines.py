@@ -13,13 +13,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import date
 from functools import cached_property
-from pathlib import Path
 
 import duckdb
 
 from src.contracts import Query
-from src.match.index import check_processed, get_index, pq_path, processed_dir
-from src.match.store import ParquetStore
+from src.match.index import get_index
+from src.match.store import Store, get_store
 from src.match.text import tokenize
 
 METHODS = ("pop", "inc", "bm25")
@@ -35,34 +34,26 @@ def okpd_prefix(code: str, level: int) -> str | None:
 
 
 class History:
-    """Participations before `as_of`, one row per lot x supplier x OKPD2 group, in memory."""
+    """Participations before `as_of`, one row per lot x supplier x OKPD2 group, in memory.
 
-    def __init__(self, processed: Path, as_of: date | None) -> None:
-        check_processed(processed)
-        self.processed, self.as_of = processed, as_of
+    Read through the store (#293): the same rows from parquet and from Postgres (tests/unit/test_store.py)."""
+
+    def __init__(self, store: Store, as_of: date | None) -> None:
+        store.manifest()  # StoreUnavailable with the command that builds the data
+        self.store, self.as_of = store, as_of
         self.con = duckdb.connect()
-        cond = "p.publish_date < $as_of" if as_of else "TRUE"
-        params = {"as_of": as_of} if as_of else {}
-        part = pq_path(processed / "participants.parquet")
-        # inn_valid: an INN with a wrong checksum is never relevant and search() cannot return it (D-032)
+        self.con.register("part_in", store.participations(as_of))
+        self.con.register("classes_in", store.lot_classes())
+        self.con.execute("CREATE TABLE part AS SELECT * FROM part_in")
         self.con.execute(
-            f"""
-            CREATE TABLE part AS
-            SELECT p.lot_id, p.supplier_inn AS inn, p.customer_inn, bool_or(p.is_winner) AS is_winner
-            FROM read_parquet({part}) p WHERE p.inn_valid AND {cond}
-            GROUP BY p.lot_id, p.supplier_inn, p.customer_inn
-            """,
-            params,
-        )
-        self.con.execute(
-            f"""
+            """
             CREATE TABLE lp AS
-            SELECT DISTINCT part.lot_id, part.inn, part.customer_inn, part.is_winner,
-                   i.okpd2_l4 AS l4, i.okpd2_l2 AS l2
-            FROM part JOIN read_parquet({pq_path(processed / "items.parquet")}) i USING (lot_id)
-            WHERE i.okpd2_l2 IS NOT NULL
+            SELECT DISTINCT part.lot_id, part.inn, part.customer_inn, part.is_winner, c.l4, c.l2
+            FROM part JOIN classes_in c USING (lot_id)
             """
         )
+        self.con.unregister("part_in")
+        self.con.unregister("classes_in")
         self._cache: dict[tuple, list[str]] = {}
 
     def top(self, k: int, *, level: int | None = None, groups: Iterable[str] = (),
@@ -108,14 +99,18 @@ class History:
         return {r[0] for r in self.con.execute("SELECT DISTINCT inn FROM part").fetchall()}
 
 
-_HISTORY: dict[tuple[str, date | None], History] = {}
+_HISTORY: dict[tuple[str, str, object, date | None], History] = {}
 
 
-def history(as_of: date | None, processed: Path | None = None) -> History:
-    processed = processed or processed_dir()
-    key = (str(processed), as_of)
+def history(as_of: date | None, store: Store | None = None) -> History:
+    """History for `as_of` from `store` (default: the store of the environment, as search() reads).
+
+    Keyed by the data, not by the store object: DATA_STORE=auto with Postgres down re-creates the parquet store
+    every RETRY_PG_S, and one History per object would rebuild and keep a copy each time (review #367)."""
+    store = store or get_store()
+    key = (store.name, repr(store), store.manifest().get("built_at"), as_of)
     if key not in _HISTORY:
-        _HISTORY[key] = History(processed, as_of)
+        _HISTORY[key] = History(store, as_of)
     return _HISTORY[key]
 
 
@@ -166,7 +161,7 @@ def rank_bm25(query: Query, k: int, h: History) -> list[str]:
     """Order of the retriever of search() (best BM25 of the supplier's lots), no component scoring."""
     from src.match import search as search_mod  # read-only use of the retriever (src/match is not ours)
 
-    store = ParquetStore(h.processed)
+    store = h.store
     idx = get_index(store, query.as_of)
     hits = idx.retrieve(tokenize(query.text), search_mod.TOP_DOCS)
     if not hits:

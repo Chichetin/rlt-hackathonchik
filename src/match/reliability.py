@@ -212,25 +212,26 @@ def spearman(x: list[float], y: list[float]) -> float:
 def check(min_after: int = 3, quantiles: int = 5) -> dict:
     """Quantiles of reliability as of the cutoff (global prior) vs win rate and survival after it.
 
-    Outcome window: [cutoff, holdout_from) of configs/split.yaml — the holdout is never read.
+    Outcome window: [cutoff, holdout_from) of configs/split.yaml — the holdout is never read: the store is asked
+    for participations strictly before `holdout_from`, the dev period is what is not before the cutoff.
+    Organizers' data only through the Store (#293): parquet or Postgres, the same rows.
     """
-    from src.eval.split import split_config
-    from src.match.store import ParquetStore, _pq, processed_dir
+    import duckdb
+
+    from src.ingest.split_config import split_config
+    from src.match.store import get_store
 
     cfg = split_config()
     cutoff, until = date.fromisoformat(str(cfg["cutoff"])), date.fromisoformat(str(cfg["holdout_from"]))
-    store = ParquetStore(processed_dir())
-    store.manifest()
-    import duckdb
-
-    part = _pq(store.processed / "participants.parquet")
-    inns = [r[0] for r in duckdb.sql(
-        f"SELECT DISTINCT supplier_inn FROM {part} WHERE publish_date < DATE '{cutoff}'").fetchall()]
+    store = get_store()
+    con = duckdb.connect()
+    con.register("before", store.participations(cutoff))
+    con.register("upto", store.participations(until))
+    inns = [r[0] for r in con.execute("SELECT DISTINCT inn FROM before ORDER BY inn").fetchall()]
     hist = store.supplier_history(inns, cutoff)
-    after = {r[0]: (int(r[1]), int(r[2])) for r in duckdb.sql(
-        f"""SELECT supplier_inn, count(DISTINCT lot_id), count(DISTINCT lot_id) FILTER (WHERE is_winner)
-            FROM {part} WHERE publish_date >= DATE '{cutoff}' AND publish_date < DATE '{until}'
-            GROUP BY supplier_inn""").fetchall()}
+    after = {r[0]: (int(r[1]), int(r[2])) for r in con.execute(
+        """SELECT inn, count(DISTINCT lot_id), count(DISTINCT lot_id) FILTER (WHERE is_winner)
+           FROM upto WHERE lot_id NOT IN (SELECT lot_id FROM before) GROUP BY inn""").fetchall()}
     prior = pool_prior(hist.values())
     last = cutoff - timedelta(days=1)
     rel = {inn: history_reliability(h, prior, last)[0] for inn, h in hist.items()}

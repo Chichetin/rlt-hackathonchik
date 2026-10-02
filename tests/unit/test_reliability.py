@@ -185,6 +185,8 @@ def _ranking(res):
 
 
 def test_shadow_shows_value_but_keeps_score_and_order(search_data, mode):
+    """The product default: the learned ranker sets the order (D-103), shadow fills the shown top-k after it."""
+    assert search_mod.load_config().get("ranker")
     q = Query(query_id="q", text="бумага офисная", as_of=CUTOFF)
     mode("off")
     off = search(q)
@@ -198,7 +200,8 @@ def test_shadow_shows_value_but_keeps_score_and_order(search_data, mode):
     assert rel(top).value > 0 and "Побед 3 из 3" in rel(top).explanation  # lots 6, 7 are after as_of
 
 
-def test_on_adds_the_weighted_component_to_the_score(search_data, mode):
+def test_on_adds_the_weighted_component_to_the_score(search_data, v2_formula, mode):
+    """The formula itself (no ranker: under D-103 the shown score is capped by the one above)."""
     q = Query(query_id="q", text="бумага офисная", as_of=CUTOFF)
     mode("off")
     off = {m.counterparty.inn: m for m in search(q, k=200)}

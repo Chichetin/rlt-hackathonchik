@@ -30,7 +30,6 @@ from __future__ import annotations
 import html
 import os
 import re
-import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -41,6 +40,7 @@ import httpx
 
 from src.contracts import Evidence, inn_is_valid
 from src.sources.cache import CachedPage, SourceCache
+from src.sources.pacing import HostPacer
 from src.sources.tls import gov_ssl_context
 
 BASE = "https://zakupki.gov.ru"
@@ -53,8 +53,9 @@ TIMEOUT_S = 40.0
 NO_RESULTS = "Поиск не дал результатов"
 MSK = ZoneInfo("Europe/Moscow")  # the date in the fact is the one the user sees on site
 
-_lock = threading.Lock()
-_last_request = 0.0
+# No block state here: a refusal raises Blocked for this request only (the answer is never cached).
+# MIN_INTERVAL_S is read at every request (a test may override the module value).
+PACER = HostPacer(lambda: MIN_INTERVAL_S)
 
 _ENTRY = re.compile(r"search-registry-entry-block.*?(?=search-registry-entry-block|$)", re.S)
 _BLOCK = re.compile(r"(?:registry-entry__body-title|data-block__title)\"?>\s*(.*?)\s*</div>\s*"
@@ -139,15 +140,8 @@ def _entry_fact(prefix: str, e: Entry) -> str:
 
 
 def _get(client: httpx.Client, url: str) -> tuple[int, str]:
-    global _last_request
-    with _lock:
-        wait = MIN_INTERVAL_S - (time.monotonic() - _last_request)
-        if wait > 0:
-            time.sleep(wait)
-        try:
-            r = client.get(url)
-        finally:
-            _last_request = time.monotonic()
+    with PACER.slot():
+        r = client.get(url)
     if r.status_code in (403, 429):
         raise Blocked(f"zakupki.gov.ru ответил {r.status_code} — останавливаемся")
     r.raise_for_status()
