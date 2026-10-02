@@ -1,0 +1,8 @@
+MTS Text — Regular, Medium, Bold (WOFF2), unmodified.
+Downloaded 2026-10-02 from the official MTS corporate typeface bundle:
+https://static.mts.ru/mts_rf/images/logo/new/mts_shrift.7z
+Linked as «Корпоративный шрифт» on:
+https://moskva.mts.ru/about/media-centr/mediabank/korporativnyj-stil
+
+Archive paths: mts_shrift/ШРИФТ/Web/Text/MTSText-{weight}/MTSText-{weight}.woff2
+These are proprietary MTS font assets, not covered by the application's license.
