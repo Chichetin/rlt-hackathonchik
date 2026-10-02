@@ -123,8 +123,8 @@ def to_case(lot: Lot, as_of: date) -> EvalCase:
     return EvalCase(query=query, relevant_inns=sorted(grades), date=lot.date, grades=grades)
 
 
-def read_lots(processed: Path, start: date) -> list[Lot]:
-    """Every lot published on or after `start` (no earlier lot is ever a case), ordered by lot_id."""
+def read_lots(processed: Path, start: date, end: date | None = None) -> list[Lot]:
+    """Every lot published on or after `start` (no earlier lot is ever a case) and before `end`, ordered by lot_id."""
     def pq(name: str) -> str:
         return "'" + (processed / f"{name}.parquet").as_posix().replace("'", "''") + "'"
 
@@ -144,6 +144,7 @@ def read_lots(processed: Path, start: date) -> list[Lot]:
                n.start_price, coalesce(it.items, []), coalesce(pt.participants, [])
         FROM {pq("notices")} n LEFT JOIN it USING (lot_id) LEFT JOIN pt USING (lot_id)
         WHERE n.publish_date >= DATE '{start.isoformat()}'
+          {f"AND n.publish_date < DATE '{end.isoformat()}'" if end else ""}
         ORDER BY n.lot_id
         """
     ).fetchall()
