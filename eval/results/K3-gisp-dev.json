@@ -1,7 +1,7 @@
 {
  "experiment": "K3-gisp",
  "issue": 74,
- "commit": "bfbe410",
+ "commit": "c9ab6bd",
  "cases": "eval/cases/dev.jsonl",
  "gisp_meta": {
   "exported": "02.10.2026, 01:00:20",
@@ -13,7 +13,7 @@
  },
  "source_cache": "/mnt/storage/rlt236/cache/sources.sqlite",
  "offline": true,
- "seconds": 234.5,
+ "seconds": 226.1,
  "summary": {
   "lots": 2000,
   "lots_with_okpd2": 2000,
@@ -50033,6 +50033,6 @@
   "shown": 1302,
   "sampled": 30,
   "seed": 74,
-  "file": "eval/labels/gisp_pairs_stem471.csv"
+  "file": "/tmp/claude-1000/rec/pairs2.csv"
  }
 }
