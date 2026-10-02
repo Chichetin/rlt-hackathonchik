@@ -6,7 +6,7 @@ strip_unverified() shows "ИНН не подтверждён"). Organizers' data
 "ИНН <inn>" until enrich() (D-019). An INN that fails the checksum becomes inn=None.
 Region is not derived here: a KPP/INN prefix is the tax office, not a fact with Evidence
 (`geography` in search reads `kpp` itself). Rows come from a store (src/match/store.py): search()
-passes the Postgres or parquet rows to `from_rows`, `counterparties` reads parquet.
+passes the Postgres or parquet rows to `from_rows`; `counterparties` reads the store too (#293).
 """
 
 from __future__ import annotations

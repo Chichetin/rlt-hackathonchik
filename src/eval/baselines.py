@@ -99,14 +99,17 @@ class History:
         return {r[0] for r in self.con.execute("SELECT DISTINCT inn FROM part").fetchall()}
 
 
-_HISTORY: dict[tuple[int, date | None], History] = {}
+_HISTORY: dict[tuple[str, str, object, date | None], History] = {}
 
 
 def history(as_of: date | None, store: Store | None = None) -> History:
-    """History for `as_of` from `store` (default: the store of the environment, as search() reads)."""
+    """History for `as_of` from `store` (default: the store of the environment, as search() reads).
+
+    Keyed by the data, not by the store object: DATA_STORE=auto with Postgres down re-creates the parquet store
+    every RETRY_PG_S, and one History per object would rebuild and keep a copy each time (review #367)."""
     store = store or get_store()
-    key = (id(store), as_of)
-    if key not in _HISTORY or _HISTORY[key].store is not store:
+    key = (store.name, repr(store), store.manifest().get("built_at"), as_of)
+    if key not in _HISTORY:
         _HISTORY[key] = History(store, as_of)
     return _HISTORY[key]
 

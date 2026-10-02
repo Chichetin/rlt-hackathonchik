@@ -1,7 +1,8 @@
 """Lot lookup: notice number (lot_id or reqnum) -> Query built from organizers' data.
 
 Reads the store search() reads (src/match/store.py): Postgres schema `data` or ingest parquet — one SQL for
-both (#293: no second copy of the lookup on raw CSV; `make demo` and `make up` always build the ingest first).
+both (#293: no second copy of the lookup on raw CSV — `make demo` builds the ingest, `make up` reads Postgres
+loaded from it by `make db-load`; without them search answers 503 as well).
 Data absent -> LotDataUnavailable (API answers 503 with the command that builds it, the UI falls back
 to free text); lot absent -> LotNotFound (404). Nothing is invented.
 

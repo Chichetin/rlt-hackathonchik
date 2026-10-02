@@ -295,7 +295,8 @@ GROUP BY product_name ORDER BY product_name{c} LIMIT 5
 # The most active suppliers first (src/worker/prefetch.py warms the source cache in this order, D-056).
 _TOP_SUPPLIERS = """
 SELECT inn FROM {t[suppliers]} WHERE inn_valid
-ORDER BY lots_won DESC, lots_participated DESC, last_seen DESC, inn{c} LIMIT %(limit)s
+ORDER BY lots_won DESC NULLS LAST, lots_participated DESC NULLS LAST, last_seen DESC NULLS LAST, inn{c}
+LIMIT %(limit)s
 """
 
 # The baselines of the backtest (src/eval/baselines.py): one row per lot x supplier x customer before as_of and

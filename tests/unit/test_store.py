@@ -268,7 +268,11 @@ DIRECT_PARQUET_OK = {
 
 
 def test_organizers_data_is_read_only_through_the_store():
-    """A new direct read of the ingest parquet bypasses Postgres (D-054) — add a Store method instead."""
+    """A new direct read of the ingest parquet bypasses Postgres (D-054) — add a Store method instead.
+
+    Sees the explicit forms only (`read_parquet`, `ParquetStore(`): an implicit DuckDB `FROM '<file>.parquet'`
+    (src/eval/build_cases.py, an eval tool) is not caught — a wider pattern hits the index and embedding files,
+    which are not organizers' data."""
     pattern = re.compile(r"read_parquet|ParquetStore\(")
     found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "src").rglob("*.py")
              if pattern.search(p.read_text(encoding="utf-8"))}
