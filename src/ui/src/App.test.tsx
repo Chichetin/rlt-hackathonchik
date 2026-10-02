@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App, discoveryAlert, noteText } from "./App";
+import { App, discoveryAlert, newBlockHint, noteText } from "./App";
 import { reviewLinks } from "./reviews";
 import { buildQuery, type Counterparty, type Filters, filterNotes, NO_FILTERS, regionLabel, rnpLabel, type SearchResponse } from "./api";
 
@@ -566,4 +566,17 @@ test("works: the line over the results names the customer, the type, what «ав
   expect(screen.queryByRole("button", { name: "Изменить закупку" })).not.toBeInTheDocument();
   await userEvent.selectOptions(within(line).getByRole("combobox", { name: "Может работать у заказчика" }), "any");
   await waitFor(() => expect(sent.at(-1)).toBe("any"));
+});
+
+test("подпись «Новых» называет ГИСП, только когда в блоке есть изготовитель из ГИСП (#477)", () => {
+  const ev = (source: string) => ({ source, url: "https://example.org/x", fetched_at: "2026-10-02T00:00:00Z", fact: "факт" });
+  const row = (source: string) => ({ counterparty: { inn: "7801000012", name: "ООО «А»", evidence: [ev(source)] } }) as never;
+  const msp = newBlockHint([row("ФНС: единый реестр субъектов МСП")]);
+  expect(msp).toContain("первые 10 действующих записей реестра МСП по ОКВЭД и региону");
+  expect(msp).not.toContain("ГИСП");
+  expect(newBlockHint([])).toBe(msp);
+  const both = newBlockHint([row("ФНС: единый реестр субъектов МСП"), row("Минпромторг: реестр российской промышленной продукции (ГИСП)")]);
+  expect(both).toContain("Минпромторга (ГИСП) — по товару закупки");
+  expect(both).toContain("реестра МСП по ОКВЭД и региону");
+  expect(both).not.toContain("первые 10");
 });

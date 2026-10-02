@@ -253,6 +253,18 @@ export function noteText(note: string | undefined): string | undefined {
   return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
+const NEW_BLOCK_LEAD = "В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: ";
+const GISP_SOURCE = "ГИСП"; // src/sources/gisp.py SOURCE: «Минпромторг: реестр российской промышленной продукции (ГИСП)»
+
+/** Caption of «Новые» (#477): names the channels the block really holds — a ГИСП maker is chosen by the product,
+ * a МСП registry row by OKVED and region. */
+export function newBlockHint(rows: CounterpartyMatch[]): string {
+  const gisp = rows.some(m => (m.counterparty.evidence ?? []).some(e => e.source.includes(GISP_SOURCE)));
+  return NEW_BLOCK_LEAD + (gisp
+    ? "изготовители из реестра промышленной продукции Минпромторга (ГИСП) — по товару закупки, и действующие записи реестра МСП по ОКВЭД и региону, без отбора"
+    : "первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора");
+}
+
 /** Why «Новые» may be incomplete (X-Discovery-Error, #287): the source failed, or novelty was not checked. */
 export function discoveryAlert(code: string | undefined): string | undefined {
   if (!code) return undefined;
@@ -980,7 +992,7 @@ export function App() {
             variant="new"
             tag="Открытые реестры"
             title="Новые из открытых источников"
-            hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
+            hint={newBlockHint(res.discovered)}
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             alert={discoveryAlert(res.discoveryError)}
             chip={res.discoveryClass?.predicted ? `ОКПД2 определён по тексту: ${okpd2Text(res.discoveryClass.classes, discoveryLabels)}` : undefined}
