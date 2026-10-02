@@ -128,6 +128,7 @@ class Discovery:
     requests: list[str] = field(default_factory=list)  # one line per (OKVED, region): what happened
     leads: list[str] = field(default_factory=list)  # web leads (#108): what happened to them, one line
     notes: list[str] = field(default_factory=list)
+    source_failed: bool = False  # a registry request was refused or failed: the block may be incomplete (#287)
 
 
 def predicted_class_allowed() -> bool:
@@ -538,6 +539,7 @@ def discover(
         url = rmsp.search_url(ch.okved, region, np_type)
         # no time left before the deadline → the client raises Paused without a request
         live = not offline and net_ok and cache.get(url) is None and not rmsp.blocked()
+        paused_source = not offline and rmsp.blocked()  # the source is resting after a failure (#287)
         try:
             page = rmsp.fetch_search(ch.okved, region, np_type, cache, client, offline=not live, deadline=deadline)
         except rmsp.Paused:  # no request was made: pause of the source or no time left
@@ -547,14 +549,17 @@ def discover(
             log.error("discovery: %s", e)
             res.requests.append(f"{label}: источник отказал — остановлено")
             res.notes.append(str(e))
+            res.source_failed = True
             continue
         except (httpx.HTTPError, ValueError) as e:
             net_ok = False
             log.warning("discovery: %s: %s", label, e)
             res.requests.append(f"{label}: источник не ответил ({type(e).__name__})")
+            res.source_failed = True
             continue
         if page is None:
             res.requests.append(f"{label}: нет в кеше, в сеть не ходили")
+            res.source_failed = res.source_failed or paused_source  # not asked because the source failed before
             continue
         if live and cache.get(url) is None:  # the request failed and an outdated answer was used
             net_ok, live = False, False

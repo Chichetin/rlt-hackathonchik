@@ -447,6 +447,60 @@ def test_facets_of_new_without_history_check_are_zero(search_client, monkeypatch
     assert r.json()["discovered"] == [] and json.loads(r.headers["X-Facets"])["discovered"] == ZERO
 
 
+def test_discovery_failure_is_a_header_and_history_survives(search_client, monkeypatch):
+    """#287: a broken open source is told to the user (X-Discovery-Error), not shown as «no new companies»."""
+    from src.enrich import discover as discover_mod
+
+    def broken(q, h, **k):
+        raise TimeoutError("/secret/path rmsp.nalog.ru: read timed out")
+
+    monkeypatch.setattr(discover_mod, "discover", broken)
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.status_code == 200 and r.json()["history"]  # the history block is untouched
+    assert r.json()["discovered"] == []
+    assert r.headers["X-Discovery-Error"] == "TimeoutError"  # the type only: no message, no path
+
+    class ОшибкаИсточника(RuntimeError):  # a non-ASCII type name must not make a latin-1 header fail (500)
+        pass
+
+    def broken_ru(q, h, **k):
+        raise ОшибкаИсточника()
+
+    monkeypatch.setattr(discover_mod, "discover", broken_ru)
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.status_code == 200 and r.headers["X-Discovery-Error"] == "Error"
+
+
+def test_registry_refusal_inside_discovery_is_a_header(search_client, monkeypatch):
+    """discover() catches a refused / failed registry request and goes on: still, the block may be incomplete."""
+    from src.enrich import discover as discover_mod
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        okpd_classes=["17.12"], history_checked=True, source_failed=True))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.headers["X-Discovery-Error"] == app_mod.SOURCE_UNAVAILABLE
+
+
+def test_discovery_without_history_check_is_a_header(search_client, monkeypatch):
+    from src.enrich import discover as discover_mod
+    m = CounterpartyMatch(counterparty=Counterparty(inn="7707049388", name="опт"), score=0.3, origin="discovered",
+                          components=[])
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(
+        matches=[m], candidates=[m], okpd_classes=["17.12"], history_checked=False))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.json()["discovered"] == [] and r.headers["X-Discovery-Error"] == app_mod.HISTORY_UNCHECKED
+
+
+@pytest.mark.parametrize("found", [
+    {"okpd_classes": ["17.12"], "history_checked": True},  # the sources answered: the block is what they gave
+    {"okpd_classes": [], "history_checked": False},  # no OKPD2 class: nothing was searched, nothing failed
+])
+def test_no_discovery_header_when_nothing_failed(search_client, monkeypatch, found):
+    from src.enrich import discover as discover_mod
+    monkeypatch.setattr(discover_mod, "discover", lambda q, h, **k: discover_mod.Discovery(**found))
+    r = search_client.post("/api/search", json={"query_id": "q", "text": "бумага"})
+    assert r.status_code == 200 and "X-Discovery-Error" not in r.headers
+
+
 @pytest.mark.parametrize("filters", [{"kinds": "producer"}, {"entity": "fl"}, {"min_score": "high"}])
 def test_bad_filter_value_is_422_not_a_silent_no_filter(roles_client, filters):
     for path in ("/api/search", "/api/export"):

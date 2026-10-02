@@ -248,6 +248,15 @@ export function noteText(note: string | undefined): string | undefined {
   return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
+/** Why «Новые» may be incomplete (X-Discovery-Error, #287): the source failed, or novelty was not checked. */
+export function discoveryAlert(code: string | undefined): string | undefined {
+  if (!code) return undefined;
+  if (code === "history_unchecked") {
+    return "Данные организаторов не загружены — сверка с историей закупок не выполнена, поэтому новых компаний не показываем.";
+  }
+  return "Источники не ответили — список может быть неполным.";
+}
+
 type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
 
 // History API routing without a router dependency; the API serves index.html for every page path (src/api/app.py)
@@ -854,7 +863,9 @@ export function App() {
           <div className="result-list-pane">
             <div className="result-groups" role="group" aria-label="Группа поставщиков">
               <button type="button" className="group-history" aria-pressed={resultGroup === "history"} onClick={() => setResultGroup("history")}>С опытом <span>{historyTotal}</span></button>
-              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span></button>
+              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span>
+                {res.discoveryError && <span className="group-alert" title={discoveryAlert(res.discoveryError)}>
+                  <span aria-hidden="true">!</span><span className="sr-only">список может быть неполным</span></span>}</button>
             </div>
             <div className="result-list-scroll" hidden={resultGroup !== "history"}>
           <Block
@@ -886,6 +897,7 @@ export function App() {
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
+            alert={discoveryAlert(res.discoveryError)}
             rows={newRows}
             total={newTotal}
             onOpen={selectResult}
@@ -930,6 +942,7 @@ function Block(props: {
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
+  alert?: string; // the block may be incomplete and why (#287)
   variant: "history" | "new";
   tag: string;
   customerRegion?: string;
@@ -943,6 +956,7 @@ function Block(props: {
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
+      {props.alert && <p className="stub block-alert" role="status" data-testid="discovery-error">{props.alert}</p>}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
