@@ -11,7 +11,7 @@
 # and is renamed in only after the check, so an interrupted run leaves no truncated file.
 set -euo pipefail
 
-TAG="${DATA_TAG:-data-2026-10-01}"
+TAG="${DATA_TAG:-data-2026-10-02}"  # data-2026-10-01: ingest before the supplier profile (#435)
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROCESSED="${DATA_PROCESSED_DIR:-$ROOT/data/processed}"
 RAW="${DATA_RAW_DIR:-$ROOT/data/raw}"
