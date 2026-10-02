@@ -230,3 +230,11 @@ R-long-lr:
   ranker: {kind: logreg, model: models/ranker/R-long-lr.json, customer_only: false}
 R-w4-gbm:
   ranker: {kind: lgbm, model: models/ranker/R-w4-gbm.txt, customer_only: false}
+# Гибрид BM25 + дообученный эмбеддер E3 только для коротких запросов (#485): запрос из 1–4 слов → pg_hybrid с
+# e3/user-base-okpd2 (векторы — vec.names_e3_okpd2), длиннее — BM25 как в дефолте. База — дефолт (`E485-base`).
+# Итог: REJECT — короткий запрос хуже дефолта (recall@10 −0.016 [−0.027, −0.006]), research/EXPERIMENTS.md E485-short.
+# rrf — баллы RRF, как у pg_hybrid; bm25 — порядок RRF, баллы в шкале BM25 запроса (ранжировщик D-103 учился на ней).
+E485-short-rrf:
+  hybrid_short: {model: e3/user-base-okpd2, max_words: 4}
+E485-short-bm25:
+  hybrid_short: {model: e3/user-base-okpd2, max_words: 4, scores: bm25}

@@ -272,12 +272,13 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
 
 
 def _vectors(cfg: dict) -> dict | None:
-    """Model, table and rows of the vector half (pg_hybrid) the run actually used."""
-    if cfg.get("retriever") != "pg_hybrid":
+    """Model, table and rows of the vector half (pg_hybrid, or hybrid_short for short queries, #485) the run used."""
+    short = cfg.get("hybrid_short")
+    if cfg.get("retriever") != "pg_hybrid" and not short:
         return None
     from src.match import pg_retriever
 
-    return pg_retriever.coverage(cfg.get("embedding_model"))
+    return pg_retriever.coverage(short["model"] if short else cfg.get("embedding_model"))
 
 
 def _store() -> str:
