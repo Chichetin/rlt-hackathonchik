@@ -125,3 +125,7 @@ H-105-combo-aisgz:   # combo + сглаженная доля побед толь
   ranker: null   # измерено на v2 до #198 (D-103)
   weights: {price: 0.05}
   options: {price: scale, activity_by: similar, experience_wins: rate_aisgz}
+# #105 поверх дефолта D-103 (ранжировщик): признак days_similar — давность последней похожей закупки.
+# R-105-gbm обучен src.match.ranker_train --name R-105 теми же данными и seed, что R-198, плюс этот признак.
+H-105-rk:
+  ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt}
