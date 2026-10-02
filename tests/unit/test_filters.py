@@ -111,6 +111,17 @@ def test_legal_status_drops_dead_and_rnp_before_user_filters():
     assert _names(rows) == ["ok", "unchecked"]
 
 
+@pytest.mark.parametrize("status", [
+    "Юридическое лицо прекратило деятельность", "Индивидуальный предприниматель прекратил деятельность",
+    "Недействующее юридическое лицо", "Исключено из ЕГРЮЛ", "деятельность прекращена (ГИР БО: TERMINATED)",
+    "банкротство (ГИР БО: BANKRUPT)",
+    "Регистрирующим органом принято решение о предстоящем исключении недействующего ЮЛ из ЕГРЮЛ",
+])
+def test_legal_status_drops_every_stopped_entity_wording(status):
+    rows = [_m("dead", status=status), _m("ok", status="Действующая организация")]
+    assert [m.counterparty.name for m in apply_legal(rows)] == ["ok"]
+
+
 def test_facets_count_every_role_and_entity_value():
     rows = [*ROLES, *ENTITIES]
     got = facets(rows)
