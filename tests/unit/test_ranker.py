@@ -98,6 +98,21 @@ def test_missing_model_falls_back_to_v2(search_data, tmp_path):
     assert all(m.rank_reason is None for m in ranker.reasons(search(Q, config=plain_cfg)))  # v2: no reasons
 
 
+def test_no_customer_keeps_the_v2_order(search_data, tmp_path):
+    """#490: the ranker learned only queries with a customer; free text without one goes in the v2 order."""
+    old = _logreg_on_lots(tmp_path)
+    cfg = {**old, "ranker": {**old["ranker"], "customer_only": True}}
+    plain_cfg = {k: v for k, v in cfg.items() if k != "ranker"}
+    assert search(Q, config=cfg) != search(Q, config=plain_cfg)  # with a customer the model reorders
+    free = Q.model_copy(update={"customer_inn": None})
+    assert search(free, config=cfg) == search(free, config=plain_cfg)
+    assert search(free, config=old) != search(free, config=plain_cfg)  # without the key: as before #490
+    got: list = []
+    search(free, config=cfg, features_out=got)
+    assert got  # training still gets the features
+    assert search_mod.load_config()["ranker"].get("customer_only") is True  # the product default
+
+
 def _logreg_on_lots(tmp_path) -> dict:
     n = len(ranker.NAMES)
     coef = np.zeros(n)
