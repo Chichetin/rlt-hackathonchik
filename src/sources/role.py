@@ -11,17 +11,23 @@ this INN — only the keys of BASIS_KEYS (`vyp.КодОКВЭД: 33.12`, `row.<i
 src/enrich/evidence.py keeps `kind` only when that line is on the cached page as a whole line and the rule
 applied to its code gives the same kind.
 
-The state registry of manufacturers comes first (#186, #74): a product of this INN in the registry of Russian
-industrial products (ГИСП, src/sources/gisp.py) makes it a manufacturer. Its basis is an Evidence with
-`field="product"` and `value` = the line `gisp.<inn>.product: <name>` of that INN's registry record page.
+Priority of the bases, v0 (#186) — `decide()`: the state registry of manufacturers (ГИСП, #74; `СвПрод` — no source
+yet) → the company's site (a phrase of the dictionary of src/enrich/site_facts.py, literally on the page) → the main
+OKVED (the rule above). When two bases name different roles, both are returned. The registry branch: a product of this
+INN in the registry of Russian industrial products (src/sources/gisp.py) makes it a manufacturer; its basis is an
+Evidence with `field="product"` and `value` = the line `gisp.<inn>.product: <name>` of that INN's registry record page
+(`basis_kind` below; src/enrich/evidence.py accepts it); gisp.with_role() writes the role and the text of `decide()`
+into the card. Without a registry record `Counterparty.kind` follows the OKVED rule.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Literal
 
-from src.contracts import Kind
+from src.contracts import Evidence, Kind
 
 LABEL: dict[Kind, str] = {"manufacturer": "производитель", "distributor": "дистрибьютор", "dealer": "дилер",
                           "unknown": "не определена"}
@@ -82,3 +88,76 @@ def assign(code: str | None, name: str | None, line: str, add: Callable[[str, st
     head = f"Роль — {LABEL[kind]}" if kind != "unknown" else "Роль не определена"
     named = f" «{name}»" if name else ""
     return kind if add("okved", line, f"{head}: заявленный основной ОКВЭД {code}{named} — {why}") else None
+
+
+# --- priority of the bases (v0, #186) ---------------------------------------------------------------------
+
+BasisSource = Literal["registry", "site", "okved"]
+PRIORITY: tuple[BasisSource, ...] = ("registry", "site", "okved")
+SOURCE_LABEL: dict[BasisSource, str] = {"registry": "госреестр производителей (ГИСП)", "site": "сайт компании",
+                                        "okved": "основной ОКВЭД"}
+
+
+@dataclass(frozen=True)
+class Basis:
+    """One reason to name a role: where it comes from, which role, the fact in words and its Evidence."""
+
+    source: BasisSource
+    kind: Kind
+    why: str
+    evidence: Evidence | None = None
+
+
+@dataclass(frozen=True)
+class RoleDecision:
+    kind: Kind | None  # None — there is no basis at all
+    basis: Basis | None  # the basis that decided
+    bases: tuple[Basis, ...]  # every basis given, in priority order
+    conflict: bool  # another basis names a different definite role
+
+    def shown(self) -> tuple[Basis, ...]:
+        """What the card must show: the deciding basis and every basis that disagrees with it."""
+        if self.basis is None:
+            return ()
+        return (self.basis, *(b for b in self.bases
+                              if b is not self.basis and b.kind != "unknown" and b.kind != self.basis.kind))
+
+    def explanation(self) -> str:
+        if self.basis is None or self.kind is None:
+            return "Роль не определена: нет ни записи реестра, ни фразы на сайте, ни основного ОКВЭД"
+        head = f"Роль — {LABEL[self.kind]}" if self.kind != "unknown" else "Роль не определена"
+        text = f"{head}: {SOURCE_LABEL[self.basis.source]} — {self.basis.why}"
+        for b in self.shown()[1:]:
+            text += f"; расхождение: {SOURCE_LABEL[b.source]} — {LABEL[b.kind]} ({b.why})"
+        return text
+
+
+def okved_basis(code: str | None, name: str | None = None, evidence: Evidence | None = None) -> Basis | None:
+    """The basis of the OKVED rule (D-057); None when there is no code."""
+    got = classify(code)
+    if got is None:
+        return None
+    named = f" «{name}»" if name else ""
+    return Basis("okved", got[0], f"заявленный основной ОКВЭД {(code or '').strip()}{named} — {got[1]}", evidence)
+
+
+def site_basis(kind: Kind, phrase: str, evidence: Evidence | None = None) -> Basis:
+    return Basis("site", kind, f"на сайте указано «{phrase}»", evidence)
+
+
+def registry_basis(record: str, evidence: Evidence | None = None) -> Basis:
+    """A record of the state registry of manufacturers: the company is a manufacturer."""
+    return Basis("registry", "manufacturer", f"запись реестра: {record}", evidence)
+
+
+def decide(registry: Basis | None = None, site: Basis | None = None, okved: Basis | None = None) -> RoleDecision:
+    """The role by the first basis in PRIORITY that names a definite role; «unknown» (the OKVED rule could
+    not tell) decides only when nothing else is given. `conflict` — some other basis names a different
+    definite role: then `shown()` returns both."""
+    given = {"registry": registry, "site": site, "okved": okved}
+    bases = tuple(b for src in PRIORITY if (b := given[src]) is not None)
+    definite = [b for b in bases if b.kind != "unknown"]
+    winner = definite[0] if definite else (bases[0] if bases else None)
+    if winner is None:
+        return RoleDecision(None, None, (), False)
+    return RoleDecision(winner.kind, winner, bases, any(b.kind != winner.kind for b in definite))

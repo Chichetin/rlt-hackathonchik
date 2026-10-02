@@ -16,13 +16,13 @@ Organizers' data stats (`Counterparty.stats`) come from search(), not from here.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 
 import httpx
 
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
 from src.regions import label_by_code, name_by_code
+from src.settings import get_settings
 from src.sources import bo_nalog, fns_opendata, gisp, pb_nalog, rmsp, role
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
@@ -254,7 +254,7 @@ def _enrich(inn: str, cache: SourceCache, offline: bool | None) -> Counterparty:
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
     if offline is None:
-        offline = os.environ.get("ENRICH_OFFLINE") == "1"
+        offline = get_settings().enrich_offline
     err: Exception
     if offline:
         page = cache.get(pb_nalog.card_url(inn), allow_stale=True)

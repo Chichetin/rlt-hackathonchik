@@ -15,16 +15,14 @@ still searched.
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
 
 import duckdb
 
 from src.contracts import Query
 from src.ingest.notice import notice_query
 from src.match.store import StoreUnavailable, get_store
+from src.settings import get_settings
 
-ROOT = Path(__file__).resolve().parents[2]
 log = logging.getLogger(__name__)
 _testsets: dict[tuple[str, float], object] = {}
 
@@ -37,19 +35,13 @@ class LotNotFound(KeyError):
     pass
 
 
-def _dir(env: str, default: str) -> Path:
-    d = Path(os.environ.get(env, ROOT / default))
-    return d if d.is_absolute() else ROOT / d
-
-
 def _test_lot(ident: str) -> Query | None:
     """Lot from TEST_DATA_DIR (re-read when the folder changes); None when unset, absent or broken."""
     from src.ingest.testset import TestDataError, TestSet, load_testset
 
-    folder = os.environ.get("TEST_DATA_DIR")
-    if not folder:
+    path = get_settings().test_data_dir  # relative — from the repository root
+    if path is None:
         return None
-    path = _dir("TEST_DATA_DIR", folder)
     try:
         key = (str(path), max((p.stat().st_mtime for p in path.glob("*.csv")), default=0.0))
         ts = _testsets.get(key)
@@ -57,7 +49,7 @@ def _test_lot(ident: str) -> Query | None:
             _testsets.clear()
             ts = _testsets[key] = load_testset(path)
     except (TestDataError, OSError) as e:
-        log.warning("TEST_DATA_DIR=%s не читается: %s", folder, e)
+        log.warning("TEST_DATA_DIR=%s не читается: %s", path, e)
         return None
     assert isinstance(ts, TestSet)
     lot = ts.find(ident)

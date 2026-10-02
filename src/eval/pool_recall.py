@@ -29,8 +29,10 @@ precision of new companies: it complements the labelling #21 and the judge #82, 
 
 from __future__ import annotations
 
+import argparse
+import json
 import logging
-import os
+import math
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -41,7 +43,7 @@ import duckdb
 import numpy as np
 
 from src.db.pool import POOL
-from src.enrich import discover
+from src.enrich import discover, okved_link
 from src.eval.metrics import BOOTSTRAP_N, BOOTSTRAP_SEED, bootstrap_ci
 from src.eval.split import EvalCase
 from src.ingest.load import suppliers_path
@@ -49,14 +51,18 @@ from src.match import search as search_mod
 from src.match.filters import REGION_CODE
 from src.match.profiles import procurement_type
 from src.match.store import processed_dir
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 K = 10
-METRICS = ("in_pool", "in_region", "covered", "random_cover", "winner@10", "random_okved@10", "random_region@10")
+METRICS = ("in_pool", "in_region", "covered", "random_cover", "winner@10", "random_okved@10", "random_region@10",
+           "winner@100", "winner_rr")
+PAIRED = ("winner@10", "winner@100", "winner_rr")  # the order metrics `compare` pairs (#377)
+SIGNALS = ("fit", "main", "report", "link", "size", "geo")  # features of `order:` (#377)
 
 
 def pool_dir(cfg: dict) -> Path:
-    raw = os.environ.get("POOL_DIR") or cfg.get("pool_dir")
+    raw = get_settings().pool_dir or cfg.get("pool_dir")
     return Path(raw) if raw else POOL
 
 
@@ -86,22 +92,68 @@ class Candidate:
     region: str
 
 
-def rank(cands: Sequence[Candidate], target: str, weights: dict[str, float], extra_okved: float,
-         k: int = K) -> list[str]:
-    """Top-k INNs by the block's rule: score of product_fit and geography, ties by INN, kinds in turn."""
+def rule_order(cands: Sequence[Candidate], target: str, weights: dict[str, float],
+               extra_okved: float) -> list[Candidate]:
+    """Every candidate by the block's rule: score of product_fit and geography, ties by INN."""
     def score(c: Candidate) -> float:
         fit = discover.FIT[c.relation] * (1.0 if c.main else extra_okved)
         geo = 1.0 if c.region == target else discover.NEIGHBOUR_VALUE
         return fit * weights.get("product_fit", 0.0) + geo * weights.get("geography", 0.0)
 
-    ranked = sorted(cands, key=lambda c: (-score(c), c.inn))
-    queues = [[c for c in ranked if c.relation == r] for r in ("class", "wholesale")]
+    return sorted(cands, key=lambda c: (-score(c), c.inn))
+
+
+def mix(ordered: Sequence[Candidate], k: int = K) -> list[Candidate]:
+    """Top-k with producers and distributors in turn (discover._mix), shown in the order of `ordered`."""
+    pos = {c.inn: i for i, c in enumerate(ordered)}
+    queues = [[c for c in ordered if c.relation == r] for r in ("class", "wholesale")]
     picked: list[Candidate] = []
     while len(picked) < k and any(queues):
         for q in queues:
             if q and len(picked) < k:
                 picked.append(q.pop(0))
-    return [c.inn for c in sorted(picked, key=lambda c: (-score(c), c.inn))]
+    return sorted(picked, key=lambda c: pos[c.inn])
+
+
+def rank(cands: Sequence[Candidate], target: str, weights: dict[str, float], extra_okved: float,
+         k: int = K) -> list[str]:
+    """Top-k INNs by the block's rule, kinds in turn."""
+    return [c.inn for c in mix(rule_order(cands, target, weights, extra_okved), k)]
+
+
+def signal_order(cands: Sequence[Candidate], order: dict[str, float], *, plan: Sequence[discover.Channel],
+                 feat: dict[str, tuple], linked: set[str], target: str) -> list[Candidate]:
+    """Every candidate by a weighted sum of registry signals (#377), ties by INN. Signals, each 0…1:
+    fit — the channel (class 1.0, wholesale 0.6); main — matched by the MAIN OKVED; report — an OKVED of the
+    company's reporting (`okved_report`) is under the plan; link — its main OKVED is learned for the query class
+    from history before the cutoff (#250); size — log headcount, 100+ → 1; geo — the customer's region."""
+    unknown = set(order) - set(SIGNALS)
+    if unknown:
+        raise ValueError(f"order: неизвестные сигналы {sorted(unknown)} (есть: {', '.join(SIGNALS)})")
+    prefixes = [ch.okved for ch in plan]
+
+    def score(c: Candidate) -> float:
+        main_code, report, employees = feat.get(c.inn, (None, (), None))
+        x = {"fit": discover.FIT[c.relation], "main": float(c.main),
+             "report": float(any(r.startswith(p) for r in report or () for p in prefixes)),
+             "link": float(bool(main_code) and main_code[:5] in linked),
+             "size": min(1.0, math.log1p(employees or 0) / math.log1p(100)),
+             "geo": 1.0 if c.region == target else discover.NEIGHBOUR_VALUE}
+        return sum(w * x[name] for name, w in order.items())
+
+    return sorted(cands, key=lambda c: (-score(c), c.inn))
+
+
+def linked_okveds(path: Path) -> dict[str, set[str]]:
+    """OKPD2 class → main OKVED (class level) learned from history (#250, src/enrich/okved_link.py)."""
+    if not path.exists():
+        raise FileNotFoundError(f"нет {path} — src.enrich.okved_link.build(<cutoff>, out=<processed>/{path.name}) "
+                                "(CLI build пишет okved_link.parquet — переименуйте)")
+    out: dict[str, set[str]] = {}
+    sql = okved_link.select(okved_link.MIN_LIFT, okved_link.MIN_SUPPLIERS, okved_link.TOP, okved_link.src_of(path))
+    for cls, okved, *_ in duckdb.connect().execute(sql).fetchall():
+        out.setdefault(cls, set()).add(okved)
+    return out
 
 
 class Pool:
@@ -125,6 +177,10 @@ class Pool:
         self.entity = dict(self.con.execute("SELECT inn, entity FROM co").fetchall())
         self.region = dict(self.con.execute(f"SELECT inn, region_code FROM co WHERE region_code IN ({regs}){kinds}")
                            .fetchall())
+        # signals of `order:` (#377): main OKVED, reporting OKVED, headcount of the region's companies
+        self.feat: dict[str, tuple] = {r[0]: r[1:] for r in self.con.execute(
+            f"SELECT inn, okved_main, okved_report, employees FROM read_parquet('{c}') "
+            f"WHERE region_code IN ({regs}){kinds}").fetchall()}
         self._plans: dict[tuple[tuple[str, str], ...], list[Candidate]] = {}
 
     def candidates(self, plan: Sequence[discover.Channel]) -> list[Candidate]:
@@ -183,6 +239,9 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date) -> dict:
     regions = sorted(set(REGION_CODE.values()))
     entities = cfg.get("entities")
     pool = Pool(pool_dir(cfg), regions, entities=entities, main_only=bool(cfg.get("main_only")))
+    order = cfg.get("order")  # None — the block's rule; {signal: weight} — #377
+    link_file = str(cfg.get("okved_link", f"okved_link_{cutoff.isoformat()}.parquet"))
+    link = linked_okveds(processed_dir() / link_file) if order and order.get("link") else {}
     known: dict[date | None, frozenset[str]] = {}
     known_in_region: dict[date | None, int] = {}
     skipped = {"no_winner": 0, "no_okpd2": 0}
@@ -204,7 +263,14 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date) -> dict:
             known_in_region[query.as_of] = sum(1 for inn in pool.region if inn in known[query.as_of])
         target = REGION_CODE.get(search_mod.customer_region(query)[0], "78")  # «География» of the block (#218)
         cands = [c for c in pool.candidates(plan) if c.inn not in hidden]
-        top = rank(cands, target, weights, extra)
+        if order:
+            classes = discover.okpd_classes(query.okpd2)[:discover.MAX_CLASSES]
+            linked = set().union(*(link.get(cls, set()) for cls in classes))
+            full = signal_order(cands, order, plan=plan, feat=pool.feat, linked=linked, target=target)
+        else:
+            full = rule_order(cands, target, weights, extra)
+        top = {c.inn for c in mix(full)}
+        first = next((i for i, c in enumerate(full) if c.inn in winners), None)
         # the region population after the product's drop of known INNs, with the hidden winners returned
         in_region = (len(pool.region) - known_in_region[query.as_of]
                      + len(winners & known[query.as_of] & pool.region.keys()))
@@ -219,7 +285,10 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date) -> dict:
             "winner_entity": "+".join(sorted(entity)) or "нет в пуле",
             "n_candidates": len(cands), "n_region": in_region,
             "in_pool": float(bool(entity)), "in_region": float(n_reg > 0), "covered": float(n_cov > 0),
-            "winner@10": float(bool(winners & set(top))),
+            "winner@10": float(bool(winners & top)),
+            "winner@100": float(first is not None and first < 100),
+            "winner_rr": 1.0 / (first + 1) if first is not None else 0.0,
+            "winner_pos": first,  # position of the first winner in the full order, None — not a candidate
             "random_okved@10": hit_probability(len(cands), n_cov),
             "random_region@10": hit_probability(in_region, n_reg),
             "random_cover": hit_probability(in_region, n_reg, len(cands)),
@@ -250,3 +319,38 @@ def print_table(rec: dict) -> None:
                        *((k, s["n_queries"], s["metrics"]) for k, s in rec["slices"].items())]:
         cells = (f"{m[x]['value']:.4f} [{m[x]['ci95'][0]:.3f}, {m[x]['ci95'][1]:.3f}]" for x in METRICS)
         print(f"{name:<28} {n:>5}  " + "  ".join(f"{c:<22}" for c in cells))
+
+
+def paired(a: dict, b: dict) -> dict:
+    """Δ = a − b of the order metrics over the cases both runs have, with a bootstrap interval (#377)."""
+    rows_b = {q["query_id"]: q for q in b["per_query"]}
+    common = [(q, rows_b[q["query_id"]]) for q in a["per_query"] if q["query_id"] in rows_b]
+    out: dict = {"n_queries": len(common)}
+    for m in PAIRED:
+        d = [x[m] - y[m] for x, y in common]
+        lo, hi = bootstrap_ci(d)
+        out[m] = {"a": sum(x[m] for x, _ in common) / max(len(common), 1),
+                  "b": sum(y[m] for _, y in common) / max(len(common), 1),
+                  "delta": sum(d) / max(len(d), 1), "ci95": [lo, hi]}
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    from src.eval.run import RESULTS
+
+    ap = argparse.ArgumentParser(description="pool order: paired Δ of two pool_recall runs (#377)")
+    ap.add_argument("command", choices=("compare",))
+    ap.add_argument("a")
+    ap.add_argument("b")
+    args = ap.parse_args(argv)
+    a, b = (json.loads((RESULTS / f"{x}.json").read_text(encoding="utf-8")) for x in (args.a, args.b))
+    res = paired(a, b)
+    print(f"{args.a} - {args.b}, n={res['n_queries']}")  # ASCII: a Windows console is cp1251
+    for m in PAIRED:
+        r = res[m]
+        print(f"  {m:<11} {r['a']:.4f} - {r['b']:.4f} = {r['delta']:+.4f} [{r['ci95'][0]:+.4f}, {r['ci95'][1]:+.4f}]")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

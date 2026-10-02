@@ -5,8 +5,7 @@ each module's own `os.environ.get` did before. So there is no cache to go stale 
 a variable after the import and the next access sees it), a hot path such as `tokenize()` pays for one read, and
 a garbage value of one variable cannot break the others. Names and defaults live here and in .env.example
 (tests/unit/test_settings.py keeps the two in step); `make settings-check` (scripts/check_settings.py) fails on
-a new `os.environ` read anywhere else in src/ — files not migrated yet are on scripts/settings_allowlist.txt,
-which only shrinks.
+an `os.environ` read anywhere else in src/ (no exceptions since #297).
 
 An empty value (`NAME=` in .env or in a docker env_file) means «not set», as .env.example shows.
 """
@@ -101,7 +100,9 @@ class Settings:
     gis2_down_cooldown_s = _Var("GIS2_DOWN_COOLDOWN_S", lambda v: float(v or 90.0))  # pause after a timeout
     gis2_disabled = _Var("GIS2_DISABLED", lambda v: (v or "").strip().lower() in {"1", "true", "yes"})
     reviews_live_max = _Var("REVIEWS_LIVE_MAX", _limit(REVIEWS_LIVE_MAX_DEFAULT))  # reads of 2gis.ru at once, ≥ 1
-    # open sources (src/sources): pauses and timeouts, s — read once, at import of the source module
+    # open sources (src/sources). Pauses, timeouts and cache ages, s (SOURCE_CACHE_TTL_S, RNP_MAX_AGE_S too), are read
+    # once, at import of the source module; SOURCE_CACHE — when a SourceCache is created; PB_DISABLED, FNS_OPENDATA_*
+    # and YANDEX_* — at every call (tests set them later)
     source_cache = _Var("SOURCE_CACHE", lambda v: Path(v or "cache/sources.sqlite"))  # as given: relative to the cwd
     source_cache_ttl_s = _Var("SOURCE_CACHE_TTL_S", lambda v: int(v or 7 * 24 * 3600))
     pb_min_interval_s = _Var("PB_MIN_INTERVAL_S", lambda v: float(v or 1.0))
@@ -120,10 +121,25 @@ class Settings:
     yandex_search_folder_id = _Var("YANDEX_SEARCH_FOLDER_ID", lambda v: (v or "").strip())
     yandex_search_ttl_s = _Var("YANDEX_SEARCH_TTL_S", lambda v: int(float(v or 30 * 24 * 3600)))
     yandex_search_daily_max = _Var("YANDEX_SEARCH_DAILY_MAX", lambda v: int(float(v or 100)))
+    yandex_search_max_requests = _Var("YANDEX_SEARCH_MAX_REQUESTS", lambda v: int(float(v or 2500)))  # all time (D-149)
+    yandex_max_per_lot = _Var("YANDEX_MAX_PER_LOT", lambda v: v.strip() if v else "")  # "" — not set: client off
+    yandex_max_per_run = _Var("YANDEX_MAX_PER_RUN", lambda v: v.strip() if v else "")  # "" — not set: client off
     yandex_search_min_interval_s = _Var("YANDEX_SEARCH_MIN_INTERVAL_S", lambda v: float(v or 1.0))
     yandex_search_offline = _Var("YANDEX_SEARCH_OFFLINE", lambda v: v == "1")
     yandex_search_cache = _Var("YANDEX_SEARCH_CACHE", lambda v: Path(v) if v else None)  # None — the main checkout's
     yandex_search_region = _Var("YANDEX_SEARCH_REGION", lambda v: v)
+    # block «Новые» (src/enrich/discover.py) and the LLM provider (src/llm) — read at every call
+    discovery_offline = _Var("DISCOVERY_OFFLINE", lambda v: v == "1")  # 1 — registries from the cache only
+    discovery_leads = _Var("DISCOVERY_LEADS", lambda v: v != "0")  # 0 — web leads (#108) are not added
+    discovery_np_types = _Var("DISCOVERY_NP_TYPES", lambda v: v or "UL")  # rmsp entity types, comma-separated
+    llm_provider = _Var("LLM_PROVIDER", lambda v: (v or "none").strip().lower())  # none — the mode without LLM
+    # tools (src/eval, src/match/ranker_train.py) — read at every call, except the two directories of emb_bench (import)
+    eval_final_confirm = _Var("EVAL_FINAL_CONFIRM", lambda v: v)  # sha256 from make eval-final CONFIRM=…
+    eval_user = _Var("USER", lambda v: v or "?")  # who ran eval-final: written to eval/final-log.md
+    dev_full = _Var("DEV_FULL", lambda v: v)  # dev_full.jsonl outside this checkout (a worktree without data/)
+    pool_dir = _Var("POOL_DIR", lambda v: Path(v) if v else None)  # as given; None — `pool_dir:` of the eval config
+    data_gpu_dir = _Var("DATA_GPU_DIR", _directory("data/gpu"))  # embeddings computed on the GPU stand (emb_bench)
+    models_dir = _Var("MODELS_DIR", _directory("models"))  # fine-tuned embedding models (emb_bench, finetune)
     # worker (src/worker): unlike the two limits above this one always raised on garbage, a typo is not a default
     queue_stale_running_s = _Var("QUEUE_STALE_RUNNING_S", lambda v: int(v or QUEUE_STALE_RUNNING_DEFAULT_S))
 

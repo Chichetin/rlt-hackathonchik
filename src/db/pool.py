@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -41,6 +40,7 @@ import pyarrow as pa
 
 from src.contracts import Counterparty
 from src.db.load import pg_dsn
+from src.settings import get_settings
 from src.sources import msp_dump, role
 from src.sources.cache import SourceCache
 
@@ -299,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         result: dict[str, Any] = build(args.parts, args.pool, fetched_at=msp_dump.ZIP.stat().st_mtime)
     elif args.command == "load":
-        url = os.environ.get("DATABASE_URL", "")
+        url = get_settings().database_url
         if not url.startswith("postgres"):
             print("нужен DATABASE_URL=postgresql://… (docker compose up -d db)", file=sys.stderr)
             return 2
