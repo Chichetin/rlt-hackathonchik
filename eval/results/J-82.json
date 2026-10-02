@@ -1,9 +1,9 @@
 {
   "exp_id": "J-82",
   "part": "new-suppliers",
-  "created_at": "2026-10-02T08:53:52+00:00",
-  "commit": "bfbe4109e0f310860b17424e13b0b8062e72cbe4",
-  "dirty": true,
+  "created_at": "2026-10-02T09:01:30+00:00",
+  "commit": "d792f3d339fefe1330ae35fa57f813ffd0e016ee",
+  "dirty": false,
   "config": {
     "block": "discovered",
     "k": 10,
@@ -12,7 +12,7 @@
   },
   "tokenizer_version": "prefix5-v1",
   "exact_docs": 20,
-  "config_sha256": "7b1bb6d205d0a27ef736d2c373322f7a79bc4e8fd2e91985897c15a969492711",
+  "config_sha256": "1f55c33af6285f29b3b991248d8c7f22d0cce6f487caa490115b06dff1e88446",
   "stub": false,
   "vectors": null,
   "store": "parquet",
@@ -40,6 +40,12 @@
     "overlap": 35,
     "share": 0.6285714285714286,
     "kappa": -0.041189931350114284,
+    "confusion": {
+      "human0_llm0": 21,
+      "human0_llm1": 3,
+      "human1_llm0": 10,
+      "human1_llm1": 1
+    },
     "llm_used": false
   },
   "n_selected": 12,

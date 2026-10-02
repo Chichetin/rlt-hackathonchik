@@ -1,8 +1,8 @@
 {
   "exp_id": "N-new-p10",
   "part": "new-suppliers",
-  "created_at": "2026-10-02T07:40:21+00:00",
-  "commit": "032d4231ea9f920979271292b12f51b5e88be332",
+  "created_at": "2026-10-02T09:01:31+00:00",
+  "commit": "d792f3d339fefe1330ae35fa57f813ffd0e016ee",
   "dirty": false,
   "config": {
     "block": "discovered",
@@ -12,7 +12,7 @@
   },
   "tokenizer_version": "prefix5-v1",
   "exact_docs": 20,
-  "config_sha256": "ecdd2e3b41235b452fe46e9a5242cf8fc0b5899e7d37c2a6453e6a73c0abeca6",
+  "config_sha256": "1f55c33af6285f29b3b991248d8c7f22d0cce6f487caa490115b06dff1e88446",
   "stub": false,
   "vectors": null,
   "store": "parquet",
@@ -37,8 +37,15 @@
     "человек": 42
   },
   "agreement_human_llm": {
-    "overlap": 0,
-    "share": null,
+    "overlap": 35,
+    "share": 0.6285714285714286,
+    "kappa": -0.041189931350114284,
+    "confusion": {
+      "human0_llm0": 21,
+      "human0_llm1": 3,
+      "human1_llm0": 10,
+      "human1_llm1": 1
+    },
     "llm_used": false
   },
   "n_selected": 12,
