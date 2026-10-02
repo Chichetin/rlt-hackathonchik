@@ -58,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     lines = args.cases.read_text(encoding="utf-8").splitlines()
     cases = [json.loads(x) for x in lines if x.strip()][: args.limit or None]
     src = Path(os.environ.get("SOURCE_CACHE", ROOT / "cache" / "sources.sqlite"))
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                            cwd=ROOT).stdout.strip()  # at the start: the code that is measured
     t0 = time.time()
     with tempfile.TemporaryDirectory() as tmp:
         copy = Path(tmp) / "sources.sqlite"
@@ -84,8 +86,6 @@ def main(argv: list[str] | None = None) -> int:
         "gisp_candidates_in_top10": sum(p["after"]["gisp"] for p in per),
         "gisp_candidates_evidence_fail": sum(p["after"]["evidence_fail"] for p in per),
     }
-    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
-                            cwd=ROOT).stdout.strip()
     result = {"experiment": "K3-gisp", "issue": 74, "commit": commit, "cases": str(args.cases.relative_to(ROOT)
               if args.cases.is_relative_to(ROOT) else args.cases), "gisp_meta": gisp.meta(args.gisp_dir),
               "source_cache": str(src), "offline": True, "seconds": round(time.time() - t0, 1),
