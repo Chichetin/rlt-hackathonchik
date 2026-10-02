@@ -253,6 +253,70 @@
         }
       }
     },
+    "/api/reviews/{inn}": {
+      "get": {
+        "summary": "Отзывы о поставщике из 2ГИС по требованию",
+        "description": "Cards of 2GIS that carry the name of the company, how far each is trusted (`basis`, `verified`), and the\nnewest reviews of the trusted ones: quote, date, link — every one with its Evidence.",
+        "operationId": "api_reviews_api_reviews__inn__get",
+        "parameters": [
+          {
+            "name": "inn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Inn"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ключ API, если на сервере задан API_KEY",
+              "title": "X-Api-Key"
+            },
+            "description": "ключ API, если на сервере задан API_KEY"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewsResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "нужен ключ API (X-API-Key), если на сервере задан API_KEY"
+          },
+          "429": {
+            "description": "2ГИС запрашивают другие пользователи; повторите через Retry-After секунд"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "summary": "Health",
@@ -1297,6 +1361,217 @@
           "created_at"
         ],
         "title": "Review"
+      },
+      "ReviewCard": {
+        "properties": {
+          "branch_id": {
+            "type": "string",
+            "title": "Branch Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "rubrics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rubrics"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "вкладка отзывов карточки на 2gis.ru"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating",
+            "description": "рейтинг карточки, как его показывает 2ГИС"
+          },
+          "review_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Count"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "phone",
+              "site",
+              "legal_name",
+              "name"
+            ],
+            "title": "Basis"
+          },
+          "verified": {
+            "type": "boolean",
+            "title": "Verified",
+            "description": "True только при совпадении телефона или сайта с данными компании"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "что именно совпало и чего не хватает"
+          },
+          "quotes": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewQuote"
+            },
+            "type": "array",
+            "title": "Quotes"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "branch_id",
+          "title",
+          "address",
+          "rubrics",
+          "url",
+          "rating",
+          "review_count",
+          "basis",
+          "verified",
+          "note",
+          "quotes",
+          "evidence"
+        ],
+        "title": "ReviewCard"
+      },
+      "ReviewQuote": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "начало отзыва дословно; «…» в конце — отзыв длиннее"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating",
+            "description": "оценка автора, 1–5; автор не показывается"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date",
+            "description": "дата отзыва, YYYY-MM-DD"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "rating",
+          "date",
+          "evidence"
+        ],
+        "title": "ReviewQuote"
+      },
+      "ReviewsResult": {
+        "properties": {
+          "inn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inn"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "not_found",
+              "unsupported",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "queried": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queried",
+            "description": "по какому названию искали"
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewCard"
+            },
+            "type": "array",
+            "title": "Cards"
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer",
+            "default": "Отзывы с 2ГИС, как их видит любой посетитель сайта. 2ГИС не публикует ИНН: принадлежность карточки компании подтверждена только там, где так и написано. В подбор и рейтинг отзывы не входят."
+          }
+        },
+        "type": "object",
+        "required": [
+          "inn",
+          "status"
+        ],
+        "title": "ReviewsResult"
       },
       "ScoreComponent": {
         "properties": {
