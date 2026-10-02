@@ -14,6 +14,7 @@ import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
+import { Requisites } from "./Requisites";
 import { lookupOkpd2Name, okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
@@ -1277,6 +1278,8 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
           </li>
         ))}
       </ul>
+
+      <Requisites cp={cp} />
 
       <h3>Сведения о компании</h3>
       <dl className="facts">
