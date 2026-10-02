@@ -125,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cache", type=Path, default=ROOT / "data" / "ranker" / "train-2025-04-01.npz")
     ap.add_argument("--from-cache", action="store_true")
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--name", default="R-198", help="model file prefix: <name>-lr.json, <name>-gbm.txt (#105)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING)
     cfg = load_config()
@@ -155,13 +156,15 @@ def main(argv: list[str] | None = None) -> int:
     t1 = time.monotonic()
     lr = fit_logreg(x, y)
     lr["meta"] = {**meta, "train_s": round(time.monotonic() - t1, 1), "l2": L2}
-    (args.out / "R-198-lr.json").write_text(json.dumps(lr, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    lr_text = json.dumps(lr, ensure_ascii=False, indent=1) + "\n"
+    (args.out / f"{args.name}-lr.json").write_text(lr_text, encoding="utf-8")
     print(f"logreg: {lr['meta']['train_s']} с, сходимость {lr['converged']}")
     for name, w in sorted(zip(ranker.NAMES, lr["coef"], strict=True), key=lambda t: -abs(t[1]))[:12]:
         print(f"  {name:<20} {w:+.3f}")
     t2 = time.monotonic()
     booster, n_valid = fit_lgbm(x, y, q)
-    (args.out / "R-198-gbm.txt").write_text(booster.model_to_string(), encoding="utf-8")  # C API: no non-ASCII paths
+    # C API: no non-ASCII paths
+    (args.out / f"{args.name}-gbm.txt").write_text(booster.model_to_string(), encoding="utf-8")
     gain = booster.feature_importance("gain")
     print(f"lgbm: {time.monotonic() - t2:.1f} с, деревьев {booster.best_iteration}, валидация {n_valid} запросов, "
           f"ndcg@10 {booster.best_score['valid_0']['ndcg@10']:.4f}")
