@@ -143,3 +143,30 @@ def test_every_setting_is_documented_in_env_example() -> None:
     documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]*)=", ENV_EXAMPLE.read_text(encoding="utf-8"), re.M))
     missing = sorted(set(settings.env_names()) - documented)
     assert not missing, f"нет в .env.example: {missing}"
+
+
+def test_gis2_reviews_defaults_and_overrides() -> None:
+    """2GIS reviews on demand (#234, D-142): pacing, timeouts, the off switch and the live-read limit."""
+    s = get_settings({})
+    assert (s.gis2_min_interval_s, s.gis2_timeout_s, s.gis2_down_cooldown_s) == (3.0, 20.0, 90.0)
+    assert s.gis2_disabled is False and s.reviews_live_max == 2
+    s = get_settings({"GIS2_MIN_INTERVAL_S": "0.5", "GIS2_TIMEOUT_S": "5", "GIS2_DOWN_COOLDOWN_S": "30",
+                      "REVIEWS_LIVE_MAX": "4"})
+    assert (s.gis2_min_interval_s, s.gis2_timeout_s, s.gis2_down_cooldown_s, s.reviews_live_max) == (0.5, 5.0, 30.0, 4)
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("1", True), ("true", True), (" Yes ", True), ("0", False),
+                                               ("no", False), ("", False)])
+def test_gis2_disabled_switch(raw: str, expected: bool) -> None:
+    assert get_settings({"GIS2_DISABLED": raw}).gis2_disabled is expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("0", 1), ("abc", 2), ("", 2)])
+def test_reviews_live_max_is_at_least_one_and_falls_back_on_garbage(raw: str, expected: int) -> None:
+    assert get_settings({"REVIEWS_LIVE_MAX": raw}).reviews_live_max == expected
+
+
+def test_gis2_pacing_fails_fast_on_garbage() -> None:
+    """As before #290 moved it here: a typo in a pause must not silently become the default."""
+    with pytest.raises(ValueError):
+        get_settings({"GIS2_MIN_INTERVAL_S": "three"}).gis2_min_interval_s  # noqa: B018
