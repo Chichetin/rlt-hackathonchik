@@ -18,13 +18,18 @@ HOME = "src/settings.py"
 SKIP = ("node_modules", "dist", "__pycache__", ".venv")
 
 
+ENV_NAMES = ("environ", "environb", "getenv", "getenvb")
+
+
 def _reads_environment(tree: ast.AST) -> bool:
+    os_names = {"os"} | {a.asname for n in ast.walk(tree) if isinstance(n, ast.Import)
+                         for a in n.names if a.name == "os" and a.asname}  # `import os as o`
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in ("environ", "getenv") \
-                and isinstance(node.value, ast.Name) and node.value.id == "os":
+        if isinstance(node, ast.Attribute) and node.attr in ENV_NAMES \
+                and isinstance(node.value, ast.Name) and node.value.id in os_names:
             return True
         if isinstance(node, ast.ImportFrom) and node.module == "os" \
-                and any(a.name in ("environ", "getenv") for a in node.names):
+                and any(a.name in ENV_NAMES or a.name == "*" for a in node.names):
             return True
     return False
 

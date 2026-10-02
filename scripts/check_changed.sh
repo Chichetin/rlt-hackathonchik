@@ -79,6 +79,7 @@ has '^(\.claude/hooks/|\.claude/settings\.json|\.githooks/|scripts/issues\.sh)' 
 if has '^src/'; then
   run bash scripts/seal_check.sh
   run "${PY[@]}" python scripts/check_stubs.py
+  run "${PY[@]}" python scripts/check_settings.py
 fi
 e2e_needed && run make e2e
 

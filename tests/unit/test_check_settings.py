@@ -37,6 +37,11 @@ def tree(root: Path, files: dict[str, str], allow: str = "") -> Path:
     "from os import environ\nX = environ['A']\n",
     "from os import getenv\nX = getenv('A')\n",
     "import os\nif 'A' in os.environ:\n    pass\n",
+    "import os as o\nX = o.environ\n",
+    "from os import *\n",
+    "import os\nX = os.environb\n",
+    "import os\nX = os.getenvb(b'A')\n",
+    "from os import environ as e\nX = e\n",
 ])
 def test_every_way_to_read_the_environment_is_found(mod: ModuleType, tmp_path: Path, code: str) -> None:
     root = tree(tmp_path, {"src/match/x.py": code})
@@ -51,6 +56,7 @@ def test_mentions_in_strings_and_comments_do_not_count(mod: ModuleType, tmp_path
 
 def test_settings_module_and_the_ui_are_exempt(mod: ModuleType, tmp_path: Path) -> None:
     root = tree(tmp_path, {"src/settings.py": "import os\nX = os.environ\n",
+                           "src/ui/e2e/x.py": "import os\nX = os.environ\n",
                            "src/ui/node_modules/p/x.py": "import os\nX = os.environ\n"})
     assert mod.check(root) == ([], [])
 
