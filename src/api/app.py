@@ -25,6 +25,9 @@ Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error h
 discover() failed (no message, no path), `source_unavailable` when a registry request was refused or failed and
 discover() went on with the rest, or `history_unchecked` when the companies were found but could not be checked
 against organizers' data (so none is called «новая»). Absent — the block is what the sources gave.
+The OKPD2 classes «Новые» searched by are the X-Discovery-Class header, ASCII JSON `{"classes": ["17.12"],
+"predicted": true | false}`: `predicted` — the query had no OKPD2 and the class was predicted from its text by
+search() (#394), so the UI says so. Absent — no class, the block was not searched.
 """
 
 from __future__ import annotations
@@ -251,6 +254,9 @@ def api_search(query: Query, response: Response,
         response.headers["X-Query-Corrected"] = quote(json.dumps(pairs, ensure_ascii=False, separators=(",", ":")))
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
     response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
+    if res.discovery is not None and res.discovery.okpd_classes:  # the class «Новые» searched by (#394)
+        response.headers["X-Discovery-Class"] = json.dumps(
+            {"classes": res.discovery.okpd_classes, "predicted": res.discovery.predicted}, separators=(",", ":"))
     if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
         response.headers["X-Excluded-Lot"] = str(own)
     history = [m for m in matches if m.origin == "history"]

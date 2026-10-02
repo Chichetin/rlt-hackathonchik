@@ -123,10 +123,24 @@ export type Totals = { history: number; discovered: number };
 // discoveryError: why «Новые» may be incomplete — X-Discovery-Error: an exception type or "history_unchecked" (#287)
 // weakMatch: a short query matched past lots weakly — X-Weak-Match, percent-encoded UTF-8 (#281)
 // corrections: what the server fixed in the query (layout / typos), [typed, searched] — X-Query-Corrected (#282)
+// discoveryClass: the OKPD2 classes «Новые» searched by; predicted — determined from the text (X-Discovery-Class, #394)
+export type DiscoveryClass = { classes: string[]; predicted: boolean };
 export type SearchPage = SearchResponse & {
   total: Totals; note?: string; facets?: Facets; context?: SearchContext; excludedLot?: string; discoveryError?: string;
-  weakMatch?: string; corrections?: Array<[string, string]>;
+  weakMatch?: string; corrections?: Array<[string, string]>; discoveryClass?: DiscoveryClass;
 };
+
+function discoveryClass(r: Response): DiscoveryClass | undefined {
+  const raw = r.headers.get("X-Discovery-Class");
+  if (!raw) return undefined;
+  try {
+    const v = JSON.parse(raw);
+    const classes = Array.isArray(v?.classes) ? v.classes.filter((c: unknown): c is string => typeof c === "string") : [];
+    return classes.length ? { classes, predicted: v.predicted === true } : undefined;
+  } catch {
+    return undefined; // malformed header: no chip, the block itself is fine
+  }
+}
 
 function searchNote(r: Response, header = "X-Search-Note"): string | undefined {
   const raw = r.headers.get(header);
@@ -167,6 +181,7 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
     excludedLot: r.headers.get("X-Excluded-Lot") ?? undefined,
     discoveryError: r.headers.get("X-Discovery-Error") ?? undefined,
     corrections: corrections(r),
+    discoveryClass: discoveryClass(r),
   };
 }
 
