@@ -40,7 +40,7 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("YANDEX_SEARCH_DAILY_MAX", "100")
     monkeypatch.setenv("YANDEX_SEARCH_MIN_INTERVAL_S", "0")
     monkeypatch.delenv("YANDEX_SEARCH_MAX_REQUESTS", raising=False)
-    monkeypatch.setenv("YANDEX_MAX_PER_LOT", "100")  # the ceilings of the human (D-145): set, high
+    monkeypatch.setenv("YANDEX_MAX_PER_LOT", "100")  # the ceilings of the human (D-149): set, high
     monkeypatch.setenv("YANDEX_MAX_PER_RUN", "100")
     ys.reset_run_caps()
 
@@ -265,7 +265,7 @@ def test_error_32_spends_the_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert api.calls == 1 and ys.spent_today(cache) == 1
 
 
-# --- D-145 ceilings (#438): all-time, off without ceilings, per lot, per run ------------------------------
+# --- D-149 ceilings (#438): all-time, off without ceilings, per lot, per run ------------------------------
 
 def test_all_time_cap_counts_every_day(tmp_path: Path, xml: str, monkeypatch: pytest.MonkeyPatch) -> None:
     cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml)

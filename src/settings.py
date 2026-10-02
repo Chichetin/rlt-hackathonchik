@@ -121,7 +121,7 @@ class Settings:
     yandex_search_folder_id = _Var("YANDEX_SEARCH_FOLDER_ID", lambda v: (v or "").strip())
     yandex_search_ttl_s = _Var("YANDEX_SEARCH_TTL_S", lambda v: int(float(v or 30 * 24 * 3600)))
     yandex_search_daily_max = _Var("YANDEX_SEARCH_DAILY_MAX", lambda v: int(float(v or 100)))
-    yandex_search_max_requests = _Var("YANDEX_SEARCH_MAX_REQUESTS", lambda v: int(float(v or 2500)))  # all time (D-145)
+    yandex_search_max_requests = _Var("YANDEX_SEARCH_MAX_REQUESTS", lambda v: int(float(v or 2500)))  # all time (D-149)
     yandex_max_per_lot = _Var("YANDEX_MAX_PER_LOT", lambda v: v.strip() if v else "")  # "" — not set: client off
     yandex_max_per_run = _Var("YANDEX_MAX_PER_RUN", lambda v: v.strip() if v else "")  # "" — not set: client off
     yandex_search_min_interval_s = _Var("YANDEX_SEARCH_MIN_INTERVAL_S", lambda v: float(v or 1.0))

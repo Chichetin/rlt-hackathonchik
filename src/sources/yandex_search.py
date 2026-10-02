@@ -11,8 +11,8 @@ Every request costs money, so the cache is the point of this module, not an extr
 - Spend ledger (`spend` table of the same file): one row per ATTEMPT, written before the request leaves —
   a timeout after sending counts too. `spent_today()` counts the rows since local midnight; at
   `YANDEX_SEARCH_DAILY_MAX` nothing is sent (`BudgetExceeded`) and the stale cache, if any, is returned.
-  The same transaction holds the all-time cap of the hackathon, `YANDEX_SEARCH_MAX_REQUESTS` (2500, D-145, #438).
-- OFF until the human sets the ceilings (D-145, #438): a live request needs the key AND `YANDEX_MAX_PER_LOT`,
+  The same transaction holds the all-time cap of the hackathon, `YANDEX_SEARCH_MAX_REQUESTS` (2500, D-149, #438).
+- OFF until the human sets the ceilings (D-149, #438): a live request needs the key AND `YANDEX_MAX_PER_LOT`,
   `YANDEX_MAX_PER_RUN` (positive integers in `.env`); otherwise `Disabled`, no network. Per lot (the caller's
   `lot=`) and per run (this process) are counted in memory (`Caps`); a cached answer counts nowhere.
   Within a process a lock makes «check the cap, pay, store» one step; separate processes share the file
@@ -98,7 +98,7 @@ def _ceiling(raw: str) -> int | None:
 
 
 def ceilings() -> tuple[int | None, int | None]:
-    """(per lot, per run) set by the human in `.env` (D-145); None — not set or not a positive integer."""
+    """(per lot, per run) set by the human in `.env` (D-149); None — not set or not a positive integer."""
     s = get_settings()
     return _ceiling(s.yandex_max_per_lot), _ceiling(s.yandex_max_per_run)
 
@@ -110,7 +110,7 @@ def disabled_reason() -> str | None:
     lot, run = ceilings()
     missing = [name for name, v in (("YANDEX_MAX_PER_LOT", lot), ("YANDEX_MAX_PER_RUN", run)) if v is None]
     if missing:
-        return f"выключен: не задан {', '.join(missing)} (целое > 0 в .env, D-145)"
+        return f"выключен: не задан {', '.join(missing)} (целое > 0 в .env, D-149)"
     return None
 
 
@@ -151,11 +151,11 @@ class BudgetExceeded(YandexSearchError):
 
 
 class Disabled(YandexSearchError):
-    """The client is off: no key or no ceilings in `.env` (D-145). No request was sent."""
+    """The client is off: no key or no ceilings in `.env` (D-149). No request was sent."""
 
 
 class Caps:
-    """Per-lot and per-run counters of live requests in this process (one run = one process, D-145).
+    """Per-lot and per-run counters of live requests in this process (one run = one process, D-149).
 
     A cached answer costs nothing and counts nowhere: `check()` and `add()` run only for a request about to
     leave — `check()` before the ledger row (a refused ceiling spends nothing), `add()` after it.
