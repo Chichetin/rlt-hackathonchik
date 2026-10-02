@@ -228,3 +228,15 @@ def test_the_cutoff_reader_is_in_the_hashed_method_code():
     rel = Path(sc.__file__).resolve().relative_to(R.ROOT).as_posix()
     assert any(rel == p or rel.startswith(p + "/") for p in R.METHOD_PATHS), rel
     assert split_config is sc.split_config  # the eval tools read the very same function
+
+
+def test_tokenizer_override_changes_the_signature(repo, monkeypatch):
+    """#440: BM25_TOKENIZER changes the method, so it changes the signature; without it the hash is as before."""
+    monkeypatch.delenv("BM25_TOKENIZER", raising=False)
+    plain = R.config_sha256(repo)
+    monkeypatch.setenv("BM25_TOKENIZER", "snowball")
+    snowball = R.config_sha256(repo)
+    monkeypatch.setenv("BM25_TOKENIZER", "prefix5")
+    assert len({plain, snowball, R.config_sha256(repo)}) == 3
+    monkeypatch.delenv("BM25_TOKENIZER")
+    assert R.config_sha256(repo) == plain
