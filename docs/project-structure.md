@@ -68,7 +68,7 @@ scripts/              # issues.sh, download-models.sh, check_stubs.py, check_lay
 
 | Слой | Что | Модули `src/` |
 |---|---|---|
-| L0 | типы и настройки | `contracts.py`, `settings.py` (#290); `regions` — когда появится (#292) |
+| L0 | типы и настройки | `contracts.py`, `settings.py` (#290); `regions.py` — таблица регионов (#292) |
 | L1 | внешний мир и хранение | `sources/`, `db/`, `llm/`, `ingest/` (build, load, notice, okpd2, profile, split_config, testset), `worker/queue.py` |
 | L2 | ядро match | `match/` — store, index, search, fallback, filters, signals, profiles, purchase_type, text, pg_retriever |
 | L3 | обогащение | `enrich/` — enrich, discover, evidence, web_leads_warm (прогрев веб-лидов, #108), fns_lookup (факты ФНС с проверкой, #59); роль по ОКВЭД — `sources/role.py` (L1, #294) |

@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from src.contracts import Counterparty, CounterpartyMatch, Query
-from src.match.filters import REGION_CODE
+from src.regions import REGION_CODE
 
 if TYPE_CHECKING:
     from src.match.search import Candidate
