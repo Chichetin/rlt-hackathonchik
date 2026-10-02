@@ -1,0 +1,464 @@
+{
+  "exp_id": "C-fns-v2",
+  "kind": "fns_coverage",
+  "created_at": "2026-10-02T04:29:57+00:00",
+  "commit": "92c86e1d87c3ac20dc413aff2dc6390f6881884d",
+  "cache": {
+    "path": "/mnt/storage/rlt236/cache/sources.sqlite",
+    "pages": 244
+  },
+  "top": 10,
+  "n_queries": 12,
+  "summary": {
+    "history": {
+      "n": 120,
+      "unchecked": 107,
+      "checked": 13,
+      "active": 13,
+      "named": 120,
+      "role_basis": 86,
+      "dated": 120,
+      "checked_share": 0.1083,
+      "active_share": 0.1083,
+      "named_share": 1.0,
+      "role_basis_share": 0.7167,
+      "dated_share": 1.0
+    },
+    "discovered": {
+      "n": 0,
+      "unchecked": 0,
+      "checked": 0,
+      "active": 0,
+      "named": 0,
+      "role_basis": 0,
+      "dated": 0,
+      "checked_share": null,
+      "active_share": null,
+      "named_share": null,
+      "role_basis_share": null,
+      "dated_share": null
+    },
+    "all": {
+      "n": 120,
+      "checked": 13,
+      "checked_share": 0.1083,
+      "active": 13,
+      "active_share": 0.1083,
+      "named": 120,
+      "named_share": 1.0,
+      "role_basis": 86,
+      "role_basis_share": 0.7167,
+      "dated": 120,
+      "dated_share": 1.0
+    }
+  },
+  "per_query": [
+    {
+      "query_id": "demo-e2e",
+      "history": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "unchecked_inn": [
+          "7805820841",
+          "7820324037",
+          "1001058990",
+          "7811756312",
+          "7842387810",
+          "050709241713",
+          "7802924730",
+          "7816279649",
+          "471700135593",
+          "7811662431"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5903085",
+      "history": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "unchecked_inn": [
+          "7820324037",
+          "7839118609",
+          "7811756312",
+          "781105160691",
+          "7725849080",
+          "7801030360",
+          "7842387810",
+          "7811506697",
+          "7811529091",
+          "7708768762"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5875992",
+      "history": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 8,
+        "dated": 10,
+        "unchecked_inn": [
+          "7813645960",
+          "780519522471",
+          "7806603021",
+          "780435345748",
+          "7802843456",
+          "7806301091",
+          "7840063270",
+          "7820324037",
+          "7811726371",
+          "7804340539"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-6050858",
+      "history": {
+        "n": 10,
+        "checked": 1,
+        "active": 1,
+        "unchecked": 9,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "unchecked_inn": [
+          "7804545409",
+          "780626336374",
+          "7814829978",
+          "7810980375",
+          "7806469464",
+          "667008527935",
+          "781303506542",
+          "7826176265",
+          "9721065762"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5761234",
+      "history": {
+        "n": 10,
+        "checked": 1,
+        "active": 1,
+        "unchecked": 9,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "unchecked_inn": [
+          "7801575469",
+          "7801695773",
+          "7801332931",
+          "7810639197",
+          "7810410350",
+          "7811553672",
+          "7820046277",
+          "9701292189",
+          "7813219553"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5779719",
+      "history": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 10,
+        "dated": 10,
+        "unchecked_inn": [
+          "7814108542",
+          "7806514090",
+          "4705022480",
+          "7804196035",
+          "780700972749",
+          "7743142914",
+          "7743115639",
+          "780443398976",
+          "7804573830",
+          "7825438729"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5786484",
+      "history": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 1,
+        "dated": 10,
+        "unchecked_inn": [
+          "7805593846",
+          "054606381441",
+          "530401077109",
+          "470901054448",
+          "470315299245",
+          "471909491522",
+          "780716816209",
+          "471911136677",
+          "890104290688",
+          "780722097552"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5798959",
+      "history": {
+        "n": 10,
+        "checked": 1,
+        "active": 1,
+        "unchecked": 9,
+        "named": 10,
+        "role_basis": 0,
+        "dated": 10,
+        "unchecked_inn": [
+          "7801658531",
+          "782700410398",
+          "7805497035",
+          "7804663233",
+          "7718285210",
+          "4716047350",
+          "784800136706",
+          "7810474570",
+          "7841321140"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5802116",
+      "history": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 9,
+        "dated": 10,
+        "unchecked_inn": [
+          "780622594367",
+          "7733287011",
+          "780435345748",
+          "781800055723",
+          "7842387810",
+          "7811511062",
+          "781717145403",
+          "781901739462",
+          "7839131046",
+          "667008527935"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5804197",
+      "history": {
+        "n": 10,
+        "checked": 1,
+        "active": 1,
+        "unchecked": 9,
+        "named": 10,
+        "role_basis": 9,
+        "dated": 10,
+        "unchecked_inn": [
+          "7840063270",
+          "2460122114",
+          "7806513385",
+          "2465141061",
+          "7802843456",
+          "5031147919",
+          "9718179632",
+          "633003524483",
+          "2461050649"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5809419",
+      "history": {
+        "n": 10,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 10,
+        "named": 10,
+        "role_basis": 9,
+        "dated": 10,
+        "unchecked_inn": [
+          "511201370324",
+          "030802079276",
+          "781393985551",
+          "7810686567",
+          "7816708464",
+          "7806534410",
+          "590420542141",
+          "7839027599",
+          "330406868701",
+          "7814823670"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    },
+    {
+      "query_id": "lot-5860547",
+      "history": {
+        "n": 10,
+        "checked": 9,
+        "active": 9,
+        "unchecked": 1,
+        "named": 10,
+        "role_basis": 0,
+        "dated": 10,
+        "unchecked_inn": [
+          "7813578560"
+        ]
+      },
+      "discovered": {
+        "n": 0,
+        "checked": 0,
+        "active": 0,
+        "unchecked": 0,
+        "named": 0,
+        "role_basis": 0,
+        "dated": 0,
+        "unchecked_inn": []
+      }
+    }
+  ],
+  "warm": {
+    "top": 20,
+    "inns": 212,
+    "total": 212,
+    "done_total": 212,
+    "done_this_run": 123,
+    "errors_this_run": 0,
+    "failed_total": 0,
+    "elapsed_s": 455.6,
+    "inn_per_min": 16.2,
+    "stopped": null
+  }
+}
