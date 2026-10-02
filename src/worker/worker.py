@@ -11,9 +11,9 @@ import argparse
 import logging
 import time
 
-from src.enrich.enrich import enrich
 from sqlalchemy.exc import OperationalError
 
+from src.enrich.enrich import enrich
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired
 from src.worker.queue import claim, engine_from_env, finish, release, requeue_stale, status_counts

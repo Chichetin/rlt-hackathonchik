@@ -111,6 +111,18 @@ def test_enqueue_only_fills_queue_idempotently(eng):
     assert prefetch.enqueue_only(GOOD[:4], eng) == {"pending": 4}  # no duplicates
 
 
+def test_main_enqueue_only_fills_the_queue_from_the_store_and_enriches_nothing(eng, suppliers, monkeypatch):
+    monkeypatch.setattr(prefetch, "enrich", lambda inn: (_ for _ in ()).throw(AssertionError("no enrich")))
+    monkeypatch.setenv("DATA_STORE", "parquet")  # the store of the environment, as the worker reads it
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(suppliers.processed))
+    clear_stores()
+    try:
+        assert prefetch.main(["--top", "2", "--enqueue-only"]) == 0
+    finally:
+        clear_stores()
+    assert status_counts(eng) == {"pending": 2}
+
+
 def test_worker_night_mode_sleeps_on_captcha_and_continues(eng, monkeypatch):
     from src.sources.pb_nalog import CaptchaRequired
     from src.worker import worker as W
