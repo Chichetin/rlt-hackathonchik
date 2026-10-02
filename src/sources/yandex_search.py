@@ -38,6 +38,7 @@ import sqlite3
 import threading
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
@@ -208,10 +209,34 @@ def _ledger(cache: SourceCache) -> sqlite3.Connection:
     return c
 
 
-def _reserve(cache: SourceCache, url: str) -> int:
-    with closing(_ledger(cache)) as c, c:
-        cur = c.execute("INSERT INTO spend (sent_at, url, outcome) VALUES (?, ?, 'sent')", (time.time(), url))
-        return int(cur.lastrowid or 0)
+def _midnight(now: float | None = None) -> float:
+    return datetime.fromtimestamp(time.time() if now is None else now).replace(
+        hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+def _reserve(cache: SourceCache, url: str, limit: int) -> int:
+    """Count today's rows and insert ours in ONE write transaction: threads and processes cannot both pass.
+
+    The row stays whatever the request returns (a request that left may be billed). At the limit: no row.
+    """
+    c = _ledger(cache)
+    c.isolation_level = None  # explicit BEGIN IMMEDIATE below
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            (n,) = c.execute("SELECT COUNT(*) FROM spend WHERE sent_at >= ?", (_midnight(),)).fetchone()
+            if n >= limit:
+                raise BudgetExceeded(f"Яндекс Search API: дневной лимит {limit} живых запросов исчерпан "
+                                     "(YANDEX_SEARCH_DAILY_MAX)")
+            cur = c.execute("INSERT INTO spend (sent_at, url, outcome) VALUES (?, ?, 'sent')", (time.time(), url))
+            attempt = int(cur.lastrowid or 0)
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+        c.execute("COMMIT")
+        return attempt
+    finally:
+        c.close()
 
 
 def _settle(cache: SourceCache, attempt: int, outcome: str) -> None:
@@ -221,10 +246,8 @@ def _settle(cache: SourceCache, attempt: int, outcome: str) -> None:
 
 def spent_today(cache: SourceCache, now: float | None = None) -> int:
     """Attempts since local midnight — every request that left, whatever came back."""
-    midnight = datetime.fromtimestamp(time.time() if now is None else now).replace(
-        hour=0, minute=0, second=0, microsecond=0).timestamp()
     with closing(_ledger(cache)) as c:
-        (n,) = c.execute("SELECT COUNT(*) FROM spend WHERE sent_at >= ?", (midnight,)).fetchone()
+        (n,) = c.execute("SELECT COUNT(*) FROM spend WHERE sent_at >= ?", (_midnight(now),)).fetchone()
     return int(n)
 
 
@@ -237,8 +260,11 @@ def _ready() -> None:
 
 
 def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
-              client: httpx.Client | None = None) -> str:
-    """One live, paid POST. The decoded XML; YandexSearchError on a refusal (no key, 4xx/5xx, timeout)."""
+              client: httpx.Client | None = None, on_send: Callable[[], None] | None = None) -> str:
+    """One live, paid POST. The decoded XML; YandexSearchError on a refusal (no key, 4xx/5xx, timeout).
+
+    `on_send` runs inside the pacer slot right before the POST (the spend reservation); it may raise.
+    """
     _ready()
     body: dict[str, object] = {
         "query": {"searchType": "SEARCH_TYPE_RU", "queryText": normalize(query), "page": str(page)},
@@ -253,6 +279,8 @@ def fetch_raw(query: str, n: int = 10, region: str | None = None, page: int = 0,
     client = client or httpx.Client(timeout=TIMEOUT_S)
     try:
         with PACER.slot():
+            if on_send is not None:
+                on_send()
             # bytes, not str: the body must leave as UTF-8 whatever the console encoding is
             r = client.post(ENDPOINT, content=json.dumps(body, ensure_ascii=False).encode("utf-8"),
                             headers={"Authorization": f"Api-Key {api_key()}",
@@ -299,22 +327,25 @@ def search(query: str, n: int = 10, region: str | None = None, page: int = 0, *,
     def fetcher(_: str) -> tuple[int, str]:
         nonlocal live
         _ready()
-        if spent_today(cache) >= daily_max():
-            raise BudgetExceeded(f"Яндекс Search API: дневной лимит {daily_max()} живых запросов исчерпан "
-                                 "(YANDEX_SEARCH_DAILY_MAX)")
-        attempt = _reserve(cache, url)
+        attempts: list[int] = []
+
+        def reserve() -> None:  # inside the pacer slot, atomic with the cap check
+            attempts.append(_reserve(cache, url, daily_max()))
+
         try:
-            xml = fetch_raw(q, n, region, page, client)
+            xml = fetch_raw(q, n, region, page, client, on_send=reserve)
             found, hits = parse_xml(xml)  # an XML error raises before anything is cached
         except YandexSearchError as e:
             if e.code in RATE_LIMIT_CODES:
                 PACER.block()
-            _settle(cache, attempt, f"error: {e}")
+            if attempts:
+                _settle(cache, attempts[0], f"error: {e}")
             raise
         except Exception as e:
-            _settle(cache, attempt, f"error: {type(e).__name__}")
+            if attempts:
+                _settle(cache, attempts[0], f"error: {type(e).__name__}")
             raise
-        _settle(cache, attempt, "ok")
+        _settle(cache, attempts[0], "ok")
         cache.put(raw_url(q, n, region, page), xml)
         live = True
         return 200, _body(q, found, hits)

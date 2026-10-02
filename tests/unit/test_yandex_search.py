@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 from pathlib import Path
 
 import httpx
@@ -207,3 +208,51 @@ def test_default_cache_is_shared_by_worktrees(tmp_path: Path, monkeypatch: pytes
     assert ys.main_checkout(main) == main
     monkeypatch.delenv("YANDEX_SEARCH_CACHE")
     assert ys.cache_path() == ys.main_checkout() / "cache" / "yandex_search.sqlite"
+
+
+def test_reserve_is_atomic_across_threads(tmp_path: Path) -> None:
+    cache, won, lost = SourceCache(tmp_path / "s.sqlite"), [], []
+    barrier = threading.Barrier(8)
+
+    def worker() -> None:
+        barrier.wait()
+        try:
+            won.append(ys._reserve(cache, "u", 1))
+        except ys.BudgetExceeded:
+            lost.append(1)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert len(won) == 1 and len(lost) == 7 and ys.spent_today(cache) == 1
+
+
+def test_two_threads_at_cap_one_send_one_paid_request(tmp_path: Path, xml: str,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YANDEX_SEARCH_DAILY_MAX", "1")
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(xml)
+    results: list[str] = []
+
+    def run(q: str) -> None:
+        try:
+            ys.search(q, 3, cache=cache, client=api.client())
+            results.append("ok")
+        except ys.BudgetExceeded:
+            results.append("budget")
+
+    threads = [threading.Thread(target=run, args=(q,)) for q in ("первый", "второй")]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert sorted(results) == ["budget", "ok"] and api.calls == 1 and ys.spent_today(cache) == 1
+
+
+def test_error_32_spends_the_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YANDEX_SEARCH_DAILY_MAX", "1")
+    err = '<yandexsearch><response><error code="32">Лимит</error></response></yandexsearch>'
+    cache, api = SourceCache(tmp_path / "s.sqlite"), Api(err)
+    with pytest.raises(ys.YandexSearchError, match="ошибка 32"):
+        ys.search("первый", 3, cache=cache, client=api.client())
+    monkeypatch.setattr(ys, "PACER", ys.HostPacer(0.0, ys.BLOCK_COOLDOWN_S))  # the pause is not what stops us
+    with pytest.raises(ys.BudgetExceeded):
+        ys.search("второй", 3, cache=cache, client=api.client())
+    assert api.calls == 1 and ys.spent_today(cache) == 1
