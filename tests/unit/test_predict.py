@@ -130,6 +130,25 @@ def test_extra_and_absent_columns_are_warnings(tmp_path):
     assert any("пустой предмет" in n for n in ts.lots[1].notes)
 
 
+def test_glued_header_cell_is_split(tmp_path):
+    # the organizers' test export of 02.10: "reqnum;procedure_name" in one quoted header cell (#590)
+    d = _copy(tmp_path)
+    (d / "Извещения_24-25.csv").write_text(
+        '"publish_date";"procedure_id";"lot_id";"start_price";"reqnum;procedure_name";"subject";"is_smp";'
+        '"customer_inn";"customer_kpp";"is_eshop_or_aisgz"\n'
+        "2026-01-23;5805974;6041774;63600.00;;Обслуживание;Обслуживание;false;7813131108;781301001;ЭМ\n"
+        "2026-02-09;5822537;6058337;501397.40;0372200075025000162;Исследования;Исследования;false;"
+        "7801048494;780101001;АИС ГЗ\n", encoding="utf-8")
+    ts = load_testset(d)
+    assert [lt.lot_id for lt in ts.lots] == ["6041774", "6058337"]
+    first, second = ts.lots
+    assert first.query.customer_inn == "7813131108" and first.query.channel == "ЭМ"
+    assert second.query.customer_inn == "7801048494" and second.query.channel == "АИС ГЗ"
+    assert second.reqnum == "0372200075025000162" and first.query.budget == 63600.0
+    text = " ".join(ts.warnings)
+    assert "склеены" in text and "ячеек больше" not in text and "лишние колонки" not in text
+
+
 def test_bad_price_is_a_note(tmp_path):
     d = _copy(tmp_path)
     (d / "Извещения_24-25.csv").write_text("lot_id;subject;start_price\n1;Бумага;abc\n2;Вода;1 500,50\n",

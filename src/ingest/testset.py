@@ -75,6 +75,10 @@ def _rows(path: Path, columns: tuple[str, ...], required: tuple[str, ...], warni
         raise TestDataError(f"{path.name}: не читается ({e.strerror})") from e
     reader = csv.DictReader(text.splitlines(), delimiter=";", quotechar='"')
     header = [h.strip() for h in (reader.fieldnames or [])]
+    glued = [h for h in header if ";" in h]
+    if glued:  # a quoted header cell hiding the delimiter: "reqnum;procedure_name" (#590)
+        header = [p.strip().strip('"') for h in header for p in h.split(";")]
+        warnings.append(f"{path.name}: в заголовке склеены колонки {', '.join(glued)} — разделены по «;»")
     if not header:
         raise TestDataError(f"{path.name}: пустой файл, нет строки заголовка")
     missing = [c for c in required if c not in header]
