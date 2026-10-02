@@ -1,0 +1,126 @@
+{
+  "exp_id": "J-301",
+  "part": "dev_fresh_free_text(n=50,seed=301)",
+  "created_at": "2026-10-02T03:38:13+00:00",
+  "commit": "c218dfd81642eec1712b3019a728043d5aec9cb8",
+  "dirty": true,
+  "config": {
+    "judge_model": "claude-opus-5-5",
+    "systems": {
+      "B-bm25": "B-bm25",
+      "H-15f": "H-15f",
+      "product": "product default"
+    },
+    "top": 10,
+    "seed": 301,
+    "pool": 300,
+    "names_per_supplier": 15,
+    "tokenizer": "prefix5"
+  },
+  "tokenizer_version": "prefix5-v1",
+  "exact_docs": 20,
+  "config_sha256": "b1211791cbfa4b793d963b930f3e9f73c1fe990c3221a6aeee0cca387b179a79",
+  "stub": false,
+  "vectors": null,
+  "store": "parquet",
+  "n_queries": 50,
+  "precision_at_10": {
+    "B-bm25": {
+      "mean": 0.5249,
+      "ci95": [
+        0.431,
+        0.6178
+      ]
+    },
+    "H-15f": {
+      "mean": 0.57,
+      "ci95": [
+        0.4687,
+        0.6718
+      ]
+    },
+    "product": {
+      "mean": 0.5026,
+      "ci95": [
+        0.4061,
+        0.6004
+      ]
+    }
+  },
+  "paired": {
+    "B-bm25 - H-15f": {
+      "mean": -0.0451,
+      "ci95": [
+        -0.1025,
+        0.004
+      ]
+    },
+    "B-bm25 - product": {
+      "mean": 0.0223,
+      "ci95": [
+        -0.0289,
+        0.0758
+      ]
+    },
+    "H-15f - product": {
+      "mean": 0.0674,
+      "ci95": [
+        0.0328,
+        0.1066
+      ]
+    }
+  },
+  "null_labels": 26,
+  "per_query": [
+    "lot-5747312",
+    "lot-5749348",
+    "lot-5754547",
+    "lot-5758320",
+    "lot-5758958",
+    "lot-5763525",
+    "lot-5763641",
+    "lot-5767283",
+    "lot-5770585",
+    "lot-5772049",
+    "lot-5776830",
+    "lot-5778710",
+    "lot-5781389",
+    "lot-5784580",
+    "lot-5786640",
+    "lot-5787643",
+    "lot-5789346",
+    "lot-5793121",
+    "lot-5793842",
+    "lot-5796853",
+    "lot-5797672",
+    "lot-5798179",
+    "lot-5801537",
+    "lot-5803029",
+    "lot-5809353",
+    "lot-5815482",
+    "lot-5815765",
+    "lot-5816928",
+    "lot-5817184",
+    "lot-5818901",
+    "lot-5822047",
+    "lot-5826672",
+    "lot-5829525",
+    "lot-5830934",
+    "lot-5831339",
+    "lot-5832152",
+    "lot-5836805",
+    "lot-5838458",
+    "lot-5839825",
+    "lot-5840074",
+    "lot-5840225",
+    "lot-5841091",
+    "lot-5842323",
+    "lot-5842549",
+    "lot-5845694",
+    "lot-5848069",
+    "lot-5848437",
+    "lot-5854805",
+    "lot-5859328",
+    "lot-5860823"
+  ]
+}
