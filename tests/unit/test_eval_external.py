@@ -7,6 +7,7 @@ from pathlib import Path
 
 import duckdb
 
+from src.eval import build_cases as BC
 from src.eval import external as EX
 from src.eval.build_cases import Lot
 
@@ -68,3 +69,21 @@ def test_publish_dates_reads_only_the_listed_notices(tmp_path: Path) -> None:
     duckdb.sql(f"COPY (SELECT * FROM (VALUES (1, DATE '2025-03-01'), (2, DATE '2025-11-01'), (3, DATE '2025-04-01'))"
                f" t(lot_id, publish_date)) TO '{(tmp_path / 'notices.parquet').as_posix()}' (FORMAT parquet)")
     assert EX.publish_dates(tmp_path, [1, 2]) == {1: date(2025, 3, 1), 2: date(2025, 11, 1)}
+
+
+def test_read_lots_does_not_load_lots_on_or_after_end(tmp_path: Path) -> None:
+    def put(name: str, sql: str) -> None:
+        duckdb.sql(f"COPY ({sql}) TO '{(tmp_path / (name + '.parquet')).as_posix()}' (FORMAT parquet)")
+
+    put("notices", "SELECT * FROM (VALUES (1, DATE '2025-01-01', 'ЭМ', 's', 'p', '7800000001', 1.0),"
+                   " (2, DATE '2025-09-30', 'ЭМ', 's', 'p', '7800000001', 1.0),"
+                   " (3, DATE '2025-10-01', 'ЭМ', 's', 'p', '7800000001', 1.0),"
+                   " (4, DATE '2025-12-01', 'ЭМ', 's', 'p', '7800000001', 1.0))"
+                   " t(lot_id, publish_date, channel, subject, procedure_name, customer_inn, start_price)")
+    put("items", "SELECT 1 AS lot_id, 'x' AS product_name, '01.11' AS okpd2_code")
+    put("participants", "SELECT * FROM (VALUES (3, '7800000002', true, true), (2, '7800000003', true, true))"
+                        " t(lot_id, supplier_inn, is_winner, inn_valid)")
+    got = BC.read_lots(tmp_path, date(2025, 1, 1), date(2025, 10, 1))
+    assert [x.lot_id for x in got] == [1, 2]  # the lot of 2025-10-01 itself is the sealed period
+    assert [x.lot_id for x in BC.read_lots(tmp_path, date(2025, 1, 2), date(2025, 10, 1))] == [2]
+    assert [x.lot_id for x in BC.read_lots(tmp_path, date(2025, 1, 1))] == [1, 2, 3, 4]

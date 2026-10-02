@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -21,10 +22,12 @@ from pathlib import Path
 import duckdb
 import numpy as np
 
-from src.eval.external import publish_dates
-from src.eval.metrics import bootstrap_ci
-from src.eval.split import ROOT
-from src.match.store import processed_dir
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # `uv run python scripts/compare_art7235.py` without PYTHONPATH
+
+from src.eval.external import publish_dates  # noqa: E402
+from src.eval.metrics import bootstrap_ci  # noqa: E402
+from src.eval.split import ROOT  # noqa: E402
+from src.match.store import processed_dir  # noqa: E402
 
 DEV_START = date(2025, 7, 1)  # the window where the weights of v2 were tuned (configs/split.yaml cutoff)
 SETTINGS = (("A", "X-art-A-v2", "их протокол: история до 2025-01-01, метод v2"),

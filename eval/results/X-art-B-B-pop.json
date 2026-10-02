@@ -1,9 +1,9 @@
 {
   "exp_id": "X-art-B-B-pop",
   "part": "ext-art7235_lots-n2000",
-  "created_at": "2026-10-02T02:09:54+00:00",
-  "commit": "673b94b0890f3e4a58fc6ef6cc90ff71825e9a2b",
-  "dirty": true,
+  "created_at": "2026-10-02T04:41:49+00:00",
+  "commit": "1877fd75038a7e6c0662bd0827879306fd2cb67f",
+  "dirty": false,
   "config": {
     "baseline": "B-pop",
     "method": "pop",
@@ -15,12 +15,12 @@
   },
   "tokenizer_version": "prefix5-v1",
   "exact_docs": 20,
-  "config_sha256": "26729ed38e2112d961264990970d0f4f46ede28fefdfce3cd64461fcec870b6b",
+  "config_sha256": "60cc40695218ffcce773f67ae17cfa04837bd4d60b4be6e88702e9bbe9052121",
   "stub": false,
   "vectors": null,
   "store": "parquet",
   "n_queries": 384,
-  "elapsed_s": 1.1,
+  "elapsed_s": 0.8,
   "metrics": {
     "recall@10": {
       "value": 0.22386555863118363,
