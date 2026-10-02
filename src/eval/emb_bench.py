@@ -79,9 +79,11 @@ def vec_files(model: str, gpu_dir: Path = GPU_DIR) -> list[Path]:
 
 
 def load_model(model: str, device: str | None = None):
-    import sentence_transformers as st  # pyright: ignore[reportMissingImports]
+    import importlib
 
-    SentenceTransformer, models = st.SentenceTransformer, st.models  # pyright: ignore[reportAttributeAccessIssue]
+    # st.models is a lazy submodule: plain attribute access fails until it is imported (06ca72b broke this, #269)
+    SentenceTransformer = importlib.import_module("sentence_transformers").SentenceTransformer
+    models = importlib.import_module("sentence_transformers.models")
 
     try:
         m = SentenceTransformer(model, device=device)
