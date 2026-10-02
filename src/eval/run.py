@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 # Baselines (T-08): experiment id -> method and its parameters; configs/search.yaml stays the product method.
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
+SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 # Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
 SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
@@ -311,6 +312,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.baseline and args.config_of:
         print("--baseline и --config-of вместе не задаются", file=sys.stderr)
+        return 2
+    if args.sample is not None and args.sample <= 0:
+        print("--sample: нужно число кейсов > 0", file=sys.stderr)
         return 2
     try:
         cfg = load_method_config(args.exp, args.baseline, args.config_of)

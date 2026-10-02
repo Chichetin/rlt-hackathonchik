@@ -69,6 +69,8 @@ def test_experiment_overrides_are_merged_over_search_config(tmp_path, monkeypatc
     with pytest.raises(ValueError, match="X-2"):
         R.load_method_config("X-2-real", config_of="X-2")
     assert R.main(["--exp", "X-2-real", "--config-of", "X-2"]) == 2
+    assert R.main(["--exp", "X-1", "--sample", "-5"]) == 2  # review of #246: no silent full run on a bad --sample
+    assert R.main(["--exp", "X-1", "--sample", "0"]) == 2
 
 
 def test_eval_passes_experiment_config_to_search(monkeypatch, tmp_path):
