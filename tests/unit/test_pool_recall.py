@@ -25,6 +25,9 @@ COMPANIES = {
     "7700000006": ("ЮЛ", "77", "17.12", []),  # the class, another region
 }
 
+REPORT = {"7800000004": ["17.12.2"]}  # reports the paper class although its main OKVED is IT
+EMPLOYEES = {"4700000003": 250}
+
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -32,7 +35,11 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     pool_dir.mkdir()
     processed.mkdir()
     pq.write_table(pa.table({"inn": list(COMPANIES), "entity": [v[0] for v in COMPANIES.values()],
-                             "region_code": [v[1] for v in COMPANIES.values()]}), pool_dir / "companies.parquet")
+                             "region_code": [v[1] for v in COMPANIES.values()],
+                             "okved_main": [v[2] for v in COMPANIES.values()],
+                             "okved_report": [REPORT.get(i, []) for i in COMPANIES],
+                             "employees": [EMPLOYEES.get(i) for i in COMPANIES]}),
+                   pool_dir / "companies.parquet")
     okved = [(main, inn, True, reg) for inn, (_, reg, main, _) in COMPANIES.items()]
     okved += [(code, inn, False, reg) for inn, (_, reg, _, extra) in COMPANIES.items() for code in extra]
     pq.write_table(pa.table({k: [r[i] for r in okved] for i, k in enumerate(("code", "inn", "main", "region_code"))}),
@@ -101,3 +108,18 @@ def test_lift_has_a_bootstrap_interval() -> None:
     rows = [{"covered": c, "random_cover": 0.1} for c in (1.0, 0.0, 1.0, 1.0)]
     out = pool_recall.lift(rows)
     assert out["value"] == pytest.approx(7.5) and out["ci95"][0] <= 7.5 <= out["ci95"][1]
+
+
+def test_signal_order_and_paired_delta(env: Path) -> None:
+    """order: {report: 1} puts the reporting company first; {size: 1} — the 250-employee wholesaler (#377)."""
+    case = _case("found", "7800000001", ["17.12.14.110"])
+    base = pool_recall.evaluate([case], {"weights": {"product_fit": 1.0}}, CUTOFF)
+    report = pool_recall.evaluate([case], {"order": {"report": 1.0}}, CUTOFF)
+    size = pool_recall.evaluate([case], {"order": {"size": 1.0}}, CUTOFF)
+    assert base["per_query"][0]["winner_pos"] == 0  # main class OKVED, the lowest INN of the tier
+    assert report["per_query"][0]["winner_pos"] == 2  # 7800000004 first, then by INN: 4700000003, the winner
+    assert size["per_query"][0]["winner_pos"] == 1  # 4700000003 first
+    d = pool_recall.paired(report, base)
+    assert d["n_queries"] == 1 and d["winner_rr"]["delta"] == pytest.approx(1 / 3 - 1.0)
+    with pytest.raises(ValueError, match="неизвестные сигналы"):
+        pool_recall.evaluate([case], {"order": {"magic": 1.0}}, CUTOFF)
