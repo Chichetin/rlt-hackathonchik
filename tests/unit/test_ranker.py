@@ -28,6 +28,13 @@ def test_off_is_v2_and_features_are_deterministic(search_data):
     assert got and len(got) >= len(plain) and all(len(r) == len(ranker.NAMES) for _, r in got)
     a, b = np.asarray([r for _, r in got]), np.asarray([r for _, r in again])
     assert [i for i, _ in got] == [i for i, _ in again] and np.array_equal(a, b, equal_nan=True)
+    # #576: the display formula (name match, pool experience, INN region) does not reach the model — its features
+    # are those of the config without these options, and so are the shown values there
+    legacy = {**cfg, "options": {**cfg["options"], "name_share": 0.0, "exp_scale": "fixed"},
+              "signals": {**cfg["signals"], "inn_region": 0.0}}
+    old: list = []
+    plain = search(Q, config=legacy, features_out=old)
+    assert np.array_equal(a, np.asarray([r for _, r in old]), equal_nan=True)
     fit = a[:, ranker.NAMES.index("fit")]
     by_inn = {m.counterparty.inn: m for m in plain}
     for (inn, row), f in zip(got, fit, strict=True):
@@ -96,6 +103,21 @@ def test_missing_model_falls_back_to_v2(search_data, tmp_path):
     search(Q, config=cfg)
     assert "ранжировщик недоступен" in (fallback.search_note() or "")
     assert all(m.rank_reason is None for m in ranker.reasons(search(Q, config=plain_cfg)))  # v2: no reasons
+
+
+def test_no_customer_keeps_the_v2_order(search_data, tmp_path):
+    """#490: the ranker learned only queries with a customer; free text without one goes in the v2 order."""
+    old = _logreg_on_lots(tmp_path)
+    cfg = {**old, "ranker": {**old["ranker"], "customer_only": True}}
+    plain_cfg = {k: v for k, v in cfg.items() if k != "ranker"}
+    assert search(Q, config=cfg) != search(Q, config=plain_cfg)  # with a customer the model reorders
+    free = Q.model_copy(update={"customer_inn": None})
+    assert search(free, config=cfg) == search(free, config=plain_cfg)
+    assert search(free, config=old) != search(free, config=plain_cfg)  # without the key: as before #490
+    got: list = []
+    search(free, config=cfg, features_out=got)
+    assert got  # training still gets the features
+    assert search_mod.load_config()["ranker"].get("customer_only") is True  # the product default
 
 
 def _logreg_on_lots(tmp_path) -> dict:

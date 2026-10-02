@@ -128,8 +128,8 @@ def test_strong_candidates_are_distinct_companies_with_fit_from_0_8():
 
 
 def test_off_without_the_human_ceilings_and_not_needed_with_enough_strong(monkeypatch):
-    assert W.needed(2) == (True, "нужен: сильных кандидатов из бесплатных источников 2 < 3")
-    assert W.needed(3)[0] is False and "не нужен" in W.needed(3)[1]
+    assert W.needed(4) == (True, "нужен: сильных кандидатов из бесплатных источников 4 < 5")
+    assert W.needed(5)[0] is False and "не нужен" in W.needed(5)[1]
     monkeypatch.delenv("YANDEX_MAX_PER_RUN")
     assert not W.enabled()
     api = Api()
@@ -216,16 +216,16 @@ def test_found_company_enters_new_through_the_lead_road(cache, tmp_path):
     assert sources == {pb_nalog.SOURCE, site.SOURCE} and check_counterparty(m.counterparty, cache.page_text) == []
     assert m.counterparty.contacts == {"phone": "+7 (812) 555-12-34", "email": "info@privivka.spb.ru"}
     (line,) = res.leads
-    assert line.startswith("Яндекс (запасной путь): нужен: сильных кандидатов из бесплатных источников 0 < 3")
+    assert line.startswith("Яндекс (запасной путь): нужен: сильных кандидатов из бесплатных источников 0 < 5")
     assert "уже в данных 1" in line and "ОКВЭД не подтвердил класс 1" in line and "в блок 1" in line
 
 
 def test_enough_strong_candidates_skip_yandex(cache, tmp_path):
     _warm(cache)
-    strong = [_fit(1.0, i) for i in ("7810400592", "7811777270", "7805336905")]
+    strong = [_fit(1.0, i) for i in ("7810400592", "7811777270", "7805336905", "7806602902", "7707049388")]
     res = _discover(cache, _processed(tmp_path, []), history=strong)
     assert res.matches == [] and res.leads == ["Яндекс (запасной путь): не нужен: сильных кандидатов из "
-                                                "бесплатных источников 3 ≥ 3"]
+                                                "бесплатных источников 5 ≥ 5"]
 
 
 def test_a_company_of_a_lead_file_is_not_repeated(cache, tmp_path, monkeypatch):
@@ -290,3 +290,92 @@ def test_min_strong_and_the_trigger_are_unchanged(monkeypatch):
     cfg = W.load_config()
     k = int(cfg["min_strong"])
     assert W.needed(k - 1, cfg)[0] is True and W.needed(k, cfg)[0] is False
+
+
+# --- #550: the button «Искать в реальном времени» ---------------------------------------------------------------
+
+
+def test_live_search_asks_whatever_the_strong_count_and_gets_a_missing_card(tmp_path, monkeypatch):
+    c = SourceCache(tmp_path / "sources.sqlite")  # no card of MAKER yet: the live search fetches it
+    c.put(pb_nalog.card_url(OTHER), _card(OTHER, "62.01", "Разработка компьютерного программного обеспечения"))
+    real = D.enrich
+    fetched: list[str] = []
+
+    def fake_enrich(inn, cache, **kw):  # the live ФНС request, as the cache would have it after it
+        if kw.get("offline") is False:
+            fetched.append(inn)
+            cache.put(pb_nalog.card_url(inn), _card(inn, "21.20", "Производство лекарственных препаратов"))
+        return real(inn, cache, **{**kw, "offline": True})
+
+    monkeypatch.setattr(D, "enrich", fake_enrich)
+    api = Api()
+    live = D.live_search(QUERY, cache=c, processed=_processed(tmp_path, [KNOWN]), weights=WEIGHTS,
+                         client=api.client(), site_client=_sites(), offline=False)
+    assert api.queries  # asked with no history at all: no trigger «< 3 strong»
+    assert MAKER in fetched
+    assert [m.counterparty.inn for m in live.matches] == [MAKER]
+    m = live.matches[0]
+    assert m.origin == "discovered"
+    assert m.components[0].explanation.startswith("Найдена в реальном времени в Яндекс Поиске по запросу")
+    assert site.SOURCE in {e.source for e in m.counterparty.evidence}
+    assert check_counterparty(m.counterparty, c.page_text) == []
+    assert live.note.startswith("Яндекс (в реальном времени): по кнопке «Искать в реальном времени»")
+
+
+def test_live_search_without_the_client_says_it_is_not_configured(tmp_path, monkeypatch):
+    monkeypatch.delenv("YANDEX_MAX_PER_RUN")
+    with pytest.raises(D.LiveOff, match="живой поиск не настроен"):
+        D.live_search(QUERY, cache=SourceCache(tmp_path / "c.sqlite"), weights=WEIGHTS,
+                      client=Api().client(), site_client=_sites())
+
+
+def test_live_search_without_a_class_is_refused(tmp_path):
+    with pytest.raises(D.LiveOff, match="без кода ОКПД2"):
+        D.live_search(Query(query_id="q", text="вакцины"), cache=SourceCache(tmp_path / "c.sqlite"), weights=WEIGHTS)
+
+
+def test_yandex_tops_up_to_min_strong_and_stops_paying(cache):
+    """#558: 4 strong of 5 → one site with an INN is enough: no further paid query once topped up to min_strong."""
+    api = Api()
+    fb = W.lot_leads("lot-1", LOT_TEXT, "21.20", 4, cache=cache, client=api.client(), site_client=_sites())
+    assert fb.used and fb.leads and len(api.queries) == 1
+    assert W.load_config()["min_strong"] == 5
+
+
+def test_history_strong_beyond_ten_counts_for_the_trigger(cache, tmp_path):
+    """#558: strong candidates of the whole history count, not only its first ten."""
+    _warm(cache)
+    weak = [_fit(0.3, i) for i in ("7801000012", "7801000020", "7801000037", "7801000044", "7801000051",
+                                   "4701000038", "7804428656", "7807032363", "7810400592", "4703173460")]
+    strong = [_fit(1.0, i) for i in ("7810400592", "7811777270", "7805336905", "7806602902", "7707049388")]
+    res = _discover(cache, _processed(tmp_path, []), history=[*weak, *strong])
+    assert res.leads == ["Яндекс (запасной путь): не нужен: сильных кандидатов из бесплатных источников 5 ≥ 5"]
+
+
+def test_a_lead_already_shown_does_not_count_toward_the_top_up(cache):
+    """#558 review: 4 strong and the sites state only INNs already shown → the top-up goes on to the next query."""
+    api = Api()
+    fb = W.lot_leads("lot-1", LOT_TEXT, "21.20", 4, cache=cache, client=api.client(), site_client=_sites(),
+                     known={MAKER, KNOWN, OTHER}, cfg={**W.load_config(), "max_sites": 50})
+    assert fb.used and len(api.queries) > 1
+
+
+def test_live_button_takes_an_entrepreneur_retailer_from_another_region(tmp_path):
+    """#583: the button takes an ИП (whatever DISCOVERY_NP_TYPES), a goods retailer (47.x) with product_fit 0.4,
+    and a company of another region (the geography scores it); the automatic fallback still drops all three."""
+    from datetime import date
+
+    from src.match.store import store_for
+    c = SourceCache(tmp_path / "s.sqlite")
+    c.put(pb_nalog.card_url(IP_INN), _card(IP_INN, "47.41", "Торговля розничная компьютерами", kpp="500101001"))
+    lead = web_leads.Lead(okpd2_class="21.20", inn=IP_INN, name="ip.ru", site="ip.ru", role_claim="unknown",
+                          region=None, source_url="https://ip.ru/", search_query="q", found_at=date.today())
+    store = store_for(_processed(tmp_path, []))
+    args = (QUERY, ["21.20.10.110"], ["21.20"], set(), c, WEIGHTS, False, store, "Санкт-Петербург", None)
+    off, _, _, off_line = D.lead_matches(*args, leads={IP_INN: lead})
+    assert off == [] and off_line and "тип ИНН не из DISCOVERY_NP_TYPES 1" in off_line
+    on, _, _, _ = D.lead_matches(*args, leads={IP_INN: lead}, live=True)
+    (m,) = on
+    fit = m.components[0]
+    assert fit.value == D.RETAIL_FIT and "розничная торговля" in fit.explanation
+    assert next(x for x in m.components if x.name == "geography").value == 0.0  # Московская область: scored, kept

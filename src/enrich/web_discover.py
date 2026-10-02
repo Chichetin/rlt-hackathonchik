@@ -29,7 +29,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -199,16 +199,20 @@ class Fallback:
 def lot_leads(lot: str, text: str, okpd_class: str, strong: int, *, okpd2: Sequence[str] = (),
               cache: SourceCache | None = None, search_cache: SourceCache | None = None,
               client: httpx.Client | None = None, site_client: httpx.Client | None = None,
-              offline: bool = False, deadline: float | None = None, cfg: dict | None = None) -> Fallback:
+              offline: bool = False, deadline: float | None = None, cfg: dict | None = None,
+              force: bool = False, known: Collection[str] = ()) -> Fallback:
     """The fallback path for one lot: `text` — its subject, `okpd_class` — the class its leads answer, `strong`
     — how many strong candidates the free sources gave. Not needed or off → nothing is done, the reason is
     returned. `cache` — site pages (the source cache of discover); `search_cache` — the answers of the client
     (its own shared file by default). `offline` → cached answers and pages only. `deadline` (time.monotonic(), the
     deadline of the whole search) — after it nothing goes to the network: answers and pages are read from the cache
     only, and a live request is cut to the time left. Once `max_sites` sites are checked no further query is sent.
-    What was not reached is cached by nobody and costs nothing: the next search of the lot continues."""
+    What was not reached is cached by nobody and costs nothing: the next search of the lot continues.
+    `force` — the button «Искать в реальном времени» (#550): asked whatever `strong` is, if the client is on.
+    `known` — INNs already shown (history, other channels): a lead among them does not count toward min_strong."""
     cfg = cfg or load_config()
-    need, why = needed(strong, cfg)
+    off = yandex_search.disabled_reason()
+    need, why = (off is None, off or "по кнопке «Искать в реальном времени»") if force else needed(strong, cfg)
     out = Fallback(lot=lot, used=False, reason=why)
     if not need:
         return out
@@ -222,7 +226,7 @@ def lot_leads(lot: str, text: str, okpd_class: str, strong: int, *, okpd2: Seque
     out.used = True
     notes: list[str] = []
     seen: set[str] = set()
-    max_sites = int(cfg.get("max_sites", 6))
+    max_sites = int(cfg.get("live_max_sites" if force else "max_sites", 6))
     timed_out = False
 
     def left() -> float | None:
@@ -235,8 +239,12 @@ def lot_leads(lot: str, text: str, okpd_class: str, strong: int, *, okpd2: Seque
         timed_out = timed_out or (not offline and not ok)
         return ok
 
+    floor = int(cfg["min_strong"])
     for q in out.queries:
         if len(out.sites) >= max_sites:  # nothing more would be opened: do not pay for another answer
+            break
+        # topped up to min_strong (#558): no more paid queries; a lead already shown does not count
+        if not force and strong + sum(lead.inn not in known for lead in out.leads) >= floor:
             break
         try:
             if live():

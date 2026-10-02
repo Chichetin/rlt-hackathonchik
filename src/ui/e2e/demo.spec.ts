@@ -14,9 +14,8 @@ test("демо: запрос → два блока → карточка → фи
   await expect(page).toHaveURL(/\/search$/);
 
   // 1. Ввёл номер закупки → запрос заполнен из извещения (предмет, НМЦК, заказчик)
-  await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
-  await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага офисная А4/);
+  await page.goto(`/search?lot=${DEMO_LOT}`);
+  await expect(page.getByLabel("Название товара")).toHaveValue(/Бумага офисная А4/);
   await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
   await expect(page.getByLabel("ИНН заказчика")).toHaveValue("7801000051");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
@@ -32,7 +31,7 @@ test("демо: запрос → два блока → карточка → фи
   await page.getByRole("button", { name: /^Новые/ }).click();
   await expect(discovered.locator(".item").first()).toBeVisible();
   await expect(discovered.locator(".why").first()).toContainText("Основной ОКВЭД");
-  await expect(discovered.locator(".hint")).toContainText("первые 10 действующих записей реестра МСП");
+  await expect(discovered.locator("p.hint")).toHaveCount(0); // #583: no caption under the block title
   await page.getByRole("button", { name: /^С опытом/ }).click();
   await expect(history.locator(".score").first()).toHaveText(/\d\.\d\d/);
   await expect(history.locator(".why").first()).not.toBeEmpty();
@@ -63,7 +62,8 @@ test("демо: запрос → два блока → карточка → фи
   await discovered.locator(".item").first().click();
   await page.getByRole("button", { name: /Открыть полную карточку/ }).click();
   await expect(card.getByText("не подтверждён")).toHaveCount(0);
-  await expect(card.locator(".components li")).toHaveCount(6);
+  // criteria with weight 0 are hidden since #576 — how many are left depends on the company
+  await expect(card.locator(".components li").first()).toBeVisible();
   await expect(card.locator(".evidence li a").first()).toHaveAttribute("href", /^https:\/\/rmsp\.nalog\.ru\//);
   await expect(card.locator(".evidence li").first()).toContainText(/\d{2}\.\d{2}\.\d{4}/);
   // роль и её основание — факт с источником (D-057): основной ОКВЭД из реестра МСП
@@ -147,9 +147,8 @@ test("демо: запрос → два блока → карточка → фи
 // Отдельная регрессия #232: расширенная проверка ролей не меняет состав и бюджет основного демо.
 test("фильтр роли: счётчик дистрибьюторов совпадает с выдачей и бейджами", async ({ page }) => {
   await page.goto("/search");
-  await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
-  await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага офисная А4/);
+  await page.goto(`/search?lot=${DEMO_LOT}`);
+  await expect(page.getByLabel("Название товара")).toHaveValue(/Бумага офисная А4/);
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   const discovered = page.getByRole("region", { name: "Новые из открытых источников" });
@@ -188,10 +187,9 @@ test("фильтр роли: счётчик дистрибьюторов сов�
 
 test("номер закупки не найден → понятное сообщение, свободный текст работает", async ({ page }) => {
   await page.goto("/search");
-  await page.getByLabel("Номер закупки (необязательно)").fill("999999");
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.goto(`/search?lot=${"999999"}`);
   await expect(page.getByRole("alert")).toContainText("не найдена");
-  await page.getByLabel("Что нужно закупить").fill("Бумага офисная А4");
+  await page.getByLabel("Название товара").fill("Бумага офисная А4");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   await expect(page.getByRole("region", { name: "С опытом госзакупок" }).locator(".item").first()).toBeVisible();
   // без ОКПД2 класс определяется по тексту тем же классификатором, что у подбора (P-02, #394): блок «Новые»
@@ -208,7 +206,7 @@ test("мобильная выдача и карточка без горизон�
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/search");
   await page.getByRole("button", { name: "Бумага офисная А4, 80 г/м²", exact: true }).click();
-  await expect(page.getByLabel("Что нужно закупить")).toBeFocused();
+  await expect(page.getByLabel("Название товара")).toBeFocused();
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   await expect(page.getByRole("group", { name: "Группа поставщиков" })).toBeVisible();
   const first = page.locator(".item").first();
@@ -229,7 +227,7 @@ test("deep link: /search?lot=N загружает лот и сразу ищет,
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await expect(history.locator(".item").first()).toBeVisible();
   await expect(page.locator(".own-lot-note")).toHaveText(new RegExp(`^Закупка ${DEMO_LOT} есть в данных`));
-  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page).toHaveURL(new RegExp(`/search\\?lot=${DEMO_LOT}$`));
   // скопированная ссылка воспроизводит поиск в новой вкладке
   const copy = await page.context().newPage();
   await copy.goto(page.url());
@@ -240,7 +238,7 @@ test("deep link: /search?lot=N загружает лот и сразу ищет,
 test("deep link: /search?q=текст ищет по тексту; неизвестный лот — форма с причиной", async ({ page }) => {
   await page.goto("/search?q=" + encodeURIComponent("Бумага офисная А4"));
   await expect(page.getByRole("region", { name: "С опытом госзакупок" }).locator(".item").first()).toBeVisible();
-  await expect(page).toHaveURL(/\/results\?q=/);
+  await expect(page).toHaveURL(/\/search\?q=/);
 
   await page.goto("/search?lot=999999999");
   await expect(page).toHaveURL(/\/search/);
@@ -250,11 +248,10 @@ test("deep link: /search?q=текст ищет по тексту; неизвес
 // #395, ревью: F5 на /results?lot=N повторяет сохранённый запрос вкладки с фильтрами и НМЦК — не сбрасывает их
 test("deep link: обновление страницы сохраняет фильтр и НМЦК", async ({ page }) => {
   await page.goto("/search");
-  await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.goto(`/search?lot=${DEMO_LOT}`);
   await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
-  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page).toHaveURL(new RegExp(`/search\\?lot=${DEMO_LOT}$`));
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await expect(history.locator(".item").first()).toBeVisible();
   const select = page.getByRole("group", { name: "Заказчик и тип закупки" }).getByRole("combobox", { name: "Может работать у заказчика" });
@@ -264,7 +261,7 @@ test("deep link: обновление страницы сохраняет фил
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("mitrandir.query") ?? "")).toContain('"near":"near"');
 
   await page.reload();
-  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page).toHaveURL(new RegExp(`/search\\?lot=${DEMO_LOT}$`));
   await expect(history.locator(".item").first()).toBeVisible();
   await expect(select).toHaveValue("near");
   await page.goto("/search");
@@ -276,14 +273,13 @@ test("deep link: обновление страницы сохраняет фил
 test("deep link: ссылка на уже искомый лот в той же вкладке ищет заново; назад/вперёд и возврат из фильтров держат адрес", async ({ page }) => {
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await page.goto("/search");
-  await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.goto(`/search?lot=${DEMO_LOT}`);
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   await expect(history.locator(".item").first()).toBeVisible();
 
   await page.goto(`/search?lot=${DEMO_LOT}`);
   await expect(history.locator(".item").first()).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page).toHaveURL(new RegExp(`/search\\?lot=${DEMO_LOT}$`));
   await expect(page.getByText("Проверьте и нажмите")).toHaveCount(0);
 
   await page.goto("/search?q=" + encodeURIComponent("Бумага офисная А4"));
@@ -295,11 +291,11 @@ test("deep link: ссылка на уже искомый лот в той же �
   await page.goBack();
   await expect(page).toHaveURL(/\/search/);
   await page.goForward();
-  await expect(page).toHaveURL(/\/results\?q=/);
+  await expect(page).toHaveURL(/\/search\?q=/);
   await expect(history.locator(".item").first()).toBeVisible();
 
   // возврат из «Фильтров» на результаты — адрес с параметрами
   await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).click();
   await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
-  await expect(page).toHaveURL(/\/results\?q=/);
+  await expect(page).toHaveURL(/\/search\?q=/);
 });

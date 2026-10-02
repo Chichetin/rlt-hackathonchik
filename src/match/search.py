@@ -6,7 +6,8 @@ v1 (T-02, research/METHODOLOGY.md, D-017, D-029):
 2. OKPD2 class of the query: `Query.okpd2`, or — when empty — a vote of the positions that
    matched the query themselves (D-045): group XX.XX first, then the code inside it.
 3. Components in [0, 1], one explanation line each:
-   product_fit — BM25 similarity (normalized by the best candidate) + depth of the OKPD2 match;
+   product_fit — BM25 similarity (normalized by the best candidate), optionally mixed with how well the name of
+                 the best matched position covers the query (options.name_share, #576) + depth of the OKPD2 match;
    experience  — lots and wins in the query's OKPD2 group (level 4) before as_of;
    activity    — days from the last participation to as_of (or to the end of the data);
    geography   — region of the KPP (78 / 47) against Query.region;
@@ -50,6 +51,7 @@ from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
 from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_IN, REGION_NAME, REGION_PREP
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +61,11 @@ IS_STUB = False
 RETRIEVERS = ("bm25", "pg_hybrid")  # pg_hybrid: + pgvector, RRF (src/match/pg_retriever.py, #39)
 # eval sets True: a configured pg_hybrid that is unavailable is an error, not a silent BM25 measurement.
 STRICT_RETRIEVER = False
+# hybrid_short (#485): a short query goes to pg_hybrid with its own embedding model, a long one stays on BM25.
+# scores: rrf — the fused list keeps RRF scores (as pg_hybrid); bm25 — RRF order, scores rescaled to the query's best
+# BM25 (the ranker D-103 was trained on BM25-scale scores).
+HYBRID_SHORT_KEYS = ("model", "max_words", "scores")
+HYBRID_SCORES = ("rrf", "bm25")
 
 TOP_DOCS = 500  # BM25 documents (distinct position texts) taken per query
 CANDIDATES = 200  # suppliers scored per query (by best BM25 of their lots)
@@ -77,12 +84,28 @@ UNAVAILABLE = {
     "reliability": "Нет данных: статус, РНП и расторжения ещё не подключены — в score не входит",
     "price": "Нет данных: в выгрузке нет цены контракта, только НМЦК — в score не входит",
 }
+# options.price scale, but nothing to compare (#585): the weight goes to the other criteria
+NO_PRICE = "Нет данных: НМЦК закупки не указана или у поставщика нет лотов с НМЦК — вес отдан другим критериям"
+
+
+def _without_price(w: dict[str, float]) -> dict[str, float]:
+    """Weights with the price share spread over the other criteria in proportion, so the score keeps its scale."""
+    total, wp = sum(w.values()), w.get("price", 0.0)
+    if wp <= 0 or total <= wp:
+        return w
+    return {k: 0.0 if k == "price" else round(v * total / (total - wp), 4) for k, v in w.items()}
 
 
 # Scoring options of experiments (#22, `options:` in configs/search.yaml or configs/experiments.yaml).
 # The defaults are v1: without the block nothing changes.
 OPTIONS: dict[str, tuple] = {
     "fit_bm25_share": (FIT_BM25_SHARE, None),  # share of BM25 in product_fit, [0, 1]
+    # share of the name match inside the text part of product_fit (#576): 0 — BM25 relative to the best candidate
+    # only (v1), so the best one always gets 1.0; > 0 — the words of the query found in the best position's name
+    "name_share": (0.0, None),
+    # experience saturation (#576): fixed — at sat_lots / sat_wins; pool — at least at the most experienced candidate
+    # of this query, so in a popular category not everyone with 20+ lots gets 1.0
+    "exp_scale": ("fixed", ("fixed", "pool")),
     "experience_by": ("class", ("class", "similar")),  # lots in the OKPD2 group | lots with similar positions
     "tie_break": ("inn", ("inn", "bm25")),  # order of equal scores
     # lots / wins at which experience reaches 1.0 (#196): low caps make active suppliers indistinguishable
@@ -113,6 +136,9 @@ def scoring_options(cfg: dict) -> dict:
     out["price_decades"] = float(out["price_decades"])
     if out["price_decades"] <= 0:
         raise ValueError(f"options.price_decades = {out['price_decades']}: ожидается число > 0")
+    out["name_share"] = float(out["name_share"])
+    if not 0.0 <= out["name_share"] <= 1.0:
+        raise ValueError(f"options.name_share = {out['name_share']}: доля должна быть в [0, 1]")
     if not 0.0 <= out["fit_bm25_share"] <= 1.0:
         raise ValueError(f"options.fit_bm25_share = {out['fit_bm25_share']}: доля должна быть в [0, 1]")
     for name in ("sat_lots", "sat_wins"):
@@ -121,10 +147,50 @@ def scoring_options(cfg: dict) -> dict:
     return out
 
 
+def hybrid_short(cfg: dict) -> dict | None:
+    """`hybrid_short:` of the config checked (#485): {model, max_words, scores}; None when the block is absent."""
+    raw = cfg.get("hybrid_short")
+    if not raw:
+        return None
+    if not isinstance(raw, dict) or set(raw) - set(HYBRID_SHORT_KEYS):
+        raise ValueError(f"hybrid_short: ожидается {{{', '.join(HYBRID_SHORT_KEYS)}}}, получено {raw!r}")
+    model, n, scores = raw.get("model"), raw.get("max_words"), raw.get("scores", "rrf")
+    if not isinstance(model, str) or not model:
+        raise ValueError("hybrid_short.model: нужна модель эмбеддингов (src/db/embed.py SPECS)")
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        raise ValueError(f"hybrid_short.max_words = {n!r}: ожидается целое число ≥ 1")
+    if scores not in HYBRID_SCORES:
+        raise ValueError(f"hybrid_short.scores = {scores!r}: ожидается одно из {HYBRID_SCORES}")
+    if cfg.get("retriever") != "bm25":
+        raise ValueError("hybrid_short задаётся только при retriever: bm25")
+    return {"model": model, "max_words": n, "scores": scores}
+
+
+def routed(cfg: dict, text: str) -> dict:
+    """The config this query is searched with (#485): a query of 1..hybrid_short.max_words words → retriever pg_hybrid
+    with the model of hybrid_short; a longer one — the config as is. Without DATABASE_URL to Postgres the product
+    stays on BM25 silently, as before the option; eval (STRICT_RETRIEVER) routes anyway, so missing vectors fail it."""
+    hs = hybrid_short(cfg)
+    if hs is None or not 0 < len(text.split()) <= hs["max_words"]:
+        return cfg
+    if not STRICT_RETRIEVER and not get_settings().database_url.startswith("postgres"):
+        return cfg
+    return {**cfg, "retriever": "pg_hybrid", "embedding_model": hs["model"], "hybrid_scores": hs["scores"]}
+
+
+def no_customer_options(cfg: dict) -> dict:
+    """Scoring options of the path without a customer and without the ranker (#511): `no_customer_options:` of the
+    config over `options:`. The ranker reads the components as features (#198) and was trained on `options:`, so
+    these apply only where the formula itself orders the answer: free text without a customer (#490)."""
+    return scoring_options({"options": {**(cfg.get("options") or {}), **(cfg.get("no_customer_options") or {})}})
+
+
 def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
+    hybrid_short(cfg)  # short queries to pg_hybrid (#485), off by default
     scoring_options(cfg)
+    no_customer_options(cfg)
     candidates.sizes(cfg)
     ranker.spec(cfg)  # learned ranker (#198): on by default since D-103
     profile_overrides(cfg)  # weights by procurement type (#104), off by default
@@ -299,11 +365,27 @@ def _period(as_of: date | None) -> str:
     return f"до {_fmt(as_of)}" if as_of else "за весь период данных"
 
 
+def _name_match(query_tokens: set[str], text: str) -> tuple[float, int, int]:
+    """How well a position name matches the query (#576): 0.7 · share of the query words found in the name +
+    0.3 · share of the name's words that are in the query (a long name with one common word is a weak match).
+    Returns (value, query words found, query words)."""
+    name = set(tokenize(text))
+    if not query_tokens or not name:
+        return 0.0, 0, len(query_tokens)
+    hit = len(query_tokens & name)
+    return 0.7 * hit / len(query_tokens) + 0.3 * hit / len(name), hit, len(query_tokens)
+
+
 def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: bool,
-                 how: str = "", share: float = FIT_BM25_SHARE) -> tuple[float, str]:
+                 how: str = "", share: float = FIT_BM25_SHARE, name_share: float = 0.0,
+                 query_tokens: set[str] | None = None) -> tuple[float, str]:
     sim = c.bm25 / top_bm25 if top_bm25 > 0 else 0.0
     best = c.best_text if len(c.best_text) <= 60 else c.best_text[:57] + "…"
     head = c.found_by or f"Похожие{how} позиции в {c.n_lots} лот(ах), лучшее совпадение «{best}» (лот {c.best_lot})"
+    if name_share > 0 and query_tokens:
+        name, hit, total = _name_match(query_tokens, c.best_text)
+        sim = name_share * name + (1 - name_share) * sim
+        head = f"{head}; в наименовании совпало слов запроса: {hit} из {total}"
     if not codes:
         return sim, f"{head}; ОКПД2 запроса не определён"
     src = "ОКПД2 определён по похожим позициям" if predicted else "ОКПД2 запроса"
@@ -491,6 +573,30 @@ def _drop_own(lots: LotHits, own: int | None) -> LotHits:
     _excluded.set(own)
     return lots.without(own)
 
+def _hybrid_hits(idx: LotIndex, text: str, hits: list[tuple[int, float]],
+                 cfg: dict) -> tuple[list[tuple[int, float]], str]:
+    """pg_hybrid (#39): BM25 hits fused with the nearest names by meaning; BM25 as is when the vectors are unavailable
+    (no psycopg, Postgres, table or model) — an error in eval (STRICT_RETRIEVER)."""
+    try:
+        from src.match import pg_retriever
+    except ImportError as e:  # no extra pg (psycopg): the same as unavailable vectors
+        if STRICT_RETRIEVER:
+            raise
+        log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
+        return hits, ""
+    try:
+        fused, by_meaning = pg_retriever.hybrid(idx, text, hits, TOP_DOCS, model=cfg.get("embedding_model"))
+    except pg_retriever.VectorsUnavailable as e:
+        if STRICT_RETRIEVER:
+            raise
+        log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
+        return hits, ""
+    if cfg.get("hybrid_scores") == "bm25" and fused:  # #485: RRF order on the BM25 scale the ranker was trained on
+        top = hits[0][1] if hits else 1.0
+        fused = [(d, s / fused[0][1] * top) for d, s in fused]
+    return fused, " по словам и смыслу" if by_meaning else ""
+
+
 def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
            config: dict | None = None, features_out: list | None = None) -> list[CounterpartyMatch]:
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
@@ -506,6 +612,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     _fit_signals.set(None)
     own = own_lot(query)
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
+    cfg = routed(cfg, query.text)  # #485: a short query may go to pg_hybrid
     w = weights or cfg["weights"]
     shares = signal_shares(cfg)  # experiment signals (#22), all 0 by default
     rel_mode = reliability_mode(cfg)  # #72: off | shadow | on
@@ -513,6 +620,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     store = get_store()
     as_of = query.as_of
     idx = get_index(store, as_of)
+    lot_date = as_of  # activity is counted up to the lot's date (#589)
+    if as_of is not None and idx.data_end is not None and as_of > idx.data_end:
+        as_of = None  # a lot after the data (defense export): its history is all of it — the prebuilt snapshot
     if idx.n_docs == 0:
         fallback.set_note(fallback.no_history(as_of))
         return []
@@ -521,15 +631,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     hits = idx.retrieve(tokens, TOP_DOCS)
     how = ""
     if cfg["retriever"] == "pg_hybrid":
-        from src.match import pg_retriever
-
-        try:
-            hits, by_meaning = pg_retriever.hybrid(idx, query.text, hits, TOP_DOCS, model=cfg.get("embedding_model"))
-            how = " по словам и смыслу" if by_meaning else ""
-        except pg_retriever.VectorsUnavailable as e:
-            if STRICT_RETRIEVER:
-                raise
-            log.warning("pg_hybrid недоступен, поиск по BM25: %s", e)
+        hits, how = _hybrid_hits(idx, query.text, hits, cfg)
     codes, bad_codes = fallback.okpd2_codes(query.okpd2)
     lots = _drop_own(idx.lot_hits(hits), own)
     cands = _retrieve(store, idx, lots, as_of) if len(lots) else []
@@ -550,7 +652,11 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg, own)  # #195
         _class_history(store, cands, codes, as_of)
     rk = ranker.spec(cfg)
+    if rk is not None and rk.get("customer_only") and not query.customer_inn:  # #490: learned only on queries
+        rk = None  # with a customer; free text without one goes in the v2 order
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
+    if not query.customer_inn and not ranked:  # #511: the formula orders free text without a customer
+        opts = no_customer_options(cfg)
     w, profile_note = profile_weights(w, cfg, codes, predicted)  # #104: (w, "") when off
     incumbent: dict[str, int] = {}
     if (shares["incumbent"] > 0 or ranked) and query.customer_inn:
@@ -562,9 +668,13 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         wins_mode = "rate" if query.channel == "АИС ГЗ" else "count"
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
+    query_tokens = set(tokens)
+    by_class = bool(codes) and opts["experience_by"] == "class"
+    pool_lots = max((c.class_lots if by_class else c.n_lots) for c in cands)
+    pool_wins = max((c.class_wins if by_class else c.n_wins) for c in cands)
     _fit_signals.set({"top_bm25": top_bm25, "tokens": len(set(tokens)), "retriever": cfg["retriever"],
                       "ladder": any(c.found_by for c in cands)})
-    ref = as_of or idx.data_end
+    ref = lot_date or idx.data_end
     last_day = as_of - timedelta(days=1) if as_of else idx.data_end  # history is strictly before as_of
     # on: every candidate needs its history (the score depends on it); shadow: nothing here — the weight is 0, the
     # order does not depend on it; shadow_reliability() fills only what the user sees (the page, the export rows)
@@ -578,30 +688,38 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         cp = parties.get(c.inn)
         if cp is None:
             continue
-        fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
-        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"],
-                                   wins_mode)
+        sat_lots, sat_wins = opts["sat_lots"], opts["sat_wins"]
+        if opts["exp_scale"] == "pool":
+            sat_lots, sat_wins = max(sat_lots, pool_lots), max(sat_wins, pool_wins)
+        fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"], opts["name_share"],
+                                    query_tokens)
+        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], sat_lots, sat_wins, wins_mode)
+        exp_rank = exp if opts["exp_scale"] == "fixed" else _experience(
+            c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"], wins_mode)[0]
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
+            exp_rank = mix_incumbent(exp_rank, "", incumbent.get(c.inn, 0), shares["incumbent"])[0]
         exp_why += _profile_note(cp)
         if opts["activity_by"] == "similar" and c.last_similar is not None:
-            act, act_why = _recency(c.last_similar, ref, as_of, "Последнее участие в закупке с похожими позициями")
+            act, act_why = _recency(c.last_similar, ref, lot_date, "Последнее участие в закупке с похожими позициями")
         else:
-            act, act_why = _activity(cp, ref, as_of)
+            act, act_why = _activity(cp, ref, lot_date)
         price = _price(cp, query.budget, as_of, opts["price_decades"]) if opts["price"] == "scale" else None
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
         if profile_note:
             geo_why = f"{geo_why}; {profile_note}"
+        wc = _without_price(w) if price is None else w
+        no_price = NO_PRICE if opts["price"] == "scale" else UNAVAILABLE["price"]
         comps = [
-            _component("product_fit", fit, w, fit_why),
-            _component("experience", exp, w, exp_why),
-            _reliability("off" if rel_mode == "shadow" else rel_mode, history.get(c.inn), prior, last_day, w),
-            _component("price", price[0], w, price[1]) if price is not None else ScoreComponent(
-                name="price", value=0.0, weight=0.0, explanation=UNAVAILABLE["price"]),
-            _component("activity", act, w, act_why),
-            _component("geography", geo, w, geo_why),
+            _component("product_fit", fit, wc, fit_why),
+            _component("experience", exp, wc, exp_why),
+            _reliability("off" if rel_mode == "shadow" else rel_mode, history.get(c.inn), prior, last_day, wc),
+            _component("price", price[0], wc, price[1]) if price is not None else ScoreComponent(
+                name="price", value=0.0, weight=0.0, explanation=no_price),
+            _component("activity", act, wc, act_why),
+            _component("geography", geo, wc, geo_why),
         ]
         comps.sort(key=lambda x: list(w).index(x.name) if x.name in w else len(w))
         cp = cp.model_copy(update={"evidence": [*cp.evidence, Evidence(
@@ -614,7 +732,17 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
                                      components=comps, origin="history"))
         bm25_of.append(c.bm25)
         if ranked:
-            rows.append(ranker.feature_row(c, top_bm25, {x.name: x.value for x in comps},
+            # the ranker was trained on product_fit without the name match, experience with fixed saturation and
+            # geography without the INN region:
+            # it gets those values, so its order does not move with the display formula (#576)
+            feats = {x.name: x.value for x in comps}
+            feats["experience"] = round(min(1.0, max(0.0, exp_rank)), 4)
+            if opts["name_share"] > 0:
+                feats["product_fit"] = round(min(1.0, _product_fit(c, top_bm25, codes, predicted, how,
+                                                                   opts["fit_bm25_share"])[0]), 4)
+            if shares["inn_region"] > 0:
+                feats["geography"] = round(_geography(cp, target)[0], 4)
+            rows.append(ranker.feature_row(c, top_bm25, feats,
                                            incumbent.get(c.inn, 0) if query.customer_inn else None,
                                            cp, query, ref, codes, predicted))
     if features_out is not None:

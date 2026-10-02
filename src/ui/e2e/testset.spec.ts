@@ -21,12 +21,14 @@ test("тестовая выгрузка: загрузка CSV → процеду
   await expect(panel.getByText("≈ 3 процедуры, около 1 мин")).toBeVisible(); // the wait before the download
 
   await lots.first().click();
-  await expect(page).toHaveURL(/\/results(\?.*)?$/);
+  await expect(page).toHaveURL(/\/search(\?.*)?$/);
   await expect(page.getByRole("region", { name: "С опытом госзакупок" })).toBeVisible();
-  await expect(page.getByLabel("Что нужно закупить")).not.toHaveValue("");
+  await expect(page.getByLabel("Название товара")).not.toHaveValue("");
 
   // the list survives a reload: the server keeps the active set
   await page.goto("/search");
+  await expect(page.locator("#results")).toHaveAttribute("aria-busy", "false");
+  await page.locator(".query-options > summary").click();
   await expect(page.getByRole("region", { name: "Тестовая выгрузка" }).getByRole("status")).toContainText("Процедур: 3");
 
   expect((await request.get("/api/testset/predict.csv?offline=0")).status()).toBe(422); // a live run is a mass crawl

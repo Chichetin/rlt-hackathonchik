@@ -43,38 +43,42 @@ import logging
 import re
 import time
 from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import duckdb
 import httpx
+import yaml
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.enrich import eaeu, web_discover
 from src.enrich.enrich import enrich, from_bo, from_card
-from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
+from src.enrich.evidence import cached_pages, check_counterparty, strip_unverified, value_in_page
 from src.match import new_fit
 from src.match import search as search_mod
 from src.match.filters import apply_filters, apply_legal
 from src.match.index import processed_dir
+from src.match.purchase_type import purchase_type
 from src.match.store import Store, get_store, store_for
 from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_NAME
 from src.settings import get_settings
-from src.sources import bo_nalog, gisp, msp_dump, pb_nalog, rmsp, role, web_leads
+from src.sources import bo_nalog, gisp, msp_dump, pb_nalog, rmsp, role, web_leads, yandex_search
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 
-MAX_SHOWN = 10  # companies in the block and INNs sent to enrichment per query
+MAX_SHOWN = 10  # producers / distributors mixed at the top of the block
 MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wholesale codes × 2 regions
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
 VOTE_MATCHES = 10  # top history matches whose lots vote for the OKPD2 class
 FIT = {"class": 1.0, "wholesale": 0.6}  # product_fit of a discovered company (D-036)
+RETAIL_OKVED, RETAIL_FIT = "47", 0.4  # the live button only (#583): a retailer of goods found by the product
 COMPONENT_ORDER = ("product_fit", "experience", "reliability", "activity", "geography", "price")
 
 # OKPD2 prefix (longest wins) → OKVED2 wholesale codes for these goods, the main one first. A hand-made
@@ -260,6 +264,15 @@ def _lots_class(history: Sequence[CounterpartyMatch], store: Store | None = None
 def known_inns(inns: Sequence[str], as_of: date | None, store: Store | None = None) -> set[str] | None:
     """INNs present in organizers' data (before as_of) — the suppliers table of `store` (default: the store
     search() reads, Postgres in `make up`); None — the data is absent, nothing checked."""
+    if as_of is not None:  # a lot after the data (#589, defense export): everyone in the data is before it
+        from src.match.index import get_index
+
+        try:
+            end = get_index(store, None).data_end
+        except _STORE_ERRORS:
+            end = None
+        if end is not None and as_of > end:
+            as_of = None
     try:
         everyone = (store or get_store()).supplier_inns(as_of)
     except _STORE_ERRORS as e:  # StoreUnavailable (no table for as_of, Postgres down) is an OSError
@@ -379,7 +392,7 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
         rel_why = "Состоит в реестре МСП; статус в ЕГРЮЛ ещё не проверен (обогащение в очереди) — в score не входит"
 
     want, code = REGION_CODE.get(region), row.get("regioncode", "")
-    where = REGION_NAME.get(code, f"регион с кодом {code}")
+    where = REGION_NAME.get(code, f"регион с кодом {code}") if code else "регион не установлен"
     if want is not None and code == want:
         geo, geo_why = 1.0, f"Реестр МСП: {where}"
     elif want is not None and NEIGHBOUR.get(want) == code:
@@ -411,16 +424,31 @@ def _order(backed: set[str]) -> Callable[[CounterpartyMatch], tuple[float, bool,
 
 
 def _mix(ranked: list[CounterpartyMatch], relation: dict[str, Relation],
-         backed: set[str] | None = None) -> list[CounterpartyMatch]:
+         backed: set[str] | None = None, min_score: float | None = None,
+         max_shown: int = MAX_SHOWN) -> list[CounterpartyMatch]:
     """Top MAX_SHOWN with both kinds present: producers and distributors take slots in turn (best
-    first within a kind), so ten producers do not hide every distributor; shown in score order."""
+    first within a kind), so ten producers do not hide every distributor; shown in score order.
+    `min_score` (#549) — after them every other candidate scoring at least it, best first, up to `max_shown`
+    in all; None — the top MAX_SHOWN only."""
     queues = [[m for m in ranked if relation[m.counterparty.inn or ""] == r] for r in ("class", "wholesale")]
     picked: list[CounterpartyMatch] = []
     while len(picked) < MAX_SHOWN and any(queues):
         for q in queues:
             if q and len(picked) < MAX_SHOWN:
                 picked.append(q.pop(0))
-    return sorted(picked, key=_order(backed or set()))
+    order = _order(backed or set())
+    head = sorted(picked, key=order)[:max_shown]
+    if min_score is None:
+        return head
+    taken = {id(m) for m in head}
+    rest = sorted((m for m in ranked if id(m) not in taken and m.score >= min_score), key=order)
+    return [*head, *rest][:max_shown]
+
+
+def block_config(path: Path = new_fit.CONFIG) -> dict[str, Any]:
+    """`block` of configs/discover.yaml (#549): the size of «Новые» in /api/search and the limits of its live
+    registry requests."""
+    return dict(yaml.safe_load(path.read_text(encoding="utf-8"))["block"])
 
 
 def leads_enabled() -> bool:
@@ -430,7 +458,7 @@ def leads_enabled() -> bool:
 def lead_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], cache: SourceCache,
     weights: dict[str, float], predicted: bool, store: Store, region: str, region_note: str | None,
-    leads: dict[str, web_leads.Lead] | None = None,
+    leads: dict[str, web_leads.Lead] | None = None, *, live: bool = False,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """Web leads of the query's classes (#108, src/sources/web_leads.py): companies outside the МСП registry.
 
@@ -441,7 +469,9 @@ def lead_matches(
     DISCOVERY_NP_TYPES — the same rules as the registry channel, so product_fit keeps its steps (D-036).
     Returns the matches, their relation, the new INNs without a cached card (for the queue) and one line
     for `Discovery.leads`. `leads` — INN → lead given by the caller (the Yandex fallback, src/enrich/web_discover.py);
-    None — the lead files of the query's classes.
+    None — the lead files of the query's classes. `live` (#583, the button «Искать в реальном времени»): an
+    individual entrepreneur is taken whatever DISCOVERY_NP_TYPES says, and for goods any region (the geography stays a
+    component of the score, not a filter — the organizers' expert: for goods the region does not matter).
     """
     leads = dict(web_leads.for_classes(list(classes), web_leads.load()) if leads is None else leads)
     for inn in skip:  # already found in the МСП registry: one row per company
@@ -451,7 +481,8 @@ def lead_matches(
     known = known_inns(list(leads), query.as_of, store) or set()
     plan = okved_plan(codes)
     regions = _regions(query)
-    np_types = _np_types()
+    np_types = ["UL", "IP"] if live else _np_types()
+    any_region = live and purchase_type(codes) == "goods"
     out: list[CounterpartyMatch] = []
     relation: dict[str, Relation] = {}
     no_card: list[str] = []
@@ -469,14 +500,19 @@ def lead_matches(
             continue
         code = cp.okved[0] if cp.okved else ""
         ch = next((c for c in plan if c.okpd_class == lead.okpd2_class and code.startswith(c.okved)), None)
+        retail = ch is None and live and any_region and code.startswith(RETAIL_OKVED)
+        if retail:  # #583: the button takes a retailer of goods (47.x) found by the product, with a lower fit
+            ch = Channel(okved=RETAIL_OKVED, okpd_class=lead.okpd2_class, relation="wholesale")
         if ch is None:  # the registry does not confirm the category the search found it for
             other_okved += 1
             continue
         regioncode = cp.kpp[:2] if cp.kpp else REGION_CODE.get(cp.region or "", "")
-        if not regioncode or regioncode == "99":  # ГИР БО without KPP; KPP 99 of the largest taxpayers
+        if any_region:  # #583: goods from anywhere; an unknown region scores 0 in «География»
+            regioncode = "" if regioncode == "99" else regioncode
+        elif not regioncode or regioncode == "99":  # ГИР БО without KPP; KPP 99 of the largest taxpayers
             no_region += 1
             continue
-        if regioncode not in regions:
+        elif regioncode not in regions:
             other_region += 1
             continue
         # the OKVED name only from a fact «Основной ОКВЭД <code> — <name>» (ГИР БО gives the code alone)
@@ -486,10 +522,14 @@ def lead_matches(
         comps = []
         for c in _components(cp, row, ch, predicted, True, region, weights, region_note):
             why = c.explanation
-            if c.name == "product_fit":
+            if c.name == "product_fit" and retail:
+                c = c.model_copy(update={"value": RETAIL_FIT})
+                why = (f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: основной ОКВЭД {code} — "
+                       "розничная торговля, производство и опт по реестру не подтверждены")
+            elif c.name == "product_fit":
                 why = f"Найдена веб-поиском по товару; вид деятельности — по реестру ФНС: {why}"
-            elif c.name == "geography" and cp.kpp:
-                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)")
+            elif c.name == "geography":  # the region comes from the card, not from a registry row
+                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)") if cp.kpp else why.replace("Реестр МСП: ", "")
             comps.append(c.model_copy(update={"explanation": why}))
         relation[inn] = ch.relation
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
@@ -503,36 +543,99 @@ def lead_matches(
 def yandex_matches(
     query: Query, codes: Sequence[str], classes: Sequence[str], skip: set[str], history: Sequence[CounterpartyMatch],
     current: Sequence[CounterpartyMatch], cache: SourceCache, weights: dict[str, float], predicted: bool,
-    store: Store, region: str, region_note: str | None, *, offline: bool, deadline: float,
+    store: Store, region: str, region_note: str | None, *, offline: bool, deadline: float | None,
+    force: bool = False, fetch_card: Callable[[str], object] | None = None, client: httpx.Client | None = None,
+    site_client: httpx.Client | None = None,
 ) -> tuple[list[CounterpartyMatch], dict[str, Relation], list[str], str | None]:
     """The paid fallback (#194, src/enrich/web_discover.py): Yandex → company site → INN → the road of a web lead.
 
-    Asked only when the free sources — the first MAX_SHOWN of the history block and every «Новые» found so far —
-    hold fewer strong candidates than `min_strong`. The lot of the per-lot ceiling is `query.query_id`. `deadline` —
+    Asked only when the free sources — every history candidate and every «Новые» found so far, after the legal
+    filters — hold fewer strong candidates than `min_strong` (#558: 5, topped up to it). The lot of the per-lot
+    ceiling is `query.query_id`. `deadline` —
     the one of the whole discover(): after it Yandex and the sites are read from their caches only. Leads answer the
     first class of the query. A company already in `skip` (found by the registry or a lead file) is not repeated.
-    Returns what `lead_matches` returns.
+    Returns what `lead_matches` returns. `force` (#550, the button «Искать в реальном времени») — asked whatever the
+    strong count is, the explanation says «найдена в реальном времени»; `fetch_card(inn)` — gets the ФНС card of a
+    found INN that has none in the cache before the lead road, which shows only a company with a cached card.
     """
-    strong = web_discover.strong_count([*history[:MAX_SHOWN], *apply_legal(list(current))])
+    strong = 0 if force else web_discover.strong_count([*apply_legal(list(history)), *apply_legal(list(current))])
     fb = web_discover.lot_leads(query.query_id, query.text, classes[0], strong, okpd2=codes, cache=cache,
-                                offline=offline, deadline=deadline)
+                                offline=offline, deadline=deadline, force=force, client=client,
+                                site_client=site_client,
+                                known={*skip, *(m.counterparty.inn or "" for m in history)})
+    head = f"Яндекс ({'в реальном времени' if force else 'запасной путь'}): {fb.reason}"
     if not fb.used:
-        return [], {}, [], f"Яндекс (запасной путь): {fb.reason}"
+        return [], {}, [], head
     leads = {lead.inn: lead for lead in fb.leads if lead.inn and lead.inn not in skip}
+    if fetch_card is not None:  # only a company the lead road could show: not in organizers' data, an allowed type
+        known = known_inns(list(leads), query.as_of, store) or set()
+        np_types = ["UL", "IP"] if force else _np_types()  # the button takes an individual entrepreneur too (#583)
+        for inn in leads:
+            if inn in known or ("UL" if len(inn) == 10 else "IP") not in np_types:
+                continue
+            if cache.get(pb_nalog.card_url(inn)) is None:
+                try:
+                    fetch_card(inn)
+                except Exception:  # noqa: BLE001 — a card that fails stays «без карточки», the rest go on
+                    log.exception("живой поиск: карточка ФНС %s не получена", inn)
     found, relation, no_card, line = lead_matches(query, codes, classes, skip, cache, weights, predicted, store,
-                                                  region, region_note, leads=leads)
+                                                  region, region_note, leads=leads, live=force)
     out: list[CounterpartyMatch] = []
     for m in found:
         s = fb.check(m.counterparty.inn or "")
         if s is None:
             continue
+        found_as = "Найдена в реальном времени в Яндекс Поиске" if force else "Найдена в Яндекс Поиске"
         comps = [c.model_copy(update={"explanation": c.explanation.replace(
-            "Найдена веб-поиском по товару", f"Найдена в Яндекс Поиске по запросу «{s.query}», ИНН указан на сайте "
+            "Найдена веб-поиском по товару", f"{found_as} по запросу «{s.query}», ИНН указан на сайте "
             f"{s.domain}")}) if c.name == "product_fit" else c for c in m.components]
         out.append(m.model_copy(update={"counterparty": web_discover.with_site(m.counterparty, s, cache),
                                         "components": comps}))
-    head = f"Яндекс (запасной путь): {fb.reason}"
     return out, relation, no_card, head + (f"; {line.removeprefix('веб-лиды: ')}" if line else "")
+
+
+class LiveOff(Exception):
+    """The live search cannot run: the Yandex client is off (no key or no ceilings) or the query has no class."""
+
+
+@dataclass
+class Live:
+    matches: list[CounterpartyMatch]
+    note: str  # what happened: the requests, the sites, the funnel of the lead road
+
+
+def live_search(query: Query, *, cache: SourceCache | None = None, processed: Path | None = None,
+                weights: dict[str, float] | None = None, client: httpx.Client | None = None,
+                site_client: httpx.Client | None = None, offline: bool | None = None) -> Live:
+    """The button «Искать в реальном времени» (#550): Yandex → company site → INN → the road of a web lead for this
+    purchase now, without the trigger «< min_strong strong» and without a deadline; a found INN without a cached
+    ФНС card gets it live. The class — the first OKPD2 class of the query (the UI sends the class «Новые» searched
+    by). Only the page of the site that states the INN and the ФНС card are facts; the result snippet never is.
+    LiveOff — the client is off or the query has no OKPD2 class."""
+    why = yandex_search.disabled_reason()
+    if why is not None:
+        raise LiveOff(f"живой поиск не настроен: {why}")
+    classes = okpd_classes(query.okpd2)
+    if not classes:
+        raise LiveOff("живой поиск по закупке без кода ОКПД2 невозможен: класс не определён")
+    cache = cache or SourceCache()
+    offline = offline_mode() if offline is None else offline
+    weights = weights if weights is not None else search_mod.load_config()["weights"]
+    store = store_for(processed)
+    target, target_note = search_mod.customer_region(query)
+    codes = [c.strip() for c in query.okpd2]
+
+    def card(inn: str) -> object:
+        return enrich(inn, cache, offline=offline, open_data=False)
+
+    found, _, no_card, line = yandex_matches(
+        query, codes, classes[:MAX_CLASSES], set(), (), (), cache, weights, False, store, target, target_note,
+        offline=offline, deadline=None, force=True, fetch_card=card, client=client, site_client=site_client)
+    note = line or ""
+    if no_card:
+        note += f"; без карточки ФНС не показаны {len(no_card)}"
+    log.info("живой поиск %s: %d компаний; %s", query.query_id, len(found), note)
+    return Live(matches=sorted(apply_filters(found, query), key=_order(set())), note=note)
 
 
 GISP_MARK = "реестру Минпромторга (ГИСП)"  # in product_fit of a product confirmed by the registry (#74)
@@ -767,13 +870,17 @@ def discover(
     processed: Path | None = None,
     enqueue: Callable[[str], object] | None = None,
     offline: bool | None = None,
-    budget_s: float = LIVE_BUDGET_S,
+    budget_s: float | None = LIVE_BUDGET_S,
     client: httpx.Client | None = None,
     max_requests: int | None = MAX_REQUESTS,
     pages: int = 1,
     predicted_class: bool | None = None,
     fit_mode: str | None = None,
     predicted_code: str | None = None,
+    pool: bool = False,
+    pool_limit: int | None = None,
+    min_score: float | None = None,
+    max_shown: int = MAX_SHOWN,
 ) -> Discovery:
     """Companies of the query's OKVED in СПб / ЛО from the МСП registry that are not in organizers' data.
 
@@ -784,6 +891,10 @@ def discover(
     `fit_mode` (off | shadow | on) overrides new_fit.mode() — for the off/on comparison (#77).
     `predicted_code` — the OKPD2 code search() predicted from the text of this query (search.predicted_code());
     used only when the query has no OKPD2 of its own, and then its full code picks the wholesale row.
+    `pool` — add the offline pool of companies (#185, #219) to the block, as `make predict` does (#518): offline,
+    after the history check; a company another channel found keeps that channel's row; `pool_limit` — pool rows
+    per region (POOL_API_LIMIT by default).
+    `min_score` / `max_shown` — the block beyond its mixed top MAX_SHOWN (_mix, #549); `budget_s=None` — no deadline.
     """
     cache = cache or SourceCache()
     store = store_for(processed)  # organizers' data: the store search() read unless a parquet dir is given
@@ -813,7 +924,7 @@ def discover(
 
     jobs = [(ch, region, np) for region in _regions(query) for ch in okved_plan(codes)
             for np in _np_types()][:max_requests]
-    deadline = time.monotonic() + budget_s  # every live request of this query ends before it
+    deadline = None if budget_s is None else time.monotonic() + budget_s  # every live request ends before it
     net_ok = True  # False after the first network failure: the rest of the query is cache only
     found: dict[str, tuple[dict[str, str], Channel, CachedPage]] = {}
     last_rows: dict[tuple[str, str, str], int] = {}
@@ -911,6 +1022,13 @@ def discover(
         relation.update(lead_relation)
         if line:
             res.leads.append(line)
+    pool_step: dict[str, str] = {}  # INN → STEP key of a pool company (class / extra / wholesale)
+    if pool and res.history_checked:
+        found_pool, pool_step = pool_matches(query, codes, {m.counterparty.inn or "" for m in matches} | set(found),
+                                             res, weights, cache, store, pool_limit or POOL_API_LIMIT)
+        matches.extend(found_pool)
+        # an additional OKVED of the class takes a producer's slot of _mix; its own step stays in res.relation
+        relation.update({inn: "wholesale" if r == "wholesale" else "class" for inn, r in pool_step.items()})
     gisp_no_card: list[str] = []
     gisp_step: dict[str, str] = {}  # INN → STEP key of the registry's product match (#74)
     if gisp.available():  # ГИСП (#74): registry makers of the query's product; no export → nothing changes
@@ -965,8 +1083,9 @@ def discover(
     matches.sort(key=order)
     res.pool = matches
     res.relation = dict(relation)
+    res.relation.update(pool_step)  # extra: an additional OKVED of the class (STEP 0.5)
     res.relation.update(gisp_step)  # the registry's step for make predict (STEP), over the OKVED one
-    res.matches = _mix(matches, relation, res.gisp_backed)
+    res.matches = _mix(matches, relation, res.gisp_backed, min_score, max_shown)
     if res.history_checked and res.okpd_classes and eaeu.enabled():  # EAEU (#200): goods only, cache only
         try:
             abroad, line = eaeu.matches(codes, res.okpd_classes, cache, weights, res.predicted)
@@ -984,10 +1103,10 @@ def discover(
                  "; ".join(f"{m.counterparty.inn} {res.fit_new[m.counterparty.inn or ''].value:.2f}"
                            for m in res.matches if (m.counterparty.inn or "") in res.fit_new))
     if enqueue is not None:
-        for m in res.matches:
+        for m in res.matches:  # every shown row gets its card (human decision 02.10: no cap of 10)
             if m.counterparty.inn in no_card:
                 enqueue(m.counterparty.inn)
-        for inn in lead_no_card[:MAX_SHOWN]:  # a lead is shown only with a card: get it for the next search
+        for inn in lead_no_card:  # a lead is shown only with a card: get it for the next search
             try:
                 enqueue(inn)
             except Exception:  # noqa: BLE001 — a dead queue does not empty the block
@@ -1046,13 +1165,40 @@ def pool_source() -> tuple[str | None, Path | None]:
     return (url, None) if url.startswith("postgres") else (None, None)
 
 
+_POOL_ROWS: dict[tuple, tuple[list[dict], list[dict]]] = {}  # (prefixes, region, limit, source) → rows; #518
+_POOL_ROWS_MAX = 256
+
+
+def _pool_rows(prefixes: Sequence[str], region: str, limit: int, url: str | None,
+               pool_dir: Path) -> tuple[list[dict], list[dict]]:
+    """Rows of the pool for one (OKVED prefixes, region): the registry dump (`candidates`, at most `limit`)
+    and the companies outside it (`large`). The okved table is 79 M rows and a parquet scan by a code prefix
+    takes seconds on it, so a repeated query (the demo, a page of /api/search) reads it once per process;
+    the key holds the files' mtime — a rebuilt pool is read again."""
+    from src.db import pool as pool_mod
+
+    stamp = tuple((pool_dir / f"{t}.parquet").stat().st_mtime if (pool_dir / f"{t}.parquet").exists() else None
+                  for t in ("okved", pool_mod.LARGE))
+    key = (tuple(prefixes), region, limit, url, pool_dir.as_posix(), stamp)
+    hit = _POOL_ROWS.get(key)
+    if hit is None:
+        hit = (pool_mod.candidates(prefixes, regions=[region], limit=limit, url=url, pool_dir=pool_dir, by_size=True),
+               pool_mod.large_candidates(prefixes, regions=[region], pool_dir=pool_dir))
+        if len(_POOL_ROWS) >= _POOL_ROWS_MAX:
+            _POOL_ROWS.clear()
+        _POOL_ROWS[key] = hit
+    return hit
+
+
 def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: dict[str, float],
-              processed: Path, cache: SourceCache, url: str | None = None, pool_dir: Path | None = None,
-              limit: int = POOL_LIMIT) -> tuple[list[CounterpartyMatch], dict[str, str], bool | None]:
+              processed: Path | None, cache: SourceCache, url: str | None = None, pool_dir: Path | None = None,
+              limit: int = POOL_LIMIT, store: Store | None = None,
+              ) -> tuple[list[CounterpartyMatch], dict[str, str], bool | None]:
     """«Новые» from the offline МСП pool (#185) by the same OKVED plan as the live registry search: the
     class (product_fit 1.0 for the main OKVED, POOL_EXTRA_FIT for an additional one) and the wholesale codes
-    (0.6). Regions: the query's, then the neighbour. Organizers' suppliers are dropped. The third value:
-    organizers' data checked (None — the pool is not loaded, nothing was searched)."""
+    (0.6). Regions: the query's, then the neighbour. Organizers' suppliers are dropped (`store` — the store
+    the caller searched, else the one of `processed`). The third value: organizers' data checked (None — the
+    pool is not loaded, nothing was searched)."""
     from src.db import pool as pool_mod
 
     if url is None and pool_dir is None:
@@ -1064,16 +1210,17 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
         return [], {}, False
     rows: dict[str, dict] = {}
     large: set[str] = set()  # companies outside the registry dump (#219): the `large` table of the pool
-    for region in _regions(query):  # the query's region first: its rows win the limit
-        prefixes = [ch.okved for ch in plan]
-        for r in pool_mod.candidates(prefixes, regions=[region], limit=limit, url=url,
-                                     pool_dir=pool_dir or pool_mod.POOL):
+    prefixes, regions = [ch.okved for ch in plan], _regions(query)
+    with ThreadPoolExecutor(max_workers=len(regions)) as ex:  # a scan per region; DuckDB releases the GIL
+        per_region = list(ex.map(lambda rg: _pool_rows(prefixes, rg, limit, url, pool_dir or pool_mod.POOL), regions))
+    for dump_rows, large_rows in per_region:  # the query's region first: its rows win the limit
+        for r in dump_rows:
             rows.setdefault(r["inn"], r)
-        for r in pool_mod.large_candidates(prefixes, regions=[region], pool_dir=pool_dir or pool_mod.POOL):
+        for r in large_rows:
             if r["inn"] not in rows:
                 rows[r["inn"]] = r
                 large.add(r["inn"])
-    known = known_inns(list(rows), query.as_of, store_for(processed))
+    known = known_inns(list(rows), query.as_of, store or store_for(processed))
     if known is None:
         return [], {}, False
     fresh = [inn for inn in rows if inn not in known]
@@ -1111,8 +1258,67 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
                                      score=round(sum(c.value * c.weight for c in comps), 4)))
     out = apply_filters(out, query)
-    out.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
+    # equal scores within a basis: larger headcount first (N-order-size, #377: winner@10 +0.018), then INN (#518)
+    size = {inn: r.get("employees") or 0 for inn, r in rows.items()}
+    out.sort(key=lambda m: (-m.score, -size.get(m.counterparty.inn or "", 0), m.counterparty.inn or "~"))
     return out, relation, True
+
+
+# pool rows per region for one /api/search query: the block shows MAX_SHOWN of them, and the pool's scores tie within
+# a basis (class / wholesale), so more rows change nothing on the screen but cost the lookup and the Evidence check
+# (≈ 2 s per 100 companies on the real pool, #518)
+POOL_API_LIMIT = 25
+POOL_MEMO_TTL_S = 600.0  # one answer of the pool per query: the pages, the card and the export repeat the search
+_POOL_MEMO: dict[str, tuple[float, list[CounterpartyMatch], dict[str, str], str]] = {}
+_POOL_MEMO_MAX = 64
+POOL_ABSENT = ("офлайн-пул компаний не загружен (make data PART=pool) — «Новые» только из реестра МСП, "
+               "веб-лидов и ГИСП")
+
+
+def _store_key(store: Store) -> str:
+    """Which organizers' data a memoized pool answer was checked against: the parquet dir or the Postgres schema."""
+    return f"{type(store).__name__}:{getattr(store, 'processed', None) or getattr(store, 'schema', '')}"
+
+
+def pool_matches(query: Query, codes: Sequence[str], skip: set[str], res: Discovery, weights: dict[str, float],
+                 cache: SourceCache, store: Store, limit: int = POOL_API_LIMIT
+                 ) -> tuple[list[CounterpartyMatch], dict[str, str]]:
+    """«Новые» of the offline pool for discover(pool=True) — the from_pool() of `make predict` (#518): the same
+    OKVED plan, regions, organizers' history before as_of (of the store the query searched), Evidence from the
+    pool's cached pages; facts that fail the check are stripped. INNs in `skip` (another channel) are left
+    out. No pool — nothing, one note; a broken pool — nothing, one line in `res.requests`."""
+    try:
+        url, pool_dir = pool_source()
+        if url is None and pool_dir is None:
+            res.notes.append(POOL_ABSENT)
+            return [], {}
+        started = time.monotonic()
+        key = repr((query.model_dump_json(exclude={"query_id"}), list(codes), res.predicted, sorted(weights.items()),
+                    url, pool_dir.as_posix() if pool_dir else None, limit, _store_key(store), cache.path.as_posix()))
+        hit = _POOL_MEMO.get(key)
+        if hit is not None and started - hit[0] < POOL_MEMO_TTL_S:
+            _, extra, relation, _ = hit
+            how = f"из памяти процесса, первый запрос {hit[3]}"
+        else:
+            found, relation, checked = from_pool(query, codes, predicted=res.predicted, weights=weights,
+                                                 processed=None, cache=cache, url=url, pool_dir=pool_dir, limit=limit,
+                                                 store=store)
+            if checked is None:
+                res.notes.append(POOL_ABSENT)
+                return [], {}
+            pages = cached_pages(cache.page_text)  # the pool's pages were cached by from_pool: checked like any
+            extra = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in found]
+            how = f"{time.monotonic() - started:.1f} с"
+            if len(_POOL_MEMO) >= _POOL_MEMO_MAX:
+                _POOL_MEMO.clear()
+            _POOL_MEMO[key] = (started, extra, relation, how)
+    except Exception as e:  # noqa: BLE001 — a broken pool never takes the other channels down
+        log.exception("discovery: пул пропущен из-за ошибки")
+        res.requests.append(f"пул: ошибка {type(e).__name__} — канал пропущен")
+        return [], {}
+    added = [m for m in extra if (m.counterparty.inn or "") not in skip]
+    res.requests.append(f"пул: кандидатов {len(extra)}, новых к остальным каналам {len(added)} ({how})")
+    return added, {m.counterparty.inn or "": relation[m.counterparty.inn or ""] for m in added}
 
 
 def _report(query: Query, res: Discovery, cache: SourceCache) -> None:
