@@ -273,3 +273,36 @@ def test_every_module_the_evaluation_imports_is_in_the_hashed_method_code():
                      and not any(f == p or f.startswith(p + "/") for p in R.METHOD_PATHS))
     assert not outside, f"eval импортирует код вне METHOD_PATHS: {outside}"
     assert {"src/settings.py", "src/regions.py", "src/match/search.py"} <= files  # the walk really went through
+
+
+def test_ranker_model_is_part_of_the_signature_and_of_the_clean_tree(repo):
+    """The product ranks with a learned model file (D-103): retraining it under the same name is another method, so it
+    changes the hash, and an uncommitted edit is refused like an edit of the code (#451)."""
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    model = repo / "models" / "ranker" / "m.txt"
+    model.parent.mkdir(parents=True)
+    model.write_text("tree 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "model"], check=True)
+    before = R.config_sha256(repo)
+    model.write_text("tree 2\n", encoding="utf-8")
+    with pytest.raises(PermissionError, match="не чистое"):
+        F.gate(before, repo, repo / "log.md")
+    subprocess.run([*git, "commit", "-qam", "retrained"], check=True)
+    assert R.config_sha256(repo) != before
+
+
+def test_the_configured_ranker_model_is_tracked_and_hashed():
+    """The model `configs/search.yaml` names must sit under METHOD_PATHS and be committed: an untracked file would
+    not enter `git ls-tree`, and the signature would not name the method (#451)."""
+    import yaml
+
+    spec = yaml.safe_load((ROOT / "configs" / "search.yaml").read_text(encoding="utf-8")).get("ranker")
+    if not spec:
+        pytest.skip("ранжировщик выключен (ranker: null) — модели в методе нет")
+    if subprocess.run(["git", "-C", str(ROOT), "rev-parse"], capture_output=True).returncode != 0:
+        pytest.skip("не git-копия (архив) — проверять нечего")
+    rel = spec["model"]
+    assert any(rel == p or rel.startswith(p + "/") for p in R.METHOD_PATHS), rel
+    tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--error-unmatch", rel], capture_output=True)
+    assert tracked.returncode == 0, f"{rel} не в git"

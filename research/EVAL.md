@@ -265,9 +265,9 @@ make parity A=parity-base-<sha> B=parity-new-<sha>
 - `src/eval/split.py`: `load_cases("holdout")` вне `make eval-final` бросает `SealedError`;
   кейс dev вне своих дат — ошибка «split leak».
 - `make eval-final CONFIRM=<sha256>` (`src/eval/final.py`) читает holdout, только если:
-  1. `CONFIRM` равен sha256 конфигурации (`configs/search.yaml` + `configs/split.yaml` + закоммиченный код метода `src/{match,enrich,sources,ingest,eval,llm,db}`, `src/contracts.py`, `src/settings.py`, `src/regions.py` — `METHOD_PATHS`; полноту по графу импортов от `src.eval.run` и `src.eval.final` проверяет тест, #448, D-150; заданный `BM25_TOKENIZER` тоже входит в хэш, #447; UI и API не входят, D-015); без
+  1. `CONFIRM` равен sha256 конфигурации (`configs/search.yaml` + `configs/split.yaml` + закоммиченный код метода `src/{match,enrich,sources,ingest,eval,llm,db}`, `src/contracts.py`, `src/settings.py`, `src/regions.py` и модели ранжировщика `models/ranker` (#451, D-151) — `METHOD_PATHS`; полноту по графу импортов от `src.eval.run` и `src.eval.final` проверяет тест, #448, D-150; заданный `BM25_TOKENIZER` тоже входит в хэш, #447; UI и API не входят, D-015); без
      `CONFIRM` команда печатает текущий хеш;
-  2. дерево чистое для `src/ configs/ pyproject.toml uv.lock`;
+  2. дерево чистое для `src/ configs/ models/ranker/ pyproject.toml uv.lock` (`FROZEN_PATHS`; `models/ranker` — #451);
   3. эта конфигурация на holdout ещё не запускалась;
   4. `search()` — не `# STUB`.
   Каждый запуск — строка в `eval/final-log.md`. Запускает только `evaluator` и только по заморозке.
