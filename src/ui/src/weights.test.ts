@@ -35,7 +35,7 @@ test("score is Σ value × weight; the server's weight mass is kept, no-data com
   expect(m.score).toBe(0.75);
   // the standard weights reproduce the server score
   const std = reweight(match("B", { product_fit: 1, experience: 0.5, activity: 1, geography: 1 }), DEFAULT_WEIGHTS);
-  expect(std.score).toBeCloseTo(0.762 + 0.095 + 0.048, 4);
+  expect(std.score).toBeCloseTo(0.5 + 0.125 + 0.15 + 0.1, 4);
 });
 
 test("the no-data list mirrors UNAVAILABLE in src/match/search.py", () => {

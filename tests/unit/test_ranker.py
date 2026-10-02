@@ -28,6 +28,13 @@ def test_off_is_v2_and_features_are_deterministic(search_data):
     assert got and len(got) >= len(plain) and all(len(r) == len(ranker.NAMES) for _, r in got)
     a, b = np.asarray([r for _, r in got]), np.asarray([r for _, r in again])
     assert [i for i, _ in got] == [i for i, _ in again] and np.array_equal(a, b, equal_nan=True)
+    # #576: the display formula (name match, pool experience, INN region) does not reach the model — its features
+    # are those of the config without these options, and so are the shown values there
+    legacy = {**cfg, "options": {**cfg["options"], "name_share": 0.0, "exp_scale": "fixed"},
+              "signals": {**cfg["signals"], "inn_region": 0.0}}
+    old: list = []
+    plain = search(Q, config=legacy, features_out=old)
+    assert np.array_equal(a, np.asarray([r for _, r in old]), equal_nan=True)
     fit = a[:, ranker.NAMES.index("fit")]
     by_inn = {m.counterparty.inn: m for m in plain}
     for (inn, row), f in zip(got, fit, strict=True):

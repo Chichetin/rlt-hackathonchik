@@ -77,7 +77,7 @@ function InspectorBody({ match, onOpen, weightsNote, customerRegion }: {
   match: CounterpartyMatch; onOpen: (m: CounterpartyMatch) => void; weightsNote?: string; customerRegion?: string;
 }) {
   const cp = match.counterparty;
-  const components = [...match.components].sort((a,b) => b.value * b.weight - a.value * a.weight);
+  const components = match.components.filter(c => c.weight > 0).sort((a,b) => b.value * b.weight - a.value * a.weight);
   return <>
     <p className="inspector-origin">{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</p>
     <div className="inspector-identity"><SupplierAvatar cp={cp} /><h2>{cp.name}</h2></div>
