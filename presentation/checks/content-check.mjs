@@ -1,0 +1,31 @@
+// Cross-check displayed facts against existing local artefacts; never runs ingest/eval.
+const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'../../src/ui/node_modules/playwright-core/index.mjs');
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+const here=path.dirname(fileURLToPath(import.meta.url)), deck=path.resolve(here,'..'), repo=process.env.RLT_EVIDENCE_ROOT||path.resolve(deck,'..');
+const read=p=>JSON.parse(fs.readFileSync(path.join(repo,p),'utf8'));
+const baseline=read('eval/results/B-bm25.json'),current=read('eval/results/A361-base.json'),manifest=read('data/processed/manifest.json'),example=read('presentation/assets/example.json');
+const browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1600,height:900},offline:true});
+await page.emulateMedia({reducedMotion:'reduce'});await page.goto(pathToFileURL(path.join(deck,'index.html')).href);await page.evaluate(()=>document.fonts.ready);
+const checks=[];function check(ok,name){checks.push({name,passed:!!ok});}
+const all=await page.locator('.slide').evaluateAll(slides=>slides.map(s=>{const clone=s.cloneNode(true);clone.querySelectorAll('.speaker-note,svg').forEach(n=>n.remove());return {id:s.id,title:s.querySelector('h1').innerText.replace(/\n/g,' '),text:clone.textContent.replace(/\s+/g,' ').trim(),seconds:+s.dataset.seconds,notes:s.querySelector('.speaker-note').innerHTML}}));
+const text=id=>all.find(s=>s.id===id).text;
+const ru=n=>n.toFixed(1).replace('.',',');
+check(baseline.n_queries===current.n_queries&&JSON.stringify(baseline.per_query.map(q=>q.query_id))===JSON.stringify(current.per_query.map(q=>q.query_id)),'Comparison uses identical query IDs');
+check(text('s6').includes(ru(baseline.metrics['recall@10'].value*100)+'%')&&text('s6').includes(ru(current.metrics['recall@10'].value*100)+'%'),'Main percentages agree with both saved reports');
+check(text('s6').includes('+'+((current.metrics['recall@10'].value-baseline.metrics['recall@10'].value)*100).toFixed(1).replace('.',',')),'Percentage point delta agrees with pitch/facts.md (+0.123, one decimal)');
+check(text('s6').includes('2 000')&&current.n_queries===2000,'Displayed evaluation sample size agrees');
+check(text('s3').includes(manifest.rows.notices.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.suppliers.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.items.toLocaleString('en-US').replaceAll(',',' ')),'Corpus counts agree with manifest');
+check(text('b1').includes(String(example.result.score))&&text('s5').includes('126')&&text('s5').includes('36'),'Example score and evidence preserved');
+check(['mrr','ndcg@10'].every(k=>[baseline,current].every(r=>text('b2').includes(r.metrics[k].value.toFixed(3).replace('.',',')))),'Backup metrics agree with saved reports');
+check(!/НАСТОЯЩИЙ РЕЗУЛЬТАТ|СЛЕДУЮЩИЙ ПРАКТИЧЕСКИЙ ШАГ|К ВОПРОСАМ/.test(all.map(s=>s.text).join(' ')),'Removed redundant editorial labels');
+check(await page.locator('#b3 .tech-brand img').count()===12,'Twelve technology pictograms in component groups');
+check(text('b3').includes('выключена')&&text('b3').includes('Показанный запрос выполнен на Parquet'),'Optional vector branch and observed storage remain explicit');
+check(await page.evaluate(()=>document.fonts.check('58px Tektur')&&document.fonts.check('18px Mono')),'Product fonts loaded locally');
+await page.evaluate(()=>location.hash='s4/0');await page.waitForFunction(()=>!document.getElementById('s4').hidden);
+const overflow=await page.locator('#s4 .node').evaluateAll(nodes=>nodes.flatMap(n=>{const b=n.getBoundingClientRect(),issues=[];const walker=document.createTreeWalker(n,NodeFilter.SHOW_TEXT);while(walker.nextNode()){if(!walker.currentNode.textContent.trim())continue;const r=document.createRange();r.selectNodeContents(walker.currentNode);for(const box of r.getClientRects())if(box.left<b.left-2||box.right>b.right+2||box.top<b.top-2||box.bottom>b.bottom+2)issues.push(walker.currentNode.textContent)}return issues}));
+check(overflow.length===0,'All architecture labels fit inside their nodes');
+check(await page.locator('#s4 .architecture-links [marker-end] path').count()===4,'Data feed arrows have explicit endpoints');
+check(await page.locator('button,dialog').count()===0,'No mouse-only controls');
+const report={checked_at:new Date().toISOString(),checks,overflow};fs.writeFileSync(path.join(here,'content-report.json'),JSON.stringify(report,null,2)+'\n');fs.writeFileSync(path.join(here,'slide-content.json'),JSON.stringify(all,null,2)+'\n');await browser.close();console.log(JSON.stringify(report,null,2));if(checks.some(c=>!c.passed))process.exitCode=1;

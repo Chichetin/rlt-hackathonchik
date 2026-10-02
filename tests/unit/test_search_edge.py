@@ -17,6 +17,7 @@ from src.match import fallback
 from src.match import index as index_mod
 from src.match import search as search_mod
 from src.match.search import search
+from src.match.store import ParquetStore
 
 pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py
 
@@ -117,7 +118,7 @@ def test_no_history_before_as_of_says_why(data):
     assert "нет истории до 01.01.2020" in (fallback.search_note() or "")
 
 def test_long_query_keeps_the_rarest_words(data):
-    idx = index_mod.get_index(data, None)
+    idx = index_mod.get_index(ParquetStore(data), None)
     tokens = ["бумаг", "картр", "тонер", "ремон", "бумаг", "xyzzy"]
     assert fallback.cap_tokens(idx, tokens, cap=5) == tokens  # ≤ cap unique words: untouched
     assert fallback.cap_tokens(idx, tokens, cap=2) == ["тонер", "ремон"]  # 1 and 2 documents
@@ -128,9 +129,27 @@ def test_parallel_first_build_builds_the_index_once(search_data, monkeypatch):
     build = index_mod._build
     monkeypatch.setattr(index_mod, "_build", lambda *a: (calls.append(1), build(*a))[1])
     got: list = []
-    threads = [threading.Thread(target=lambda: got.append(index_mod.get_index(search_data, None))) for _ in range(3)]
+    store = ParquetStore(search_data)
+    threads = [threading.Thread(target=lambda: got.append(index_mod.get_index(store, None))) for _ in range(3)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
     assert len(calls) == 1 and len({id(i) for i in got}) == 1
+
+
+def test_extra_candidates_from_customer_history(data):
+    """#195: with `candidates.customer` a supplier of this customer's paper lots joins a water query; off — absent."""
+    q = Query(query_id="c", text="Вода питьевая", okpd2=["17.12.14.110"], customer_inn="7801000051")
+    cfg = search_mod.load_config()
+    off = {m.counterparty.inn for m in search(q, k=50, config=cfg)}
+    on = search(q, k=50, config={**cfg, "candidates": {"customer": 10}})
+    added = [m for m in on if m.counterparty.inn not in off]
+    assert "7801000020" not in off and "7801000020" in {m.counterparty.inn for m in added}
+    assert all(fit(m).explanation.startswith("Не найден по названию; поставщик этого заказчика") for m in added)
+    exp = next(c for c in added[0].components if c.name == "experience").explanation
+    assert "этого заказчика в группе ОКПД2" in exp and "с похожими позициями" not in exp  # review of #246
+    # review of #246: a query built from notice 1 (the customer's only paper lot with 7801000020) does not bring
+    # 7801000020 back through the customer's history (#249)
+    own = search(q.model_copy(update={"query_id": "lot-1"}), k=50, config={**cfg, "candidates": {"customer": 10}})
+    assert own and "7801000020" not in {m.counterparty.inn for m in own}
