@@ -544,7 +544,8 @@ GISP_STOPWORDS = ("через", "около", "после", "между", "пе�
 # 4-letter words of dev lot items that name no product (counted over eval/cases/dev.jsonl), compared whole.
 GISP_SHORT_STOPWORDS = ("года", "типа", "виде", "вида", "двух", "трех", "пяти", "одно", "иные", "этап", "мини",
                         "прав", "мест", "спец", "штук", "раза", "июле", "анти", "срок", "теме", "кода", "ктру",
-                        "цена", "день", "базе", "базы", "база", "сети", "учет", "корп", "цвет", "тела", "сред")
+                        "цена", "день", "базе", "базы", "база", "сети", "учет", "корп", "цвет", "тела", "сред",
+                        "гост", "фгос", "один", "июль", "июне", "гбук", "гкуз", "губз", "мцбс", "сшор")
 GISP_STEP = {"code": "registry", "kind": "registry_kind"}  # match level → key of STEP
 GISP_MIN_SHARED = {"code": 1, "kind": 2}  # a neighbour code needs two words of the items in the product's name
 MIN_STEM = 4  # a stem of ≤ 3 letters («при», «лот», «мнн») is not a word of the product

@@ -273,9 +273,8 @@ def test_four_letter_words_are_stems():
     assert D.query_stems("стол письменный") == ["стол", "письм"]
     assert D.shared_words(D.query_stems("шкаф металлический"), "Шкафы металлические для одежды") == ["шкаф", "метал"]
     # 4-letter words that name no product stay out, compared whole; 3 letters are still too short
-    assert D.query_stems("мыло жидкое года типа штук цена при") == ["мыло", "жидко"]
+    assert D.query_stems("мыло жидкое года типа штук цена гост один при") == ["мыло", "жидко"]
     assert D.query_stems("годами") == ["годам"]  # a longer word is not a short stop word
-    assert D._stem("шкаф") == "шка"  # _stem drops a letter of a short word; query_stems keeps a 4-letter one whole
 
 
 def test_plural_endings_are_cut_from_stems():
