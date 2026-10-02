@@ -69,6 +69,6 @@ test("settings live in this browser only and survive a reload", () => {
 });
 
 test("reweight drops the ranker's reason for the next supplier (#278)", () => {
-  const m = { ...match("A", { product_fit: 1 }), rank_reason: "главное отличие от следующего: x" };
+  const m = { ...match("A", { product_fit: 1 }), rank_reason: "выше следующего: x" };
   expect(reweight(m, DEFAULT_WEIGHTS).rank_reason).toBeNull();
 });

@@ -25,7 +25,7 @@ export function componentText(c: ScoreComponent): string {
   return i < 0 ? c.explanation : c.explanation.slice(0, i).replace(/;\s*$/, "");
 }
 
-const NEXT_PREFIX = "главное отличие от следующего: ";
+const NEXT_PREFIX = "выше следующего: ";
 
 /** Why the model put this supplier above the next visible one (#278), without the common prefix; null when absent. */
 export function nextReason(m: CounterpartyMatch): string | null {

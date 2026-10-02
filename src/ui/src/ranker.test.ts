@@ -32,8 +32,8 @@ test("without the ranker nothing changes", () => {
 test("nextReason strips the common prefix and keeps other forms whole (#278)", () => {
   const m = match(fit);
   expect(nextReason(m)).toBeNull();
-  expect(nextReason({ ...m, rank_reason: "главное отличие от следующего: компонента «активность» — 0.99 против 0.11" }))
+  expect(nextReason({ ...m, rank_reason: "выше следующего: компонента «активность» — 0.99 против 0.11" }))
     .toBe("компонента «активность» — 0.99 против 0.11");
-  expect(nextReason({ ...m, rank_reason: "модель и релевантность одинаковы со следующим — порядок условный (по ИНН)" }))
-    .toBe("модель и релевантность одинаковы со следующим — порядок условный (по ИНН)");
+  expect(nextReason({ ...m, rank_reason: "модель оценила почти одинаково со следующим — порядок условный" }))
+    .toBe("модель оценила почти одинаково со следующим — порядок условный");
 });
