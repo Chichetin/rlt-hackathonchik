@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -143,7 +142,8 @@ def predicted_class_allowed() -> bool:
 
 
 def offline_mode() -> bool:
-    return os.environ.get("DISCOVERY_OFFLINE") == "1" or os.environ.get("ENRICH_OFFLINE") == "1"
+    s = get_settings()
+    return s.discovery_offline or s.enrich_offline
 
 
 def okpd_classes(codes: Sequence[str]) -> list[str]:
@@ -419,7 +419,7 @@ def _mix(ranked: list[CounterpartyMatch], relation: dict[str, Relation]) -> list
 
 
 def leads_enabled() -> bool:
-    return os.environ.get("DISCOVERY_LEADS", "1") != "0"
+    return get_settings().discovery_leads
 
 
 def lead_matches(
@@ -500,7 +500,7 @@ def _regions(query: Query) -> list[str]:
 
 
 def _np_types() -> list[str]:
-    raw = os.environ.get("DISCOVERY_NP_TYPES", "UL")
+    raw = get_settings().discovery_np_types
     return [t for t in (x.strip().upper() for x in raw.split(",")) if t in rmsp.NP_TYPES] or ["UL"]
 
 

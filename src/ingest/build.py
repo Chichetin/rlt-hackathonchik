@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from datetime import UTC, date, datetime
@@ -31,6 +30,7 @@ import duckdb
 
 from src.ingest.profile import FILES, inn_valid_sql
 from src.ingest.split_config import split_config
+from src.settings import get_settings
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "data" / "processed"
@@ -301,7 +301,7 @@ def build(raw: Path, out: Path, as_of: date | None = None, cutoff: date | None =
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--raw-dir", type=Path, default=Path(os.environ.get("DATA_RAW_DIR") or ROOT / "data" / "raw"))
+    ap.add_argument("--raw-dir", type=Path, default=get_settings().data_raw_dir)
     ap.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--as-of", type=date.fromisoformat, default=None, help="history strictly before this date")
     ap.add_argument("--no-cutoff", action="store_true", help="skip suppliers_<cutoff>.parquet")
