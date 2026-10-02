@@ -54,7 +54,7 @@ import { STATIC_DEMO } from "./staticApi";
 
 // #242: the filter is by the CUSTOMER's region (where the goods go, where the work is done), not the supplier's
 const CUSTOMER_REGIONS = ["Санкт-Петербург", "Ленинградская область"];
-const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Компьютерное оборудование"];
+const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Ноутбуки"]; // each predicts its own class from the text (D-141): no general category names
 
 function SearchIcon({ className = "" }: { className?: string }) {
   return (
@@ -936,7 +936,9 @@ export function App() {
               hiddenNew(res, base, shownQuery) ??
               (res.query.okpd2?.length || res.discoveryClass
                 ? "В открытых источниках новых компаний по этому запросу не найдено: реестр МСП ФНС не ответил, в нём нет компаний с подходящим ОКВЭД в СПб и области, либо все найденные уже есть в данных АИС ГЗ."
-                : "Код ОКПД2 не указан и по тексту не определён — уточните запрос или загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
+                : res.discoveryError // discover() failed before a class was resolved (#394): the code is not «unknown»
+                  ? "Поиск в открытых источниках не выполнен из-за ошибки — повторите запрос."
+                  : "Код ОКПД2 не указан и по тексту не определён — уточните запрос или загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
           </div>

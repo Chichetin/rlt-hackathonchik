@@ -97,6 +97,9 @@ test("a failed open source is shown in «Новые», not passed off as «nobod
   await userEvent.click(await screen.findByRole("button", { name: /^Новые/ }));
   const block = await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(within(block).getByTestId("discovery-error")).toHaveTextContent("Источники не ответили — список может быть неполным.");
+  // discover() failed before a class was resolved: not «the code is unknown» (#394)
+  expect(block).toHaveTextContent("Поиск в открытых источниках не выполнен из-за ошибки — повторите запрос.");
+  expect(block).not.toHaveTextContent("по тексту не определён");
   expect(discoveryAlert("history_unchecked")).toContain("сверка с историей закупок не выполнена");
   expect(discoveryAlert(undefined)).toBeUndefined();
 });

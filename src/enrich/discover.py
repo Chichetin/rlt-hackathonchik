@@ -21,10 +21,10 @@ Block «Новые из открытых источников» (`origin="discov
    enrichment queue (`enqueue`), so the request itself makes no pb.nalog.ru calls.
 
 `DISCOVERY_OFFLINE=1` or `ENRICH_OFFLINE=1` — cache only, no network.
-A query WITHOUT OKPD2 gets the block by the class search() predicts from the text (#394, revises D-041:
+A query WITHOUT OKPD2 gets the block by the class search() predicts from the text (#394, D-141 revises D-041:
 P-02 predicts the class right in 0.820 of positions, D-110). The class is never called «ОКПД2 запроса»:
 the explanation and the UI say it was determined automatically. `DISCOVERY_PREDICTED_CLASS=0` switches
-it off (src/settings.py): such a query gets an empty block and no network request.
+it off (also `false` / `off`, src/settings.py): such a query gets an empty block and no network request.
 CLI (live check, cache warm-up): `python -m src.enrich.discover "бумага офисная" --okpd2 17.12.14`;
 without `--okpd2` the class is the one search() predicts on organizers' data (as in /api/search).
 """
@@ -537,7 +537,7 @@ def discover(
     if not classes:
         if not predicted_class_allowed():  # #394: on by default, DISCOVERY_PREDICTED_CLASS=0 switches it off
             res.notes.append("ОКПД2 в запросе не указан — блок «Новые» не строится "
-                             "(DISCOVERY_PREDICTED_CLASS=0)")
+                             "(DISCOVERY_PREDICTED_CLASS выключен)")
             return res
         # the code search() predicted from the text (P-02); without it — what its explanations / lots say
         code = predicted_code.strip() if predicted_code and okpd_classes([predicted_code]) else None

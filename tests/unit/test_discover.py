@@ -284,7 +284,7 @@ def test_predicted_class_flag_0_gives_no_block_and_no_network(search_data, tmp_p
     res = D.discover(q, history, cache=c, weights=WEIGHTS, processed=search_data, offline=False,
                      client=_client(_no_network), predicted_code="17.12.14.110")
     assert res.matches == [] and res.requests == [] and res.okpd_classes == [] and not res.predicted
-    assert "DISCOVERY_PREDICTED_CLASS=0" in res.notes[0]
+    assert "DISCOVERY_PREDICTED_CLASS выключен" in res.notes[0]
     # an explicit OKPD2 never needs the flag
     explicit = D.discover(q.model_copy(update={"okpd2": ["17.12.14.110"]}), history, cache=c, weights=WEIGHTS,
                           processed=search_data, offline=True)
