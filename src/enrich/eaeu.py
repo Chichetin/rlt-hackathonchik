@@ -99,7 +99,7 @@ def _components(lead: Lead, status: str | None, predicted: bool, weights: dict[s
            else f"ОКПД2 запроса {lead.okpd2_class}")
     parts: dict[str, tuple[float, float, str]] = {
         "product_fit": (0.0, weights.get("product_fit", 0.0),
-                        f"Найдена веб-поиском по товарам класса {cls}: {lead.source_url}. "
+                        f"Кандидат по товарам класса {cls}; идентификатор взят со страницы {lead.source_url}. "
                         f"{REGISTRY_NAME[lead.country]} не содержит видов деятельности — соответствие товару реестром "
                         "не подтверждено, в оценку не входит"),
         "experience": (0.0, weights.get("experience", 0.0),
