@@ -264,6 +264,12 @@ def parse_reviews_html(html: str) -> ReviewsPage:
 
 # --- the flat text that goes to the cache ------------------------------------------------------
 
+def _phone_text(digits: str) -> str:
+    """A number as the Evidence check recognises a phone: `7…` of 11 digits needs the plus (src/enrich/evidence.py).
+    The same digits as `value` of the contact on the page, written the way phones are written."""
+    return f"+{digits}" if len(digits) == 11 and digits.startswith("7") else digits
+
+
 def _card_lines(c: Card) -> list[str]:
     lines = [f"card.{c.id}.name: {c.name}"]
     for field, value in (("primary", c.primary), ("legal_name", c.legal_name), ("org_id", c.org_id),
@@ -272,7 +278,7 @@ def _card_lines(c: Card) -> list[str]:
                          ("review_count", None if c.review_count is None else str(c.review_count))):
         if value:
             lines.append(f"card.{c.id}.{field}: {value}")
-    lines += [f"card.{c.id}.phone: {p}" for p in c.phones]
+    lines += [f"card.{c.id}.phone: {_phone_text(p)}" for p in c.phones]
     lines += [f"card.{c.id}.site: {s}" for s in c.sites]
     return lines
 
@@ -310,7 +316,7 @@ def _card_from_fields(cid: str, f: dict[str, list[str]]) -> Card:
         id=cid, name=one("name") or "", primary=one("primary"), legal_name=one("legal_name"), org_id=one("org_id"),
         address=one("address"), rubrics=[r for r in (one("rubrics") or "").split("; ") if r],
         rating=float(rating) if rating else None, review_count=int(count) if count else None,
-        phones=f.get("phone", []), sites=f.get("site", []),
+        phones=[_digits(p) for p in f.get("phone", [])], sites=f.get("site", []),
     )
 
 

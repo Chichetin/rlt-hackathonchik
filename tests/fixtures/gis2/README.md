@@ -14,6 +14,9 @@
 - `search_grace_trade.html` — «ГРЕЙС ТРЭЙД»: карточки с `name_ex.legal_name` («ООО Грейс трэйд»);
 - `reviews_rostelecom.html` — вкладка отзывов `/spb/firm/70000001104087830/tab/reviews`: 4 из 6 отзывов,
   телефон карточки (`8‒800‒100‒08‒00` с цифровым `value` `88001000800`);
+- `reviews_grace_trade.html` — вкладка отзывов «Грейс трэйд» (улица Бабушкина, 3): 1 отзыв, два телефона и сайт
+  `http://gracetrade.ru` (значения `value`: `+78125619110`, `+78124263900`);
+- `reviews_saturn.html` — вкладка отзывов гипермаркета «Сатурн» (Литовская улица, 15): 3 из 74 отзывов;
 - `reviews_empty.html` — вкладка отзывов карточки «Арт-техника»: `items: []`;
 - `robots.txt` — настоящий robots.txt 2gis.ru на 02.10.2026 (`tests/unit/test_robots.py`).
 

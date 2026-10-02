@@ -23,6 +23,7 @@ FIX = Path(__file__).resolve().parents[1] / "fixtures" / "gis2"
 SATURN = (FIX / "search_saturn.html").read_text(encoding="utf-8")
 ART = (FIX / "search_art_tehnika.html").read_text(encoding="utf-8")
 GRACE = (FIX / "search_grace_trade.html").read_text(encoding="utf-8")
+GRACE_REVIEWS = (FIX / "reviews_grace_trade.html").read_text(encoding="utf-8")
 ROSTELECOM = (FIX / "reviews_rostelecom.html").read_text(encoding="utf-8")
 EMPTY = (FIX / "reviews_empty.html").read_text(encoding="utf-8")
 ROBOTS = (FIX / "robots.txt").read_text(encoding="utf-8")
@@ -95,6 +96,17 @@ def test_flat_text_round_trips_and_keeps_values_verbatim():
     assert "card.70000001104087830.phone: 88001000800" in flat
     assert "review.264728803.date: 2026-08-04" in flat
     assert gis2.parse_reviews(flat) == page
+
+
+def test_phone_written_the_way_the_evidence_check_recognises_phones():
+    page = gis2.parse_reviews_html(GRACE_REVIEWS)
+    assert page.card.phones == ["78125619110", "78124263900"] and page.card.sites == ["http://gracetrade.ru"]
+    flat = gis2.flatten_reviews(page)
+    assert "card.70000001065972795.phone: +78125619110" in flat  # `7…` of 11 digits gets the plus
+    assert "card.70000001065972795.site: http://gracetrade.ru" in flat
+    assert gis2.parse_reviews(flat) == page  # …and the plus is gone again on reading
+    from src.enrich.evidence import value_in_page
+    assert value_in_page("phone", "78125619110", flat) and value_in_page("phone", "+7 (812) 426-39-00", flat)
 
 
 def test_a_review_with_line_breaks_becomes_one_line_of_the_flat_text():
