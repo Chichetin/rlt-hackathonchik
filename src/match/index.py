@@ -29,7 +29,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.match.store import LotHits, ParquetStore, Store, get_store
+from src.match.store import LotHits, Store, get_store
 from src.match.store import processed_dir as processed_dir
 from src.match.text import tokenize, tokenizer_version
 from src.settings import get_settings
@@ -39,11 +39,6 @@ log = logging.getLogger(__name__)
 
 def index_root() -> Path:
     return get_settings().index_dir
-
-
-def check_processed(processed: Path) -> dict:
-    """Manifest of the ingest parquet, or FileNotFoundError with the command that builds it."""
-    return ParquetStore(processed).manifest()
 
 
 def pq_path(path: Path) -> str:
@@ -161,14 +156,12 @@ def _load(key: str, path: Path) -> LotIndex:
                     date.fromisoformat(as_of) if as_of else None)
 
 
-def get_index(store: Store | Path | None, as_of: date | None) -> LotIndex:
+def get_index(store: Store | None, as_of: date | None) -> LotIndex:
     """Cached index for (ingest manifest, as_of): memory, then disk, else built once from the store.
 
-    `store`: a Store, an ingest directory (parquet) or None — the store of the environment."""
+    `store`: a Store or None — the store of the environment (organizers' data only through Store, #293)."""
     if store is None:
         store = get_store()
-    elif isinstance(store, Path):
-        store = ParquetStore(store)
     key = index_key(store.manifest(), as_of)
     with _lock:
         if key in _cache:
@@ -205,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     import duckdb
 
     from src.eval.split import split_config
+    from src.match import speller
     from src.match.search import prebuild_doc_codes
 
     for as_of in (None, date.fromisoformat(str(split_config()["cutoff"]))):
@@ -221,12 +215,16 @@ def main(argv: list[str] | None = None) -> int:
                      else f"ВНЕ индекса ({codes}): контейнер его не увидит")
         except (OSError, ValueError, duckdb.Error) as e:  # search falls back to the lot vote (D-045)
             where = f"НЕ построены ({e}) — запрос без кода определит класс по лотам"
-        print(f"as_of={as_of}: {idx.n_docs} документов из {store.name}, {idx.path}; коды позиций {where} "
+        try:  # the query speller's dictionary (#282): next to the index, read-only for the API in make up
+            words = f"словарь запроса {len(speller.for_index(idx.path).freq)} словоформ"
+        except (OSError, ValueError) as e:
+            words = f"словарь запроса НЕ построен ({e}) — построится при первом запросе"
+        print(f"as_of={as_of}: {idx.n_docs} документов из {store.name}, {idx.path}; коды позиций {where}; {words} "
               f"({time.time() - t0:.1f} с)")
     return 0
 
 
-__all__ = ["LotHits", "LotIndex", "check_processed", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
+__all__ = ["LotHits", "LotIndex", "clear_memory_cache", "get_index", "index_root", "processed_dir"]
 
 
 if __name__ == "__main__":

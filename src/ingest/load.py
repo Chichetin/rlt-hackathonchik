@@ -6,7 +6,7 @@ strip_unverified() shows "ИНН не подтверждён"). Organizers' data
 "ИНН <inn>" until enrich() (D-019). An INN that fails the checksum becomes inn=None.
 Region is not derived here: a KPP/INN prefix is the tax office, not a fact with Evidence
 (`geography` in search reads `kpp` itself). Rows come from a store (src/match/store.py): search()
-passes the Postgres or parquet rows to `from_rows`, `counterparties` reads parquet.
+passes the Postgres or parquet rows to `from_rows` — the data layer does not import the store (#294, D-106).
 """
 
 from __future__ import annotations
@@ -79,18 +79,6 @@ def _stats(row: dict) -> dict[str, float | int | str]:
             continue  # missing key = not computed, never 0 by default (contract)
         out[k] = v.isoformat() if isinstance(v, date) else v
     return out
-
-
-def counterparties(
-    inns: list[str], as_of: date | None = None, processed: Path = DEFAULT_OUT
-) -> dict[str, Counterparty]:
-    """Counterparty per INN found in the history before as_of (ingest parquet); unknown INNs are absent."""
-    from src.match.store import ParquetStore
-
-    if not inns:
-        return {}
-    suppliers_path(as_of, processed)  # the error names the command that builds it
-    return from_rows(ParquetStore(processed).supplier_rows(inns, as_of), built_at(processed))
 
 
 def from_rows(rows: list[dict], fetched: datetime) -> dict[str, Counterparty]:

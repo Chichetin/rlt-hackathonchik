@@ -19,6 +19,7 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     """No test talks to an open source by accident: discovery is cache-only and the cache is per test."""
     monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
     monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "sources-default.sqlite"))
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(tmp_path / "no-fns-opendata.parquet"))  # not the dev machine's
     # a test export uploaded in the UI (cache/testsets/active) must not answer /api/lot in tests (#207)
     monkeypatch.setenv("TESTSETS_DIR", str(tmp_path / "testsets-default"))
     # no real network: only httpx.MockTransport answers (a request to a source in a test is a bug)
@@ -62,3 +63,17 @@ def search_data(fixture_processed: Path, tmp_path: Path, monkeypatch: pytest.Mon
     index.clear_memory_cache()
     yield fixture_processed
     index.clear_memory_cache()
+
+
+@pytest.fixture
+def v2_formula(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The product config without the learned ranker (#198): tests of the v2 formula itself — scores as the
+    weighted sum of components, the fallback ladder depths. The ranker on top is tested in test_ranker.py."""
+    from src.match import search as search_mod
+
+    plain = search_mod.load_config
+
+    def load_config(*args, **kwargs) -> dict:
+        return {k: v for k, v in plain(*args, **kwargs).items() if k != "ranker"}
+
+    monkeypatch.setattr(search_mod, "load_config", load_config)

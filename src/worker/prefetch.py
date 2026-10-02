@@ -6,6 +6,7 @@ The INNs go into the task queue (idempotent by (kind, key), D-008), the loop dra
 between live source calls. A restart does not repeat finished INNs: `done` tasks stay done and the
 cache serves the rest. A pb captcha is never bypassed: enrich() falls back to rmsp/bo (D-052); the run
 stops, returning the task to the queue, only when no source answered (D-056).
+The suppliers come from the store search() reads (#293): Postgres in `make up`, ingest parquet in `make demo`.
 """
 
 from __future__ import annotations
@@ -14,14 +15,12 @@ import argparse
 import logging
 import time
 from collections.abc import Callable
-from pathlib import Path
 
-import duckdb
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
 from src.enrich.enrich import enrich
-from src.settings import get_settings
+from src.match.store import Store, get_store
 from src.sources.pb_nalog import CaptchaRequired
 from src.worker.queue import claim_keys, engine_from_env, enqueue, finish, release, requeue_stale, tasks
 
@@ -29,13 +28,8 @@ log = logging.getLogger("prefetch")
 CACHE_HIT_S = 0.05  # a task faster than this was served by the cache: no source was hit, no pause
 
 
-def top_inns(suppliers: Path, n: int) -> list[str]:
-    rows = duckdb.connect().execute(
-        "SELECT inn FROM read_parquet(?) WHERE inn_valid "
-        "ORDER BY lots_won DESC, lots_participated DESC, last_seen DESC, inn ASC LIMIT ?",
-        [str(suppliers), n],
-    ).fetchall()
-    return [r[0] for r in rows]
+def top_inns(store: Store, n: int) -> list[str]:
+    return store.top_suppliers(n)
 
 
 def _statuses(eng: Engine, inns: list[str]) -> dict[str, str]:
@@ -108,11 +102,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Warm the source cache for the top-N active suppliers")
     ap.add_argument("--top", type=int, default=200)
     ap.add_argument("--pause", type=float, default=1.0, help="seconds between live source calls")
-    ap.add_argument("--suppliers", type=Path, default=None)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    path = args.suppliers or get_settings().data_processed_dir / "suppliers.parquet"
-    res = run(top_inns(path, args.top), engine_from_env(), pause_s=args.pause)
+    # the store of the environment: DATA_STORE, DATABASE_URL, DATA_PROCESSED_DIR (src/match/store.py)
+    res = run(top_inns(get_store(), args.top), engine_from_env(), pause_s=args.pause)
     return 0 if res["done_total"] == res["total"] else 1
 
 

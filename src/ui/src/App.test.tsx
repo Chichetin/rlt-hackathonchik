@@ -101,6 +101,27 @@ test("a failed open source is shown in «Новые», not passed off as «nobod
   expect(discoveryAlert(undefined)).toBeUndefined();
 });
 
+test("a weak match is flagged above the history block (#281)", async () => {
+  const warn = "Слабое совпадение с названиями прошлых закупок — проверьте название.";
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(response), { status: 200, headers: { "X-Weak-Match": encodeURIComponent(warn) } }),
+  );
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "вентиляция");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const block = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(within(block).getByTestId("weak-match")).toHaveTextContent(warn);
+});
+
+test("no weak-match warning when the server did not send one (#281)", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const clean = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(within(clean).queryByTestId("weak-match")).toBeNull();
+});
+
 test("no alert in «Новые» when the sources answered", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
   render(<App />);
@@ -110,6 +131,26 @@ test("no alert in «Новые» when the sources answered", async () => {
   await screen.findByRole("region", { name: "Новые из открытых источников" });
   expect(screen.queryByTestId("discovery-error")).toBeNull();
   expect(screen.queryByText("список может быть неполным")).toBeNull();
+});
+
+test("a corrected query is said, and «искать как введено» repeats it with the correction off (#282)", async () => {
+  const bodies: Array<{ text: string; filters: Record<string, unknown> }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    const body = JSON.parse(String((init as RequestInit).body));
+    bodies.push(body);
+    const fixed = encodeURIComponent(JSON.stringify([["бумвга", "бумага"]]));
+    const headers: Record<string, string> = body.filters?.spell === "off" ? {} : { "X-Query-Corrected": fixed };
+    return new Response(JSON.stringify(response), { status: 200, headers });
+  });
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумвга");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const note = await screen.findByTestId("query-corrected");
+  expect(note).toHaveTextContent("Запрос исправлен (раскладка или опечатки): «бумвга» → «бумага».");
+  await userEvent.click(within(note).getByRole("button", { name: "Искать как введено" }));
+  await waitFor(() => expect(screen.queryByTestId("query-corrected")).toBeNull());
+  expect(bodies.at(-1)).toMatchObject({ text: "бумвга", filters: { spell: "off" } });
+  expect(bodies[0].filters.spell).toBeUndefined(); // the first search is corrected by the server
 });
 
 test("API error is shown, not swallowed", async () => {

@@ -25,7 +25,7 @@ freeze (02.10, 14:00) цифры и слайды по методологии г�
 | `src/contracts.py` | DATA до заморозки 11:30; после — любой | отдельный PR, метка `contract`, перечень потребителей; затем `make openapi` в том же PR |
 | `docs/openapi.json`, `src/ui/src/api-types.ts` | генерируются | только `make openapi`; руками не правятся |
 | `pyproject.toml`, `uv.lock`, `src/ui/package*.json` | тот, кому нужна зависимость | в своём PR + строка в `research/DECISIONS.md` |
-| `src/settings.py`, `.env.example` | любой, по задаче | единственное место, где читается окружение: новая переменная — поле `Settings` и строка в `.env.example`; файл из `scripts/settings_allowlist.txt` переводится на `get_settings()` и вычёркивается из списка (`make settings-check`, D-107) |
+| `src/settings.py`, `.env.example` | любой, по задаче | единственное место, где читается окружение: новая переменная — поле `Settings` и строка в `.env.example`; файл из `scripts/settings_allowlist.txt` переводится на `get_settings()` и вычёркивается из списка (`make settings-check`, D-139) |
 | `src/ui/e2e/demo.spec.ts` | APP; область, подключившая свою часть, добавляет шаг | PR, ломающий сценарий, не вливается |
 | `research/DECISIONS.md`, `docs/tz-compliance.md` | все, в своём PR | append-only; при конфликте сохраняются обе строки |
 | `CLAUDE.md`, `GIT.md`, `.claude/`, `docs/timeline.md` | любой, по задаче | ревью `reviewer` обязательно; сроки — одним решением (D-014) |
@@ -74,7 +74,7 @@ scripts/              # issues.sh, download-models.sh, check_stubs.py, check_lay
 | L3 | обогащение | `enrich/` — enrich, discover, evidence, role |
 | L4 | сценарии поверх ядра | `match/pipeline.py`, `ingest/predict.py` |
 | L5 | точки входа | `api/`, `worker/` (кроме `queue.py`) |
-| L6 | инструменты | `eval/` — импортирует продукт; продукт `eval/` не импортирует |
+| L6 | инструменты | `eval/`, `match/ranker_train.py` (обучение ранжировщика, #198) — импортируют продукт; продукт их не импортирует |
 
 - Слой модуля — по самому длинному префиксу из `LAYERS` в `scripts/check_layers.py`: новый модуль
   внутри пакета получает слой пакета, исключение — отдельная строка (так `match/pipeline.py` — L4,

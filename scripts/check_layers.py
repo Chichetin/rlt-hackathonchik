@@ -41,7 +41,7 @@ LAYERS: dict[str, int] = {
     "src.sources": 1,
     "src.db": 1,
     "src.llm": 1,
-    "src.ingest": 1,  # build, load, okpd2, profile, testset
+    "src.ingest": 1,  # build, load, notice, okpd2, profile, testset
     "src.worker.queue": 1,
     # L2: the match core (store, index, search, fallback, filters, signals, profiles, text)
     "src.match": 2,
@@ -55,6 +55,7 @@ LAYERS: dict[str, int] = {
     "src.worker": 5,
     # L6: tools — they may import the product, nothing of the product imports them
     "src.eval": 6,
+    "src.match.ranker_train": 6,  # offline ranker training (#198): reads eval cases; the product never imports it
 }
 LAYER_NAMES = {
     0: "контракты, настройки",
