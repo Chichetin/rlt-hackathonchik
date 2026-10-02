@@ -218,8 +218,8 @@ def spec(cfg: dict) -> dict | None:
     raw = cfg.get("ranker")
     if not raw:
         return None
-    if not isinstance(raw, dict) or set(raw) - {"kind", "model", "ablate"}:
-        raise ValueError(f"ranker: ожидается {{kind, model[, ablate]}}, получено {raw!r}")
+    if not isinstance(raw, dict) or set(raw) - {"kind", "model", "ablate", "customer_only"}:
+        raise ValueError(f"ranker: ожидается {{kind, model[, ablate, customer_only]}}, получено {raw!r}")
     bad = set(raw.get("ablate") or []) - set(NAMES)
     if bad:
         raise ValueError(f"ranker.ablate: неизвестные признаки {sorted(bad)}")
@@ -227,7 +227,7 @@ def spec(cfg: dict) -> dict | None:
         raise ValueError(f"ranker.kind = {raw.get('kind')!r}: ожидается одно из {KINDS}")
     if not raw.get("model"):
         raise ValueError("ranker.model: нужен путь к файлу модели")
-    return raw
+    return {**raw, "customer_only": bool(raw.get("customer_only", False))}  # no key — as before #490
 
 
 def _cols(path: Path, features: list[str]) -> list[int] | None:

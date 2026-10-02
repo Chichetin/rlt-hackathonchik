@@ -9,80 +9,95 @@
 # воспроизводятся на commit из файла результата; на HEAD различие ≤ 9 из 2000 dev-кейсов (ИНН заказчика 47…).
 # #198 (D-103): с 02.10 дефолт продукта — v2 + ранжировщик LightGBM (`ranker:` в search.yaml); записи, снятые
 # до него, выключают его явно (`ranker: null`), `v2` — формула D-077 без ранжировщика (eval/results/v2.json).
+# #511 (D-179): `no_customer_options` из search.yaml действует только на запросы без заказчика при выключенном
+# ранжировщике. В dev 23 кейса без заказчика: прежние эксперименты явно задают null, сохраняя свои options.
 # #282 (D-109): с 02.10 запрос исправляется до поиска (`spell: true` в search.yaml); записи, снятые до него,
 # ищут запрос как введён (`spell: false`).
 v2:              # формула v2 (H-15f, D-077) без ранжировщика — база для R-198-*
   spell: false
   ranker: null
+  no_customer_options: null # #511: как до D-179 и для запроса без заказчика (null — не {}: словари сливаются)
 v1:              # прежний дефолт продукта (D-004, D-029) — воспроизводит E-002 / bm25-dev-v1
   spell: false
   weights: &v1_weights {product_fit: 0.35, experience: 0.2, reliability: 0.2, activity: 0.1, geography: 0.1, price: 0.05}
   options: &v1_options {fit_bm25_share: 0.6, experience_by: class, tie_break: inn}
   ranker: null
+  no_customer_options: null # #511: как до D-179 и для запроса без заказчика (null — не {}: словари сливаются)
 H-15a-03:        # инкумбент-сигнал в experience, доля 0.3
   spell: false
   weights: *v1_weights
   options: *v1_options
   signals: {incumbent: 0.3}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-15a-06:
   spell: false
   weights: *v1_weights
   options: *v1_options
   signals: {incumbent: 0.6}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-15b:           # веса H-15b (сумма доступных компонент 1.0)
   spell: false
   weights: {product_fit: 0.5, experience: 0.25, reliability: 0.0, activity: 0.15, geography: 0.1, price: 0.0}
   options: *v1_options
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-15c:           # регион ИП без КПП или с КПП из нулей — по ИНН (signals.inn_region, #95)
   spell: false
   weights: *v1_weights
   options: *v1_options
   signals: {inn_region: 1.0}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-15d-tie:       # равные баллы — по BM25, а не по ИНН
   spell: false
   weights: *v1_weights
   options: {fit_bm25_share: 0.6, experience_by: class, tie_break: bm25}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-15e:           # experience по лотам с похожими позициями вместо группы ОКПД2
   spell: false
   weights: *v1_weights
   options: {fit_bm25_share: 0.6, experience_by: similar, tie_break: inn}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-15f:           # v2-кандидат: текст важнее, опыт — по похожим позициям, география не штрафует
   spell: false
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-15g:           # H-15f + инкумбент-сигнал 0.3
   spell: false
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.0, price: 0.0}
   signals: {incumbent: 0.3}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-15f-geo:       # проверка: H-15f с ненулевым весом географии и регионом ИП по ИНН
   spell: false
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 R-198-lr:        # обученный ранжировщик (#198): логистическая регрессия поверх кандидатов и компонент v2 (E-003)
   spell: false
-  ranker: {kind: logreg, model: models/ranker/R-198-lr.json}
+  ranker: {kind: logreg, model: models/ranker/R-198-lr.json, customer_only: false}
 R-198-gbm:       # обученный ранжировщик (#198): LightGBM LambdaMART, объяснение — pred_contrib
   spell: false
-  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, customer_only: false}
 # Шире набор кандидатов (#195): + поставщики заказчика и частые поставщики группы ОКПД2, поверх v2 (без ранжировщика).
 C-195-cg:        # заказчик 30 + группа ОКПД2 30
   spell: false
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
   candidates: {customer: 30, okpd2: 30}
 C-195-cgi:       # то же + инкумбент-сигнал 0.3 (как H-15g): поставщикам заказчика есть чем подняться
   spell: false
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
   candidates: {customer: 30, okpd2: 30}
   signals: {incumbent: 0.3}
 H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (география от заказчика); не прогоняется — см. EXPERIMENTS
@@ -91,6 +106,7 @@ H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (гео�
   signals: {inn_region: 1.0}
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 # Профили весов по типу закупки (#104, src/match/profiles.py, weights_by_type). Сравнение — по срезам type=.
 H-104b:          # H-15f + профиль: для товаров география 0.05 и регион ИП по ИНН, для услуг 0 (как в H-15f)
   spell: false
@@ -99,94 +115,132 @@ H-104b:          # H-15f + профиль: для товаров географ�
   options: {fit_bm25_share: 0.8, experience_by: similar, tie_break: bm25}
   weights_by_type: {goods: {geography: 0.05}}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-104g:          # дефолт D-077 + профиль: для товаров география 0.048 (= 0.05 / 1.05) и регион ИП по ИНН, для услуг 0
   spell: false
   signals: {inn_region: 1.0}
   weights_by_type: {goods: {geography: 0.048}}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 # #196: потолки насыщения experience поверх дефолта H-15f (в дефолте 20 лотов / 10 побед).
 H-196-sat100:
   spell: false
   options: {sat_lots: 100, sat_wins: 50}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 H-196-sat500:
   spell: false
   options: {sat_lots: 500, sat_wins: 250}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 # Ступень 2 сравнения моделей (#98, ступень 1 — #115): гибрид BM25 + векторы (RRF), остальное — продукт.
 S2-hyb-e5s:      # pg_hybrid, intfloat/multilingual-e5-small (vec.names_e5_small)
   spell: false
   retriever: pg_hybrid
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — лучший гибрид ступени 1 на коротких запросах
   spell: false
   retriever: pg_hybrid
   embedding_model: deepvk/USER-base
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 S-282-spell:     # #282: исправление раскладки и опечаток в запросе (с D-109 — дефолт продукта)
   spell: true
-  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}   # снят при дефолте D-103; с D-171 дефолт — R-long
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, customer_only: false}   # снят при дефолте D-103; с D-171 дефолт — R-long
 S-282-nospell:   # #282: запрос как введён — база замера S-282 (прогоны S-282-off-* сняты при spell: false в search.yaml)
   spell: false
-  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}   # снят при дефолте D-103; с D-171 дефолт — R-long
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, customer_only: false}   # снят при дефолте D-103; с D-171 дефолт — R-long
+# #490: продукт до #490 — ранжировщик и на запросах без ИНН заказчика (база замера G-490L на R-long)
+R-490-off:
+  ranker: {customer_only: false}
+# #490: замеры G-490-* сняты при дефолте R-198 (D-103) — до D-171
+G-490-free:
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, customer_only: true}
+  no_customer_options: null  # Measured before the separate #511 formula change.
+G-490-dev:
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, customer_only: true}
+  no_customer_options: null  # Measured before the separate #511 formula change.
+G-490-free-off:
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, customer_only: false}
+G-490-dev-off:
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, customer_only: false}
+G-490L-free:
+  ranker: {kind: lgbm, model: models/ranker/R-long-gbm.txt, customer_only: true}
+  no_customer_options: null
+G-490L-free-off:
+  ranker: {kind: lgbm, model: models/ranker/R-long-gbm.txt, customer_only: false}
+  no_customer_options: null
 # #361: абляция признака win_rate в обученном ранжировщике (без переобучения) — у 59 % поставщиков (только АИС ГЗ) он 1.0 по построению
 A361-no-winrate:
-  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate]}
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate], customer_only: false}
 # Абляция компонент (#191): формула v2 (как `v2`) с весом одной компоненты = 0; ранжировщик выключен — у него вес
 # компоненты = 0 без переобучения не определён. `abl-base` — та же база на том же коде (парное сравнение).
 abl-base:
   spell: false
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 abl-product_fit:
   spell: false
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {product_fit: 0.0}
 abl-experience:
   spell: false
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {experience: 0.0}
 abl-activity:
   spell: false
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {activity: 0.0}
 # #105: компонента price — масштаб НМЦК запроса против медианы НМЦК лотов поставщика до as_of
 # (src/match/search.py::_price), поверх дефолта H-15f; вес price добавляется к сумме (баллы не нормированы).
 H-105-price05:
   ranker: null   # измерено на v2 до #198 (D-103)
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {price: 0.05}
   options: {price: scale}
 H-105-price10:
   ranker: null   # измерено на v2 до #198 (D-103)
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {price: 0.10}
   options: {price: scale}
 # #105: свежесть опыта — activity по последней закупке с похожими позициями, а не по последнему участию вообще
 H-105-fresh:
   ranker: null   # измерено на v2 до #198 (D-103)
+  no_customer_options: null  # Preserve the historical formula without a customer.
   options: {activity_by: similar}
 H-105-fresh10:   # то же, вес activity 0.10 вместо 0.048
   ranker: null   # измерено на v2 до #198 (D-103)
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {activity: 0.10}
   options: {activity_by: similar}
 # #105: доля побед (сглаженная) вместо числа побед во второй половине experience
 H-105-winrate:
   ranker: null   # измерено на v2 до #198 (D-103)
+  no_customer_options: null  # Preserve the historical formula without a customer.
   options: {experience_wins: rate}
 H-105-price05-d1:   # price обнуляется при 10× (как в предложении METHODOLOGY), вес 0.05
   ranker: null   # измерено на v2 до #198 (D-103)
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {price: 0.05}
   options: {price: scale, price_decades: 1.0}
 H-105-combo:     # price 0.05 (масштаб НМЦК) + свежесть по похожим позициям — две компоненты, что не ухудшили dev
   ranker: null   # измерено на v2 до #198 (D-103)
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {price: 0.05}
   options: {price: scale, activity_by: similar}
 H-105-combo-aisgz:   # combo + сглаженная доля побед только для канала АИС ГЗ (там один исполнитель на лот)
   ranker: null   # измерено на v2 до #198 (D-103)
+  no_customer_options: null  # Preserve the historical formula without a customer.
   weights: {price: 0.05}
   options: {price: scale, activity_by: similar, experience_wins: rate_aisgz}
 # #105 поверх дефолта D-103 (ранжировщик): признак days_similar — давность последней похожей закупки.
 # R-105-gbm обучен src.match.ranker_train --name R-105 теми же данными и seed, что R-198, плюс этот признак.
 H-105-rk:
-  ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt}
+  ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt, customer_only: false}
 # reliability (#72, D-157). Подвыборка — каждый 4-й кейс dev: `uv run python -m src.eval.run --exp <id> --every 4`.
 # "on" в кавычках — иначе YAML 1.1 читает bool. Сняты до D-103 / D-109: ранжировщик и исправление запроса выключены.
 rel-off-s500:    # на прежнем дефолте v1 (до D-077): reliability в карточке, не в балле
@@ -195,29 +249,33 @@ rel-off-s500:    # на прежнем дефолте v1 (до D-077): reliabili
   options: *v1_options
   reliability: {mode: shadow}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 rel-on-s500:     # на v1: reliability в балле с весом 0.2 (D-004)
   spell: false
   weights: *v1_weights
   options: *v1_options
   reliability: {mode: "on"}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 rel-off-f:       # на H-15f (D-077, без ранжировщика): shadow — балл и порядок как у v2
   spell: false
   reliability: {mode: shadow}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 rel-on-f:        # на H-15f: + reliability 0.2 поверх нормированных весов H-15f (с ранжировщиком порядок задаёт модель — замер без него)
   spell: false
   weights: {reliability: 0.2}
   reliability: {mode: "on"}
   ranker: null
+  no_customer_options: null  # Preserve the historical formula without a customer.
 # #486: ранжировщик на 4 квартальных окнах [2024-07-01, 2025-07-01), признаки каждого окна до его начала (R-long);
 # R-w4 — то же только на последнем окне [2025-04-01, 2025-07-01) на этом коде (как R-198)
 R-long-gbm:
-  ranker: {kind: lgbm, model: models/ranker/R-long-gbm.txt}
+  ranker: {kind: lgbm, model: models/ranker/R-long-gbm.txt, customer_only: false}
 R-long-lr:
-  ranker: {kind: logreg, model: models/ranker/R-long-lr.json}
+  ranker: {kind: logreg, model: models/ranker/R-long-lr.json, customer_only: false}
 R-w4-gbm:
-  ranker: {kind: lgbm, model: models/ranker/R-w4-gbm.txt}
+  ranker: {kind: lgbm, model: models/ranker/R-w4-gbm.txt, customer_only: false}
 # Гибрид BM25 + дообученный эмбеддер E3 только для коротких запросов (#485): запрос из 1–4 слов → pg_hybrid с
 # e3/user-base-okpd2 (векторы — vec.names_e3_okpd2), длиннее — BM25 как в дефолте. База — дефолт (`E485-base`).
 # Итог: REJECT — короткий запрос хуже дефолта (recall@10 −0.016 [−0.027, −0.006]), research/EXPERIMENTS.md E485-short.
@@ -226,3 +284,15 @@ E485-short-rrf:
   hybrid_short: {model: e3/user-base-okpd2, max_words: 4}
 E485-short-bm25:
   hybrid_short: {model: e3/user-base-okpd2, max_words: 4, scores: bm25}
+# #511: путь без ML — свободный текст без заказчика (`src.eval.run --free-text-bare`: только предмет лота, без ОКПД2,
+# заказчика, НМЦК и канала). Порядок задаёт формула v2 (без ранжировщика, как по правилу #490); исправление запроса
+# включено, как в продукте. `no_customer_options` действует только на запросы без заказчика и без ранжировщика.
+F-511-v2:        # база: формула v2 как есть (null, а не {}: словарь слился бы с no_customer_options из search.yaml)
+  ranker: null
+  no_customer_options: null
+F-511-sat100:    # + насыщение опыта 100 лотов / 50 побед только на этом пути (как H-196-sat100)
+  ranker: null
+  no_customer_options: {sat_lots: 100, sat_wins: 50}
+F-511-sat-act:   # + давность по последнему лоту с похожими позициями (activity_by: similar, как в H-105-combo)
+  ranker: null
+  no_customer_options: {sat_lots: 100, sat_wins: 50, activity_by: similar}
