@@ -6,7 +6,8 @@ One CSV (`;`, UTF-8 BOM for Excel): per lot the top-N suppliers from organizers'
 (block «История») and the companies from open sources (block «Новые»), score and every component
 (value × weight, explanation). A lot without candidates gets one row with the reason — never a
 silent gap. Idempotent: lots already in the output are skipped (resume after a crash); progress
-goes to the log. Exit 2 on a broken export (message, no traceback).
+goes to the log. Exit 2 on a broken export (message, no traceback). A text cell starting with
+= + - @ (tab, CR) gets a leading «'» so Excel does not run it as a formula (docs/REVIEW.md F-08).
 """
 
 from __future__ import annotations
@@ -24,6 +25,18 @@ log = logging.getLogger("predict")
 ROOT = Path(__file__).resolve().parents[2]
 COLUMNS = ("lot_id", "reqnum", "query_text", "okpd2", "block", "rank", "inn", "name", "score", "components", "note")
 BLOCKS = {"history": "История", "discovered": "Новые"}
+FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(value: object) -> object:
+    """Excel reads «- Аренда…», «=…», «+7…» as a formula (F-08): prefix «'»; a number stays a number."""
+    if not isinstance(value, str) or not value.startswith(FORMULA_START):
+        return value
+    try:
+        float(value)
+    except ValueError:
+        return "'" + value
+    return value
 
 
 def _components(m: CounterpartyMatch) -> str:
@@ -31,34 +44,32 @@ def _components(m: CounterpartyMatch) -> str:
 
 
 def recommend(lot: TestLot, top: int, offline: bool | None = None) -> tuple[list[CounterpartyMatch], list[str]]:
-    """History top-N + «Новые» for one lot; notes explain an empty block. Errors become notes."""
-    from src.enrich import discover as discover_mod
-    from src.match import search as search_mod
+    """History top-N + «Новые» for one lot — the /api/search pipeline (src/match/pipeline.py, #220): cached
+    enrichment, hard filters (liquidated, РНП), the Evidence check; notes explain an empty block."""
+    from src.match import pipeline
 
     notes = list(lot.notes)
     try:
-        history = search_mod.search(lot.query, k=top)
+        picked = pipeline.pick(lot.query, offline=offline)
     except FileNotFoundError:
         raise  # training data absent: nothing can be predicted, the caller stops
     except Exception as e:  # noqa: BLE001 — one bad lot must not stop the whole export
-        log.exception("search, лот %s", lot.lot_id)
+        # the pipeline is one call now: a failed search leaves no «Новые» either (D-097)
+        log.exception("подбор, лот %s", lot.lot_id)
         notes.append(f"ошибка подбора по истории: {type(e).__name__}")
-        history = []
+        return [], notes
+    history, discovered = picked.history[:top], picked.discovered[:top]
     if not history:
-        notes.append("в истории нет поставщиков по этому предмету")
-    discovered: list[CounterpartyMatch] = []
-    try:
-        res = discover_mod.discover(lot.query, history, offline=offline)
-        if res.history_checked:
-            discovered = res.matches[:top]
-        else:
-            notes.append("«Новые» не установлены: нет сверки с данными организаторов")
-        if not discovered:
-            notes.extend(res.notes or ["открытые источники не дали новых компаний"])
-    except Exception as e:  # noqa: BLE001 — an open source failing never breaks the history block
-        log.exception("discover, лот %s", lot.lot_id)
-        notes.append(f"блок «Новые» недоступен: {type(e).__name__}")
-    return [*history, *discovered], notes
+        notes.append(picked.note or "в истории нет поставщиков по этому предмету")
+    res = picked.discovery
+    if res is None:
+        if not pipeline.is_stub():
+            notes.append(f"блок «Новые» недоступен: {picked.discovery_error or 'ошибка источника'}")
+    elif not res.history_checked:
+        notes.append("«Новые» не установлены: нет сверки с данными организаторов")
+    if res is not None and not discovered:
+        notes.extend(res.notes or ["открытые источники не дали новых компаний"])
+    return pipeline.verified([*history, *discovered]), notes
 
 
 def _done(out: Path) -> set[str]:
@@ -75,11 +86,15 @@ def run(csv_dir: Path, out: Path, top: int = 10, offline: bool | None = None) ->
     new_file = not out.exists()
     stats = {"lots": len(ts.lots), "skipped": 0, "with_history": 0, "with_discovered": 0, "empty": 0}
     with out.open("a", encoding="utf-8-sig" if new_file else "utf-8", newline="") as f:
-        w = csv.writer(f, delimiter=";")
+        csv_w = csv.writer(f, delimiter=";")
+
+        def row(cells: list[object]) -> None:
+            csv_w.writerow([csv_cell(c) for c in cells])
+
         if new_file:
-            w.writerow(COLUMNS)
+            row(list(COLUMNS))
         for i, lot in enumerate(ts.lots, start=1):
-            if lot.lot_id in done:
+            if csv_cell(lot.lot_id) in done:  # the file holds the escaped id
                 stats["skipped"] += 1
                 continue
             matches, notes = recommend(lot, top, offline)
@@ -87,13 +102,13 @@ def run(csv_dir: Path, out: Path, top: int = 10, offline: bool | None = None) ->
             note = "; ".join(notes)
             if not matches:
                 stats["empty"] += 1
-                w.writerow([*base, "", "", "", "", "", "", note or "кандидатов нет"])
+                row([*base, "", "", "", "", "", "", note or "кандидатов нет"])
             ranks = {"history": 0, "discovered": 0}
             for m in matches:
                 ranks[m.origin] += 1
                 cp = m.counterparty
-                w.writerow([*base, BLOCKS[m.origin], ranks[m.origin], cp.inn or "", cp.name, f"{m.score:.4f}",
-                            _components(m), note])
+                row([*base, BLOCKS[m.origin], ranks[m.origin], cp.inn or "", cp.name, f"{m.score:.4f}",
+                     _components(m), note])
             stats["with_history"] += ranks["history"] > 0
             stats["with_discovered"] += ranks["discovered"] > 0
             f.flush()  # a crash keeps every finished lot: the next run resumes after it

@@ -274,3 +274,12 @@ def test_lookup_many_is_one_query_with_facts_per_inn(built):
     assert F.lookup_many([], cache, parquet=out) == {}
     with pytest.raises(ValueError):
         F.lookup_many([BRASS, "7804428657"], cache, parquet=out)
+
+
+def test_lookup_many_is_safe_across_threads(built):
+    from concurrent.futures import ThreadPoolExecutor
+    out, _, cache = built
+    want = F.lookup_many([BRASS, OFFICEMAG], cache, parquet=out)
+    with ThreadPoolExecutor(8) as pool:
+        got = list(pool.map(lambda _: F.lookup_many([BRASS, OFFICEMAG], cache, parquet=out), range(64)))
+    assert all(g == want for g in got)

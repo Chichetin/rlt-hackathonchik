@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
+import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
+import { ResultInspector } from "./ResultInspector";
 import "./micro.css";
 import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
-import { easeOut, glide, ScrollTools } from "./Motion";
+import { easeOut, ScrollTools } from "./Motion";
 import { okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
@@ -14,7 +16,12 @@ import {
   COMPONENT_LABEL,
   exportXlsx,
   fetchLot,
+  facetCount,
   filterNotes,
+  filtersActive,
+  NO_FILTERS,
+  normalizeFilters,
+  type Facets,
   formatStat,
   KIND_LABEL,
   LotError,
@@ -31,12 +38,20 @@ import {
   type Counterparty,
 } from "./api";
 import { reviewLinks } from "./reviews";
+import { BacktestPanel } from "./Backtest";
+import { TestsetPanel } from "./TestsetPanel";
+import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
+import "./filters.css";
+import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
+import "./testset.css";
+import { componentText, formulaScore, rankerReason, rankerShort } from "./ranker";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
 
-const REGIONS = ["", "Санкт-Петербург", "Ленинградская область"];
+// #242: the filter is by the CUSTOMER's region (where the goods go, where the work is done), not the supplier's
+const CUSTOMER_REGIONS = ["Санкт-Петербург", "Ленинградская область"];
 const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Компьютерное оборудование"];
 
 function SearchIcon({ className = "" }: { className?: string }) {
@@ -67,20 +82,163 @@ function Skeleton() {
   );
 }
 
-/** «Новые» emptied by «Только производители», judged by the filters of the shown answer (#84): the role of
+/** «Новые» emptied by the role chip «Производитель» alone, judged by the filters of the shown answer (#84): the role of
  *  a new company is set by its main OKVED (D-057), so the filter hides all of them only when none of them is a
  *  manufacturer. If the base answer has one, other filters emptied the block: the general text. Other filters
  *  alone keep the general text too: region and МСП of new companies are known, their empty block has other reasons. */
 function hiddenNew(res: SearchResponse, base: SearchResponse | null, shown: Query | null): string | undefined {
   const n = base?.discovered.length ?? 0;
-  if (res.discovered.length || !n || base === res || !shown?.filters?.only_manufacturers) return undefined;
+  if (res.discovered.length || !n || base === res || String(shown?.filters?.kinds ?? "") !== "manufacturer") return undefined;
   const kinds = base?.discovered.map((m) => m.counterparty.kind) ?? [];
   if (kinds.includes("manufacturer")) return undefined;
   const undetermined = kinds.filter((k) => !k).length;
   const why = undetermined
     ? `подтверждённых производителей среди них нет — у ${undetermined} из ${n} роль ещё не определена`
     : "по основному ОКВЭД среди них нет производителей";
-  return `Под фильтр «Только производители» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+  return `Под фильтр «Производитель» не попал никто из ${n} новых компаний из реестра МСП: ${why}. Снимите фильтр, чтобы их увидеть.`;
+}
+
+/** «Минимальная релевантность» on the locally re-ranked score (local weights, D-079). */
+function atLeast(rows: CounterpartyMatch[], level: MinLevel): CounterpartyMatch[] {
+  const min = minScore(level);
+  return min === undefined ? rows : rows.filter((m) => m.score >= min);
+}
+
+/** «Работал с заказчиками СПб» — a fact from the organizers' data (stats.customers_spb), only for a SPb customer (#242). */
+function WorkedWith({ cp, customerRegion }: { cp: Counterparty; customerRegion?: string }) {
+  const n = cp.stats?.customers_spb;
+  if (customerRegion !== "Санкт-Петербург" || typeof n !== "number" || n <= 0) return null;
+  return <span className="badge badge-worked">{`участвовал в закупках ${n.toLocaleString("ru-RU")} ${plural(n, "заказчика", "заказчиков", "заказчиков")} СПб`}</span>;
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+}
+
+/** Role chips: multiple choice; a count from X-Facets when the server sends it (#232). */
+function RoleChips({ filters, onChange, facets }: { filters: Filters; onChange: (f: Filters) => void; facets?: Facets }) {
+  return (
+    <fieldset className="role-chips">
+      <legend className="sr-only">Роль</legend>
+      {KINDS.map((k) => {
+        const on = filters.kinds.includes(k);
+        const n = facetCount(facets, "kind", k);
+        return (
+          <label key={k} className={`role-chip role-${k}${on ? " is-on" : ""}`}>
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => onChange({ ...filters, kinds: e.target.checked ? [...filters.kinds, k] : filters.kinds.filter((x) => x !== k) })}
+            />
+            <RoleIcon kind={k} />
+            {ROLE[k].chip}
+            {n !== undefined && <span className="chip-count">{n}</span>}
+          </label>
+        );
+      })}
+    </fieldset>
+  );
+}
+
+const NEAR_LABEL: Record<NearChoice, string> = {
+  auto: "авто — по типу закупки",
+  // the server keeps the customer's region OR a bid for its customers (stats.customers_spb counts applications,
+  // not wins; «Новые» pass by the region alone) — the label says both halves
+  worked: "в регионе заказчика или участвовал в закупках заказчиков региона",
+  near: "в регионе заказчика или соседнем",
+  any: "любой регион",
+};
+
+function NearSelect({ value, onChange, facets }: { value: NearChoice; onChange: (v: NearChoice) => void; facets?: Facets }) {
+  return (
+    <select aria-label="Может работать у заказчика" value={value} onChange={(e) => onChange(e.target.value as NearChoice)}>
+      {(Object.keys(NEAR_LABEL) as NearChoice[]).map((k) => {
+        const n = k === "worked" || k === "near" ? facetCount(facets, "near", k) : undefined;
+        return (
+          <option key={k} value={k}>
+            {NEAR_LABEL[k]}
+            {n !== undefined ? ` (${n})` : ""}
+          </option>
+        );
+      })}
+    </select>
+  );
+}
+
+/** Who the customer is, what is bought and where the supplier may come from (#242): the server's decision over the
+ *  results, with the choice itself and what it hides (D-030) — no trip to the form to change it. */
+function ContextLine({ context, facets, near, onNear }: { context?: SearchContext; facets?: Facets; near: NearChoice; onNear: (v: NearChoice) => void }) {
+  const applied = context?.applied_near ?? context?.default_near;
+  const hidden = nearHidden(context, facets);
+  return (
+    <div className="search-context" role="group" aria-label="Заказчик и тип закупки">
+      {context && (
+        <span>
+          Заказчик: <strong>{context.customer_region}</strong> <small>({context.customer_basis})</small>
+        </span>
+      )}
+      {context?.purchase_label && (
+        <span>
+          Тип закупки: <strong>{context.purchase_label}</strong>
+          {context.type_basis.length > 0 && <small> (ОКПД2 {context.type_basis.join(", ")})</small>}
+        </span>
+      )}
+      <label>
+        Может работать у заказчика
+        <NearSelect value={near} onChange={onNear} facets={facets} />
+      </label>
+      {near === "auto" && applied && <small>авто: {NEAR_LABEL[applied]}</small>}
+      {hidden && (
+        <small role="note">
+          скрыто {hidden.hidden} из {hidden.of}: другой регион или регион не известен
+        </small>
+      )}
+    </div>
+  );
+}
+
+/** Filters over the results (#232): role chips, ЮЛ / ИП, minimal relevance, and the legend of the levels. */
+function FilterBar({ filters, facets, onChange }: { filters: Filters; facets?: Facets; onChange: (f: Filters) => void }) {
+  // 12 INN digits: a sole trader or a natural person — «ИП/ФЛ», not a guessed «ИП»
+  const entities: [Filters["entity"], string][] = [["", "Все"], ["ul", "ЮЛ"], ["ip", "ИП/ФЛ"]];
+  return (
+    <div className="filterbar" role="group" aria-label="Фильтры выдачи">
+      <RoleChips filters={filters} onChange={onChange} facets={facets} />
+      <div className="filterbar-row">
+        <fieldset className="seg">
+          <legend>Форма</legend>
+          {entities.map(([v, label]) => {
+            const n = v ? facetCount(facets, "entity", v) : undefined;
+            return (
+              <label key={label} className={filters.entity === v ? "is-on" : ""}>
+                <input type="radio" name="entity" checked={filters.entity === v} onChange={() => onChange({ ...filters, entity: v })} />
+                {label}
+                {n !== undefined && <span className="chip-count">{n}</span>}
+              </label>
+            );
+          })}
+        </fieldset>
+        <label className="minlevel">
+          Релевантность
+          <select value={filters.min_level} onChange={(e) => onChange({ ...filters, min_level: e.target.value as MinLevel })}>
+            <option value="">любая</option>
+            <option value="mid">средняя и выше</option>
+            <option value="high">только высокая</option>
+          </select>
+        </label>
+        <p className="legend-levels">
+          <span className="sr-only">Уровни релевантности:</span>
+          {LEVELS.map((l, i) => (
+            <span key={l.id} className={`relevance relevance-${l.id}`}>
+              <i aria-hidden="true" />
+              {l.label} {i === 0 ? `≥ ${l.min.toFixed(2)}` : i === LEVELS.length - 1 ? `< ${LEVELS[i - 1].min.toFixed(2)}` : `${l.min.toFixed(2)}–${LEVELS[i - 1].min.toFixed(2)}`}
+            </span>
+          ))}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /** Server's reason for an empty answer (X-Search-Note, #166) as a sentence; none — the general empty text. */
@@ -89,6 +247,15 @@ export function noteText(note: string | undefined): string | undefined {
   if (!t) return undefined;
   const sentence = t[0].toUpperCase() + t.slice(1);
   return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/** Why «Новые» may be incomplete (X-Discovery-Error, #287): the source failed, or novelty was not checked. */
+export function discoveryAlert(code: string | undefined): string | undefined {
+  if (!code) return undefined;
+  if (code === "history_unchecked") {
+    return "Данные организаторов не загружены — сверка с историей закупок не выполнена, поэтому новых компаний не показываем.";
+  }
+  return "Источники не ответили — список может быть неполным.";
 }
 
 type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
@@ -111,7 +278,7 @@ function usePath(): [Path, (next: Path) => void] {
 
 // the last query survives a reload of /results; storage may be unavailable — the page works without it
 const STORE = "mitrandir.query";
-type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string };
+type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string; customerRegion?: string };
 function loadSaved(): Partial<Saved> {
   try {
     return JSON.parse(window.sessionStorage.getItem(STORE) ?? "{}") as Partial<Saved>;
@@ -195,19 +362,23 @@ export function shortName(name: string): string {
 
 function CompanyName({ name }: { name: string }) {
   // the organizers' data has no supplier names (contracts.py): such a row is named by its INN
-  const short = shortName(name);
-  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={short !== name ? name : undefined}>{short}</span>;
+  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={name}>{name}</span>;
 }
 
 export function App() {
   const reduced = useReducedMotion();
   const [saved] = useState(loadSaved);
   const [path, go] = usePath();
+  const filterReturn = useRef<Path>("/search");
+  useEffect(() => { if (path === "/search" || path === "/results") filterReturn.current = path; }, [path]);
   const [text, setText] = useState(saved.text ?? "");
-  const [filters, setFilters] = useState<Filters>(saved.filters ?? { only_msp: false, only_manufacturers: false, region: "" });
+  const [filters, setFilters] = useState<Filters>(() => normalizeFilters(saved.filters));
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
   const [more, setMore] = useState(false);
+  const [mobileDetails, setMobileDetails] = useState(false);
+  const [resultGroup, setResultGroup] = useState<"history" | "new">("history");
+  const [selectedSuppliers, setSelectedSuppliers] = useState<Partial<Record<"history" | "new", string>>>({});
   // the same query without user filters: how many candidates a filter hides for an unknown attribute
   const [base, setBase] = useState<SearchResponse | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
@@ -219,26 +390,40 @@ export function App() {
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
+  // #242: the customer's region when the INN is not given (goes to Query.region); with an INN the server takes it from there
+  const [customerRegion, setCustomerRegion] = useState(saved.customerRegion ?? "Санкт-Петербург");
   const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [lotBusy, setLotBusy] = useState(false);
   const resetLot = () => {
     setLot(null);
     setLotQueryId(undefined);
   };
-  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId });
+  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId, customer_region: customerRegion });
 
-  async function loadLot() {
-    if (!lotId.trim()) return;
+  // the query of a loaded lot, for a search that must not wait for the form state to update
+  type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
+
+  async function loadLot(id: string = lotId): Promise<Ready | null> {
+    if (!id.trim()) return null;
     setLotBusy(true);
     setLotMsg(null);
     try {
-      const q = await fetchLot(lotId);
+      const q = await fetchLot(id);
       setText(q.text);
       setBudget(q.budget ? String(q.budget) : "");
       setCustomerInn(q.customer_inn ?? "");
       setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
       setLotQueryId(q.query_id);
-      setLotMsg({ kind: "ok", text: `Закупка ${lotId.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+      const budgetText = q.budget ? String(q.budget) : "";
+      const lotCtx = { okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget };
+      return {
+        text: q.text,
+        lotId: id,
+        budget: budgetText,
+        customerInn: q.customer_inn ?? "",
+        extra: { budget: budgetText, customer_inn: q.customer_inn ?? "", lot: lotCtx, query_id: q.query_id },
+      };
     } catch (e) {
       setLot(null);
       setLotQueryId(undefined);
@@ -252,8 +437,22 @@ export function App() {
               ? "Номер закупки — только цифры (lot_id или реестровый номер)."
               : `Не удалось загрузить закупку: ${String(e)}.`;
       setLotMsg({ kind: "err", text: `${why} Опишите предмет закупки текстом ниже.` });
+      return null;
     } finally {
       setLotBusy(false);
+    }
+  }
+
+  // a procedure of the uploaded test export (#207): load it by number and search at once
+  const [pickedLot, setPickedLot] = useState<string | null>(null);
+  async function pickTestLot(id: string) {
+    setPickedLot(id);
+    setLotId(id);
+    try {
+      const ready = await loadLot(id);
+      if (ready) await run(filters, ready);
+    } finally {
+      setPickedLot(null);
     }
   }
 
@@ -282,20 +481,24 @@ export function App() {
     }
   }
 
-  async function run(nextFilters: Filters = filters) {
-    if (!text.trim()) return;
+  async function run(nextFilters: Filters = filters, ready?: Ready) {
+    // the query of this run: a picked test lot (#207) or the form
+    const qText = ready?.text ?? text;
+    const qExtra = ready ? () => ready.extra : extra;
+    if (!qText.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
     setState("loading");
     setOpen(null);
     try {
-      const active = nextFilters.only_msp || nextFilters.only_manufacturers || !!nextFilters.region;
-      const none: Filters = { only_msp: false, only_manufacturers: false, region: "" };
-      const q = buildQuery(text, nextFilters, extra());
+      const active = filtersActive(nextFilters);
+      const none: Filters = NO_FILTERS;
+      // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
+      const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
-        active ? search(buildQuery(text, none, extra()), { limit: ALL }) : Promise.resolve(null),
+        active ? search(buildQuery(qText, none, qExtra()), { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
@@ -305,7 +508,9 @@ export function App() {
       setState("idle");
       // weights switched on while this page-sized answer was in flight
       if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
-      save({ text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
+      save(ready
+        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
+        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
       if (window.location.pathname === "/search") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
@@ -349,7 +554,7 @@ export function App() {
       /* nothing stored */
     }
     runSeq.current++; // drop an answer still in flight
-    setFilters({ only_msp: false, only_manufacturers: false, region: "" });
+    setFilters(NO_FILTERS);
     setText("");
     setLotId("");
     setBudget("");
@@ -378,7 +583,7 @@ export function App() {
   });
 
   useEffect(() => {
-    const titles: Record<string, string> = { "/": "Поставщики для вашей закупки", "/search": "Подбор поставщиков", "/results": "Результаты подбора", "/settings": "Настройки", "/about": "О сервисе" };
+    const titles: Record<string, string> = { "/": "Поставщики для вашей закупки", "/search": "Подбор поставщиков", "/results": "Результаты подбора", "/settings": "Фильтры", "/about": "О сервисе" };
     document.title = `${titles[path] ?? "Страница не найдена"} — Митрандир`;
   }, [path]);
 
@@ -402,27 +607,71 @@ export function App() {
     if (res) void run(next);
   }
 
+  const rankedHistory = res ? (weights ? atLeast(rerank(res.history, weights), filters.min_level) : res.history) : [];
+  const historyRows = weights ? rankedHistory.slice(0, shown) : rankedHistory;
+  const newRows = res ? (weights ? atLeast(rerank(res.discovered, weights), filters.min_level) : res.discovered) : [];
+  const historyTotal = res ? (weights ? rankedHistory.length : res.total.history) : 0;
+  const newTotal = res ? (weights ? newRows.length : res.total.discovered) : 0;
+  const customerRatings = useRatingSummaries([...historyRows, ...newRows].map(m => m.counterparty.inn));
+  const activeRows = resultGroup === "history" ? historyRows : newRows;
+  const selectedResult = activeRows.find(m => supplierKey(m) === selectedSuppliers[resultGroup]) ?? activeRows[0] ?? null;
+  const selectedIndex = selectedResult ? activeRows.indexOf(selectedResult) : -1;
+  const revealSelection = useRef(false);
+  const selectResult = (m: CounterpartyMatch) => {
+    revealSelection.current = true;
+    setSelectedSuppliers(prev => ({ ...prev, [resultGroup]: supplierKey(m) }));
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      setMobileDetails(true);
+      requestAnimationFrame(() => {
+      const pane = document.getElementById("supplier-preview");
+      pane?.querySelector<HTMLButtonElement>(".inspector-back")?.focus({ preventScroll: true });
+      pane?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "start" });
+      });
+    }
+  };
+
+  const selectedKey = selectedResult ? supplierKey(selectedResult) : "";
+  useEffect(() => { if (!selectedKey) setMobileDetails(false); }, [selectedKey]);
+  useEffect(() => {
+    if (!revealSelection.current) return;
+    revealSelection.current = false;
+    const list = document.querySelector<HTMLElement>(".result-list-scroll:not([hidden])");
+    const row = list?.querySelector<HTMLElement>('.item[aria-pressed="true"]');
+    if (!list || !row) return;
+    const box = list.getBoundingClientRect(), item = row.getBoundingClientRect();
+    if (item.top < box.top) list.scrollTop += item.top - box.top;
+    else if (item.bottom > box.bottom) list.scrollTop += item.bottom - box.bottom;
+  }, [selectedKey, path]);
+  function returnToList() {
+    setMobileDetails(false);
+    requestAnimationFrame(() => {
+    const row = document.querySelector<HTMLElement>('.result-list-scroll:not([hidden]) .item[aria-pressed="true"]');
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "center" });
+    });
+  }
+
   return (
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
     <div inert={!!open}><ScrollTools /></div>
-    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} inert={!!open}
+    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
-      {path === "/search" && <div className="search-background"><WaveField pattern="slats" /></div>}
+      {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
       <div className="content">
       <AnimatePresence mode="wait" initial={false}>
-      <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
+      <motion.div className={path === "/" ? undefined : "interior-route"} key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
       {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
       : path === "/about" ? <AboutPage onStart={() => go("/search")} />
-      : path === "/settings" ? <SettingsPage filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
+      : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => go(filterReturn.current)} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
       <div className="top">
         <h1>{path === "/results" ? "Поставщики для вашей закупки" : "Подбор поставщиков для закупки"}</h1>
-        <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>
+        {path !== "/results" && <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>}
       </div>
 
       {res?.stub && (
@@ -431,10 +680,22 @@ export function App() {
         </div>
       )}
 
-      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""}`}>
+      {path === "/results" && res && <div className="results-commandbar">
+        <p><span>Закупка</span><strong>{res.query.text}</strong></p>
+        <div className="results-commands">
+          <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
+          <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
+            setError(`выгрузка в Excel: ${String(e)}`); setState("error");
+          })}>Выгрузить в Excel</button>
+        </div>
+        <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
+        {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
+      </div>}
+      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""} ${path === "/results" && res ? "results-workspace" : ""}`}>
       <form
         id="supplier-search"
         className="query"
+        hidden={path === "/results" && !!res}
         onSubmit={(e) => {
           e.preventDefault();
           void run();
@@ -475,6 +736,7 @@ export function App() {
               {lotMsg.text}
             </p>
           )}
+          {lot && lotMsg?.kind === "ok" && <BacktestPanel key={lotQueryId} ident={lotId} />}
         </div>
         <div className="query-divider"><span>или введите описание</span></div>
         <label htmlFor="q">Что нужно закупить</label>
@@ -494,10 +756,10 @@ export function App() {
         }} />
         </div>
         <div className="query-options">
-        {path === "/search" && <div className="section-heading"><div>
+        <div className="section-heading refinement-heading"><div>
           <h2>Уточнить подбор</h2>
-          <p>Необязательно. Поможет сузить круг компаний.</p>
-        </div></div>}
+          <p>Необязательные параметры</p>
+        </div></div>
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -507,6 +769,19 @@ export function App() {
             ИНН заказчика
             <input value={customerInn} inputMode="numeric" placeholder="необязательно" onChange={(e) => setCustomerInn(e.target.value)} />
           </label>
+          {/* the server takes the customer's region from an INN 78 / 47 only (D-083); any other — from this select */}
+          {!/^(78|47)\d{8}$/.test(customerInn.trim()) && (
+            <label>
+              Регион заказчика
+              <select value={customerRegion} onChange={(e) => setCustomerRegion(e.target.value)}>
+                {CUSTOMER_REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         {(lot?.channel || lot?.okpd2?.length) && (
           <div className="chips">
@@ -514,58 +789,23 @@ export function App() {
             {lot?.okpd2?.length ? <span className="chip">ОКПД2: {okpd2Text(lot.okpd2, lotLabels)}</span> : null}
           </div>
         )}
-        <div className="row">
-          <fieldset className="filters">
-            <legend>Фильтры</legend>
-            <label>
-              <input
-                type="checkbox"
-                checked={filters.only_msp}
-                onChange={(e) => toggle({ ...filters, only_msp: e.target.checked })}
-              />
-              Только МСП
+        <div className="row query-finish">
+          <div className="query-refinements">
+            <a className="filter-link" {...link("/settings")}>Фильтры {filtersActive(filters) && <span className="filter-applied">применены</span>}<span aria-hidden="true">↗</span></a>
+            <label className="query-region">Может работать у заказчика
+              <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} facets={res?.facets} />
             </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={filters.only_manufacturers}
-                onChange={(e) => toggle({ ...filters, only_manufacturers: e.target.checked })}
-              />
-              Только производители
-            </label>
-            <label>
-              Регион{" "}
-              <select value={filters.region} onChange={(e) => toggle({ ...filters, region: e.target.value })}>
-                {REGIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r || "Любой"}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </fieldset>
+          </div>
           <div className="actions">
             <button type="submit" disabled={!text.trim() || state === "loading"}>
               <SearchIcon />
               {state === "loading" ? "Ищем…" : "Найти поставщиков"}
             </button>
-            {path === "/results" && <button
-              type="button"
-              className="secondary"
-              disabled={!res}
-              onClick={() =>
-                void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch((e) => {
-                  setError(`выгрузка в Excel: ${String(e)}`);
-                  setState("error");
-                })
-              }
-            >
-              Выгрузить в Excel
-            </button>}
-            {path === "/results" && weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
+
           </div>
         </div>
         </div>
+        <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
       </form>
       <div className="output">
       {state === "error" && (
@@ -578,7 +818,7 @@ export function App() {
         state === "loading" ? <Skeleton /> : path === "/results" ? (
           <section className="getting-started" aria-label="Результаты">
             <h2>Вы ещё не запускали подбор</h2>
-            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки слева и нажмите «Найти поставщиков».</p>
+            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки и нажмите «Найти поставщиков».</p>
           </section>
         ) : (
         <section id="about" className="getting-started" aria-label="Как работает подбор">
@@ -601,50 +841,67 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
       ))}
 
+      {path === "/results" && res?.excludedLot && state !== "loading" && (
+        <p className="lotmsg own-lot-note" role="note">
+          Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
+          выдачу только по другим своим закупкам. Для закупок июля–сентября 2025 места участников по истории до
+          01.07.2025 — кнопка «Проверить на истории».
+        </p>
+      )}
+
       {path === "/results" && res && (
-        <motion.main initial={reduced ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : 0.45, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
-          <header className="results-heading">
-            <h2 className="results-title">Результаты подбора</h2>
-            <p className="result-query">По запросу: <strong>{res.query.text}</strong></p>
-            {weights && (
-              <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
-                Оценка: {presetTitle(weightSet)} · только у вас
-              </a>
-            )}
-            <span className="result-total" role="status">
-              С опытом: <strong><RollingNumber value={res.total.history} /></strong> · Новых: <strong><RollingNumber value={res.total.discovered} /></strong>
-            </span>
-          </header>
+        <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
+          {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
+            Оценка: {presetTitle(weightSet)} · только у вас
+          </a>}
+          <div className="result-browser" data-mobile-details={mobileDetails && !!selectedResult}>
+          <div className="result-list-pane">
+            <div className="result-groups" role="group" aria-label="Группа поставщиков">
+              <button type="button" className="group-history" aria-pressed={resultGroup === "history"} onClick={() => setResultGroup("history")}>С опытом <span>{historyTotal}</span></button>
+              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span>
+                {res.discoveryError && <span className="group-alert" title={discoveryAlert(res.discoveryError)}>
+                  <span aria-hidden="true">!</span><span className="sr-only">список может быть неполным</span></span>}</button>
+            </div>
+            <div className="result-list-scroll" hidden={resultGroup !== "history"}>
           <Block
+            customerRegion={res.context?.customer_region}
+            selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
             variant="history"
             tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
-            rows={weights ? rerank(res.history, weights).slice(0, shown) : res.history}
-            total={res.total.history}
+            ratings={customerRatings.summaries} ratingsState={customerRatings.state}
+            rows={historyRows}
+            total={historyTotal}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
             loadingMore={more}
-            onOpen={setOpen}
+            onOpen={selectResult}
             empty={
-              filterNotes(base, filters).length
+              filterNotes(base, filters, res.facets).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
                 : noteText(res.note)
             }
           />
+          </div>
+          <div className="result-list-scroll" hidden={resultGroup !== "new"}>
           <Block
+            customerRegion={res.context?.customer_region}
+            selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
             variant="new"
             tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
-            rows={rerank(res.discovered, weights)}
-            total={res.total.discovered}
-            onOpen={setOpen}
+            ratings={customerRatings.summaries} ratingsState={customerRatings.state}
+            alert={discoveryAlert(res.discoveryError)}
+            rows={newRows}
+            total={newTotal}
+            onOpen={selectResult}
             empty={
               hiddenNew(res, base, shownQuery) ??
               (res.query.okpd2?.length
@@ -652,6 +909,12 @@ export function App() {
                 : "Код ОКПД2 не указан — загрузите закупку по номеру, чтобы найти новых поставщиков в открытых источниках.")
             }
           />
+          </div>
+          </div>
+          <ResultInspector customerRegion={res.context?.customer_region} onBack={returnToList} loadingMore={more} onMore={resultGroup === "history" && selectedIndex === activeRows.length - 1 && activeRows.length < historyTotal ? (weights ? () => setShown(n => n + PAGE) : () => void showMore()) : undefined} match={selectedResult} weightsNote={weights ? presetTitle(weightSet) : undefined} onOpen={setOpen}
+            onPrevious={selectedIndex > 0 ? () => selectResult(activeRows[selectedIndex - 1]) : undefined}
+            onNext={selectedIndex >= 0 && selectedIndex + 1 < activeRows.length ? () => selectResult(activeRows[selectedIndex + 1]) : undefined} />
+          </div>
         </motion.main>
       )}
       </div>
@@ -661,23 +924,30 @@ export function App() {
       </AnimatePresence>
       </div>
     </motion.div>
-    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} />}</AnimatePresence>
+    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} customerRegion={res?.context?.customer_region} />}</AnimatePresence>
     </LayoutGroup>
     </MotionConfig>
   );
 }
 
+function supplierKey(m: CounterpartyMatch) { return `${m.origin}:${m.counterparty.inn ?? m.counterparty.name}`; }
+
 function Block(props: {
   title: string;
   hint: string;
   rows: CounterpartyMatch[];
+  ratings: Record<string, RatingSummary>;
+  ratingsState: "loading" | "ready" | "error";
   total: number;
   onOpen: (m: CounterpartyMatch) => void;
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
+  alert?: string; // the block may be incomplete and why (#287)
   variant: "history" | "new";
   tag: string;
+  customerRegion?: string;
+  selectedKey?: string;
 }) {
   const reduced = useReducedMotion();
   return (
@@ -687,34 +957,40 @@ function Block(props: {
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
+      {props.alert && <p className="stub block-alert" role="status" data-testid="discovery-error">{props.alert}</p>}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
         <ol className="list">
-          {props.rows.map((m, i) => {
+          {props.rows.map((m) => {
             const cp = m.counterparty;
             const top = [...m.components].sort((a, b) => b.value * b.weight - a.value * a.weight)[0];
             return (
               <motion.li key={cp.inn ?? cp.name} layout={reduced ? false : "position"}
-                initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, amount: 0.05 }} transition={{ duration: reduced ? 0 : 0.45, delay: reduced ? 0 : Math.min(i, 4) * 0.04, ease: easeOut }}>
-                <motion.button className="item" whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
+                initial={false} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.12 }}>
+                <motion.button className="item" aria-controls="supplier-preview" aria-pressed={props.selectedKey === supplierKey(m)} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
-                  <span className="score" title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}`}>
+                  <span className={`score score-level-${levelOf(m.score)}`} title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
                     <span className="score-num">{m.score.toFixed(2)}</span>
+                    <RelevanceTag score={m.score} />
                     <span className="score-meter" aria-hidden="true">
                       <motion.span style={{ width: `${Math.round(Math.min(1, m.score) * 100)}%`, originX: 0 }} initial={reduced ? false : { scaleX: 0 }} whileInView={{ scaleX: 1 }} viewport={{ once: true }} transition={{ duration: reduced ? 0 : 0.7, ease: easeOut }} />
                     </span>
                   </span>
                   <span className="meta">
-                    {KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}
+                    {regionLabel(cp)}
+                    {props.customerRegion && relationToCustomer(cp, props.customerRegion) && <> — {relationToCustomer(cp, props.customerRegion)}</>}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
                   <span className="badges">
+                    <RoleBadge kind={cp.kind} />
                     <OriginBadge m={m} />
+                    <WorkedWith cp={cp} customerRegion={props.customerRegion} />
                   </span>
-                  {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
+                  <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
+                  {rankerShort(m) ? <span className="why" title={rankerReason(m) ?? ""}><span className="why-label">Почему на этом месте</span>{rankerShort(m)}</span>
+                    : top && <span className="why" title={componentText(top)}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{componentText(top)}</span>}
                 </motion.button>
               </motion.li>
             );
@@ -741,8 +1017,8 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   const links = reviewLinks(cp.name, cp.inn);
   return (
     <section aria-label="Отзывы">
-      <h3>Отзывы</h3>
-      <p className="hint">Не влияет на оценку подбора. Рейтинг из отзывов не показываем: нет источника, который можно честно проверить.</p>
+      <h3>Отзывы в открытых источниках</h3>
+      <p className="hint">Внешние отзывы можно проверить по ссылкам. Их рейтинг не переносится в Митрандир и не влияет на подбор.</p>
       {links.length > 0 ? (
         <p className="review-links">
           Искать отзывы самостоятельно:{" "}
@@ -760,7 +1036,7 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   );
 }
 
-function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () => void; weightsNote?: string }) {
+function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatch; onClose: () => void; weightsNote?: string; customerRegion?: string }) {
   const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
@@ -780,13 +1056,13 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
     <motion.div className="card-overlay" initial={{ opacity: reduced ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.2 }} onClick={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-    <motion.aside ref={cardRef} initial={reduced ? false : { x: "100%" }} animate={{ x: 0 }} exit={{ x: reduced ? 0 : "100%" }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 38 }} className="card" role="dialog" aria-modal="true" onKeyDown={(event) => {
+    <motion.aside ref={cardRef} initial={reduced ? false : { x: "100%" }} animate={{ x: 0 }} exit={{ x: reduced ? 0 : "100%" }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 38 }} className="card interior-card" role="dialog" aria-modal="true" onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
       }
       if (event.key === "Tab") {
-        const elements = cardRef.current?.querySelectorAll<HTMLElement>('button, a[href]');
+        const elements = [...(cardRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? [])].filter(el => el.getClientRects().length > 0 && el.tabIndex >= 0);
         if (!elements?.length) return;
         const first = elements[0];
         const last = elements[elements.length - 1];
@@ -809,12 +1085,18 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
       </div>
       <div className={`card-summary card-summary-${m.origin === "history" ? "history" : "new"}`}>
         <span>{m.origin === "history" ? "С опытом госзакупок" : "Из открытых источников"}</span>
-        <span>Оценка <strong>{m.score.toFixed(2)}</strong></span>
+        <span>Оценка <strong>{m.score.toFixed(2)}</strong> <RelevanceTag score={m.score} /></span>
       </div>
+      <p className="card-role"><RoleBadge kind={cp.kind} /></p>
       <Breakdown m={m} />
       <h3>Почему в списке</h3>
       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
-      <p className="hint">Оценка по каждому критерию × его вес в подборе.</p>
+      {rankerReason(m) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(m)}</p>}
+      <p className="hint">{rankerReason(m)
+        ? (Math.abs(formulaScore(m) - m.score) < 0.005
+          ? "Порядок задаёт модель, критерии ниже — её входы; число — соответствие по формуле «критерий × вес»."
+          : `Порядок задаёт модель, критерии ниже — её входы. По формуле «критерий × вес» — ${formulaScore(m).toFixed(2)}; в списке число не выше, чем у стоящего выше.`)
+        : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
         {m.components.map((c) => (
           <li key={c.name}>
@@ -825,7 +1107,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
             <span className="cval">
               {c.value.toFixed(2)} × {c.weight.toFixed(2)}
             </span>
-            <span className="cexp">{c.explanation}</span>
+            <span className="cexp">{componentText(c)}</span>
           </li>
         ))}
       </ul>
@@ -842,6 +1124,15 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         <dd>{yesNo(cp.is_msp)}</dd>
         <dt>В РНП</dt>
         <dd>{yesNo(cp.in_rnp)}</dd>
+        {customerRegion && relationToCustomer(cp, customerRegion) && (
+          <>
+            <dt>Относительно заказчика</dt>
+            <dd>
+              {relationToCustomer(cp, customerRegion)} (заказчик — {customerRegion})
+              {customerRegion === "Санкт-Петербург" && typeof cp.stats?.customers_spb === "number" && `; заказчиков в СПб: ${cp.stats.customers_spb}`}
+            </dd>
+          </>
+        )}
         <dt>Регион</dt>
         <dd>{regionLabel(cp)}</dd>
         {Object.entries(cp.contacts ?? {}).map(([k, v]) => [<dt key={`k-${k}`}>{k}</dt>, <dd key={`v-${k}`}>{v}</dd>])}
@@ -859,6 +1150,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         </>
       )}
 
+      <Ratings inn={cp.inn} />
       <ReviewsBlock cp={cp} />
 
       <h3>Источники фактов</h3>
@@ -892,7 +1184,7 @@ const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa
 function Breakdown({ m }: { m: CounterpartyMatch }) {
   const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }));
   return (
-    <figure className="breakdown" aria-label="Из чего сложилась оценка">
+    <figure className="breakdown" aria-label={rankerReason(m) ? "Критерии — входы модели" : "Из чего сложилась оценка"}>
       <div className="stack" aria-hidden="true">
         {parts.map(({ c, v, color }) =>
           v > 0 ? <span key={c.name} style={{ width: `${v * 100}%`, background: color }} title={`${COMPONENT_LABEL[c.name]}: +${v.toFixed(2)}`} /> : null,
@@ -928,7 +1220,7 @@ function AboutPage({ onStart }: { onStart: () => void }) {
         </li>
         <li>
           <h3>Объяснимая оценка</h3>
-          <p>Итог — сумма критериев с весами. В карточке видно вклад каждого:</p>
+          <p>Порядок задаёт модель, обученная на истории закупок СПб 2024–2025; её входы — критерии ниже. В карточке видно, что подняло поставщика и что опустило, с цифрами; со своими весами порядок — по формуле «критерий × вес»:</p>
           <ul className="crit">
             {Object.values(COMPONENT_LABEL).map((l) => (
               <li key={l}>{l}</li>
@@ -1041,15 +1333,15 @@ function WeightsSettings({ value, onChange }: { value: WeightSettings; onChange:
   );
 }
 
-function SettingsPage({ filters, onChange, onReset, weightSet, onWeights }: {
-  filters: Filters; onChange: (f: Filters) => void; onReset: () => void;
+function SettingsPage({ facets, onBack, filters, onChange, onReset, weightSet, onWeights }: {
+  facets?: Facets; onBack: () => void; filters: Filters; onChange: (f: Filters) => void; onReset: () => void;
   weightSet: WeightSettings; onWeights: (s: WeightSettings) => void;
 }) {
   return (
     <section className="subpage" aria-labelledby="settings-title">
       <header className="top">
-        <h1 id="settings-title">Настройки подбора</h1>
-        <p className="sub">Фильтры применяются к каждому поиску и к выгрузке в Excel; их же можно менять в форме подбора. Веса оценки — только у вас.</p>
+        <h1 id="settings-title">Фильтры подбора</h1>
+        <p className="sub">Требования к поставщикам применяются к подбору и выгрузке. Где может работать исполнитель — в подборе и над результатами. Веса оценки — только у вас.</p>
       </header>
       <div className="settings">
         <fieldset className="setting-group">
@@ -1061,37 +1353,12 @@ function SettingsPage({ filters, onChange, onReset, weightSet, onWeights }: {
               <small>Субъекты малого и среднего предпринимательства по реестру ФНС — для закупок у СМП.</small>
             </span>
           </label>
-          <label className="setting">
-            <input
-              type="checkbox"
-              checked={filters.only_manufacturers}
-              onChange={(e) => onChange({ ...filters, only_manufacturers: e.target.checked })}
-            />
-            <span>
-              <strong>Только производители</strong>
-              <small>Роль определяется по основному ОКВЭД; у кого он неизвестен — скрываются, это видно в выдаче.</small>
-            </span>
-          </label>
-        </fieldset>
-        <fieldset className="setting-group">
-          <legend>География</legend>
-          <label className="setting setting-select">
-            <span>
-              <strong>Регион поставщика</strong>
-              <small>По КПП или адресу из реестра.</small>
-            </span>
-            <select aria-label="Регион поставщика" value={filters.region} onChange={(e) => onChange({ ...filters, region: e.target.value })}>
-              {REGIONS.map((r) => (
-                <option key={r} value={r}>
-                  {r || "Любой"}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterBar filters={filters} facets={facets} onChange={onChange} />
         </fieldset>
         <WeightsSettings value={weightSet} onChange={onWeights} />
         <div className="settings-actions">
-          <button type="button" className="secondary" onClick={onReset}>Сбросить настройки и сохранённый запрос</button>
+          <button type="button" className="subpage-cta" onClick={onBack}>Готово, вернуться к подбору</button>
+          <button type="button" className="secondary" onClick={onReset}>Сбросить фильтры и сохранённый запрос</button>
         </div>
       </div>
     </section>

@@ -304,9 +304,10 @@ def lookup_many(inns: Iterable[str], cache: SourceCache | None = None,
             log.warning("%s нет — открытые данные ФНС не собраны (download, build)", path)
         return {}
     try:
-        rows = duckdb.execute("SELECT inn, dataset, fetched_at, text FROM read_parquet(?) "
-                              "WHERE inn IN (SELECT unnest(?)) ORDER BY inn, dataset",
-                              [path.as_posix(), wanted]).fetchall()
+        with duckdb.connect() as con:  # not duckdb.execute(): its one shared connection is not safe across request threads
+            rows = con.execute("SELECT inn, dataset, fetched_at, text FROM read_parquet(?) "
+                               "WHERE inn IN (SELECT unnest(?)) ORDER BY inn, dataset",
+                               [path.as_posix(), wanted]).fetchall()
     except duckdb.Error as e:
         log.warning("%s не прочитан (%s) — факты ФНС пропущены", path, e)
         return {}
