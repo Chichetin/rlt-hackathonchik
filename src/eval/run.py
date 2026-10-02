@@ -26,6 +26,7 @@ from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import pipeline, ranker
 from src.match import search as search_mod
 from src.match.profiles import procurement_type
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
@@ -76,6 +77,10 @@ def config_sha256(root: Path | None = None) -> str:
         data = (root / rel).read_bytes().replace(b"\r\n", b"\n")
         h.update(rel.encode() + b"\0" + data + b"\0")
     h.update(b"method-tree\0" + git("ls-tree", "-r", "HEAD", "--", *METHOD_PATHS, root=root, strict=True).encode())
+    # The environment overrides the method too (#440): BM25_TOKENIZER replaces `tokenizer:` of the YAML. Only a set
+    # override enters the hash, so every signature computed without one stays valid.
+    if tok := get_settings().bm25_tokenizer:
+        h.update(b"env:BM25_TOKENIZER\0" + tok.encode() + b"\0")
     return h.hexdigest()
 
 
