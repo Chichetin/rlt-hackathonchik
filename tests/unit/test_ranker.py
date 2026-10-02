@@ -179,9 +179,12 @@ def test_reason_is_a_main_one_and_in_a_favour():
                       {"n_wins": -0.2, "act": 0.5})  # more wins, but the model held them against a
     assert ranker.reason(against, _ranked(0.1, 1.0, {"n_wins": math.log1p(97), "act": 0.5}, {})) == (
         "выше следующего: компонента «активность» — 0.90 против 0.50")
-    small = _ranked(1.0, 1.0, {"win_rate": 0.43, "act": 0.9}, {"days_first": 0.9, "win_rate": 0.1})
+    small = _ranked(1.0, 1.0, {"win_rate": 0.77, "act": 0.9}, {"days_first": 0.9, "win_rate": 0.1})
     other = _ranked(0.1, 1.0, {"win_rate": 0.42, "act": 0.9}, {})
-    assert ranker.reason(small, other) == "по совокупности признаков модели"  # 0.1 of 1.0 < MIN_SHARE
+    # 0.1 of 1.0: below MIN_SHARE — named as one of many, not as the reason
+    assert ranker.reason(small, other) == "по совокупности признаков модели, в том числе: доля побед — 77% против 42%"
+    tiny = _ranked(1.0, 1.0, {"win_rate": 0.77}, {"days_first": 0.97, "win_rate": 0.03})
+    assert ranker.reason(tiny, other) == "по совокупности признаков модели"  # 3 % < MIN_MENTION: not named at all
     near, far = math.log(1.2), math.log(3.0)
     assert ranker.reason(_ranked(1.0, 1.0, {"price_gap": near}, {"price_gap": 0.5}),
                          _ranked(0.1, 1.0, {"price_gap": far}, {})) == (

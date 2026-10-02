@@ -337,17 +337,19 @@ BETTER: dict[str, int] = {
 }
 
 
-# A named reason carries at least this share of what lifted `a` above `b` (Σ positive differences of the
-# contributions): «Выше следующего: X» reads as the main reason, not a 1 % one (second review of #309; on six
-# demo queries 46 of 52 pairs keep a named feature).
+# A reason named as THE reason carries at least MIN_SHARE of what lifted `a` above `b` (Σ positive differences of
+# the contributions): «Выше следующего: X» reads as the main reason (second review of #309). A smaller one, but
+# not below MIN_MENTION, is named as one of many: «по совокупности признаков модели, в том числе: X» — the top
+# row of the demo query keeps a readable reason («доля побед — 77% против 42%») without claiming it is the main one.
 MIN_SHARE = 0.2
+MIN_MENTION = 0.05
 
 
 def reason(a: Ranked, b: Ranked) -> str:
     """Why the model put `a` right above `b` — the text after the UI label «Выше следующего»: among the features
     where `a` is better by the customer's reading (BETTER) and the two values differ as shown, the one whose
-    contribution differs the most in a's favour, if it carries MIN_SHARE of the lift (exact for trees and w·z
-    alike); none — «по совокупности признаков модели»."""
+    contribution differs the most in a's favour (exact for trees and w·z alike) — as the reason if it carries
+    MIN_SHARE of the lift, as «в том числе» if MIN_MENTION; none — «по совокупности признаков модели»."""
     if a.raw - b.raw <= SAME:
         if a.score > b.score:
             return f"оценка модели равна; выше релевантность — {a.score:.4f} против {b.score:.4f}"
@@ -357,7 +359,7 @@ def reason(a: Ranked, b: Ranked) -> str:
     diff = a.contrib - b.contrib
     lift = float(diff[diff > 0].sum())
     for f in np.argsort(-diff, kind="stable"):
-        if diff[f] <= 0 or diff[f] < MIN_SHARE * lift:
+        if diff[f] <= 0 or diff[f] < MIN_MENTION * lift:
             break
         name = NAMES[f]
         va, vb = float(a.row[f]), float(b.row[f])
@@ -366,7 +368,10 @@ def reason(a: Ranked, b: Ranked) -> str:
         shown_a, shown_b = _value(name, va), _value(name, vb)
         if shown_a == shown_b or (va - vb) * BETTER[name] <= 0:
             continue  # «1.00 против 1.00» (an interaction, or a difference below the shown precision) or a worse value
-        return f"выше следующего: {FEATURES[name]} — {shown_a} против {shown_b}"
+        what = f"{FEATURES[name]} — {shown_a} против {shown_b}"
+        if diff[f] >= MIN_SHARE * lift:
+            return f"выше следующего: {what}"
+        return f"по совокупности признаков модели, в том числе: {what}"
     return "по совокупности признаков модели"
 
 
