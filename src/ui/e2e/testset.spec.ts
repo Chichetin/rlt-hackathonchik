@@ -21,7 +21,7 @@ test("тестовая выгрузка: загрузка CSV → процеду
   await expect(panel.getByText("≈ 3 процедуры, около 1 мин")).toBeVisible(); // the wait before the download
 
   await lots.first().click();
-  await expect(page).toHaveURL(/\/results(\?.*)?$/);
+  await expect(page).toHaveURL(/\/search(\?.*)?$/);
   await expect(page.getByRole("region", { name: "С опытом госзакупок" })).toBeVisible();
   await expect(page.getByLabel("Что нужно закупить")).not.toHaveValue("");
 

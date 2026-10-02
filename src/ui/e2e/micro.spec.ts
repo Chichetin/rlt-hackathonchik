@@ -63,7 +63,7 @@ test("подсказка меню доступна с клавиатуры, за
   await page.goto("/");
   const link = page.getByRole("navigation").getByRole("link", { name: "Подбор", exact: true });
   await link.focus();
-  await expect(page.getByRole("tooltip")).toContainText("Опишите закупку");
+  await expect(page.getByRole("tooltip")).toContainText("Название товара или ОКПД2");
   await expect(link).toHaveAttribute("aria-describedby", /.+/);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("tooltip")).toHaveCount(0);

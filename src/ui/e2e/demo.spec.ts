@@ -14,8 +14,9 @@ test("демо: запрос → два блока → карточка → фи
   await expect(page).toHaveURL(/\/search$/);
 
   // 1. Ввёл номер закупки → запрос заполнен из извещения (предмет, НМЦК, заказчик)
+  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага офисная А4/);
   await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
   await expect(page.getByLabel("ИНН заказчика")).toHaveValue("7801000051");
@@ -147,8 +148,9 @@ test("демо: запрос → два блока → карточка → фи
 // Отдельная регрессия #232: расширенная проверка ролей не меняет состав и бюджет основного демо.
 test("фильтр роли: счётчик дистрибьюторов совпадает с выдачей и бейджами", async ({ page }) => {
   await page.goto("/search");
+  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByLabel("Что нужно закупить")).toHaveValue(/Бумага офисная А4/);
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
@@ -188,8 +190,9 @@ test("фильтр роли: счётчик дистрибьюторов сов�
 
 test("номер закупки не найден → понятное сообщение, свободный текст работает", async ({ page }) => {
   await page.goto("/search");
+  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill("999999");
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByRole("alert")).toContainText("не найдена");
   await page.getByLabel("Что нужно закупить").fill("Бумага офисная А4");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
@@ -229,7 +232,7 @@ test("deep link: /search?lot=N загружает лот и сразу ищет,
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await expect(history.locator(".item").first()).toBeVisible();
   await expect(page.locator(".own-lot-note")).toHaveText(new RegExp(`^Закупка ${DEMO_LOT} есть в данных`));
-  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page).toHaveURL(new RegExp(`/search\\?lot=${DEMO_LOT}$`));
   // скопированная ссылка воспроизводит поиск в новой вкладке
   const copy = await page.context().newPage();
   await copy.goto(page.url());
@@ -240,7 +243,7 @@ test("deep link: /search?lot=N загружает лот и сразу ищет,
 test("deep link: /search?q=текст ищет по тексту; неизвестный лот — форма с причиной", async ({ page }) => {
   await page.goto("/search?q=" + encodeURIComponent("Бумага офисная А4"));
   await expect(page.getByRole("region", { name: "С опытом госзакупок" }).locator(".item").first()).toBeVisible();
-  await expect(page).toHaveURL(/\/results\?q=/);
+  await expect(page).toHaveURL(/\/search\?q=/);
 
   await page.goto("/search?lot=999999999");
   await expect(page).toHaveURL(/\/search/);
@@ -250,11 +253,12 @@ test("deep link: /search?q=текст ищет по тексту; неизвес
 // #395, ревью: F5 на /results?lot=N повторяет сохранённый запрос вкладки с фильтрами и НМЦК — не сбрасывает их
 test("deep link: обновление страницы сохраняет фильтр и НМЦК", async ({ page }) => {
   await page.goto("/search");
+  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
-  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page).toHaveURL(new RegExp(`/search\\?lot=${DEMO_LOT}$`));
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await expect(history.locator(".item").first()).toBeVisible();
   const select = page.getByRole("group", { name: "Заказчик и тип закупки" }).getByRole("combobox", { name: "Может работать у заказчика" });
@@ -264,7 +268,7 @@ test("deep link: обновление страницы сохраняет фил
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("mitrandir.query") ?? "")).toContain('"near":"near"');
 
   await page.reload();
-  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page).toHaveURL(new RegExp(`/search\\?lot=${DEMO_LOT}$`));
   await expect(history.locator(".item").first()).toBeVisible();
   await expect(select).toHaveValue("near");
   await page.goto("/search");
@@ -276,14 +280,15 @@ test("deep link: обновление страницы сохраняет фил
 test("deep link: ссылка на уже искомый лот в той же вкладке ищет заново; назад/вперёд и возврат из фильтров держат адрес", async ({ page }) => {
   const history = page.getByRole("region", { name: "С опытом госзакупок" });
   await page.goto("/search");
+  await page.locator(".notice-import > summary").evaluate(e => { if (!(e.parentElement as HTMLDetailsElement).open) (e as HTMLElement).click(); });
   await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
-  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.getByRole("button", { name: "Заполнить по номеру" }).click();
   await page.getByRole("button", { name: "Найти поставщиков" }).click();
   await expect(history.locator(".item").first()).toBeVisible();
 
   await page.goto(`/search?lot=${DEMO_LOT}`);
   await expect(history.locator(".item").first()).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page).toHaveURL(new RegExp(`/search\\?lot=${DEMO_LOT}$`));
   await expect(page.getByText("Проверьте и нажмите")).toHaveCount(0);
 
   await page.goto("/search?q=" + encodeURIComponent("Бумага офисная А4"));
@@ -295,11 +300,11 @@ test("deep link: ссылка на уже искомый лот в той же �
   await page.goBack();
   await expect(page).toHaveURL(/\/search/);
   await page.goForward();
-  await expect(page).toHaveURL(/\/results\?q=/);
+  await expect(page).toHaveURL(/\/search\?q=/);
   await expect(history.locator(".item").first()).toBeVisible();
 
   // возврат из «Фильтров» на результаты — адрес с параметрами
   await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).click();
   await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
-  await expect(page).toHaveURL(/\/results\?q=/);
+  await expect(page).toHaveURL(/\/search\?q=/);
 });

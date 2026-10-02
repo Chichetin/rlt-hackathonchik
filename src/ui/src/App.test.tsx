@@ -178,8 +178,9 @@ test("lot number fills the query from the notice", async () => {
   const lotQuery = { query_id: "lot-9", text: "Бумага из извещения", okpd2: ["17.12"], budget: 1000, customer_inn: "7804105239", channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(lotQuery), { status: 200 }));
   render(<App />);
+  await userEvent.click(screen.getByText("Заполнить из готового извещения"));
   await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
-  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
+  await userEvent.click(screen.getByRole("button", { name: "Заполнить по номеру" }));
   expect(await screen.findByDisplayValue("Бумага из извещения")).toBeInTheDocument();
   expect(screen.getByLabelText("НМЦК, ₽")).toHaveValue("1000");
   expect(screen.getByText(/ОКПД2: 17.12/)).toBeInTheDocument();
@@ -188,11 +189,12 @@ test("lot number fills the query from the notice", async () => {
 test("lot 503 says data is not connected and falls back to free text", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ detail: "нет данных" }), { status: 503 }));
   render(<App />);
+  await userEvent.click(screen.getByText("Заполнить из готового извещения"));
   await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
-  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
+  await userEvent.click(screen.getByRole("button", { name: "Заполнить по номеру" }));
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent("не подключены");
-  expect(alert).toHaveTextContent("текстом");
+  expect(alert).toHaveTextContent("основное поле");
 });
 
 test("card shows stats and the unconfirmed INN note", async () => {
@@ -216,8 +218,9 @@ test("editing the query text drops the lot context (okpd2, channel)", async () =
   const lotQuery = { query_id: "lot-9", text: "Бумага", okpd2: ["17.12"], budget: null, customer_inn: null, channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(lotQuery), { status: 200 }));
   render(<App />);
+  await userEvent.click(screen.getByText("Заполнить из готового извещения"));
   await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
-  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
+  await userEvent.click(screen.getByRole("button", { name: "Заполнить по номеру" }));
   expect(await screen.findByText(/ОКПД2: 17.12/)).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("Что нужно закупить"), " другое");
   expect(screen.queryByText(/ОКПД2: 17.12/)).not.toBeInTheDocument();
@@ -458,8 +461,9 @@ test("lot chip names the OKPD2 class", async () => {
   const lotQuery = { query_id: "lot-9", text: "Бумага из извещения", okpd2: ["17.12"], budget: 1000, customer_inn: null, channel: "ЭМ", filters: {}, region: "Санкт-Петербург" };
   vi.spyOn(globalThis, "fetch").mockImplementation(okpd2Route(lotQuery));
   render(<App />);
+  await userEvent.click(screen.getByText("Заполнить из готового извещения"));
   await userEvent.type(screen.getByLabelText("Номер закупки (необязательно)"), "9");
-  await userEvent.click(screen.getByRole("button", { name: "Загрузить закупку" }));
+  await userEvent.click(screen.getByRole("button", { name: "Заполнить по номеру" }));
   expect(await screen.findByText("ОКПД2: 17.12 «Бумага и картон»")).toBeInTheDocument();
 });
 

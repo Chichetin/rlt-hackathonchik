@@ -84,9 +84,6 @@
 .page-workspace .inspector-identity h2 { margin: 0; }
 .page-workspace .inspector-topline + .supplier-metrics { margin-top: 22px; }
 .page-workspace .result-inspector .ratings { min-height: 210px; }
-@media (min-width: 1101px) and (min-height: 760px) {
-  .page-workspace[data-route="/results"]:has(.results):not(:has(.query:not([hidden]))) .result-inspector { height: auto; }
-}
 @media (max-width: 900px) {
   .page-workspace .result-browser .result-inspector { height: max(440px,calc(100dvh - var(--ui-header) - 36px)); max-height: none; }
 }

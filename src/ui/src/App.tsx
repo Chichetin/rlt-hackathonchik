@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
 import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
+import { SearchProgress } from "./SearchProgress";
+import { ResultsReader } from "./ResultsReader";
 import { ResultInspector } from "./ResultInspector";
 import { SupplierAvatar, SupplierId, SupplierMetrics, supplierKey, recommendationSummary } from "./SupplierIdentity";
 import { SupplierScore } from "./SupplierScore";
@@ -75,18 +77,6 @@ function BrandMark() {
     <path d="M32 3 60 32 32 61 4 32Z" stroke="currentColor" strokeWidth="2" />
     <path d="M18 44V21l14 17 14-17v23M14 44h9m18 0h9" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
   </svg>;
-}
-
-function Skeleton() {
-  return (
-    <div className="skeleton" aria-hidden="true">
-      {[0, 1, 2].map((i) => (
-        <div className="skeleton-item" key={i}>
-          <i /><i /><i />
-        </div>
-      ))}
-    </div>
-  );
 }
 
 /** «Новые» emptied by the role chip «Производитель» alone, judged by the filters of the shown answer (#84): the role of
@@ -462,7 +452,7 @@ export function App() {
             : st === 422
               ? "Номер закупки — только цифры (lot_id или реестровый номер)."
               : `Не удалось загрузить закупку: ${String(e)}.`;
-      setLotMsg({ kind: "err", text: `${why} Опишите предмет закупки текстом ниже.` });
+      setLotMsg({ kind: "err", text: `${why} Введите название товара или ОКПД2 в основное поле.` });
       return null;
     } finally {
       setLotBusy(false);
@@ -545,12 +535,12 @@ export function App() {
       save(ready
         ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
         : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
-      if (window.location.pathname === "/search") go("/results");
+      if (window.location.pathname === "/results") go("/search");
       // the address bar keeps a link that repeats this search (#395): a copied URL opens the same query
-      if (window.location.pathname === "/results") {
+      if (window.location.pathname === "/search") {
         const loaded = ready ? ready.extra.lot != null : lot != null;
         const link = deepLinkSearch(ready ? ready.lotId : lotId, loaded, qText);
-        window.history.replaceState(null, "", `/results${link}${window.location.hash}`);
+        window.history.replaceState(null, "", `/search${link}${window.location.hash}`);
       }
     } catch (e) {
       if (seq !== runSeq.current) return;
@@ -621,7 +611,7 @@ export function App() {
 
   // a reload of /results repeats the saved query
   useEffect(() => {
-    if (path === "/results" && !deepAtMount.current.lot && !deepAtMount.current.q && !res && state === "idle" && text.trim()) void run();
+    if ((path === "/search" || path === "/results") && !deepAtMount.current.lot && !deepAtMount.current.q && !res && state === "idle" && text.trim()) void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
@@ -656,7 +646,7 @@ export function App() {
 
   const link = (to: Path) => ({
     href: to,
-    "aria-current": path === to ? ("page" as const) : undefined,
+    "aria-current": (path === to || (path === "/results" && to === "/search")) ? ("page" as const) : undefined,
     onClick: (e: React.MouseEvent) => {
       if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return; // new tab/window: let the browser do it
       e.preventDefault();
@@ -740,9 +730,9 @@ export function App() {
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
     <div inert={!!open}><ScrollTools /></div>
-    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path} inert={!!open}
+    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path === "/search" && res ? "/results" : path} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
-      <GlassHeader path={path} link={link} mark={<BrandMark />} />
+      <GlassHeader path={path === "/results" ? "/search" : path} link={link} mark={<BrandMark />} />
       {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
       <div className="content">
       {STATIC_DEMO && (
@@ -760,13 +750,13 @@ export function App() {
       : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => {
         // back to the results keeps the link of their search (#395)
         const s = loadSaved();
-        go(filterReturn.current === "/results" && s.text ? `/results${deepLinkSearch(s.lotId ?? "", !!s.lot, s.text)}` : filterReturn.current);
+        go(s.text ? `/search${deepLinkSearch(s.lotId ?? "", !!s.lot, s.text)}` : "/search");
       }} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
       <div className="top">
-        <h1>{path === "/results" ? "Поставщики для вашей закупки" : "Подбор поставщиков для закупки"}</h1>
-        {path !== "/results" && <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>}
+        <h1>Подбор поставщиков для закупки</h1>
+        {!res && <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>}
       </div>
 
       {res?.stub && (
@@ -775,22 +765,10 @@ export function App() {
         </div>
       )}
 
-      {path === "/results" && res && <div className="results-commandbar">
-        <p><span>Закупка</span><strong>{res.query.text}</strong></p>
-        <div className="results-commands">
-          <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
-          {!STATIC_DEMO && <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
-            setError(`выгрузка в Excel: ${String(e)}`); setState("error");
-          })}>Выгрузить в Excel</button>}
-        </div>
-        <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
-        {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
-      </div>}
-      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""} ${path === "/results" && res ? "results-workspace" : ""}`}>
+      <div className="search-workbench results-workspace">
       <form
         id="supplier-search"
         className="query"
-        hidden={path === "/results" && !!res}
         onSubmit={(e) => {
           e.preventDefault();
           void run();
@@ -799,58 +777,33 @@ export function App() {
         <div className="query-main">
         <div className="section-heading">
           <div>
-            <h2>Параметры закупки</h2>
-            <p>Загрузите извещение или опишите, что вам нужно.</p>
+            <h2>Что вы хотите найти?</h2>
+            <p>Введите название товара, описание или код ОКПД2 — найдём подходящих поставщиков и объясним рекомендации.</p>
           </div>
         </div>
-        <div className="lot-section">
-          <label htmlFor="lot">Номер закупки (необязательно)</label>
-          <div className="lotrow">
-            <input
-              id="lot"
-              inputMode="numeric"
-              value={lotId}
-              placeholder="Введите номер извещения"
-              onChange={(e) => {
-                setLotId(e.target.value);
-                resetLot();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void loadLot();
-                }
-              }}
-            />
-            <button type="button" className="secondary" disabled={!lotId.trim() || lotBusy} onClick={() => void loadLot()}>
-              {lotBusy ? "Загружаем…" : "Загрузить закупку"}
-            </button>
-          </div>
-          {lotMsg && (
-            <p className={lotMsg.kind === "ok" ? "lotmsg" : "lotmsg lotmsg-err"} role={lotMsg.kind === "ok" ? "status" : "alert"}>
-              {lotMsg.text}
-            </p>
-          )}
-          {lot && lotMsg?.kind === "ok" && <BacktestPanel key={lotQueryId} ident={lotId} />}
-        </div>
-        <div className="query-divider"><span>или введите описание</span></div>
         <label htmlFor="q">Что нужно закупить</label>
         <textarea
           id="q"
+          aria-describedby="query-help"
           rows={3}
           value={text}
-          placeholder="Наименование товара или позиции из ТЗ, например: бумага офисная А4, 80 г/м²"
+          placeholder="Например: офисная мебель или 31.01.11.150"
           onChange={(e) => {
             setText(e.target.value);
             resetLot();
           }}
         />
+        <p id="query-help" className="hint">Название товара или ОКПД2. Можно добавить характеристики: размер, материал, назначение.</p>
+        <div className="actions product-search-action">
+          <button type="submit" disabled={!text.trim() || state === "loading"}><SearchIcon />{state === "loading" ? "Ищем…" : "Найти поставщиков"}</button>
+        </div>
         <ExampleWheel onConfirm={() => document.getElementById("q")?.focus()} options={EXAMPLES} value={lot ? "" : text} onChange={example => {
           setText(example);
           resetLot();
         }} />
         </div>
-        <div className="query-options">
+        <details className="query-options" open={!res}>
+        <summary>Уточнить подбор</summary>
         <div className="section-heading refinement-heading"><div>
           <h2>Уточнить подбор</h2>
           <p>Необязательные параметры</p>
@@ -887,33 +840,74 @@ export function App() {
         <div className="row query-finish">
           <div className="query-refinements">
             <a className="filter-link" {...link("/settings")}>Фильтры {filtersActive(filters) && <span className="filter-applied">применены</span>}<span aria-hidden="true">↗</span></a>
-            <label className="query-region">Может работать у заказчика
+            {!res && <label className="query-region">Может работать у заказчика
               <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} facets={res?.facets} />
-            </label>
+            </label>}
           </div>
-          <div className="actions">
-            <button type="submit" disabled={!text.trim() || state === "loading"}>
-              <SearchIcon />
-              {state === "loading" ? "Ищем…" : "Найти поставщиков"}
-            </button>
 
+        </div>
+        </details>
+        <details className="notice-import" open={lotMsg?.kind === "err" || undefined}><summary>Заполнить из готового извещения</summary>
+        <div className="lot-section">
+          <label htmlFor="lot">Номер закупки (необязательно)</label>
+          <div className="lotrow">
+            <input
+              id="lot"
+              aria-describedby="lot-help"
+              inputMode="numeric"
+              value={lotId}
+              placeholder="Введите номер извещения"
+              onChange={(e) => {
+                setLotId(e.target.value);
+                resetLot();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void loadLot();
+                }
+              }}
+            />
+            <button type="button" className="secondary" disabled={!lotId.trim() || lotBusy} onClick={() => void loadLot()}>
+              {lotBusy ? "Загружаем…" : "Заполнить по номеру"}
+            </button>
           </div>
+          <p id="lot-help" className="hint">Номер конкретного объявления в АИС ГЗ или Электронном магазине, а не код ОКПД2. ОКПД2 обозначает категорию товара — например, 31.01 «Мебель для офисов и предприятий торговли». Если номера нет, оставьте поле пустым и опишите покупку ниже.</p>
+          {lotMsg && (
+            <p className={lotMsg.kind === "ok" ? "lotmsg" : "lotmsg lotmsg-err"} role={lotMsg.kind === "ok" ? "status" : "alert"}>
+              {lotMsg.text}
+            </p>
+          )}
+          {lot && lotMsg?.kind === "ok" && <BacktestPanel key={lotQueryId} ident={lotId} />}
         </div>
-        </div>
+        </details>
         <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
       </form>
       <div className="output">
+      {state === "loading" && <SearchProgress />}
+      {res && <div className="results-commandbar">
+        <p><span>Закупка</span><strong>{res.query.text}</strong></p>
+        <div className="results-commands">
+          <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
+          {!STATIC_DEMO && <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
+            setError(`выгрузка в Excel: ${String(e)}`); setState("error");
+          })}>Выгрузить в Excel</button>}
+        </div>
+        <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
+        {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
+      </div>}
+
       {state === "error" && (
         <div className="error" role="alert">
           Не удалось получить подбор: {error}
         </div>
       )}
 
-      {(!res || path === "/search") && state !== "error" && (
-        state === "loading" ? <Skeleton /> : path === "/results" ? (
+      {!res && state === "idle" && (
+        path === "/results" ? (
           <section className="getting-started" aria-label="Результаты">
             <h2>Вы ещё не запускали подбор</h2>
-            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки и нажмите «Найти поставщиков».</p>
+            <p className="empty-lead">Введите название товара или ОКПД2 и нажмите «Найти поставщиков».</p>
           </section>
         ) : (
         <section id="about" className="getting-started" aria-label="Как работает подбор">
@@ -921,7 +915,7 @@ export function App() {
           <ol className="steps">
             <li>
               <h3>Опишите закупку</h3>
-              <p>Номер извещения из АИС ГЗ или текст позиции из ТЗ. По номеру подтянутся ОКПД2, НМЦК и заказчик.</p>
+              <p>Напишите название товара или код ОКПД2. Можно добавить характеристики и требования.</p>
             </li>
             <li>
               <h3>Получите два списка</h3>
@@ -936,13 +930,13 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets, res.context?.purchase_type).map((n) => (
+      {res && state !== "loading" && filterNotes(base, filters, res.facets, res.context?.purchase_type).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
       ))}
 
-      {path === "/results" && res?.corrections && shownQuery && state !== "loading" && (
+      {res?.corrections && shownQuery && state !== "loading" && (
         <p className="lotmsg spell-note" role="note" data-testid="query-corrected">
           Запрос исправлен (раскладка или опечатки):{" "}
           {res.corrections.map(([typed, searched], i) => <span key={i}>{i > 0 && ", "}«{typed}» → «{searched}»</span>)}.{" "}
@@ -953,7 +947,7 @@ export function App() {
         </p>
       )}
 
-      {path === "/results" && res?.excludedLot && state !== "loading" && (
+      {res?.excludedLot && state !== "loading" && (
         <p className="lotmsg own-lot-note" role="note">
           Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
           выдачу только по другим своим закупкам. Для закупок июля–сентября 2025 места участников по истории до
@@ -961,11 +955,12 @@ export function App() {
         </p>
       )}
 
-      {path === "/results" && res && (
-        <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
+      {res && (
+        <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"} inert={state === "loading"}>
           {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
             Оценка: {presetTitle(weightSet)} · только у вас
           </a>}
+          <ResultsReader>
           <div className="result-browser" data-mobile-details={mobileDetails && !!selectedResult}>
           <div className="result-list-pane">
             <div className="result-groups" role="group" aria-label="Группа поставщиков">
@@ -1031,6 +1026,7 @@ export function App() {
             onPrevious={selectedIndex > 0 ? () => selectResult(activeRows[selectedIndex - 1], true) : undefined}
             onNext={selectedIndex >= 0 && selectedIndex + 1 < activeRows.length ? () => selectResult(activeRows[selectedIndex + 1], true) : undefined} />
           </div>
+          </ResultsReader>
         </motion.main>
       )}
       </div>
@@ -1330,7 +1326,7 @@ function AboutPage({ onStart }: { onStart: () => void }) {
       <ol className="steps">
         <li>
           <h3>Опишите закупку</h3>
-          <p>Номер извещения из АИС ГЗ или текст позиции из ТЗ. По номеру подтягиваются ОКПД2, НМЦК и заказчик.</p>
+          <p>Напишите название товара или код ОКПД2. Можно добавить характеристики и требования.</p>
         </li>
         <li>
           <h3>Два списка</h3>
