@@ -743,7 +743,7 @@ export function App() {
     <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
-      {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm={path !== "/results" && path !== "/search"} /></div>}
+      {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
       <div className="content">
       {STATIC_DEMO && (
         <div className="stub" role="status" data-testid="static-demo">
@@ -1096,7 +1096,7 @@ function Block(props: {
                   </span>
                   <span className="supplier-meta">
                     <RoleBadge kind={cp.kind} />
-                    <span>{regionLabel(cp)}</span>
+                    <span>{regionLabel(cp)}{relationToCustomer(cp, props.customerRegion) && <> — {relationToCustomer(cp, props.customerRegion)}</>}</span>
                     <span className="supplier-inn">ИНН {cp.inn ? <strong>{cp.inn}</strong> : "не подтверждён"}</span>
                   </span>
                   <span className="supplier-reading">
