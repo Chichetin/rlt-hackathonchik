@@ -112,6 +112,7 @@ def test_store_rows_are_identical(loaded):
         for codes in (["17.12.14.110"], ["17.12.99.000", "26.20"], ["17.12"], ["17"], ["99"]):
             assert pg.class_history(inns, codes, as_of) == pq.class_history(inns, codes, as_of)
         assert pg.supplier_rows(inns + ["0000000000"], as_of) == pq.supplier_rows(inns + ["0000000000"], as_of)
+        assert pg.supplier_inns(as_of) == pq.supplier_inns(as_of) and set(inns) <= pq.supplier_inns(as_of)  # #293
         for cust in ("7801000051", "7701000040", "0000000000"):
             assert pg.customer_lots(inns, cust, as_of) == pq.customer_lots(inns, cust, as_of)
         assert pq.customer_lots(inns, "7801000051", as_of)  # not vacuous
@@ -156,6 +157,24 @@ def test_lot_lookup_on_postgres(loaded, use):
     with pytest.raises(LotNotFound):  # longer than bigint: compared as reqnum only, not a crash
         find_lot("9" * 30)
     store_mod.clear_stores()
+
+
+@needs_pg
+def test_discovery_checks_organizers_data_on_postgres_without_parquet(loaded, use, monkeypatch, tmp_path):
+    """#220 №4, #293: in `make up` (Postgres only) «Новые» are checked against organizers' data — before, the known
+    INNs and the lot class were read from the parquet, and without it `history_checked` was False."""
+    from src.enrich import discover as D
+
+    use("parquet")
+    history = search(Query(query_id="q", text="бумага А4"))
+    inns = [m.counterparty.inn or "" for m in history] + ["0000000000"]
+    on_parquet = (D.known_inns(inns, None), D.known_inns(inns, CUTOFF), D._lots_class(history))
+    use("postgres")
+    monkeypatch.setenv("DATA_PROCESSED_DIR", str(tmp_path / "no-parquet"))
+    store_mod.clear_stores()
+    assert store_mod.get_store().name == "postgres"
+    on_pg = (D.known_inns(inns, None), D.known_inns(inns, CUTOFF), D._lots_class(history))
+    assert on_pg == on_parquet and on_pg[0] and on_pg[2] == "17.12"
 
 
 @needs_pg
@@ -265,15 +284,14 @@ DIRECT_PARQUET_OK = {
     "src/eval/emb_bench.py": "the GPU embedding bench (#115), not the product path",
     "src/eval/finetune.py": "offline training pairs of the embedder fine-tuning (#270, E3), not the product path",
     "src/eval/ce_bench.py": "the cross-encoder rerank bench (#269, E4), not the product path",
-    "src/eval/pool_recall.py": "the SMB pool parquet (#187); organizers' INNs via discover",
+    "src/eval/pool_recall.py": "the SMB pool parquet (#187); organizers' INNs via Store.supplier_inns",
     "src/eval/judge_hist.py": "eval tool (#301): item history for blind judge packets, not the product path",
     "src/sources/msp_dump.py": "the SMB register dump, not organizers' data",
     "src/sources/fns_opendata.py": "FNS open data, not organizers' data",
     "src/sources/gisp.py": "the GISP export of the registry of industrial products (#74), not organizers' data",
-    "src/enrich/discover.py": "waits for PR #131 and #258 — the second part of #293",
-    "src/match/new_fit.py": "OKPD2 item profile of «Новые» (#77, shadow) — the second part of #293",
+    "src/match/new_fit.py": "OKPD2 item profile of «Новые» (#77, shadow: does not change the output; D-165)",
     "src/ingest/predict.py": "make predict (#229): offline batch over a test upload: known OKPD2 classes and sections "
-                             "(code vs text); to Store with the second part of #293",
+                             "(code vs text) on its own build (D-165)",
 }
 
 
