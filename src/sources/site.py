@@ -21,6 +21,7 @@ import html as html_mod
 import re
 import threading
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
 
@@ -115,9 +116,10 @@ def _pacer(host: str) -> HostPacer:
         return _pacers.setdefault(host, HostPacer(lambda: MIN_INTERVAL_S))
 
 
-def _get(client: httpx.Client, url: str) -> httpx.Response:
+def _get(client: httpx.Client, url: str, allowed: Callable[[str], bool] | None = None) -> httpx.Response:
     """GET following redirects within the same site only (each hop paced): a redirect to another host is a
-    refusal — that host's robots.txt was never asked."""
+    refusal — that host's robots.txt was never asked. `allowed` — robots.txt for the path after a redirect
+    within the site (a page may redirect into a disallowed path); not allowed → a refusal, no request."""
     for _ in range(MAX_REDIRECTS + 1):
         with _pacer(urlsplit(url).hostname or "").slot():
             r = client.get(url, follow_redirects=False)
@@ -126,6 +128,8 @@ def _get(client: httpx.Client, url: str) -> httpx.Response:
         target = urljoin(url, r.headers.get("location", ""))
         if not same_site(target, url):
             raise Refused(f"{url}: перенаправление на другой сайт {target} — не идём")
+        if allowed is not None and not allowed(target):
+            raise Refused(f"{target}: robots.txt не разрешает (после перенаправления с {url})")
         url = target
     raise Refused(f"{url}: больше {MAX_REDIRECTS} перенаправлений")
 
@@ -180,7 +184,7 @@ def fetch_page(url: str, cache: SourceCache | None = None, client: httpx.Client 
     def live(u: str) -> tuple[int, str]:
         c = client or _client()
         try:
-            r = _get(c, u)
+            r = _get(c, u, lambda target: robots_allows(target, cache, client, offline=False))
         finally:
             if client is None:
                 c.close()
