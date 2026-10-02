@@ -1,0 +1,23 @@
+{
+ "top": 100,
+ "large_rows": 946,
+ "large_from_bo": 897,
+ "large_from_pb": 49,
+ "large_with_okved": 899,
+ "gap_rows": 100,
+ "candidates_rows": 846,
+ "candidates_offerable": 723,
+ "candidates_among_organizers_suppliers": 0,
+ "wins": 543841,
+ "wins_in_sme_registry": 399731,
+ "wins_outside_sme_registry": 144110,
+ "wins_in_large": 47510,
+ "winners_outside_sme_registry": 17276,
+ "winners_in_large": 100,
+ "participations": 1009976,
+ "participations_in_large": 82827,
+ "share_of_wins_outside_registry_now_in_pool": 0.3297,
+ "share_of_all_wins_in_large": 0.0874,
+ "share_of_all_wins_in_pool": 0.8224,
+ "share_of_all_wins_in_pool_before": 0.735
+}
