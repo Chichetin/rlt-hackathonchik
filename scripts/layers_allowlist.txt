@@ -7,10 +7,5 @@
 # Схема слоёв — scripts/check_layers.py (LAYERS) и docs/project-structure.md, «Правила импортов».
 # Устранение — #294; список печатает `python scripts/check_layers.py --all`.
 
-# Нижний слой тянет верхний: роль по ОКВЭД и MSP_CATEGORY лежат в enrich, а нужны источникам и пулу.
-src.db.pool -> src.enrich.role          # L1 -> L3; role.py — чистая функция над contracts, уедет вниз
-src.sources.msp_dump -> src.enrich.role         # L1 -> L3; то же
-src.sources.msp_dump -> src.enrich.enrich       # L1 -> L3; константа MSP_CATEGORY
-
 # Офлайн-источник ФНС сверяет факты своей CLI-командой `lookup` с проверкой Evidence (#59): check_evidence — вниз, в contracts.
 src.sources.fns_opendata -> src.enrich.evidence  # L1 -> L3; ленивый, только в main() (`lookup`)
