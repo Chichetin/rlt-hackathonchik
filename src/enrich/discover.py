@@ -540,6 +540,11 @@ _LETTERS = re.compile(r"[^\W\d_]+", re.UNICODE)
 # «медицинский», «применения»; Dr.Web met «электропитание». Compared by 5 letters, as configs/discover.yaml.
 GISP_STOPWORDS = ("через", "около", "после", "между", "перед", "медиц", "приме", "препа", "матер", "однор", "компл",
                   "средс", "защит", "элект", "издел", "марки", "массо", "форма", "разме", "назна", "испол")
+# A word of exactly MIN_STEM letters is its own stem («шкаф», «стол», «стул», «мыло», «клей», #476); these are the
+# 4-letter words of dev lot items that name no product (counted over eval/cases/dev.jsonl), compared whole.
+GISP_SHORT_STOPWORDS = ("года", "типа", "виде", "вида", "двух", "трех", "пяти", "одно", "иные", "этап", "мини",
+                        "прав", "мест", "спец", "штук", "раза", "июле", "анти", "срок", "теме", "кода", "ктру",
+                        "цена", "день", "базе", "базы", "база", "сети", "учет", "корп", "цвет", "тела", "сред")
 GISP_STEP = {"code": "registry", "kind": "registry_kind"}  # match level → key of STEP
 GISP_MIN_SHARED = {"code": 1, "kind": 2}  # a neighbour code needs two words of the items in the product's name
 MIN_STEM = 4  # a stem of ≤ 3 letters («при», «лот», «мнн») is not a word of the product
@@ -560,10 +565,11 @@ def items_text(text: str) -> str:
 def query_stems(text: str) -> list[str]:
     """Stems of the lot's ITEMS that may name the product: stems of ≥ MIN_STEM letters, minus the service words of a
     purchase (configs/discover.yaml `query_stopwords`) and GISP_STOPWORDS, compared by 5 letters."""
-    stop = {str(w).lower()[:new_fit.PREFIX] for w in (*new_fit.config().get("query_stopwords", ()), *GISP_STOPWORDS)}
+    stop = {str(w).lower()[:new_fit.PREFIX]
+            for w in (*new_fit.config().get("query_stopwords", ()), *GISP_STOPWORDS, *GISP_SHORT_STOPWORDS)}
     out: list[str] = []
     for w in _LETTERS.findall(items_text(text).lower().replace("ё", "е")):
-        st = _stem(w)
+        st = w if len(w) == MIN_STEM else _stem(w)  # #476: «шкаф» minus a letter is «шка», shorter than MIN_STEM
         if len(st) >= MIN_STEM and w[:new_fit.PREFIX] not in stop and st not in out:
             out.append(st)
     return out
