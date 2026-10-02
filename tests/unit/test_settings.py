@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -42,6 +45,15 @@ def test_flags_are_exactly_one() -> None:
     for other in ("0", "true", "yes", " 1"):
         s = get_settings({"DEMO_FIXTURE": other, "ENRICH_OFFLINE": other})
         assert (s.demo_fixture, s.enrich_offline) == (False, False), other
+
+
+def test_predicted_class_of_discovery_is_on_unless_0() -> None:
+    """#394: «Новые» for a free-text query is on by default; 0 / false / off switch it off."""
+    assert get_settings({}).discovery_predicted_class is True
+    for on in ("1", "true", "", "yes", "on"):
+        assert get_settings({"DISCOVERY_PREDICTED_CLASS": on}).discovery_predicted_class is True, on
+    for off in ("0", "false", "off", " OFF ", "False", "0\n"):
+        assert get_settings({"DISCOVERY_PREDICTED_CLASS": off}).discovery_predicted_class is False, off
 
 
 def test_api_key_is_stripped() -> None:
@@ -143,3 +155,138 @@ def test_every_setting_is_documented_in_env_example() -> None:
     documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]*)=", ENV_EXAMPLE.read_text(encoding="utf-8"), re.M))
     missing = sorted(set(settings.env_names()) - documented)
     assert not missing, f"нет в .env.example: {missing}"
+
+
+# placeholders for providers not wired yet ([СПРОСИТЬ Q-04, Q-13]): documented, read by no code
+RESERVED_IN_ENV_EXAMPLE = {"LLM_API_KEY", "LLM_MODEL", "DADATA_API_KEY", "DADATA_SECRET", "SEARCH_API_KEY"}
+
+
+def test_env_example_lists_only_what_the_code_reads() -> None:
+    """The reverse of the test above: a line in .env.example that no `Settings` field reads (a typo, a removed
+    variable) misleads whoever deploys. The placeholders are an explicit list, so a new stray name fails here."""
+    documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]*)=", ENV_EXAMPLE.read_text(encoding="utf-8"), re.M))
+    assert documented - set(settings.env_names()) == RESERVED_IN_ENV_EXAMPLE
+
+
+def test_eval_tool_defaults_are_the_ones_the_modules_had() -> None:
+    """src/eval and ranker_train (#297): the same defaults as their own `os.environ.get` had."""
+    s = get_settings({})
+    assert (s.eval_final_confirm, s.eval_user, s.dev_full, s.pool_dir) == (None, "?", None, None)
+    assert (s.data_gpu_dir, s.models_dir) == (ROOT / "data" / "gpu", ROOT / "models")
+    over = get_settings({"EVAL_FINAL_CONFIRM": "ab12", "USER": "anna", "DEV_FULL": "/x/dev_full.jsonl",
+                         "POOL_DIR": "rel/pool", "DATA_GPU_DIR": "g", "MODELS_DIR": str(ROOT.parent / "m")})
+    assert (over.eval_final_confirm, over.eval_user, over.dev_full) == ("ab12", "anna", "/x/dev_full.jsonl")
+    assert over.pool_dir == Path("rel/pool")  # as given, as pool_recall had it
+    assert (over.data_gpu_dir, over.models_dir) == (ROOT / "g", ROOT.parent / "m")  # absolute — as given
+
+
+def test_gis2_reviews_defaults_and_overrides() -> None:
+    """2GIS reviews on demand (#234, D-142): pacing, timeouts, the off switch and the live-read limit."""
+    s = get_settings({})
+    assert (s.gis2_min_interval_s, s.gis2_timeout_s, s.gis2_down_cooldown_s) == (3.0, 20.0, 90.0)
+    assert s.gis2_disabled is False and s.reviews_live_max == 2
+    s = get_settings({"GIS2_MIN_INTERVAL_S": "0.5", "GIS2_TIMEOUT_S": "5", "GIS2_DOWN_COOLDOWN_S": "30",
+                      "REVIEWS_LIVE_MAX": "4"})
+    assert (s.gis2_min_interval_s, s.gis2_timeout_s, s.gis2_down_cooldown_s, s.reviews_live_max) == (0.5, 5.0, 30.0, 4)
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("1", True), ("true", True), (" Yes ", True), ("0", False),
+                                               ("no", False), ("", False)])
+def test_gis2_disabled_switch(raw: str, expected: bool) -> None:
+    assert get_settings({"GIS2_DISABLED": raw}).gis2_disabled is expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("0", 1), ("abc", 2), ("", 2)])
+def test_reviews_live_max_is_at_least_one_and_falls_back_on_garbage(raw: str, expected: int) -> None:
+    assert get_settings({"REVIEWS_LIVE_MAX": raw}).reviews_live_max == expected
+
+
+def test_gis2_pacing_fails_fast_on_garbage() -> None:
+    """As before #290 moved it here: a typo in a pause must not silently become the default."""
+    with pytest.raises(ValueError):
+        get_settings({"GIS2_MIN_INTERVAL_S": "three"}).gis2_min_interval_s  # noqa: B018
+
+
+def test_source_defaults_are_the_ones_the_modules_had() -> None:
+    """src/sources moved here (#297): names and defaults unchanged; relative paths stay as given (cwd)."""
+    s = settings.get_settings({})
+    assert s.source_cache == Path("cache/sources.sqlite") and s.source_cache_ttl_s == 7 * 24 * 3600
+    assert (s.pb_min_interval_s, s.bo_min_interval_s, s.bo_timeout_s) == (1.0, 1.0, 5.0)
+    rmsp = (s.rmsp_min_interval_s, s.rmsp_timeout_s, s.rmsp_quick_timeout_s, s.rmsp_down_cooldown_s)
+    assert rmsp == (1.0, 3.0, 10.0, 90.0)
+    assert s.rnp_min_interval_s is None and s.rnp_max_age_s == 24 * 3600 and s.pb_disabled is False
+    assert s.fns_opendata_dir == Path("data/external/fns_opendata") and s.fns_opendata_parquet is None
+    yandex = (s.yandex_search_ttl_s, s.yandex_search_daily_max, s.yandex_search_min_interval_s)
+    assert yandex == (30 * 24 * 3600, 100, 1.0)
+    assert (s.yandex_search_api_key, s.yandex_search_offline, s.yandex_search_cache, s.yandex_search_region) == \
+        ("", False, None, None)
+    over = settings.get_settings({"YANDEX_SEARCH_DAILY_MAX": "7.9", "RNP_MIN_INTERVAL_S": "2.5", "PB_DISABLED": "1",
+                                  "YANDEX_SEARCH_API_KEY": " key "})
+    assert (over.yandex_search_daily_max, over.rnp_min_interval_s, over.pb_disabled, over.yandex_search_api_key) == \
+        (7, 2.5, True, "key")
+
+
+def test_discovery_and_llm_defaults_are_the_ones_the_modules_had() -> None:
+    """src/enrich, src/llm moved here (#297): DISCOVERY_LEADS is on unless «0», NP types UL, LLM none."""
+    s = settings.get_settings({})
+    assert (s.discovery_offline, s.discovery_leads, s.discovery_np_types, s.llm_provider) == (False, True, "UL", "none")
+    over = settings.get_settings({"DISCOVERY_LEADS": "0", "DISCOVERY_NP_TYPES": "UL,IP", "LLM_PROVIDER": " None "})
+    assert (over.discovery_leads, over.discovery_np_types, over.llm_provider) == (False, "UL,IP", "none")
+
+
+def _fresh_copy(module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    """Execute the module's file again under a probe name: the real module and its classes stay untouched.
+
+    ``importlib.reload`` would rebind ``pb_nalog.CaptchaRequired`` and the like, and tests that run later and
+    catch the old class would fail (review #427).
+    """
+    name = f"_settings_probe_{module.__name__.replace('.', '_')}"
+    spec = importlib.util.spec_from_file_location(name, module.__file__)
+    assert spec is not None and spec.loader is not None
+    probe = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, probe)  # dataclasses look the module up by name
+    spec.loader.exec_module(probe)
+    return probe
+
+
+def test_module_constants_read_their_own_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A constant bound to a wrong field passes the defaults test (review #425): each one gets its own value."""
+    from src.sources import bo_nalog, cache, eis_contracts, eis_rnp, gis2, pb_nalog, rmsp
+
+    expected = {
+        (bo_nalog, "MIN_INTERVAL_S"): ("BO_MIN_INTERVAL_S", "11", 11.0),
+        (bo_nalog, "TIMEOUT_S"): ("BO_TIMEOUT_S", "12", 12.0),
+        (pb_nalog, "MIN_INTERVAL_S"): ("PB_MIN_INTERVAL_S", "13", 13.0),
+        (rmsp, "MIN_INTERVAL_S"): ("RMSP_MIN_INTERVAL_S", "14", 14.0),
+        (rmsp, "TIMEOUT_S"): ("RMSP_TIMEOUT_S", "15", 15.0),
+        (rmsp, "QUICK_TIMEOUT_S"): ("RMSP_QUICK_TIMEOUT_S", "16", 16.0),
+        (rmsp, "DOWN_COOLDOWN_S"): ("RMSP_DOWN_COOLDOWN_S", "17", 17.0),
+        (cache, "DEFAULT_TTL_S"): ("SOURCE_CACHE_TTL_S", "18", 18),
+        (eis_rnp, "MIN_INTERVAL_S"): ("RNP_MIN_INTERVAL_S", "190", 190.0),  # above the robots crawl-delay of 60
+        (eis_rnp, "MAX_AGE_S"): ("RNP_MAX_AGE_S", "20", 20.0),
+        (gis2, "MIN_INTERVAL_S"): ("GIS2_MIN_INTERVAL_S", "21", 21.0),
+        (gis2, "TIMEOUT_S"): ("GIS2_TIMEOUT_S", "22", 22.0),
+        (gis2, "DOWN_COOLDOWN_S"): ("GIS2_DOWN_COOLDOWN_S", "23", 23.0),
+        (eis_contracts, "SEARCH_MAX_AGE_S"): ("EIS_CONTRACTS_SEARCH_MAX_AGE_S", "24", 24.0),
+        (eis_contracts, "CARD_MAX_AGE_S"): ("EIS_CONTRACTS_CARD_MAX_AGE_S", "25", 25.0),
+        (eis_contracts, "MAX_CARDS"): ("EIS_CONTRACTS_MAX_CARDS", "26", 26),
+    }
+    for var, value, _ in expected.values():
+        monkeypatch.setenv(var, value)
+    probes = {m: _fresh_copy(m, monkeypatch) for m in {m for m, _ in expected}}
+    got = {(m, attr): getattr(probes[m], attr) for m, attr in expected}
+    assert got == {key: want for key, (_, _, want) in expected.items()}
+    assert bo_nalog.MIN_INTERVAL_S != 11.0  # the real modules keep the values they were imported with
+
+
+def test_load_dotenv_does_not_override_a_set_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = tmp_path / ".env"
+    env.write_text('# comment\nRLT_TEST_A="from file"\nRLT_TEST_B=from file\n', encoding="utf-8")
+    monkeypatch.setenv("RLT_TEST_B", "already set")
+    monkeypatch.setenv("RLT_TEST_A", "placeholder")
+    monkeypatch.delenv("RLT_TEST_A")  # unset, restored by monkeypatch after the test
+    settings.load_dotenv(env)
+    environ = settings.os.environ
+    assert (environ["RLT_TEST_A"], environ["RLT_TEST_B"]) == ("from file", "already set")
+    del environ["RLT_TEST_A"]
+

@@ -25,6 +25,9 @@ Why the block «Новые» may be incomplete (#287) is the X-Discovery-Error h
 discover() failed (no message, no path), `source_unavailable` when a registry request was refused or failed and
 discover() went on with the rest, or `history_unchecked` when the companies were found but could not be checked
 against organizers' data (so none is called «новая»). Absent — the block is what the sources gave.
+The OKPD2 classes «Новые» searched by are the X-Discovery-Class header, ASCII JSON `{"classes": ["17.12"],
+"predicted": true | false}`: `predicted` — the query had no OKPD2 and the class was predicted from its text by
+search() (#394), so the UI says so. Absent — no class, the block was not searched.
 """
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ from src.api import guard
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
 from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
 from src.api.ratings import router as ratings_router
+from src.api.reviews import router as reviews_router
 from src.api.testset import UploadLimit
 from src.api.testset import router as testset_router
 from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
@@ -107,6 +111,7 @@ app = FastAPI(
 app.add_middleware(UploadLimit)  # 413 on an oversized test export before the body is read (#207)
 app.include_router(testset_router)  # /api/testset: the test export uploaded in the UI (#207), before the SPA route
 app.include_router(ratings_router)  # /api/ratings: customer ratings 1–5★, not in the score (#233)
+app.include_router(reviews_router)  # /api/reviews: 2GIS reviews of one supplier on demand (#234)
 _engine = None
 
 
@@ -251,6 +256,9 @@ def api_search(query: Query, response: Response,
         response.headers["X-Query-Corrected"] = quote(json.dumps(pairs, ensure_ascii=False, separators=(",", ":")))
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))
     response.headers["X-Search-Context"] = json.dumps(_context(query), ensure_ascii=True, separators=(",", ":"))
+    if res.discovery is not None and res.discovery.okpd_classes:  # the class «Новые» searched by (#394)
+        response.headers["X-Discovery-Class"] = json.dumps(
+            {"classes": res.discovery.okpd_classes, "predicted": res.discovery.predicted}, separators=(",", ":"))
     if (own := search_mod.excluded_lot()) is not None:  # the notice itself is not in its own results (#249, F-13)
         response.headers["X-Excluded-Lot"] = str(own)
     history = [m for m in matches if m.origin == "history"]
@@ -361,15 +369,18 @@ def api_export(query: Query) -> StreamingResponse:
     ws = wb.active
     assert ws is not None
     ws.title = "Поставщики"
-    ws.append(["Блок", "Наименование", "ИНН", "Роль", "ЮЛ/ИП", "Регион", "МСП", "Score", "Почему в списке",
-               "Источники"])
+    # «Место» — the order of the block (the ranker's, D-103); «Релевантность» — the formula of the components, as the
+    # card's sum (D-150): a lower row may have a higher one, «Выше следующего» says why the model put it above
+    ws.append(["Блок", "Наименование", "ИНН", "Роль", "ЮЛ/ИП", "Регион", "МСП", "Место в блоке",
+               "Релевантность (формула критериев)", "Выше следующего", "Почему в списке", "Источники"])
     for block, rows in (("С опытом госзакупок", res.history), ("Новые из открытых источников", res.discovered)):
-        for m in rows:
+        for place, m in enumerate(rows, 1):
             cp = m.counterparty
             ws.append([
                 block, cp.name, cp.inn or "ИНН не подтверждён",
                 KIND_LABEL[kind_of(cp)], ENTITY_LABEL.get(entity_of(cp) or "", "не определено"), cp.region or "",
-                {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], round(m.score, 3),
+                {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], place, round(m.score, 3),
+                m.rank_reason or "",
                 "; ".join(c.explanation for c in m.components),
                 "; ".join(f"{e.source}: {e.url}" for e in cp.evidence),
             ])

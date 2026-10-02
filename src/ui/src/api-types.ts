@@ -81,6 +81,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reviews/{inn}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Отзывы о поставщике из 2ГИС по требованию
+         * @description Cards of 2GIS that carry the name of the company, how far each is trusted (`basis`, `verified`), and the
+         *     newest reviews of the trusted ones: quote, date, link — every one with its Evidence.
+         */
+        get: operations["api_reviews_api_reviews__inn__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -495,6 +516,91 @@ export interface components {
              */
             created_at: string;
         };
+        /** ReviewCard */
+        ReviewCard: {
+            /** Branch Id */
+            branch_id: string;
+            /** Title */
+            title: string;
+            /** Address */
+            address: string | null;
+            /** Rubrics */
+            rubrics: string[];
+            /**
+             * Url
+             * @description вкладка отзывов карточки на 2gis.ru
+             */
+            url: string;
+            /**
+             * Rating
+             * @description рейтинг карточки, как его показывает 2ГИС; пусто, пока нет подтверждения контактом (basis=name)
+             */
+            rating: number | null;
+            /** Review Count */
+            review_count: number | null;
+            /**
+             * Basis
+             * @enum {string}
+             */
+            basis: "phone" | "email" | "site" | "legal_name" | "name";
+            /**
+             * Verified
+             * @description True только при совпадении телефона, email или сайта с данными компании
+             */
+            verified: boolean;
+            /**
+             * Note
+             * @description что именно совпало и чего не хватает
+             */
+            note: string;
+            /** Quotes */
+            quotes: components["schemas"]["ReviewQuote"][];
+            /** Evidence */
+            evidence: components["schemas"]["Evidence"][];
+        };
+        /** ReviewQuote */
+        ReviewQuote: {
+            /**
+             * Text
+             * @description начало отзыва дословно; «…» в конце — отзыв длиннее
+             */
+            text: string;
+            /**
+             * Rating
+             * @description оценка автора, 1–5; автор не показывается
+             */
+            rating: number | null;
+            /**
+             * Date
+             * @description дата отзыва, YYYY-MM-DD
+             */
+            date: string;
+            evidence: components["schemas"]["Evidence"];
+        };
+        /** ReviewsResult */
+        ReviewsResult: {
+            /** Inn */
+            inn: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "not_found" | "unsupported" | "unavailable";
+            /** Message */
+            message?: string | null;
+            /**
+             * Queried
+             * @description по какому названию искали
+             */
+            queried?: string | null;
+            /** Cards */
+            cards?: components["schemas"]["ReviewCard"][];
+            /**
+             * Disclaimer
+             * @default Отзывы с 2ГИС, как их видит любой посетитель сайта. 2ГИС не публикует ИНН: принадлежность карточки компании подтверждена только там, где так и написано. В подбор и рейтинг отзывы не входят.
+             */
+            disclaimer: string;
+        };
         /** ScoreComponent */
         ScoreComponent: {
             /**
@@ -817,6 +923,54 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    api_reviews_api_reviews__inn__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ключ API, если на сервере задан API_KEY */
+                "x-api-key"?: string | null;
+            };
+            path: {
+                inn: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewsResult"];
+                };
+            };
+            /** @description нужен ключ API (X-API-Key), если на сервере задан API_KEY */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 2ГИС запрашивают другие пользователи; повторите через Retry-After секунд */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -28,7 +28,6 @@ a cached answer older than MAX_AGE_S is refetched. `ENRICH_OFFLINE=1` — cache 
 from __future__ import annotations
 
 import html
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -39,6 +38,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from src.contracts import Evidence, inn_is_valid
+from src.settings import get_settings
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.pacing import HostPacer
 from src.sources.tls import gov_ssl_context
@@ -47,8 +47,8 @@ BASE = "https://zakupki.gov.ru"
 SOURCE = "ЕИС, реестр недобросовестных поставщиков"
 UA = "Mozilla/5.0 (compatible; RLTHack-Enrich/0.1; hackathon, cached, paced)"
 CRAWL_DELAY_S = 60.0  # robots.txt of zakupki.gov.ru: Crawl-delay
-MIN_INTERVAL_S = max(CRAWL_DELAY_S, float(os.environ.get("RNP_MIN_INTERVAL_S") or CRAWL_DELAY_S))
-MAX_AGE_S = float(os.environ.get("RNP_MAX_AGE_S", str(24 * 3600)))
+MIN_INTERVAL_S = max(CRAWL_DELAY_S, get_settings().rnp_min_interval_s or CRAWL_DELAY_S)
+MAX_AGE_S = get_settings().rnp_max_age_s
 TIMEOUT_S = 40.0
 NO_RESULTS = "Поиск не дал результатов"
 MSK = ZoneInfo("Europe/Moscow")  # the date in the fact is the one the user sees on site
@@ -150,11 +150,13 @@ def _get(client: httpx.Client, url: str) -> tuple[int, str]:
     return r.status_code, r.text
 
 
-def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None) -> CachedPage:
+def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None, *,
+          offline: bool | None = None) -> CachedPage:
+    """Cached RNP page. `offline=True` (None — by ENRICH_OFFLINE) — cache only, KeyError when not cached."""
     cache = cache or SourceCache()
     url = search_url(inn)
     hit = cache.get(url, allow_stale=True)
-    if os.environ.get("ENRICH_OFFLINE") == "1":
+    if (get_settings().enrich_offline if offline is None else offline):
         if hit is None:
             raise KeyError(url)
         return hit
@@ -174,10 +176,11 @@ def fetch(inn: str, cache: SourceCache | None = None, client: httpx.Client | Non
     return cache.put(url, body, status)
 
 
-def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None) -> RnpResult:
+def check(inn: str, cache: SourceCache | None = None, client: httpx.Client | None = None, *,
+          offline: bool | None = None) -> RnpResult:
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
-    page = fetch(inn, cache, client)
+    page = fetch(inn, cache, client, offline=offline)
     at = datetime.fromtimestamp(page.fetched_at, tz=UTC)
     day = at.astimezone(MSK).strftime("%d.%m.%Y")
 

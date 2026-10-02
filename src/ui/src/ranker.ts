@@ -1,7 +1,7 @@
 import type { CounterpartyMatch, ScoreComponent } from "./api";
 
 // The learned ranker (#198, D-103) appends its reason to the product_fit explanation after this marker
-// (src/match/ranker.py MARKER): the order is the model's, the score is the formula's (#278, D-141), the components are its inputs.
+// (src/match/ranker.py MARKER): the order is the model's, the score is the formula's (#278, D-150), the components are its inputs.
 const MARKER = "почему на этом месте — ";
 
 /** The model's reason for the position («модель …: за — …; против — …»), or null when the order is the formula's. */

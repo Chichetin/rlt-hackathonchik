@@ -221,11 +221,12 @@ def test_same_commit_says_that_a_difference_is_nondeterminism(tmp_path, capsys):
     {"store": "postgres"},  # other data source
     {"part": "real"},
     {"dirty": True},  # the tree of the run was not the commit
-], ids=["config", "store", "part", "dirty"])
+    {"data": {"built_at": "2026-10-01T11:45:28+00:00", "rows": 1}},  # other ingest snapshot (#421, D-144)
+], ids=["config", "store", "part", "dirty", "data"])
 def test_same_commit_but_other_input_is_not_called_nondeterminism(tmp_path, capsys, other):
     """One commit, another config / data / tree: the input differs, the verdict is «not established»."""
     b = {**BASE, "q1": list(reversed(BASE["q1"]))}
-    same = {"store": "parquet"}
+    same = {"store": "parquet", "data": {"built_at": "2026-10-02T09:00:00+00:00", "rows": 1}}
     code, out, _ = run_parity(tmp_path, rec("A", BASE, **same), rec("B", b, **{**same, **other}), capsys)
     assert code == 1
     assert "ПРЕДУПРЕЖДЕНИЕ" in out
