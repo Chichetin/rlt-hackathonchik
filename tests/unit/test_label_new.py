@@ -82,9 +82,19 @@ def test_llm_used_after_agreement():
     for i in range(20):  # 20 common pairs, all equal
         rows += [lab("a", f"h{i}", "1"), lab("a", f"h{i}", "1", "llm:m")]
     rows.append(lab("a", "only", "0", "llm:m"))
-    body = L.precision_body(rows, {"a": 21, "b": 0})
+    body = L.precision_body(rows, {"a": 21, "b": 0}, allow_llm=True)
     assert body["agreement_human_llm"]["llm_used"] is True and body["labeled"] == 21
     assert body["empty_blocks"] == ["b"] and body["n_selected"] == 2
+
+
+def test_llm_labels_are_not_used_by_default_even_after_agreement():
+    """D-132: the slide number comes from human labels only; --with-llm is the explicit opt-in."""
+    rows = []
+    for i in range(20):
+        rows += [lab("a", f"h{i}", "1"), lab("a", f"h{i}", "1", "llm:m")]
+    rows.append(lab("a", "only", "0", "llm:m"))
+    body = L.precision_body(rows)
+    assert body["agreement_human_llm"]["llm_used"] is False and body["labeled"] == 20
 
 
 def test_empty_labeled_by_is_nobody():
