@@ -49,8 +49,9 @@ def level_hit(pred: str | None, truth: str, level: str) -> float | None:
 
 def predict(text: str, store, idx) -> str | None:
     """The code search() would assume for a query without OKPD2 (the same retrieval and vote)."""
-    hits = idx.retrieve(fallback.cap_tokens(idx, tokenize(text)), search_mod.TOP_DOCS)
-    return search_mod._predict_okpd2(store, idx, hits, idx.lot_hits(hits)) if hits else None
+    words = tokenize(text)
+    hits = idx.retrieve(fallback.cap_tokens(idx, words), search_mod.TOP_DOCS)
+    return search_mod._predict_okpd2(store, idx, hits, idx.lot_hits(hits), words) if hits else None
 
 
 def _positions(processed: Path, lot_ids: list[int]) -> list[tuple[int, str, str]]:
