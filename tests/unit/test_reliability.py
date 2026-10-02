@@ -178,6 +178,23 @@ def test_default_mode_is_shadow_and_invalid_is_an_error():
     assert reliability_mode(yaml.safe_load("reliability: {mode: off}")) == "off"
     with pytest.raises(ValueError):
         reliability_mode({"reliability": {"mode": "maybe"}})
+    with pytest.raises(ValueError, match="reliability.mode"):  # a bad config fails when loaded, not mid-search
+        search_mod.check_config({**search_mod.load_config(), "reliability": {"mode": "maybe"}})
+
+
+def test_sanity_check_reads_the_store_up_to_the_holdout(search_data):
+    """`python -m src.match.reliability` goes through the Store (#293): suppliers before the cutoff, outcomes in
+    [cutoff, holdout_from) — 7801000012 has lot 6 (2025-08-01) there; lot 7 (2025-10-15) is holdout, never read."""
+    from src.match.reliability import check, outcomes
+    from src.match.store import get_store
+
+    rec = check(min_after=1, quantiles=1)
+    assert (rec["cutoff"], rec["outcome_until"]) == ("2025-07-01", "2025-10-01")
+    assert rec["suppliers_before"] == 5 and rec["with_min_lots_after"] == 2
+    inns, after = outcomes(get_store(), CUTOFF, date(2025, 10, 1))
+    assert len(inns) == 5 and "7801000012" in inns
+    assert after["7801000012"] == (1, 0)  # lot 6 lost; lot 7 is holdout
+    assert outcomes(get_store(), CUTOFF, date(2025, 12, 31))[1]["7801000012"] == (2, 0)  # it is in the data
 
 
 def _ranking(res):

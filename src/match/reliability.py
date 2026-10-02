@@ -36,8 +36,12 @@ import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
 from src.contracts import Counterparty
+
+if TYPE_CHECKING:
+    from src.match.store import Store
 
 MODES = ("off", "shadow", "on")
 DEFAULT_MODE = "off"  # when the config has no `reliability:` block
@@ -209,6 +213,23 @@ def spearman(x: list[float], y: list[float]) -> float:
     return float(np.corrcoef(_ranks(x), _ranks(y))[0, 1])
 
 
+def outcomes(store: Store, cutoff: date, until: date) -> tuple[list[str], dict[str, tuple[int, int]]]:
+    """(INNs with a lot before `cutoff`, INN -> (lots, wins) published in [cutoff, until)).
+
+    The store is asked for participations strictly before `until` only — rows from `until` on (the holdout)
+    are never read; the period is what is not before the cutoff."""
+    import duckdb
+
+    con = duckdb.connect()
+    con.register("before", store.participations(cutoff))
+    con.register("upto", store.participations(until))
+    inns = [r[0] for r in con.execute("SELECT DISTINCT inn FROM before ORDER BY inn").fetchall()]
+    after = {r[0]: (int(r[1]), int(r[2])) for r in con.execute(
+        """SELECT inn, count(DISTINCT lot_id), count(DISTINCT lot_id) FILTER (WHERE is_winner)
+           FROM upto WHERE lot_id NOT IN (SELECT lot_id FROM before) GROUP BY inn""").fetchall()}
+    return inns, after
+
+
 def check(min_after: int = 3, quantiles: int = 5) -> dict:
     """Quantiles of reliability as of the cutoff (global prior) vs win rate and survival after it.
 
@@ -216,22 +237,14 @@ def check(min_after: int = 3, quantiles: int = 5) -> dict:
     for participations strictly before `holdout_from`, the dev period is what is not before the cutoff.
     Organizers' data only through the Store (#293): parquet or Postgres, the same rows.
     """
-    import duckdb
-
     from src.ingest.split_config import split_config
     from src.match.store import get_store
 
     cfg = split_config()
     cutoff, until = date.fromisoformat(str(cfg["cutoff"])), date.fromisoformat(str(cfg["holdout_from"]))
     store = get_store()
-    con = duckdb.connect()
-    con.register("before", store.participations(cutoff))
-    con.register("upto", store.participations(until))
-    inns = [r[0] for r in con.execute("SELECT DISTINCT inn FROM before ORDER BY inn").fetchall()]
+    inns, after = outcomes(store, cutoff, until)
     hist = store.supplier_history(inns, cutoff)
-    after = {r[0]: (int(r[1]), int(r[2])) for r in con.execute(
-        """SELECT inn, count(DISTINCT lot_id), count(DISTINCT lot_id) FILTER (WHERE is_winner)
-           FROM upto WHERE lot_id NOT IN (SELECT lot_id FROM before) GROUP BY inn""").fetchall()}
     prior = pool_prior(hist.values())
     last = cutoff - timedelta(days=1)
     rel = {inn: history_reliability(h, prior, last)[0] for inn, h in hist.items()}
