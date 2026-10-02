@@ -60,11 +60,11 @@ def test_requisite_links_same_site_only():
     assert links == [HOME + "rekvizity/"]
 
 
-def test_decide():
-    assert site.decide(Counter()) == (None, "на сайте нет ИНН")
-    assert site.decide(Counter({INN: 2}))[0] == INN
-    assert site.decide(Counter({INN: 3, OTHER: 1}))[0] == INN
-    assert site.decide(Counter({INN: 2, OTHER: 1}))[0] is None
+def test_pick_inn():
+    assert site.pick_inn(Counter()) == (None, "на сайте нет ИНН")
+    assert site.pick_inn(Counter({INN: 2}))[0] == INN
+    assert site.pick_inn(Counter({INN: 3, OTHER: 1}))[0] == INN
+    assert site.pick_inn(Counter({INN: 2, OTHER: 1}))[0] is None
 
 
 def test_site_inn_follows_requisites_link(tmp_path):
@@ -102,8 +102,6 @@ def test_several_inns_give_none(tmp_path):
     assert res.inn is None and "несколько" in res.reason
 
 
-
-
 def test_robots_wildcard_rule_is_obeyed(tmp_path):
     """robots.txt with `*` inside a path (src/sources/robots.py semantics): the matching page is not requested."""
     calls: list[str] = []
@@ -120,3 +118,35 @@ def test_offline_reads_the_cache_only(tmp_path):
     client = _client({}, calls)
     res = site.site_inn(HOME, cache, client, offline=True)
     assert res.inn == INN and res.url == HOME and calls == []
+
+
+def test_redirect_within_the_site_is_followed(tmp_path):
+    calls: list[str] = []
+    pages = {HOME + "robots.txt": (404, ""), HOME: (200, PAGE_HOME), HOME + "rekvizity/": (301, ""),
+             HOME + "about/rekvizity/": (200, PAGE_REQ)}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        calls.append(url)
+        status, body = pages.get(url, (404, ""))
+        headers = {"content-type": "text/html; charset=utf-8"}
+        if status == 301:
+            headers["location"] = "/about/rekvizity/"
+        return httpx.Response(status, text=body, headers=headers)
+
+    res = site.site_inn(HOME, SourceCache(tmp_path / "c.sqlite"), httpx.Client(transport=httpx.MockTransport(handler)))
+    assert res.inn == INN and HOME + "about/rekvizity/" in calls
+
+
+def test_redirect_to_another_site_is_not_followed(tmp_path):
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if str(request.url) == HOME:
+            return httpx.Response(302, headers={"location": "https://other.example/"})
+        return httpx.Response(404)
+
+    res = site.site_inn(HOME, SourceCache(tmp_path / "c.sqlite"), httpx.Client(transport=httpx.MockTransport(handler)))
+    assert res.inn is None and "другой сайт" in res.reason
+    assert not any(u.startswith("https://other.example") for u in calls)

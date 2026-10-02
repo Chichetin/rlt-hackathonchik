@@ -39,6 +39,7 @@ TIMEOUT_S = 10.0
 MAX_BYTES = 3_000_000
 MAX_PAGES = 4
 MAX_LINKS = 15
+MAX_REDIRECTS = 5
 # Link priority: requisites first, then contacts, then «about»; a link matches its best tier.
 LINK_TIERS = (("реквизит", "rekvizit", "requisit", "details"),
               ("контакт", "kontakt", "contact"),
@@ -115,8 +116,18 @@ def _pacer(host: str) -> HostPacer:
 
 
 def _get(client: httpx.Client, url: str) -> httpx.Response:
-    with _pacer(urlsplit(url).hostname or "").slot():
-        return client.get(url, follow_redirects=True)
+    """GET following redirects within the same site only (each hop paced): a redirect to another host is a
+    refusal — that host's robots.txt was never asked."""
+    for _ in range(MAX_REDIRECTS + 1):
+        with _pacer(urlsplit(url).hostname or "").slot():
+            r = client.get(url, follow_redirects=False)
+        if not r.is_redirect:
+            return r
+        target = urljoin(url, r.headers.get("location", ""))
+        if not same_site(target, url):
+            raise Refused(f"{url}: перенаправление на другой сайт {target} — не идём")
+        url = target
+    raise Refused(f"{url}: больше {MAX_REDIRECTS} перенаправлений")
 
 
 def _client() -> httpx.Client:
@@ -196,7 +207,7 @@ class SiteInn:
     reason: str = ""
 
 
-def decide(seen: Counter[str]) -> tuple[str | None, str]:
+def pick_inn(seen: Counter[str]) -> tuple[str | None, str]:
     """One labelled INN on the site → it; several → the dominant one only if it is at least 3× as frequent."""
     if not seen:
         return None, "на сайте нет ИНН"
@@ -245,7 +256,7 @@ def site_inn(home: str, cache: SourceCache | None = None, client: httpx.Client |
         if not seen:
             return res
     res.candidates = dict(seen)
-    res.inn, reason = decide(seen)
+    res.inn, reason = pick_inn(seen)
     res.reason = res.reason or reason if res.inn is None else reason
     res.url = first_page.get(res.inn) if res.inn else None
     return res

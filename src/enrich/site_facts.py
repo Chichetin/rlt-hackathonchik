@@ -1,4 +1,4 @@
-"""Facts a company states on its own site, and the product_fit step of a new company. Owner: SOURCES.
+"""Facts a company states on its own site. Owner: SOURCES.
 
 #186. Deterministic, no LLM: phone, email and address are regular expressions, the role is a dictionary
 of phrases — the phrase found is the basis shown to the user. The input is the CACHED text of a site page
@@ -28,7 +28,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 from src.contracts import Evidence, Kind
-from src.enrich.evidence import MIN_TEXT, check_evidence, value_in_page
+from src.enrich.evidence import check_evidence, value_in_page
 from src.sources import site
 from src.sources.cache import CachedPage
 
@@ -253,73 +253,3 @@ def merge(pages: Iterable[SiteFacts]) -> SiteFacts:
                 out.roles.append(r)
     return out
 
-
-# --- product_fit of a new company: the steps (v0) ---------------------------------------------------------
-
-# #186, the human's confirmation №3 of 01.10 for the numbers as v0 (to be calibrated on labelled pairs). The
-# maximum step wins. NOT part of the product score: src/match and the block «Новые» (src/enrich/discover.py,
-# FIT) are not changed here — the same component is being built in shadow mode in #77.
-FIT_STEPS: dict[str, tuple[float, str]] = {
-    "site_name": (1.0, "наименование из запроса буквально есть на сайте компании"),
-    "catalog": (0.8, "товар найден в каталоге или на маркетплейсе"),
-    "okved_class": (0.6, "основной ОКВЭД совпадает с классом ОКПД2 закупки"),
-    "okved_wholesale": (0.4, "основной ОКВЭД — оптовая торговля товарами класса закупки"),
-}
-STRONG_FIT = 0.8  # steps 1.0 and 0.8 make a «strong» candidate (the fallback rule of web_discover)
-
-
-@dataclass(frozen=True)
-class FitFact:
-    step: str  # a key of FIT_STEPS
-    basis: str  # the fact itself, one line for the user
-    evidence: Evidence | None = None
-
-
-@dataclass(frozen=True)
-class FitStep:
-    value: float
-    step: str
-    basis: str  # which step and by which fact
-    evidence: Evidence | None
-    lower: tuple[FitFact, ...] = ()  # the facts of the lower steps, not used for the value
-
-
-def new_company_fit(facts: Iterable[FitFact]) -> FitStep | None:
-    """The product_fit step of a new company: the highest step among the facts; None without facts (no fact —
-    no value, never a default). The first fact wins among equals."""
-    known = [f for f in facts if f.step in FIT_STEPS]
-    if not known:
-        return None
-    best = max(known, key=lambda f: FIT_STEPS[f.step][0])
-    value, title = FIT_STEPS[best.step]
-    return FitStep(value=value, step=best.step, basis=f"Ступень {value:.1f} — {title}: {best.basis}",
-                   evidence=best.evidence, lower=tuple(f for f in known if f is not best))
-
-
-def name_fact(name: str, page: CachedPage, step: str = "site_name") -> FitFact | None:
-    """The name of the product from the query literally stands on the cached page (the company's site → step
-    `site_name`; a page of a catalog or a marketplace about this company → `catalog`). A name shorter than
-    MIN_TEXT characters proves nothing — no fact."""
-    name = " ".join(name.split())
-    text = site.text_of(page.body)
-    if len(name) < MIN_TEXT or not value_in_page("site", name, text):
-        return None
-    where = {"site_name": "на сайте компании", "catalog": "в каталоге"}[step]
-    return FitFact(step, f"«{name}» — {where} ({page.url})",
-                   _evidence(page, "site", name, f"«{name}» есть {where}: {page.url}"))
-
-
-def okved_fact(okved: str | None, okpd_class: str, wholesale: Sequence[str] = (),
-               evidence: Evidence | None = None) -> FitFact | None:
-    """Main OKVED against the OKPD2 class of the purchase (the first four digits are shared by design) and
-    against the wholesale codes of that class (the table of src/enrich/discover.py, passed by the caller)."""
-    code = (okved or "").strip()
-    if not code or not okpd_class:
-        return None
-    if code == okpd_class or code.startswith(okpd_class + "."):
-        return FitFact("okved_class", f"основной ОКВЭД {code}, класс ОКПД2 закупки {okpd_class}", evidence)
-    trade = next((w for w in wholesale if code == w or code.startswith(w + ".")), None)
-    if trade:
-        return FitFact("okved_wholesale", f"основной ОКВЭД {code} — оптовая торговля ({trade}) товарами класса "
-                                          f"{okpd_class}", evidence)
-    return None

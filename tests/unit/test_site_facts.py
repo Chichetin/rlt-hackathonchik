@@ -1,6 +1,5 @@
 """Facts of a company site (#186, src/enrich/site_facts.py): phone, email, address and role phrases as Evidence
-that passes src/enrich/evidence.py; a made-up fact does not; no personal contacts; the INN checksum; the steps
-of product_fit of a new company.
+that passes src/enrich/evidence.py; a made-up fact does not; no personal contacts; the INN checksum.
 
 `tests/fixtures/site/*.html` are synthetic pages (no real company). No network, no LLM.
 """
@@ -225,66 +224,3 @@ def test_merge_keeps_page_order_without_repeats(company, cache):
     assert merged.role() is None and {r.kind for r in merged.roles} == {"manufacturer", "dealer"}
     assert F.merge([]).evidence() == []
 
-
-# --- product_fit of a new company: the steps (v0) ---------------------------------------------------------
-
-def test_fit_steps_values():
-    assert {k: v[0] for k, v in F.FIT_STEPS.items()} == {"site_name": 1.0, "catalog": 0.8, "okved_class": 0.6,
-                                                         "okved_wholesale": 0.4}
-    assert F.STRONG_FIT == 0.8
-
-
-def test_fit_is_the_maximum_step_with_its_basis(company):
-    name = F.name_fact("бумага  офисная А4", company)
-    okved = F.okved_fact("17.21", "17.21", ("46.49.33",))
-    assert name is not None and okved is not None
-    fit = F.new_company_fit([okved, name])
-    assert fit is not None and (fit.value, fit.step) == (1.0, "site_name")
-    assert "Ступень 1.0" in fit.basis and "бумага офисная А4" in fit.basis and URL in fit.basis
-    assert fit.evidence is not None and fit.evidence.url == URL
-    assert check_evidence(fit.evidence, lambda u: company.body) == []
-    assert [f.step for f in fit.lower] == ["okved_class"]
-
-
-@pytest.mark.parametrize(("steps", "value", "step"), [
-    (["okved_wholesale"], 0.4, "okved_wholesale"),
-    (["okved_wholesale", "okved_class"], 0.6, "okved_class"),
-    (["okved_class", "catalog", "okved_wholesale"], 0.8, "catalog"),
-    (["catalog", "site_name"], 1.0, "site_name"),
-])
-def test_fit_ladder(steps, value, step):
-    fit = F.new_company_fit(F.FitFact(s, f"факт {s}") for s in steps)
-    assert fit is not None and (fit.value, fit.step) == (value, step) and f"факт {step}" in fit.basis
-
-
-def test_no_fact_no_fit():
-    assert F.new_company_fit([]) is None
-    assert F.new_company_fit([F.FitFact("unknown_step", "?")]) is None
-
-
-def test_name_fact_needs_the_name_literally_on_the_page(company, cache):
-    assert F.name_fact("бумага офисная А3", company) is None  # another product
-    assert F.name_fact("короб", company) is None  # too short to prove anything (and only a part of a word)
-    assert F.name_fact("  ", company) is None
-    catalog = cache.put("https://market.example/item/1", "Короба архивные — ООО «Синтетика Картон», в наличии")
-    fact = F.name_fact("короба архивные", catalog, step="catalog")
-    assert fact is not None and fact.step == "catalog" and "в каталоге" in fact.basis
-    fit = F.new_company_fit([fact])
-    assert fit is not None and fit.value == 0.8
-
-
-@pytest.mark.parametrize(("okved", "cls", "wholesale", "step"), [
-    ("17.21", "17.21", (), "okved_class"),
-    ("17.21.1", "17.21", (), "okved_class"),
-    ("17.2", "17.21", (), None),  # a broader code is not the class
-    ("17.211", "17.21", (), None),
-    ("46.49.33", "17.12", ("46.49.33", "46.76.1"), "okved_wholesale"),
-    ("46.76.1", "17.12", ("46.49.33", "46.76.1"), "okved_wholesale"),
-    ("46.90", "17.12", ("46.49.33",), None),
-    ("46.49.33", "17.12", (), None),
-    (None, "17.12", ("46.49.33",), None),
-    ("", "17.12", (), None),
-])
-def test_okved_fact(okved, cls, wholesale, step):
-    fact = F.okved_fact(okved, cls, wholesale)
-    assert (fact.step if fact else None) == step
