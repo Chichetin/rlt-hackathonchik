@@ -289,6 +289,10 @@ export interface components {
         Counterparty: {
             /** Inn */
             inn: string | null;
+            /** Country */
+            country?: string | null;
+            /** Foreign Id */
+            foreign_id?: string | null;
             /** Kpp */
             kpp?: string | null;
             /** Name */

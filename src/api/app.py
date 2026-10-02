@@ -449,7 +449,7 @@ def api_export(query: Query) -> StreamingResponse:
         for place, m in enumerate(rows, 1):
             cp = m.counterparty
             ws.append([
-                block, cp.name, cp.inn or "ИНН не подтверждён",
+                block, cp.name, cp.inn or cp.foreign_id or "ИНН не подтверждён",
                 KIND_LABEL[kind_of(cp)], ENTITY_LABEL.get(entity_of(cp) or "", "не определено"), cp.region or "",
                 {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], place, round(m.score, 3),
                 m.rank_reason or "",
