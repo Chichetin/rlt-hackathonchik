@@ -13,6 +13,7 @@ import pytest
 
 from src.contracts import Counterparty, Evidence, Query
 from src.enrich import discover as D
+from src.enrich.evidence import value_in_page
 from src.eval import new_fit_compare as C
 from src.match import new_fit as F
 from src.sources import rmsp
@@ -51,7 +52,8 @@ def _cp(name: str, okved_name: str, page_name: str | None = None, page_okved: st
 
 def _score(cp, page, text, okved="22.19", relation="class", codes=("22.19.60.110",), profile=None, cfg=None):
     return F.score(cp, okved=okved, relation=relation, base=D.FIT[relation], codes=list(codes), okpd_class="22.19",
-                   query_text=text, page_body=page, profile=profile, cfg=cfg or F.config())
+                   query_text=text, page_body=page, profile=profile, in_page=value_in_page,
+                   cfg=cfg or F.config())
 
 
 # ---- mode ---------------------------------------------------------------------------------------
@@ -336,7 +338,8 @@ def test_without_parquet_the_profile_is_not_computed_and_says_why(cache, tmp_pat
         shadow = _run(cache, empty, "shadow")
     off = _run(cache, empty, "off")
     assert shadow.matches and _dump(off) == _dump(shadow)
-    assert shadow.profile is None and shadow.profile_gap and "items.parquet" in shadow.profile_gap
+    assert shadow.profile is None and shadow.profile_gap and "не загружены" in shadow.profile_gap
+    assert "items.parquet" not in shadow.profile_gap  # a file path is not for the customer: it goes to the log
     assert "профиль ОКПД2 не посчитан" in caplog.text
     by_inn = {m.counterparty.inn: shadow.fit_new[m.counterparty.inn or ""] for m in shadow.matches}
     for fit in by_inn.values():
@@ -351,7 +354,7 @@ def test_too_few_positions_is_a_different_reason(cache, tmp_path):
     assert res.profile is None and res.profile_gap and "меньше" in res.profile_gap
     assert "items.parquet" not in res.profile_gap
     gap = F.profile_gap(tmp_path / "nowhere")
-    assert "не загружены" in gap and "items.parquet" in gap
+    assert "не загружены" in gap and "items.parquet" not in gap
 
 
 def test_profile_present_means_no_gap(cache, tmp_path):

@@ -621,7 +621,7 @@ def discover(
             res.fit_new[inn] = new_fit.score(
                 registry_cp, okved=row["okved1"], relation=ch.relation, base=FIT[ch.relation], codes=codes,
                 okpd_class=ch.okpd_class, query_text=query.text, page_body=page.body, profile=res.profile,
-                cfg=fit_cfg, profile_missing=res.profile_gap)
+                in_page=value_in_page, cfg=fit_cfg, profile_missing=res.profile_gap)
         comps = _components(cp, row, ch, res.predicted, has_card, target, weights, target_note,
                             res.fit_new.get(inn) if res.fit_mode == "on" else None)
         matches.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,

@@ -33,7 +33,7 @@ import logging
 import os
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from functools import lru_cache
@@ -44,7 +44,6 @@ import duckdb
 import yaml
 
 from src.contracts import Counterparty, Evidence
-from src.enrich.evidence import value_in_page
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -179,10 +178,10 @@ def profile_gap(processed: Path, cfg: dict[str, Any] | None = None) -> str:
     """
     cfg = cfg or config()
     if not (processed / "items.parquet").exists():
-        return (f"данные организаторов не загружены (нет {(processed / 'items.parquet').as_posix()}), "
-                "профиль ОКПД2 не строился")
+        log.warning("new_fit: нет %s — профиль ОКПД2 не строился", (processed / "items.parquet").as_posix())
+        return "данные организаторов не загружены, профиль ОКПД2 не строился"  # the path goes to the log only
     return (f"в данных АИС ГЗ меньше {int(cfg['profile_min_positions'])} наименований позиций с кодом запроса и "
-            "его подгруппами (или данные не прочитались — см. лог)")
+            "его подгруппами (или данные не прочитались)")
 
 
 def query_overlap(query_text: str, profile: Profile, cfg: dict[str, Any] | None = None) -> list[str]:
@@ -224,10 +223,13 @@ class NewFit:
                 f"{minus.explanation}. {llm.explanation}")
 
 
-def _verified(cp: Counterparty, fld: str, page_body: str) -> list[Evidence]:
+InPage = Callable[[str, str, str], bool]  # (field, value, page body) -> the value literally occurs on the page
+
+
+def _verified(cp: Counterparty, fld: str, page_body: str, in_page: InPage) -> list[Evidence]:
     """Evidence of this field whose value literally occurs in the cached registry page."""
     return [e for e in cp.evidence
-            if e.field == fld and e.value and e.url.startswith("http") and value_in_page(fld, e.value, page_body)]
+            if e.field == fld and e.value and e.url.startswith("http") and in_page(fld, e.value, page_body)]
 
 
 def depth(okved: str, codes: Sequence[str], relation: str) -> Depth:
@@ -252,8 +254,11 @@ def _hit(stem: str, words: Sequence[str], compound: bool) -> bool:
 
 def score(cp: Counterparty, *, okved: str, relation: str, base: float, codes: Sequence[str],
           okpd_class: str, query_text: str, page_body: str, profile: Profile | None,
-          cfg: dict[str, Any] | None = None, profile_missing: str | None = None) -> NewFit:
+          in_page: InPage, cfg: dict[str, Any] | None = None, profile_missing: str | None = None) -> NewFit:
     """product_fit_new of one registry row. `base` is product_fit v0 of its relation (1.0 / 0.6).
+
+    `in_page` — src/enrich/evidence.py::value_in_page, passed by the caller: match (L2) does not import
+    enrich (L3), D-106.
 
     `profile_missing` — the reason the OKPD2 profile is absent (`profile_gap`): the text part then says the
     profile was NOT computed (the value rests on the query words alone), never a bare «0».
@@ -264,8 +269,8 @@ def score(cp: Counterparty, *, okved: str, relation: str, base: float, codes: Se
     norm = w_ok + w_text  # LLM is not run: its share is split between the two in proportion
     w_ok, w_text = w_ok / norm, w_text / norm
 
-    names = _verified(cp, "name", page_body)
-    okveds = _verified(cp, "okved", page_body)
+    names = _verified(cp, "name", page_body, in_page)
+    okveds = _verified(cp, "okved", page_body, in_page)
     okved_names = [e for e in okveds if not (e.value or "").startswith(f"{cp.inn}.")]  # the name, not the code line
 
     # okved_match
