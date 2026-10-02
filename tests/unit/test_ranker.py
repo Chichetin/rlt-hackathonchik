@@ -166,7 +166,7 @@ def test_default_ranker_model_loads_and_ranks(search_data):
     sp = ranker.spec(cfg)
     assert sp is not None
     model = ranker.load(sp)
-    assert model.cols is not None and len(model.cols) < len(ranker.NAMES)
+    assert model.cols is None or [ranker.NAMES[i] for i in model.cols] == model.booster.feature_name()
     res = search(Q, config=cfg)
     assert res
     assert any(ranker.MARKER in c.explanation for m in res for c in m.components)
