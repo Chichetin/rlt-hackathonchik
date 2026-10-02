@@ -24,13 +24,13 @@ A search that finds nothing is an HTTP 404 on 2gis.ru: a valid empty answer, cac
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
 import httpx
 
+from src.settings import get_settings
 from src.sources import robots
 from src.sources.cache import SourceCache
 from src.sources.pacing import HostPacer
@@ -38,10 +38,10 @@ from src.sources.pacing import HostPacer
 BASE = "https://2gis.ru"
 SOURCE = "2ГИС"
 UA = "Mozilla/5.0 (compatible; RLTHack-Reviews/0.1; hackathon, cached, paced)"
-MIN_INTERVAL_S = float(os.environ.get("GIS2_MIN_INTERVAL_S", "3.0"))
-TIMEOUT_S = float(os.environ.get("GIS2_TIMEOUT_S", "20.0"))
+MIN_INTERVAL_S = get_settings().gis2_min_interval_s  # GIS2_MIN_INTERVAL_S, read once at import (src/settings.py)
+TIMEOUT_S = get_settings().gis2_timeout_s  # GIS2_TIMEOUT_S
 BLOCK_COOLDOWN_S = 900.0
-DOWN_COOLDOWN_S = float(os.environ.get("GIS2_DOWN_COOLDOWN_S", "90"))
+DOWN_COOLDOWN_S = get_settings().gis2_down_cooldown_s  # GIS2_DOWN_COOLDOWN_S
 MAX_BODY = 4_000_000  # a card page is ~600 KB; anything much bigger is not what we asked for
 
 _CITY = re.compile(r"[a-z][a-z_]{1,29}", re.ASCII)
@@ -355,7 +355,7 @@ def parse_reviews(flat: str) -> ReviewsPage:
 
 def disabled() -> bool:
     """`GIS2_DISABLED=1`: an operator switched the reading of 2gis.ru off (read at every call, like PB_DISABLED)."""
-    return os.environ.get("GIS2_DISABLED", "").strip().lower() in {"1", "true", "yes"}
+    return get_settings().gis2_disabled
 
 
 def blocked() -> bool:

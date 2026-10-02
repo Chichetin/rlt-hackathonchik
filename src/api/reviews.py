@@ -22,13 +22,14 @@ from src.contracts import inn_is_valid
 from src.enrich import enrich as enrich_mod
 from src.enrich import reviews
 from src.enrich.evidence import strip_unverified
+from src.settings import get_settings
 from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
-_slots = guard.LiveSlots(guard._int_env("REVIEWS_LIVE_MAX", 2))  # reads of 2gis.ru at once
+_slots = guard.LiveSlots(get_settings().reviews_live_max)  # reads of 2gis.ru at once (REVIEWS_LIVE_MAX)
 
 _LIMITED: dict[int | str, dict[str, Any]] = {
     401: {"description": "нужен ключ API (X-API-Key), если на сервере задан API_KEY"},
