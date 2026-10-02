@@ -177,6 +177,8 @@ def test_api_opens_test_lot_by_number(search_data, monkeypatch):
     assert r.status_code == 200 and r.json()["okpd2"] == ["26.70.22.150"]
     assert client.get("/api/lot/0172200000126000001").json()["query_id"] == "lot-9001"
     assert client.get("/api/lot/9").status_code == 200  # training lots still open
+    assert client.get("/api/procedure/903").json()["query_id"] == "lot-9003"  # #617: by the procedure number
+    assert client.get("/api/procedure/109").json()["query_id"] == "lot-9"  # a training procedure
     monkeypatch.setenv("TEST_DATA_DIR", str(FIX / "missing"))
     assert client.get("/api/lot/9003").status_code == 404
 

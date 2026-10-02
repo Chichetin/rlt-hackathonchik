@@ -55,7 +55,7 @@ from pydantic import BaseModel
 
 from src.api import guard
 from src.api.backtest import Backtest, NotBacktestable, lot_backtest
-from src.api.lots import LotDataUnavailable, LotNotFound, find_lot
+from src.api.lots import LotDataUnavailable, LotNotFound, find_lot, find_procedure
 from src.api.ratings import router as ratings_router
 from src.api.reviews import router as reviews_router
 from src.api.testset import UploadLimit
@@ -398,6 +398,19 @@ def api_lot(ident: str) -> Query:
         return find_lot(ident)
     except LotNotFound as e:
         raise HTTPException(404, "закупка с таким номером не найдена в данных") from e
+    except LotDataUnavailable as e:
+        raise HTTPException(503, str(e)) from e
+
+
+@app.get("/api/procedure/{ident}", response_model=Query)
+def api_procedure(ident: str) -> Query:
+    """Procedure number (Извещения.procedure_id, #617) -> Query of its lot; query_id names the lot (lot-<lot_id>)."""
+    if not ident.strip().isdigit():
+        raise HTTPException(422, "номер процедуры — только цифры")
+    try:
+        return find_procedure(ident)
+    except LotNotFound as e:
+        raise HTTPException(404, "процедура с таким номером не найдена в данных") from e
     except LotDataUnavailable as e:
         raise HTTPException(503, str(e)) from e
 
