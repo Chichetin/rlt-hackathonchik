@@ -27,7 +27,6 @@ from src.sources.rmsp import MSP_CATEGORY
 log = logging.getLogger(__name__)
 
 
-
 def _region(kpp: str) -> str | None:
     return {"78": "Санкт-Петербург", "47": "Ленинградская область"}.get(kpp[:2])
 

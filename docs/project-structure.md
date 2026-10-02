@@ -38,7 +38,7 @@ src/
   contracts.py        # Query, Evidence, Counterparty, ScoreComponent, CounterpartyMatch, SearchResponse
   ingest/             # DATA: data/raw → data/processed (parquet), склейка по ИНН
   match/              # MATCH: search.py (# STUB), filters.py — жёсткие фильтры
-  sources/            # SOURCES: cache.py — кеш внешних источников (SQLite, TTL); клиенты источников
+  sources/            # SOURCES: cache.py — кеш внешних источников (SQLite, TTL); клиенты источников; role.py — роль по ОКВЭД (D-057)
   enrich/             # SOURCES: enrich.py (# STUB), evidence.py — механическая проверка фактов
   llm/                # SOURCES: provider.py — LLM из .env, режим без LLM обязателен
   eval/               # DATA: metrics.py, split.py (печать holdout), run.py (make eval), final.py (make eval-final)
