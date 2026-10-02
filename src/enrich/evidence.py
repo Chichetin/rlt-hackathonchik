@@ -11,7 +11,8 @@ Rules (CLAUDE.md, «Проверки кодом»):
 5. the counterparty INN and every contact are backed by an Evidence with the same field/value;
    the role (`kind`) by an `okved` Evidence whose value is a WHOLE line of the page with the main OKVED
    of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/enrich/role.py
-   (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19;
+   (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; `unknown` also by such a line
+   whose fact is the service basis of #188 (`role.is_service_basis`: roles do not apply to services and works);
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
 
@@ -26,13 +27,14 @@ from collections.abc import Callable
 from functools import cached_property
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
-from src.enrich.role import basis_kind
+from src.enrich.role import basis_kind, is_service_basis
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
 FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region",
           "rnp"}
 FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/sources/fns_opendata.py
+FIELDS |= {"licence"}  # src/sources/msp_dump.py: licences of the МСП dump (#188)
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
@@ -174,7 +176,9 @@ def _backed(cp: Counterparty, field: str, value: str, page_text: PageText) -> bo
 def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
     pages = cached_pages(page_text)
     for e in cp.evidence:
-        if e.field != "okved" or e.value is None or basis_kind(e.value, cp.inn) != cp.kind:
+        if e.field != "okved" or e.value is None or (rule := basis_kind(e.value, cp.inn)) is None:
+            continue
+        if rule != cp.kind and not (cp.kind == "unknown" and is_service_basis(e.fact)):
             continue
         page = pages.page(e.url)
         if page is not None and e.value.strip() in page.lines and not check_evidence(e, pages):

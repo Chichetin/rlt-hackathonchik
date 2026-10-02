@@ -14,7 +14,8 @@ Every value is copied as is from one record. Cached page of a record (src/source
 in the rmsp.nalog.ru format (same registry), so the role basis `row.<inn>.okved1` of src/enrich/role.py
 applies as is. `page()` of a parquet row equals `page_from_xml()` of the raw record (`record()`, the audit
 path: dump file + member + `ИдДок`), and `counterparty()` gives every fact an Evidence whose value is on
-that page (src/enrich/evidence.py, D-090). ИП: no locality on the page (152-ФЗ, as in rmsp.py).
+that page (src/enrich/evidence.py, D-090), licences included (`field="licence"`, #188). ИП: no locality on the
+page (152-ФЗ, as in rmsp.py).
 Licence: FNS open data, commercial use allowed (research/SOURCES.md).
 """
 
@@ -217,6 +218,8 @@ def counterparty(r: dict, fetched_at: datetime) -> Counterparty | None:
     kind = role.assign(code, code_name, f"row.{inn}.okved1: {code}", add)
     for extra in r["okved_extra"]:
         add("okved", f"{inn}.okved_extra: {extra}", f"Дополнительный ОКВЭД {extra} (заявлен в реестре МСП)")
+    for licence in r["licences"]:  # a permit of the record (#188): the activity named in the licence, verbatim
+        add("licence", f"{inn}.licence: {licence}", f"Лицензия: {licence} (реестр МСП, выгрузка ФНС на {AS_OF})")
     cat = str(r["msp_category"] or "")
     is_msp = None
     if cat in MSP_CATEGORY:
