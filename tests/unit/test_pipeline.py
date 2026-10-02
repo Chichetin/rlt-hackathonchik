@@ -31,7 +31,7 @@ def no_cache(search_data, tmp_path, monkeypatch):
 def _liquidated(inn: str):
     """enrich() from the cache: `inn` has a card «ликвидирована» today, the rest have no card."""
 
-    def fake(i, cache=None, offline=False):
+    def fake(i, cache=None, offline=False, open_data=True):
         if i != inn:
             raise KeyError(i)
         return Counterparty(inn=i, name="ООО Тест", status="Организация ликвидирована")

@@ -208,7 +208,7 @@ def test_predict_uses_the_search_pipeline_hard_filters_and_evidence_check(search
     P.run(FIX, first, top=5, offline=True)
     top = next(r["inn"] for r in _rows(first) if r["lot_id"] == "9001" and r["block"] == "История" and r["inn"])
 
-    def cached(inn, cache=None, offline=False):
+    def cached(inn, cache=None, offline=False, open_data=True):
         if inn != top:
             raise KeyError(inn)
         return Counterparty(inn=inn, name="ООО Тест", status="Организация ликвидирована")
