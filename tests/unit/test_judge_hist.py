@@ -47,9 +47,9 @@ def test_score_pairs_systems_by_query_and_ignores_unlabelled_queries():
               "q2": {"c01": 1, "c02": 0},  # A 1.0, B 0.0
               "q3": {"c01": None, "c02": 1}}  # A has nothing labelled: the query does not count
     got = J.score_records(labels, records)
-    assert got["n_queries"] == 2 and set(got["per_query"]) == {"q1", "q2"}
+    assert got["n_queries"] == 2 and {r["query_id"] for r in got["per_query"]} == {"q1", "q2"}
     assert got["precision_at_10"]["A"]["mean"] == 1.0 and got["precision_at_10"]["B"]["mean"] == 0.25
-    assert got["paired"]["A - B"]["mean"] == 0.75 and got["null_labels"] == 1
+    assert got["paired"]["A - B"]["mean"] == 0.75 and got["null_labels"] == 0  # nulls of an uncounted query are not reported
 
 
 def test_import_rejects_an_answer_that_does_not_match_the_packet(tmp_path):
@@ -57,6 +57,8 @@ def test_import_rejects_an_answer_that_does_not_match_the_packet(tmp_path):
     packets.mkdir()
     (packets / "q1.json").write_text(json.dumps({"query_id": "q1", "candidates": [{"key": "c01"}, {"key": "c02"}]}),
                                      encoding="utf-8")
+    key = {"q1": {"keys": {"c01": "7800000001", "c02": "7800000002"}, "ranked": {"A": ["c01"]}}}
+    (tmp_path / "key.json").write_text(json.dumps(key), encoding="utf-8")
     answer = tmp_path / "a.json"
     labels = tmp_path / "labels.json"
     answer.write_text(json.dumps({"query_id": "q1", "labels": {"c01": {"label": 1, "reason": "x"}}}), encoding="utf-8")
@@ -71,3 +73,5 @@ def test_import_rejects_an_answer_that_does_not_match_the_packet(tmp_path):
     J.import_answers([answer], "m", labels, packets)
     J.import_answers([answer], "m", labels, packets)  # idempotent
     assert json.loads(labels.read_text(encoding="utf-8"))["queries"] == {"q1": {"c01": 1, "c02": None}}
+    # the key → INN map and ranked lists are copied into the tracked labels: a later re-export cannot rebind them
+    assert json.loads(labels.read_text(encoding="utf-8"))["records"] == key

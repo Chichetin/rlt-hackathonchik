@@ -36,7 +36,7 @@ from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match.index import processed_dir
 
 JUDGE_DIR = ROOT / "eval" / "judge" / "hist"  # git-ignored (eval/judge/): packets are derived, answers are imported
-LABELS = ROOT / "eval" / "labels" / "judge_hist.json"  # tracked: score reproduces from it without the judge
+LABELS = ROOT / "eval" / "labels" / "judge_hist.json"  # tracked: score reproduces from it without the judge or key.json
 SEED = 301
 POOL = 300  # the sample is drawn once; --n takes its prefix, so 50 first and the rest later are one sample
 SYSTEMS = {"B-bm25": ("baseline", "B-bm25"), "H-15f": ("config", "H-15f"), "product": ("config", None)}
@@ -138,6 +138,8 @@ def export(n: int, out: Path = JUDGE_DIR) -> int:
 def import_answers(paths: list[Path], model: str, labels: Path = LABELS, packets: Path = JUDGE_DIR / "packets") -> int:
     """Answers → the tracked labels file; every candidate of the packet must be answered exactly once."""
     data: dict[str, Any] = json.loads(labels.read_text(encoding="utf-8")) if labels.exists() else {"queries": {}}
+    data.setdefault("records", {})
+    key = json.loads((packets.parent / "key.json").read_text(encoding="utf-8"))
     for path in paths:
         ans = json.loads(path.read_text(encoding="utf-8"))
         qid = ans["query_id"]
@@ -150,6 +152,7 @@ def import_answers(paths: list[Path], model: str, labels: Path = LABELS, packets
         if bad:
             raise ValueError(f"{qid}: метки вне 0/1/null: {bad}")
         data["queries"][qid] = {k: v["label"] for k, v in got.items()}
+        data["records"][qid] = key[qid]  # key → INN and ranked lists travel with the labels
     data["model"] = model
     labels.parent.mkdir(parents=True, exist_ok=True)
     labels.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True, indent=0) + "\n", encoding="utf-8")
@@ -183,9 +186,9 @@ def score_records(labels: dict[str, dict[str, int | None]], records: dict[str, d
                 d = [p[a] - p[b] for p in per_query.values()]
                 lo, hi = bootstrap_ci(d)
                 out["paired"][f"{a} - {b}"] = {"mean": round(sum(d) / len(d), 4), "ci95": [round(lo, 4), round(hi, 4)]}
-    unjudged = sum(1 for lab in labels.values() for v in lab.values() if v is None)
+    unjudged = sum(1 for qid, lab in labels.items() if qid in per_query for v in lab.values() if v is None)
     out["null_labels"] = unjudged
-    return {**out, "per_query": per_query}
+    return {**out, "per_query": [{"query_id": q, **p} for q, p in per_query.items()]}
 
 
 def score(exp: str) -> int:
@@ -193,8 +196,7 @@ def score(exp: str) -> int:
         print(f"нет {LABELS.relative_to(ROOT)} — сначала import", file=sys.stderr)
         return 2
     data = json.loads(LABELS.read_text(encoding="utf-8"))
-    records = json.loads((JUDGE_DIR / "key.json").read_text(encoding="utf-8"))
-    body = score_records(data["queries"], records)
+    body = score_records(data["queries"], data["records"])
     cfg = {"judge_model": data.get("model"), "systems": {k: v[1] or "product default" for k, v in SYSTEMS.items()},
            "top": TOP, "seed": SEED, "pool": POOL, "names_per_supplier": NAMES}
     rec = R.result_record(exp, f"dev_fresh_free_text(n={body['n_queries']},seed={SEED})", cfg, body)
