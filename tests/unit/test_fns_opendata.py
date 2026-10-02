@@ -317,4 +317,10 @@ def test_lookup_command_prints_facts_with_a_passed_check(built, monkeypatch, cap
     printed = capsys.readouterr().out
     assert printed.count("проверка: OK") == len(F.lookup(BRASS, cache, parquet=out)) > 0
     assert "проверка: [" not in printed
+    # «OK» is the check's verdict, not a label: a fact whose value is not on its page is reported with the errors
+    good = F.lookup(BRASS, cache, parquet=out)[0]
+    monkeypatch.setattr(fns_lookup, "lookup", lambda inn, c: [good.model_copy(update={"value": "999999999"})])
+    assert fns_lookup.main([BRASS]) == 0
+    assert "проверка: [" in capsys.readouterr().out
     assert F.main(["lookup", BRASS]) == 2  # the old command names the new one
+    assert "src.enrich.fns_lookup" in capsys.readouterr().err

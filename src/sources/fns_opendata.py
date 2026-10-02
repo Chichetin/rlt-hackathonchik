@@ -5,7 +5,7 @@ without key or captcha (research/SOURCES.md, #59). Commands:
 
     python -m src.sources.fns_opendata download   # 4 archives → data/external/fns_opendata/
     python -m src.sources.fns_opendata build      # streaming parse → data/processed/fns_opendata.parquet
-    python -m src.enrich.fns_lookup <inn>                # facts of an INN with the evidence check (#294)
+    python -m src.enrich.fns_lookup <inn>         # facts of an INN with the evidence check (moved, #294)
 
 XML (checked on the 25.09.2026 archives): `Файл/Документ[@ДатаСост]` → `СведНП[@НаимОрг, @ИННЮЛ]` +
 one dataset element: `СведССЧР[@КолРаб]` (sshr2019), `СведДохРасх[@СумДоход, @СумРасход]`
