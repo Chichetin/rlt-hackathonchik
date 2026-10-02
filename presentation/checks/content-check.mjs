@@ -34,7 +34,7 @@ const overflow=await page.locator('#s4 .node').evaluateAll(nodes=>nodes.flatMap(
 check(overflow.length===0,'All architecture labels fit inside their nodes');
 check(await page.locator('#s4 .architecture-links [marker-end] path').count()===4,'Data feed arrows have explicit endpoints');
 check(await page.locator('button,dialog').count()===0,'No mouse-only controls');
-check((await page.locator('#s6 .hill-value').allTextContents()).join('/')==='23%/89%'&&text('s6').includes('По данным команды')&&text('s6').includes('протокол оценки уточняется'),'User supplied winner rates are attributed and marked unverified');
+check((await page.locator('#s6 .hill-value').allTextContents()).join('/')==='38,6%/57,2%'&&text('s6').includes('F-33, F-34')&&text('s6').includes('A361-base'),'S6 numbers come from pitch/facts.md F-33/F-34 and name the eval runs');
 const longFresh=read('eval/results/LF-long.json'),oldFresh=read('eval/results/LF-base.json');
 const devIds=new Set(current.per_query.map(q=>q.query_id));
 check(JSON.stringify(longFresh.per_query.map(q=>q.query_id))===JSON.stringify(oldFresh.per_query.map(q=>q.query_id)),'Additional sample compares identical queries between models');
