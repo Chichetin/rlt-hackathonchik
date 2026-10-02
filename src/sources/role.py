@@ -18,6 +18,11 @@ INN in the registry of Russian industrial products (src/sources/gisp.py) makes i
 Evidence with `field="product"` and `value` = the line `gisp.<inn>.product: <name>` of that INN's registry record page
 (`basis_kind` below; src/enrich/evidence.py accepts it); gisp.with_role() writes the role and the text of `decide()`
 into the card. Without a registry record `Counterparty.kind` follows the OKVED rule.
+
+A service or works purchase (#188, the type of src/match/purchase_type.py): the roles manufacturer / distributor /
+dealer do not apply, `for_purchase()` makes the kind `unknown` and rewrites the fact of the same basis line —
+«роли … к услугам (работам) не применяются; исполнитель по основному ОКВЭД XX.XX «…»». The check accepts `unknown`
+on a verified main-OKVED line with that fact (`is_service_basis`), whatever kind the rule gives the code.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from src.contracts import Evidence, Kind
+from src.contracts import Counterparty, Evidence, Kind
 
 LABEL: dict[Kind, str] = {"manufacturer": "производитель", "distributor": "дистрибьютор", "dealer": "дилер",
                           "unknown": "не определена"}
@@ -36,6 +41,10 @@ _CODE = re.compile(r"\d{2}(?:\.\d{1,2}){0,3}", re.ASCII)
 # (`okved1`) and of ГИР БО (`okved2`) — a search page holds many rows and the query's own `query.okved1`.
 CARD_KEYS = ("vyp.КодОКВЭД", "search.okved2main")
 ROW_KEYS = ("okved1", "okved2")
+# #188: purchase types (src/match/purchase_type.PurchaseType) the roles do not apply to -> the dative of the basis
+SERVICE_DATIVE = {"services": "услугам", "remote": "услугам", "works": "работам"}
+SERVICE_HEAD = "Роль не определена: роли производитель / дистрибьютор / дилер к "
+_NAMED = re.compile(r"«(.*)» — ")  # the OKVED name in the fact of assign()
 GISP_KEY = "product"  # `gisp.<inn>.product: <name>` — a product of this INN in the registry of industrial products
 
 
@@ -88,6 +97,31 @@ def assign(code: str | None, name: str | None, line: str, add: Callable[[str, st
     head = f"Роль — {LABEL[kind]}" if kind != "unknown" else "Роль не определена"
     named = f" «{name}»" if name else ""
     return kind if add("okved", line, f"{head}: заявленный основной ОКВЭД {code}{named} — {why}") else None
+
+
+def is_service_basis(fact: str, value: str | None) -> bool:
+    """The fact of a basis line rewritten by for_purchase(): it backs `unknown` whatever the code's rule kind —
+    only when it names the code of its own line (`ОКВЭД 17.12` for `row.<inn>.okved1: 17.12`)."""
+    code = (value or "").partition(": ")[2].strip()
+    return bool(code) and fact.startswith(SERVICE_HEAD) and re.search(
+        rf"ОКВЭД {re.escape(code)}(?![\d.])", fact) is not None
+
+
+def for_purchase(cp: Counterparty, purchase: str | None) -> Counterparty:
+    """The role for the purchase type (#188): for services and works `unknown`, every role basis line of the card
+    keeps its page line and gets the service fact. Goods, an unknown type, no role or no basis — `cp` as is."""
+    dative = SERVICE_DATIVE.get(purchase or "")
+    if dative is None or cp.kind is None:
+        return cp
+    evidence, based = [], False
+    for e in cp.evidence:
+        if e.field == "okved" and basis_kind(e.value, cp.inn) is not None:
+            code = (e.value or "").partition(": ")[2].strip()
+            named = f" «{m.group(1)}»" if (m := _NAMED.search(e.fact)) else ""
+            fact = f"{SERVICE_HEAD}{dative} не применяются; исполнитель по основному ОКВЭД {code}{named}"
+            e, based = e.model_copy(update={"fact": fact}), True
+        evidence.append(e)
+    return cp.model_copy(update={"kind": "unknown", "evidence": evidence}) if based else cp
 
 
 # --- priority of the bases (v0, #186) ---------------------------------------------------------------------

@@ -150,3 +150,23 @@ def test_redirect_to_another_site_is_not_followed(tmp_path):
     res = site.site_inn(HOME, SourceCache(tmp_path / "c.sqlite"), httpx.Client(transport=httpx.MockTransport(handler)))
     assert res.inn is None and "другой сайт" in res.reason
     assert not any(u.startswith("https://other.example") for u in calls)
+
+
+def test_redirect_into_a_path_robots_disallows_is_not_followed(tmp_path):
+    """#194: robots.txt is asked for the path after a redirect within the site too, not only for the first URL."""
+    calls: list[str] = []
+    pages = {HOME + "robots.txt": (200, "User-agent: *\nDisallow: /private/\n"), HOME: (200, PAGE_HOME),
+             HOME + "rekvizity/": (301, ""), HOME + "private/rekvizity/": (200, PAGE_REQ)}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        calls.append(url)
+        status, body = pages.get(url, (404, ""))
+        headers = {"content-type": "text/html; charset=utf-8"}
+        if status == 301:
+            headers["location"] = "/private/rekvizity/"
+        return httpx.Response(status, text=body, headers=headers)
+
+    res = site.site_inn(HOME, SourceCache(tmp_path / "c.sqlite"), httpx.Client(transport=httpx.MockTransport(handler)))
+    assert res.inn is None and HOME + "private/rekvizity/" not in calls
+    assert "robots.txt не разрешает (после перенаправления" in res.reason

@@ -119,7 +119,7 @@ def test_counterparty_every_fact_passes_the_evidence_check(tmp_path):
     assert cp.name == 'ООО "ТЕСТОВАЯ БУМАГА"' and cp.kind == "manufacturer" and cp.is_msp is True
     assert cp.region == "Санкт-Петербург" and cp.okved == ["17.12", "46.49.33", "46.76.1"]
     fields = {e.field for e in cp.evidence}
-    assert fields == {"inn", "ogrn", "name", "okved", "msp", "region"}
+    assert fields == {"inn", "ogrn", "name", "okved", "licence", "msp", "region"}  # licence: #188
     extra = [e for e in cp.evidence if e.value == "0078000013.okved_extra: 46.49.33"]
     assert len(extra) == 1 and "Дополнительный ОКВЭД 46.49.33" in extra[0].fact
     assert all(e.url == "https://www.nalog.gov.ru/opendata/7707329152-rsmp/#inn=0078000013" for e in cp.evidence)

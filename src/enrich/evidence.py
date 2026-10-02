@@ -13,6 +13,8 @@ Rules (CLAUDE.md, «Проверки кодом»):
    of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/sources/role.py
    (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; or by a `product` Evidence
    whose value is the WHOLE line `gisp.<inn>.product: <name>` of a registry record of this INN (ГИСП, #74);
+   `unknown` also by a main-OKVED line whose fact is the service basis of #188 (`role.is_service_basis`: roles do
+   not apply to services and works);
    `in_rnp` (True or False) by at least one passing `field="rnp"` Evidence (D-154, #111) — an unbacked flag is None;
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
@@ -28,7 +30,7 @@ from collections.abc import Callable
 from functools import cached_property
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
-from src.sources.role import basis_kind
+from src.sources.role import basis_kind, is_service_basis
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 
@@ -36,6 +38,7 @@ FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "ok
           "rnp"}
 FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/sources/fns_opendata.py
 FIELDS |= {"review"}  # a quote of a public review (src/enrich/reviews.py), a normalized substring of the page
+FIELDS |= {"licence"}  # src/sources/msp_dump.py: licences of the МСП dump (#188)
 FIELDS |= {"product"}  # src/sources/gisp.py: a product of the company in the registry of industrial products
 ROLE_FIELDS = ("okved", "product")  # Evidence that may hold the basis of the role (src/sources/role.py)
 MIN_TEXT = 6
@@ -179,7 +182,10 @@ def _backed(cp: Counterparty, field: str, value: str, page_text: PageText) -> bo
 def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
     pages = cached_pages(page_text)
     for e in cp.evidence:
-        if e.field not in ROLE_FIELDS or e.value is None or basis_kind(e.value, cp.inn) != cp.kind:
+        if e.field not in ROLE_FIELDS or e.value is None or (rule := basis_kind(e.value, cp.inn)) is None:
+            continue
+        if rule != cp.kind and not (cp.kind == "unknown" and e.field == "okved"
+                                    and is_service_basis(e.fact, e.value)):
             continue
         page = pages.page(e.url)
         if page is not None and e.value.strip() in page.lines and not check_evidence(e, pages):

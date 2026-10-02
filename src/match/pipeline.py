@@ -9,6 +9,7 @@ only in options:
     search(k = CANDIDATES)                       organizers' history, scored (src/match/search.py)
       → enrichment from the cache                status, МСП, role, name — never the network here
       → block «Новые» (discover)                 optional: eval has no use for it (never relevant)
+      → role for the purchase type               services, works: `unknown` with its basis (role.for_purchase, #188)
       → hard filters                             liquidated / bankrupt / in РНП (src/match/filters.py)
       → user filters                             query.filters
     verified(matches)                            the Evidence check of what is shown (card, xlsx, CSV)
@@ -25,6 +26,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 
 from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
@@ -34,6 +36,8 @@ from src.match import confidence, fallback, ranker, speller
 from src.match import search as search_mod
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
 from src.match.index import get_index
+from src.match.purchase_type import purchase_type
+from src.sources import role
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -96,6 +100,9 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
             discovered, candidates, out.discovery, out.discovery_error = _discovered(query, found, enqueue, offline,
                                                                                     predicted)
         found = [*enriched(found, out.uncached), *discovered]
+        # services and works (#188): the role is `unknown` with its basis — before the filters and the chips
+        found = _for_purchase(found, query)
+        candidates = _for_purchase(candidates, query) if candidates is not None else None
     legal = found if backtest else apply_legal(found)
     # why above the next one — against the neighbour left after the filters, the one the customer sees (#278)
     shown = ranker.reasons(apply_user_filters(legal, query))
@@ -111,6 +118,14 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
     out.matches = shown
     out.facets = {"history": chip_facets((m for m in legal if m.origin == "history"), query), "discovered": new}
     return out
+
+
+def _for_purchase(matches: list[CounterpartyMatch], query: Query) -> list[CounterpartyMatch]:
+    """The role of every candidate for the purchase type of the query (role.for_purchase, #188)."""
+    kind = purchase_type(query.okpd2)
+    if kind not in role.SERVICE_DATIVE:
+        return matches
+    return [m.model_copy(update={"counterparty": role.for_purchase(m.counterparty, kind)}) for m in matches]
 
 
 def _spelled(query: Query, config: dict | None) -> speller.Correction | None:
@@ -130,6 +145,12 @@ def _spelled(query: Query, config: dict | None) -> speller.Correction | None:
         log.exception("speller: запрос %s ищется как введён", query.query_id)
         return None
     return fixed if fixed.changed else None
+
+
+def with_reliability(matches: list[CounterpartyMatch], as_of: date | None) -> list[CounterpartyMatch]:
+    """The reliability of what the user sees (#72, shadow): the page of /api/search, the rows of an export — not
+    every candidate pick() scored. Weight 0: score and order stay."""
+    return search_mod.shadow_reliability(matches, as_of)
 
 
 def verified(matches: list[CounterpartyMatch], open_data: bool = True) -> list[CounterpartyMatch]:

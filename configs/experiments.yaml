@@ -185,3 +185,26 @@ H-105-combo-aisgz:   # combo + сглаженная доля побед толь
 # R-105-gbm обучен src.match.ranker_train --name R-105 теми же данными и seed, что R-198, плюс этот признак.
 H-105-rk:
   ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt}
+# reliability (#72, D-157). Подвыборка — каждый 4-й кейс dev: `uv run python -m src.eval.run --exp <id> --every 4`.
+# "on" в кавычках — иначе YAML 1.1 читает bool. Сняты до D-103 / D-109: ранжировщик и исправление запроса выключены.
+rel-off-s500:    # на прежнем дефолте v1 (до D-077): reliability в карточке, не в балле
+  spell: false
+  weights: *v1_weights
+  options: *v1_options
+  reliability: {mode: shadow}
+  ranker: null
+rel-on-s500:     # на v1: reliability в балле с весом 0.2 (D-004)
+  spell: false
+  weights: *v1_weights
+  options: *v1_options
+  reliability: {mode: "on"}
+  ranker: null
+rel-off-f:       # на H-15f (D-077, без ранжировщика): shadow — балл и порядок как у v2
+  spell: false
+  reliability: {mode: shadow}
+  ranker: null
+rel-on-f:        # на H-15f: + reliability 0.2 поверх нормированных весов H-15f (с ранжировщиком порядок задаёт модель — замер без него)
+  spell: false
+  weights: {reliability: 0.2}
+  reliability: {mode: "on"}
+  ranker: null
