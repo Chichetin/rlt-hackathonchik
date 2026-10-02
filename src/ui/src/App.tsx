@@ -1069,6 +1069,23 @@ function Block(props: {
   liveInns?: Set<string>; // «Новые»: companies the live search added (#550)
 }) {
   const reduced = useReducedMotion();
+  // #615: the next server page loads when the end of the list nears, up to the total; the button stays as a fallback
+  const sentinel = useRef<HTMLDivElement>(null);
+  const onMoreRef = useRef(props.onMore);
+  onMoreRef.current = props.onMore;
+  const canMore = !!props.onMore && !props.loadingMore && props.rows.length > 0 && props.rows.length < props.total;
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!canMore || !el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        io.disconnect();
+        onMoreRef.current?.();
+      }
+    }, { rootMargin: "800px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [canMore, props.rows.length]);
   return (
     <section className={`block block-${props.variant}`} aria-label={props.title}>
       <span className="block-tag"><OriginIcon origin={props.variant} />{props.tag}</span>
@@ -1121,7 +1138,7 @@ function Block(props: {
         </ol>
       )}
       {props.rows.length > 0 && props.rows.length < props.total && (
-        <div className="more">
+        <div className="more" ref={sentinel}>
           <span className="shown">
             Показаны {props.rows.length} из {props.total}
           </span>

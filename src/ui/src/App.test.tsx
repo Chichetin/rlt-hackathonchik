@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { App, discoveryAlert, noteText } from "./App";
 import { reviewLinks } from "./reviews";
 import { buildQuery, type Counterparty, type Filters, filterNotes, NO_FILTERS, regionLabel, rnpLabel, type SearchResponse } from "./api";
@@ -308,6 +308,10 @@ test("filter that hides unknown-type suppliers says so instead of 'nothing found
 });
 
 test("history is paged on the server: total from the header, «Показать ещё» appends the next page", async () => {
+  // the end of the list never reaches the screen here: only the button loads more (#615 loads on scroll)
+  const seen = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } } as unknown as typeof IntersectionObserver;
+  onTestFinished(() => { globalThis.IntersectionObserver = seen; });
   const page = (names: string[]) => ({ ...structuredClone(response), stub: false, discovered: [], history: names.map((n) => match(n, "history")) });
   const urls: string[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
@@ -328,6 +332,22 @@ test("history is paged on the server: total from the header, «Показать 
   expect(searches()[1]).toBe("/api/search?limit=10&offset=2");
   expect(within(history).getAllByRole("listitem")).toHaveLength(3);
   expect(within(history).queryByRole("button", { name: "Показать ещё" })).not.toBeInTheDocument();
+});
+
+test("scrolling to the end of the list loads the next page without the button (#615)", async () => {
+  const page = (names: string[]) => ({ ...structuredClone(response), stub: false, discovered: [], history: names.map((n) => match(n, "history")) });
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const offset = Number(new URL(String(url), "http://x").searchParams.get("offset"));
+    const body = offset === 0 ? page(["ООО Альфа", "ООО Гамма"]) : page(["ООО Дельта"]);
+    return new Response(JSON.stringify(body), { status: 200, headers: { "X-Total-History": "3", "X-Total-Discovered": "0" } });
+  });
+  // test-setup: every observed element is on screen, as when the end of the list is scrolled to
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Название товара"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const history = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(await within(history).findByText("ООО Дельта")).toBeInTheDocument();
+  expect(within(history).getAllByRole("listitem")).toHaveLength(3);
 });
 
 // #84: «Новые» emptied by a filter. Mock: requests with the given filter get no new companies.
