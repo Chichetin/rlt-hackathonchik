@@ -146,10 +146,10 @@ class Pool:
 
 def _known(as_of: date | None) -> frozenset[str]:
     """INNs in organizers' data before as_of — the product drops them from «Новые» (discover.known_inns)."""
-    path = suppliers_path(as_of, processed_dir())
-    rows = duckdb.connect().execute("SELECT DISTINCT inn FROM read_parquet(?) WHERE inn IS NOT NULL",
-                                    [path.as_posix()]).fetchall()
-    return frozenset(r[0] for r in rows)
+    inns = discover._all_inns(suppliers_path(as_of, processed_dir()))  # the product's own reader
+    if inns is None:
+        raise FileNotFoundError(f"данные организаторов на {as_of} не прочитаны — uv run python -m src.ingest.build")
+    return inns
 
 
 def _summary(rows: list[dict]) -> dict:
