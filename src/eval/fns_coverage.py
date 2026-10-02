@@ -1,4 +1,4 @@
-"""Enrichment coverage of the top-10 (#147, #396): status, name, role with basis, fact with its fetch date per shown candidate.
+"""Enrichment coverage of the top-10 (#147, #396): status, name, role with basis, dated fact per candidate.
 
     uv run python -m src.eval.fns_coverage --exp C-fns-v1            # cache only, no network
     uv run python -m src.eval.fns_coverage --exp C-fns-v1 --enqueue  # + queue the unchecked INNs (worker, paced)
@@ -110,10 +110,10 @@ def measure(top: int = 10, lots: list[str] | None = None) -> dict:
         per_query.append(row)
     for b in BLOCKS:
         for key in ("roles", "name_sources"):
-            c: Counter = Counter()
+            acc: Counter = Counter()
             for row in per_query:
-                c.update(row[b][key])
-            totals[b][key] = dict(c)
+                acc.update(row[b][key])
+            totals[b][key] = dict(acc)
     summary: dict = {b: {**t, **{f"{k}_share": share(t[k], t["n"]) for k in FIELDS}} for b, t in totals.items()}
     n = sum(t["n"] for t in totals.values())
     total: dict = {"n": n}
@@ -145,13 +145,17 @@ def warm(body: dict, pause_s: float) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="покрытие обогащения в топ-10 (#147, #396): статус, название, роль с основанием, дата факта; "
-                                 "для воспроизведения — офлайн по копии кеша (SOURCE_CACHE), без --warm-top")
+    ap = argparse.ArgumentParser(
+        description="покрытие обогащения в топ-10 (#147, #396): статус, название, роль, дата факта; "
+        "для воспроизведения — офлайн по копии кеша (SOURCE_CACHE), без --warm-top")
     ap.add_argument("--exp", required=True, help="id результата, например C-fns-v1")
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--enqueue", action="store_true", help="поставить непроверенные ИНН в очередь обогащения")
     ap.add_argument("--lots", default="", help="номера закупок через запятую (демо-лоты): ещё запросы к 8 реальным")
-    ap.add_argument("--warm-top", type=int, default=0, help="сначала обогатить непроверенные из топ-N по сети (с паузами): МЕНЯЕТ кеш; 0 — не обогащать")
+    ap.add_argument(
+        "--warm-top", type=int, default=0,
+        help="сначала обогатить непроверенные из топ-N по сети (с паузами): МЕНЯЕТ кеш; 0 — не обогащать",
+    )
     ap.add_argument("--pause", type=float, default=1.0, help="секунд между живыми вызовами источников при --warm-top")
     args = ap.parse_args(argv)
     lots = [x.strip() for x in args.lots.split(",") if x.strip()]
@@ -160,7 +164,8 @@ def main(argv: list[str] | None = None) -> int:
     if warmed:
         body["warm"] = {"top": args.warm_top, **warmed}
     rec = {"exp_id": args.exp, "kind": "fns_coverage", "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-           "commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain", "--untracked-files=no")), "cache": cache_info(), **body}
+           "commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
+           "cache": cache_info(), **body}
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

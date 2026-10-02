@@ -57,7 +57,8 @@ def test_warm_top_zero_does_not_warm(tmp_path, monkeypatch):
     from src.eval import fns_coverage as fc
 
     body = {"top": 10, "n_queries": 0, "summary": {b: {"n": 0, "checked": 0, "checked_share": None, "active": 0,
-            "named": 0, "role_basis": 0, "dated": 0, "roles": {}, "name_sources": {}} for b in fc.BLOCKS}, "per_query": []}
+            "named": 0, "role_basis": 0, "dated": 0, "roles": {}, "name_sources": {}}
+            for b in fc.BLOCKS}, "per_query": []}
     monkeypatch.setattr(fc, "measure", lambda top=10, lots=None: body)
     monkeypatch.setattr(fc, "cache_info", lambda: {"path": "x", "pages": 0})
     monkeypatch.setattr(fc, "RESULTS", tmp_path)
