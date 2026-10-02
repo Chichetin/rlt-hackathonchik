@@ -232,6 +232,7 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
         "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
         "config": cfg,
         "tokenizer_version": tokenizer_version(),
+        "exact_docs": search_mod.EXACT_DOCS,  # P-02 switch (#349): 0 = vote only (P-01)
         "config_sha256": _safe_sha(),
         "stub": bool(getattr(search_mod, "IS_STUB", False)) and cfg.get("method", "search") == "search",
         "vectors": _vectors(cfg),
