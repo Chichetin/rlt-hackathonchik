@@ -222,7 +222,12 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
 def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counterparty]:
     """The cards plus the offline facts of ФНС open data, each with its own url (one query for all, no network)."""
     facts = fns_opendata.lookup_many([c.inn for c in cards if c.inn and inn_is_valid(c.inn)], cache)
-    return [c.model_copy(update={"evidence": [*c.evidence, *facts[c.inn]]}) if c.inn in facts else c for c in cards]
+
+    def merged(c: Counterparty) -> Counterparty:
+        have = {(e.url, e.field, e.value) for e in c.evidence}  # a card that already has them gets them once
+        new = [e for e in facts[c.inn] if (e.url, e.field, e.value) not in have]
+        return c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
+    return [merged(c) if c.inn in facts else c for c in cards]
 
 
 def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,

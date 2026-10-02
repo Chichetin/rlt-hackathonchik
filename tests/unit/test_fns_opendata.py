@@ -292,3 +292,15 @@ def test_backtest_verified_has_no_open_data_facts(built, monkeypatch):
     fields = lambda ms: {e.field for m in ms for e in m.counterparty.evidence}  # noqa: E731
     assert "employees" in fields(pipeline.verified([_match(BRASS)]))
     assert "employees" not in fields(pipeline.verified([_match(BRASS)], open_data=False))
+
+
+def test_open_data_is_not_added_twice_to_a_card_that_has_it(built, monkeypatch):
+    from src.match import pipeline
+    out, _, cache = built
+    monkeypatch.setenv("FNS_OPENDATA_PARQUET", str(out))
+    SourceCache().put(pb_nalog.card_url(BRASS), (PB / f"{BRASS}.txt").read_text(encoding="utf-8"))
+    m = CounterpartyMatch(counterparty=enrich(BRASS, offline=True), score=0.5, origin="discovered", components=[])
+    got = pipeline.verified([m])[0].counterparty.evidence
+    keys = [(e.url, e.field, e.value) for e in got]
+    assert any(e.field == "employees" for e in got)
+    assert len(keys) == len(set(keys))

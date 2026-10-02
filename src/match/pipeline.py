@@ -218,7 +218,7 @@ class TodayAudit:
             if inn not in self._cards:
                 cache = cache or SourceCache()
                 try:
-                    self._cards[inn] = legal_ok(enrich_mod.enrich(inn, cache, offline=True))
+                    self._cards[inn] = legal_ok(enrich_mod.enrich(inn, cache, offline=True, open_data=False))
                 except KeyError:  # nothing cached
                     self._cards[inn] = None
                 except Exception:  # noqa: BLE001 — a broken cached page is «no card», never a failed eval
