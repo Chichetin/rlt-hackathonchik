@@ -1,6 +1,7 @@
 """enrich(inn) while pb.nalog.ru asks for a captcha: rmsp by INN, then bo (#58, D-052).
 
-Answers are real, recorded 01.10 (tests/fixtures/enrich_fallback/README.md); the network is mocked."""
+Answers are real, recorded 01.10 (tests/fixtures/enrich_fallback/README.md), except `_bo_answer` (#454, synthetic: no
+recorded ГИР БО answer for the МСП company); the network is mocked."""
 
 import json
 from pathlib import Path
@@ -213,3 +214,44 @@ def test_msp_flag_only_from_what_the_page_says():
     assert _msp({"is_active": "1", "category": "?"}, add) is None and facts == []
     assert _msp({"is_active": "0", "category": "1"}, add) is False
     assert facts == [("msp", "is_active: 0", "Реестр МСП: запись есть, но не действующая")]
+
+
+def _bo_answer(inn: str, status: str) -> dict:
+    """A synthetic ГИР БО answer in the shape of bo_7736050003.json (no recorded answer for this INN)."""
+    return {"content": [{"inn": f"<strong>{inn}</strong>", "shortName": 'ООО "БРАСС"', "ogrn": "1077847629860",
+                         "okved2": "33.12", "statusCode": status}]}
+
+
+def test_msp_hit_also_gets_bo_status(cache):
+    """#454: a company found in the МСП registry keeps the registry facts and gets the ФНС status from ГИР БО."""
+    seed(cache)
+    cache.put(bo_nalog.search_url(MSP_INN), bo_nalog.flatten(MSP_INN, _bo_answer(MSP_INN, "ACTIVE")))
+    cp = enrich(MSP_INN)
+    assert cp.is_msp is True and cp.okved == ["33.12"] and cp.status == "действующая"
+    status = [e for e in cp.evidence if e.field == "status"]
+    assert [(e.source, e.url, e.value) for e in status] == [
+        (bo_nalog.SOURCE, bo_nalog.search_url(MSP_INN), "statusCode: ACTIVE")]
+    assert status[0].fetched_at is not None
+    assert {e.source for e in cp.evidence} == {rmsp.SOURCE, bo_nalog.SOURCE}
+    assert check_counterparty(cp, cache.page_text) == []
+
+
+def test_msp_hit_without_bo_keeps_the_registry_card(cache, monkeypatch):
+    """ГИР БО refuses or has no row: the МСП card as before, no status invented."""
+    seed(cache)
+    refuse = lambda r: httpx.Response(403, text="forbidden")  # noqa: E731
+    monkeypatch.setattr(bo_nalog, "_client", lambda *_: httpx.Client(transport=httpx.MockTransport(refuse)))
+    cp = enrich(MSP_INN)
+    assert cp.is_msp is True and cp.status is None and {e.source for e in cp.evidence} == {rmsp.SOURCE}
+    cache.put(bo_nalog.search_url(MSP_INN), bo_nalog.flatten(MSP_INN, {"content": []}))
+    assert enrich(MSP_INN).status is None
+
+
+def test_msp_hit_offline_reads_bo_from_cache_only(cache, monkeypatch):
+    monkeypatch.setenv("ENRICH_OFFLINE", "1")
+    monkeypatch.setattr(bo_nalog, "_client", lambda *_: pytest.fail("network in offline mode"))
+    seed(cache)
+    assert enrich(MSP_INN).status is None  # nothing cached: no request, no status
+    cache.put(bo_nalog.search_url(MSP_INN), bo_nalog.flatten(MSP_INN, _bo_answer(MSP_INN, "LIQUIDATED")))
+    cp = enrich(MSP_INN)
+    assert cp.status and "LIQUIDATED" in cp.status and check_counterparty(cp, cache.page_text) == []

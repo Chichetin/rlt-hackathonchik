@@ -1,0 +1,88 @@
+# Запасной путь блока «Новые» через Яндекс Search (#194, #186; src/enrich/web_discover.py).
+# Включается только вместе с клиентом (ключ, YANDEX_MAX_PER_LOT, YANDEX_MAX_PER_RUN в .env человека, D-149)
+# и только на лоте, где у бесплатных источников меньше min_strong сильных кандидатов (product_fit ≥ 0.8).
+# Агенты Яндекс не вызывают (решение IR630): тесты — фикстуры и httpx.MockTransport.
+
+min_strong: 3          # сильных кандидатов меньше — спрашиваем Яндекс (решение человека, вопрос 29 «б»)
+results: 10            # результатов (доменов) на запрос: одна страница выдачи — один платный запрос
+max_sites: 6           # сайтов на лот, которые обходим за ИНН (≤ 4 страницы на сайт, src/sources/site.py)
+
+# Модификаторы роли к очищенному тексту лота: один запрос на модификатор (их не больше YANDEX_MAX_PER_LOT).
+modifiers:
+  goods: ["производитель", "оптом", "официальный дилер"]
+  services: ["исполнитель", "подрядчик", "аккредитованная лаборатория"]
+
+# Домены, которые не являются сайтом поставщика: агрегаторы, маркетплейсы, справочники, СМИ, госпорталы.
+# Совпадение — по самому домену и его поддоменам. ИНН с них не берём.
+skip_domains:
+  - 2gis.ru
+  - yandex.ru
+  - ya.ru
+  - avito.ru
+  - ozon.ru
+  - wildberries.ru
+  - market.yandex.ru
+  - aliexpress.ru
+  - pulscen.ru
+  - tiu.ru
+  - satom.ru
+  - flagma.ru
+  - blizko.ru
+  - spb.blizko.ru
+  - yell.ru
+  - zoon.ru
+  - orgpage.ru
+  - spravker.ru
+  - rusprofile.ru
+  - list-org.com
+  - checko.ru
+  - sbis.ru
+  - zachestnyibiznes.ru
+  - audit-it.ru
+  - focus.kontur.ru
+  - kontur.ru
+  - zakupki.gov.ru
+  - gz-spb.ru
+  - rts-tender.ru
+  - roseltorg.ru
+  - b2b-center.ru
+  - tenderguru.ru
+  - wikipedia.org
+  - youtube.com
+  - vk.com
+  - dzen.ru
+  - rbc.ru
+  - otzovik.com
+  - irecommend.ru
+  - apteka.ru
+  - eapteka.ru
+  - zdravcity.ru
+  - uteka.ru
+  - megapteka.ru
+  - aptekamos.ru
+  - vidal.ru
+  - rlsnet.ru
+  - grls.rosminzdrav.ru
+  - fabricators.ru
+  - productcenter.ru
+  - promportal.su
+  - all-pribors.ru
+  - deal.by
+  - prom.ua
+  - allbiz.ru
+  - optlist.ru
+  - optovik.ru
+  - supl.biz
+  - tradedir.ru
+  - russianfood.com
+  - vprok.ru
+  - perekrestok.ru
+  - lenta.com
+  - magnit.ru
+  - sbermegamarket.ru
+  - megamarket.ru
+  - vseinstrumenti.ru
+  - leroymerlin.ru
+  - petrovich.ru
+  - hh.ru
+  - superjob.ru

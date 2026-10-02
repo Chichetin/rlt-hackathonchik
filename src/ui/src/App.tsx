@@ -48,7 +48,7 @@ import "./filters.css";
 import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
 import { componentText, nextReason, rankerReason, rankerShort } from "./ranker";
-import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
+import { activeWeights, COMPONENT_COLOR, COMPONENTS, offNote, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
 import { STATIC_DEMO } from "./staticApi";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
@@ -913,7 +913,7 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets).map((n) => (
+      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets, res.context?.purchase_type).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
@@ -967,7 +967,7 @@ export function App() {
             loadingMore={more}
             onOpen={selectResult}
             empty={
-              filterNotes(base, filters, res.facets).length
+              filterNotes(base, filters, res.facets, res.context?.purchase_type).length
                 ? "Под фильтр не попал никто: у кандидатов этот признак ещё не известен (см. выше)."
                 : noteText(res.note)
             }
@@ -1389,7 +1389,7 @@ function WeightsSettings({ value, onChange }: { value: WeightSettings; onChange:
                 <i style={{ background: COMPONENT_COLOR[c] }} aria-hidden="true" />
                 {COMPONENT_LABEL[c]}
               </span>
-              <span className="slider-off">нет данных — в оценку не входит</span>
+              <span className="slider-off">{offNote(c)}</span>
               <span className="slider-share">0 %</span>
             </div>
           ) : (

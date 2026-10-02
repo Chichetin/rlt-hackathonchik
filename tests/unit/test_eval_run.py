@@ -159,3 +159,9 @@ def test_each_eval_run_counts_its_own_queries(search_data, monkeypatch, tmp_path
     monkeypatch.setattr(ranker, "without_profile", 5)  # left over from an earlier run
     R.evaluate([case("бумага офисная", ["7801000012"])], {**search_mod.load_config(), "k": 20})
     assert ranker.without_profile == 0  # the fixture has the profile
+
+
+def test_every_must_be_positive():
+    from src.eval.run import main
+
+    assert main(["--exp", "rel-off-f", "--every", "0"]) == 2
