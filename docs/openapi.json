@@ -73,6 +73,59 @@
         }
       }
     },
+    "/api/testset/template.xlsx": {
+      "get": {
+        "summary": "Get Template",
+        "operationId": "get_template_api_testset_template_xlsx_get",
+        "responses": {
+          "200": {
+            "description": "шаблон списка закупок",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/testset/template": {
+      "post": {
+        "summary": "Upload Template",
+        "description": "The filled template -> the active set (Извещения + ТРУ of the organizers' format); 422 when unusable.",
+        "operationId": "upload_template_api_testset_template_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedTestset"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/testset/predict.csv": {
       "get": {
         "summary": "Predict Testset",
@@ -118,6 +171,50 @@
           },
           "422": {
             "description": "offline=0: живой прогон по всем лотам — только make predict"
+          }
+        }
+      }
+    },
+    "/api/testset/predict.xlsx": {
+      "get": {
+        "summary": "Predict Xlsx",
+        "description": "predict.csv as an Excel book (offline) + «Ошибки»: rows not taken from the template and notes on lots.",
+        "operationId": "predict_xlsx_api_testset_predict_xlsx_get",
+        "parameters": [
+          {
+            "name": "top",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "кандидатов в каждом блоке",
+              "default": 10,
+              "title": "Top"
+            },
+            "description": "кандидатов в каждом блоке"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "листы «Рекомендации» и «Ошибки»",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          },
+          "404": {
+            "description": "набор не загружен"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       }
@@ -1660,6 +1757,27 @@
         ],
         "title": "SearchResponse",
         "description": "API envelope: two blocks of the result (the incumbent trap, methodology step 5)."
+      },
+      "UploadTemplateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name",
+            "description": "имя файла (.xlsx или .csv по шаблону)"
+          },
+          "data": {
+            "type": "string",
+            "title": "Data",
+            "description": "содержимое файла, base64"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "data"
+        ],
+        "title": "UploadTemplateRequest"
       },
       "UploadTestsetRequest": {
         "properties": {
