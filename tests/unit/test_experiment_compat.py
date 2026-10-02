@@ -75,7 +75,8 @@ def test_product_without_customer_orders_as_f511_sat100_and_scores_by_the_produc
     keys = {m.counterparty.inn: m.score for m in measured}
     assert {m.counterparty.inn for m in got} == set(keys)
     assert [keys[m.counterparty.inn] for m in got] == sorted(keys.values(), reverse=True)
-    assert all(a.score >= b.score for a, b in zip(got, got[1:], strict=False) if keys[a.counterparty.inn] == keys[b.counterparty.inn])
+    pairs = zip(got, got[1:], strict=False)
+    assert all(a.score >= b.score for a, b in pairs if keys[a.counterparty.inn] == keys[b.counterparty.inn])
     by_activity_only = {**product, "no_customer_options": {**product["no_customer_options"],
                                                            "order_weights": {"activity": 1.0}}}
     # eval (pipeline.pick with a config) passes the config's own weights: the same order as the product
