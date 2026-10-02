@@ -271,7 +271,8 @@ function usePath(): [Path, (next: Path) => void] {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const go = (next: Path) => {
-    if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, "", next);
+    // the same page keeps its address: /results?lot=N is not replaced by /results (#395)
+    if (next !== window.location.pathname && next !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, "", next);
     setPath(next);
     window.scrollTo?.({ top: 0, behavior: "instant" });
   };
@@ -555,19 +556,32 @@ export function App() {
 
   // a deep link /search?lot=N or ?q=text (#395) — from a button in a procurement card of АИС ГЗ:
   // the lot is loaded by the same /api/lot path as by hand, the search starts at once
-  const deepAtMount = useRef<DeepLink>(path === "/search" || path === "/results" ? parseDeepLink(window.location.search) : {});
+  // the link of this very tab's last search (a reload, F5) is not a new link: the saved query with its filters repeats
+  const deepAtMount = useRef<DeepLink>(
+    (() => {
+      if (path !== "/search" && path !== "/results") return {};
+      const d = parseDeepLink(window.location.search);
+      if (d.lot && saved.lotId === d.lot && saved.lot) return {};
+      if (d.q && !d.lot && saved.text === d.q && !saved.lot) return {};
+      return d;
+    })(),
+  );
   const deepDone = useRef(false);
   useEffect(() => {
     const d = deepAtMount.current;
     if ((!d.lot && !d.q) || deepDone.current) return;
     deepDone.current = true;
+    setState("loading");
     setFilters(NO_FILTERS); // a shared link is a plain search, not the filters left in this browser
     void (async () => {
       if (d.lot) {
         setLotId(d.lot);
         const ready = await loadLot(d.lot);
         if (ready) await run(NO_FILTERS, ready);
-        else go("/search"); // not found: the form with the reason
+        else {
+          setState("idle");
+          go("/search"); // not found: the form with the reason
+        }
       } else if (d.q) {
         resetLot();
         setBudget("");

@@ -242,3 +242,28 @@ test("deep link: /search?q=текст ищет по тексту; неизвес
   await expect(page).toHaveURL(/\/search/);
   await expect(page.getByText("Закупка с таким номером не найдена в данных.")).toBeVisible();
 });
+
+// #395, ревью: F5 на /results?lot=N повторяет сохранённый запрос вкладки с фильтрами и НМЦК — не сбрасывает их
+test("deep link: обновление страницы сохраняет фильтр и НМЦК", async ({ page }) => {
+  await page.goto("/search");
+  await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
+  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
+  await page.getByRole("button", { name: "Найти поставщиков" }).click();
+  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  const history = page.getByRole("region", { name: "С опытом госзакупок" });
+  await expect(history.locator(".item").first()).toBeVisible();
+  const select = page.getByRole("group", { name: "Заказчик и тип закупки" }).getByRole("combobox", { name: "Может работать у заказчика" });
+  const near = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/search" && JSON.parse(r.request().postData() ?? "{}").filters?.near_customer === "near");
+  await select.selectOption("near");
+  await near;
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("mitrandir.query") ?? "")).toContain('"near":"near"');
+
+  await page.reload();
+  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(history.locator(".item").first()).toBeVisible();
+  await expect(select).toHaveValue("near");
+  await page.goto("/search");
+  await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
+  await expect(page.getByLabel("ИНН заказчика")).toHaveValue("7801000051");
+});
