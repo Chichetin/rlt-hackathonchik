@@ -52,6 +52,10 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     from src.sources import gisp
 
     monkeypatch.setattr(gisp, "DIR", tmp_path / "gisp-default")
+    # the offline pool of «Новые» (#185, #518): not the dev machine's; a test sets its own (pool_source / POOL)
+    from src.db import pool
+
+    monkeypatch.setattr(pool, "POOL", tmp_path / "pool-default")
     yield
     for pacer in pacers:
         pacer.reset()

@@ -9,6 +9,9 @@
 #                                     # is merged (INSERT OR IGNORE by key: its newer rows stay); CACHE_FORCE=1 replaces it
 #   bash scripts/data.sh gisp         # the GISP register (D-153) into <processed>/../external/gisp (the assets gisp-products.parquet
 #                                     # and gisp-meta.json of `python -m src.sources.gisp build`); NOT part of `all` either
+#   bash scripts/data.sh pool         # the offline pool of «Новые» (#185, #219, #518) into data/external/rsmp/pool (= POOL of
+#                                     # src/db/pool.py): every asset pool-<name>.parquet listed in SHA256SUMS.pool → <name>.parquet;
+#                                     # NOT part of `all` (gigabytes; the product works without it)
 #
 # The data never goes to git (.gitignore, check-data-files.sh); the release assets are the storage.
 # Every file is checked against SHA256SUMS of the release; a file that already matches is not
@@ -28,12 +31,14 @@ CACHE_TARGET="${SOURCE_CACHE:-$ROOT/cache/sources.sqlite}"
 GISP_SUMS="SHA256SUMS.gisp"         # its own checksum list as well
 GISP_TARGET="${GISP_DIR:-$(dirname "$PROCESSED")/external/gisp}"  # = gisp_dir() in src/sources/gisp.py (next to DATA_PROCESSED_DIR); GISP_DIR is for tests only
 GISP_ASSETS=(gisp-products.parquet:products.parquet gisp-meta.json:meta.json)  # <asset>:<file name in the directory>; meta last
+POOL_SUMS="SHA256SUMS.pool"         # the list of the pool assets as well: the set (companies, okved, ...) is not fixed here
+POOL_TARGET="${POOL_DIR:-$ROOT/data/external/rsmp/pool}"  # = POOL in src/db/pool.py; POOL_DIR is for tests only
 PROCESSED_FILES=(notices.parquet participants.parquet items.parquet suppliers.parquet
                  suppliers_2025-07-01.parquet manifest.json)
 
 fail() { echo "make data: $*" >&2; exit 1; }
 
-case "$PART" in all|processed|raw|cache|gisp) ;; *) fail "неизвестная часть '$PART' (all | processed | raw | cache | gisp)";; esac
+case "$PART" in all|processed|raw|cache|gisp|pool) ;; *) fail "неизвестная часть '$PART' (all | processed | raw | cache | gisp | pool)";; esac
 command -v gh >/dev/null 2>&1 || fail "нужен GitHub CLI (gh) с доступом к репозиторию: https://cli.github.com, затем gh auth login"
 cd "$ROOT"  # gh takes the repository from the current directory
 
@@ -65,6 +70,7 @@ TMP_DIRS+=("$SUMS_DIR")
 SUMS_ASSET=SHA256SUMS
 [ "$PART" = cache ] && SUMS_ASSET="$CACHE_SUMS"
 [ "$PART" = gisp ] && SUMS_ASSET="$GISP_SUMS"
+[ "$PART" = pool ] && SUMS_ASSET="$POOL_SUMS"
 download "$SUMS_ASSET" "$SUMS_DIR" \
   || fail "релиз $TAG недоступен или в нём нет $SUMS_ASSET (сеть, gh auth login или нет доступа к репозиторию)"
 
@@ -161,4 +167,17 @@ fi
 if [ "$PART" = gisp ]; then
   for pair in "${GISP_ASSETS[@]}"; do fetch "${pair%%:*}" "$GISP_TARGET" "${pair#*:}"; done
   echo "gisp: готово ($GISP_TARGET)"
+fi
+
+if [ "$PART" = pool ]; then
+  # every "pool-<name>" of the checksum list; a name is letters, digits, '_', '-', '.' only (no path)
+  POOL_ASSETS=()
+  while read -r _ name; do
+    case "$name" in pool-*) ;; *) continue;; esac
+    [[ "$name" =~ ^pool-[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || fail "в $POOL_SUMS недопустимое имя '$name'"
+    POOL_ASSETS+=("$name")
+  done <"$SUMS_DIR/$POOL_SUMS"
+  [ "${#POOL_ASSETS[@]}" -gt 0 ] || fail "в $POOL_SUMS релиза $TAG нет файлов pool-*"
+  for name in "${POOL_ASSETS[@]}"; do fetch "$name" "$POOL_TARGET" "${name#pool-}"; done
+  echo "pool: готово ($POOL_TARGET, файлов ${#POOL_ASSETS[@]})"
 fi
