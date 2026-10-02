@@ -78,9 +78,8 @@ export function buildQuery(text: string, filters: Filters, extra?: Extra): Query
   return q;
 }
 
-// by: "procedure" — the procedure number (Извещения.procedure_id, #617); the answer is the query of its lot
-export async function fetchLot(ident: string, by: "lot" | "procedure" = "lot"): Promise<Query> {
-  const r = await fetch(`/api/${by}/${encodeURIComponent(ident.trim())}`);
+export async function fetchLot(ident: string): Promise<Query> {
+  const r = await fetch(`/api/lot/${encodeURIComponent(ident.trim())}`);
   if (r.ok) return r.json();
   let detail = "";
   try {
