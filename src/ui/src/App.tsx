@@ -565,7 +565,7 @@ export function App() {
     }
   }
 
-  // the next page of the history block from the server, for the same query and filters
+  // #550: the live Yandex search of this purchase; the found companies go to the top of «Новые»
   async function runLive() {
     if (!res || !shownQuery) return;
     const seq = runSeq.current;
@@ -587,6 +587,7 @@ export function App() {
     }
   }
 
+  // the next page of a block from the server, for the same query and filters
   async function showMore(group: "history" | "discovered" = "history") {
     if (!res || !shownQuery) return;
     const seq = runSeq.current;

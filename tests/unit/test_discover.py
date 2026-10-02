@@ -845,3 +845,17 @@ def test_block_config_has_the_api_limits():
     cfg = D.block_config()
     assert cfg["min_score"] == 0.45 and cfg["max_shown"] >= D.MAX_SHOWN
     assert cfg["budget_s"] is None and cfg["max_requests"] is None and cfg["pages"] > 1
+
+
+def test_every_shown_row_without_a_card_is_queued_not_only_ten(tmp_path):
+    """Human decision 02.10: no cap of 10 on the enrichment of «Новые» — rows 11+ get their ФНС card too."""
+    makers = ["7801000012", "7801000020", "7801000037", "7801000044", "7801000051", "4701000038", "7804428656",
+              "7805772436", "7807032363", "7810400592", "7811777270", "4703173460"]
+    c = SourceCache(tmp_path / "c.sqlite")
+    c.put(rmsp.search_url("17.12", "78"),
+          rmsp.flatten("17.12", "78", "UL", _rows(makers, "17.12", "Производство бумаги и картона")))
+    queued: list[str] = []
+    res = _run(c, _processed(tmp_path, []), query=_query(okpd2=["17.12.14.110"]), min_score=0.0, max_shown=200,
+               enqueue=queued.append)
+    assert len(res.matches) == len(makers) > D.MAX_SHOWN
+    assert sorted(queued) == sorted(makers)

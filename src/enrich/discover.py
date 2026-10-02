@@ -71,7 +71,7 @@ from src.sources.rmsp import MSP_CATEGORY
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 
-MAX_SHOWN = 10  # producers / distributors mixed at the top of the block; INNs sent to enrichment per query
+MAX_SHOWN = 10  # producers / distributors mixed at the top of the block; the strong count of the Yandex fallback
 MAX_REQUESTS = 6  # rmsp requests per query (cached or live): class + up to 2 wholesale codes × 2 regions
 MAX_CLASSES = 2  # OKPD2 classes of one query that get their own requests
 LIVE_BUDGET_S = 4.0  # all live rmsp requests of one /api/search end within this wall time
@@ -542,8 +542,12 @@ def yandex_matches(
     if not fb.used:
         return [], {}, [], head
     leads = {lead.inn: lead for lead in fb.leads if lead.inn and lead.inn not in skip}
-    if fetch_card is not None:
+    if fetch_card is not None:  # only a company the lead road could show: not in organizers' data, an allowed type
+        known = known_inns(list(leads), query.as_of, store) or set()
+        np_types = _np_types()
         for inn in leads:
+            if inn in known or ("UL" if len(inn) == 10 else "IP") not in np_types:
+                continue
             if cache.get(pb_nalog.card_url(inn)) is None:
                 try:
                     fetch_card(inn)
@@ -1074,10 +1078,10 @@ def discover(
                  "; ".join(f"{m.counterparty.inn} {res.fit_new[m.counterparty.inn or ''].value:.2f}"
                            for m in res.matches if (m.counterparty.inn or "") in res.fit_new))
     if enqueue is not None:
-        for m in res.matches[:MAX_SHOWN]:  # the first screen only: rows 11+ are not queued (no flood of the registries)
+        for m in res.matches:  # every shown row gets its card (human decision 02.10: no cap of 10)
             if m.counterparty.inn in no_card:
                 enqueue(m.counterparty.inn)
-        for inn in lead_no_card[:MAX_SHOWN]:  # a lead is shown only with a card: get it for the next search
+        for inn in lead_no_card:  # a lead is shown only with a card: get it for the next search
             try:
                 enqueue(inn)
             except Exception:  # noqa: BLE001 — a dead queue does not empty the block
