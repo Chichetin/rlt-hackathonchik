@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url)), deck=path.resolve(here,'..'), repo=process.env.RLT_EVIDENCE_ROOT||path.resolve(deck,'..');
 const read=p=>JSON.parse(fs.readFileSync(path.join(repo,p),'utf8'));
-const baseline=read('eval/results/B-bm25.json'),current=read('eval/results/A361-base.json'),manifest=read('data/processed/manifest.json'),example=read('presentation/assets/example.json');
+const baseline=read('eval/results/B-bm25.json'),current=read('eval/results/A361-base.json'),manifest=read('data/processed/manifest.json'),example=read('presentation/assets/example.json');const exampleNew=read('presentation/assets/example-new.json');
 const browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1600,height:900},offline:true});
 await page.emulateMedia({reducedMotion:'reduce'});await page.goto(pathToFileURL(path.join(deck,'index.html')).href);await page.evaluate(()=>document.fonts.ready);
 const checks=[];function check(ok,name){checks.push({name,passed:!!ok});}
@@ -17,6 +17,7 @@ check(text('s6').includes(ru(baseline.metrics['recall@10'].value*100)+'%')&&text
 check(text('s6').includes('+'+((current.metrics['recall@10'].value-baseline.metrics['recall@10'].value)*100).toFixed(1).replace('.',',')),'Percentage point delta agrees with pitch/facts.md (+0.123, one decimal)');
 check(text('s6').includes('2 000')&&current.n_queries===2000,'Displayed evaluation sample size agrees');
 check(text('s3').includes(manifest.rows.notices.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.suppliers.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.items.toLocaleString('en-US').replaceAll(',',' ')),'Corpus counts agree with manifest');
+check(exampleNew.discovered.length>0&&text('s3').includes(exampleNew.discovered[0].counterparty.inn)&&text('s3').includes(exampleNew.lot)&&text('b4').includes(String(exampleNew.discovered.length)+' новых'),'New-company example on S3/B4 comes from example-new.json (#415)');
 check(text('b1').includes(String(example.result.score))&&text('s5').includes('126')&&text('s5').includes('36'),'Example score and evidence preserved');
 check(['mrr','ndcg@10'].every(k=>[baseline,current].every(r=>text('b2').includes(r.metrics[k].value.toFixed(3).replace('.',',')))),'Backup metrics agree with saved reports');
 check(!/НАСТОЯЩИЙ РЕЗУЛЬТАТ|СЛЕДУЮЩИЙ ПРАКТИЧЕСКИЙ ШАГ|К ВОПРОСАМ/.test(all.map(s=>s.text).join(' ')),'Removed redundant editorial labels');
