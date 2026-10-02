@@ -18,7 +18,8 @@ def _lot(lot_id: int, d: date, channel: str = "ЭМ", participants: list | None 
 
 
 def test_selection_keeps_listed_lots_in_file_order_and_drops_sealed_period() -> None:
-    lots = [_lot(1, date(2025, 3, 1)), _lot(2, date(2025, 9, 30)), _lot(3, date(2025, 10, 1)), _lot(4, date(2025, 5, 1))]
+    lots = [_lot(1, date(2025, 3, 1)), _lot(2, date(2025, 9, 30)), _lot(3, date(2025, 10, 1)),
+            _lot(4, date(2025, 5, 1))]
     cases, stats = EX.select_cases(lots, [4, 3, 1, 2, 99], CUTOFF, HOLDOUT_FROM)
     assert [c.query.query_id for c in cases] == ["lot-4", "lot-1", "lot-2"]
     assert stats["listed"] == 5 and stats["not_in_data"] == 1 and stats["holdout_period"] == 1
