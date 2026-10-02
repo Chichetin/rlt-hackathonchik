@@ -40,8 +40,11 @@ RESULTS = ROOT / "eval" / "results"
 # Files whose bytes define the evaluated configuration (sha256 for eval-final).
 CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
 # Code that defines the method (not UI/API): its committed tree enters the hash.
-METHOD_PATHS = ("src/contracts.py", "src/ingest", "src/match", "src/sources", "src/enrich", "src/eval", "src/llm",
+METHOD_PATHS = ("src/contracts.py", "src/settings.py", "src/regions.py", "src/ingest", "src/match", "src/sources",
+                "src/enrich", "src/eval", "src/llm",
                 "src/db")  # src/db: normalization and the embedding model of retriever pg_hybrid
+# settings.py parses the variables the method reads (tokenizer, data and index dirs), regions.py feeds the region
+# features; tests/unit/test_eval_seal.py checks that every module eval imports is here (#448, D-150)
 
 
 class GitError(RuntimeError):
