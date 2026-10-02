@@ -1,5 +1,7 @@
 """Prefetch: top-N order, idempotent enqueue, resume after a crash, captcha stop. No network."""
 
+from pathlib import Path
+
 import duckdb
 import pytest
 
@@ -128,19 +130,22 @@ def test_worker_night_mode_sleeps_on_captcha_and_continues(eng, monkeypatch):
     from src.worker import worker as W
     from src.worker.queue import enqueue
 
+    from src.worker.queue import MAX_ATTEMPTS
+
     enqueue(eng, "enrich", GOOD[0])
     calls: list[str] = []
 
     def flaky(inn):
         calls.append(inn)
-        if len(calls) == 1:
+        if len(calls) <= MAX_ATTEMPTS:  # more captchas than attempts: a captcha must not spend one (release)
             raise CaptchaRequired("captcha")
 
     sleeps: list[float] = []
     monkeypatch.setattr(W, "enrich", flaky)
     monkeypatch.setattr(W.time, "sleep", sleeps.append)
     assert W.run(once=True, pause_s=0, captcha_sleep_s=900) == 1
-    assert calls == [GOOD[0], GOOD[0]] and 900 in sleeps and status_counts(eng) == {"done": 1}
+    assert calls == [GOOD[0]] * (MAX_ATTEMPTS + 1) and sleeps.count(900) == MAX_ATTEMPTS
+    assert status_counts(eng) == {"done": 1}
 
 
 def test_worker_survives_db_errors_and_pauses_only_after_live_fetch(eng, monkeypatch, tmp_path):
@@ -155,11 +160,17 @@ def test_worker_survives_db_errors_and_pauses_only_after_live_fetch(eng, monkeyp
     real_claim = W.claim
     state = {"n": 0}
 
+    class Drained(Exception):
+        pass
+
     def flaky_claim(e, kind):
         state["n"] += 1
         if state["n"] == 1:
             raise OperationalError("select", {}, Exception("could not translate host name db"))
-        return real_claim(e, kind)
+        task = real_claim(e, kind)
+        if task is None:
+            raise Drained  # the long run never ends by itself: stop it once the queue is drained
+        return task
 
     cache = SourceCache(tmp_path / "c.sqlite")
 
@@ -172,7 +183,54 @@ def test_worker_survives_db_errors_and_pauses_only_after_live_fetch(eng, monkeyp
     monkeypatch.setattr(W, "claim", flaky_claim)
     monkeypatch.setattr(W, "enrich", enrich_fn)
     monkeypatch.setattr(W.time, "sleep", sleeps.append)
-    assert W.run(once=True, pause_s=1.5, db_retry_s=7) == 2
+    with pytest.raises(Drained):
+        W.run(pause_s=1.5, db_retry_s=7)
     assert 7 in sleeps  # waited for the database instead of crashing
     assert sleeps.count(1.5) == 1  # pause only after the live fetch, not after the cache hit
     assert status_counts(eng) == {"done": 2}
+
+
+def test_worker_once_fails_instead_of_waiting_for_the_database(eng, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from src.worker import worker as W
+    from src.worker.queue import enqueue
+
+    down = OperationalError("connect", {}, Exception("could not translate host name db"))
+    monkeypatch.setattr(W.time, "sleep", lambda s: pytest.fail("--once must not wait for the database"))
+    monkeypatch.setattr(W, "engine_from_env", lambda: (_ for _ in ()).throw(down))
+    with pytest.raises(OperationalError):
+        W.run(once=True)
+    monkeypatch.setattr(W, "engine_from_env", lambda: eng)  # connected, then the database goes away mid-run
+    enqueue(eng, "enrich", GOOD[0])
+    monkeypatch.setattr(W, "claim", lambda e, kind: (_ for _ in ()).throw(down))
+    with pytest.raises(OperationalError):
+        W.run(once=True)
+    with pytest.raises(SystemExit) as ex:
+        W.main(["--once"])
+    assert ex.value.code == 1
+
+
+def test_enqueue_only_revives_a_failed_task(eng):
+    from src.worker.queue import MAX_ATTEMPTS, claim, enqueue, finish
+
+    enqueue(eng, "enrich", GOOD[0])
+    for _ in range(MAX_ATTEMPTS):
+        task = claim(eng, "enrich")
+        assert task is not None
+        finish(eng, task[0], error="boom")
+    assert status_counts(eng) == {"failed": 1}
+    assert prefetch.enqueue_only(GOOD[:1], eng) == {"pending": 1}  # the night queue retries it with fresh attempts
+
+
+def test_night_mode_is_an_overlay_not_the_default_of_make_up():
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    base = yaml.safe_load((root / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
+    night = yaml.safe_load((root / "docker-compose.night.yml").read_text(encoding="utf-8"))["services"]
+    assert "--captcha-sleep" not in base["worker"]["command"] and "restart" not in base["worker"]
+    assert "restart" not in base["db"]
+    assert night["worker"]["command"][-2:] == ["--captcha-sleep", "900"]
+    assert night["worker"]["restart"] == night["db"]["restart"] == "unless-stopped"
+    assert not (root / "docker-compose.override.yml").exists()  # compose would load an override on every `make up`

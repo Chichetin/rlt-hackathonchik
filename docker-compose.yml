@@ -11,7 +11,6 @@ services:
       POSTGRES_PASSWORD: app   # secret-scan: allow — локальная БД демо, наружу не открыта
       POSTGRES_DB: app
     volumes: [dbdata:/var/lib/postgresql/data]
-    restart: unless-stopped   # ночной прогон переживает падение БД; воркер ждёт и повторяет подключение
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U app"]
       interval: 2s
@@ -29,9 +28,8 @@ services:
     depends_on: {db: {condition: service_healthy}}
   worker:
     build: {context: ., dockerfile: Dockerfile.worker}   # без UI и torch: воркеру они не нужны
-    # ночной режим (T-13): после капчи без запасных источников спит 15 мин, а не выходит; restart поднимает после сбоя
-    command: ["python", "-m", "src.worker.worker", "--captcha-sleep", "900"]
-    restart: unless-stopped
+    # ночной режим (сон на капче, restart) — не здесь, а в docker-compose.night.yml (D-153): make up его не включает
+    command: ["python", "-m", "src.worker.worker"]
     env_file: [{path: .env, required: false}]
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@db:5432/app   # secret-scan: allow

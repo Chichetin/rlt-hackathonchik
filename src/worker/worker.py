@@ -42,13 +42,16 @@ def _count_live_writes() -> None:
     SourceCache.put = put  # type: ignore[method-assign]
 
 
-def _connect(retry_s: float):  # type: ignore[no-untyped-def]
+def _connect(retry_s: float, once: bool = False):  # type: ignore[no-untyped-def]
+    """The engine; the database down — wait and retry, except for `--once` (a one-shot run fails instead of hanging)."""
     while True:
         try:
             eng = engine_from_env()
             requeue_stale(eng)
             return eng
         except OperationalError as e:
+            if once:
+                raise
             log.error("database unavailable (%s) — retry in %.0f s", str(e).splitlines()[0][:160], retry_s)
             time.sleep(retry_s)
 
@@ -58,12 +61,12 @@ def run(once: bool = False, pause_s: float = 1.0, captcha_sleep_s: float | None 
     """Drain the queue. `captcha_sleep_s`: None = stop on captcha (default); a number = night mode: the task
     goes back, the worker sleeps that long (sources' own 15-min cooldown) and continues. The cooldown
     lives in the process: a container restart forgets it (D-153), so the sleep is the only protection.
-    РНП ЕИС (after #111) is not covered: its refusal does not fail the task (the card goes without `in_rnp`),
-    eis_rnp keeps its own Crawl-delay and 15-min pause after a refusal (D-141).
-    Database errors never end the run: wait `db_retry_s` and continue (the `running` task of a lost
-    connection returns to the queue by requeue_stale)."""
+    РНП ЕИС is not asked here: enrich() reads it from the cache only (#111), the РНП is the separate pass
+    `python -m src.worker.prefetch --rnp` with its own Crawl-delay and pauses.
+    Database errors never end a long run: wait `db_retry_s` and continue (the `running` task of a lost
+    connection returns to the queue by requeue_stale). `once=True` (a one-shot drain) raises instead of waiting."""
     _count_live_writes()
-    eng = _connect(db_retry_s)
+    eng = _connect(db_retry_s, once)
     done, errors, last_requeue, t0 = 0, 0, time.monotonic(), time.monotonic()
     while True:
         try:
@@ -105,19 +108,25 @@ def run(once: bool = False, pause_s: float = 1.0, captcha_sleep_s: float | None 
             if _live_writes > writes_before:
                 time.sleep(pause_s)
         except OperationalError as e:
+            if once:
+                raise
             log.error("database unavailable (%s) — retry in %.0f s", str(e).splitlines()[0][:160], db_retry_s)
             time.sleep(db_retry_s)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="drain the queue and exit")
     ap.add_argument("--pause", type=float, default=1.0)
     ap.add_argument("--captcha-sleep", type=float, default=None,
                     help="night mode: seconds to sleep after a captcha with no fallback instead of exiting")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    n = run(once=args.once, pause_s=args.pause, captcha_sleep_s=args.captcha_sleep)
+    try:
+        n = run(once=args.once, pause_s=args.pause, captcha_sleep_s=args.captcha_sleep)
+    except OperationalError as e:  # only with --once: the long run waits for the database instead
+        log.error("database unavailable (%s) — --once stops with an error", str(e).splitlines()[0][:160])
+        raise SystemExit(1) from e
     log.info("processed %d tasks", n)
 
 
