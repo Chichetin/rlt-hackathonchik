@@ -27,6 +27,8 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
+from src.settings import get_settings
+
 metadata = MetaData()
 tasks = Table(
     "tasks",
@@ -43,11 +45,11 @@ tasks = Table(
 )
 
 MAX_ATTEMPTS = 3
-STALE_RUNNING_S = int(os.environ.get("QUEUE_STALE_RUNNING_S", "600"))  # running longer = crashed worker
+STALE_RUNNING_S = get_settings().queue_stale_running_s  # running longer = crashed worker
 
 
 def engine_from_env() -> Engine:
-    url = os.environ.get("DATABASE_URL") or "sqlite:///cache/queue.sqlite"
+    url = get_settings().database_url or "sqlite:///cache/queue.sqlite"
     if url.startswith("sqlite:///"):
         os.makedirs(os.path.dirname(url.removeprefix("sqlite:///")) or ".", exist_ok=True)
     eng = create_engine(url, future=True)

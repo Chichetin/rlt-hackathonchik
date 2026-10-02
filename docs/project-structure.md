@@ -25,6 +25,7 @@ freeze (02.10, 14:00) цифры и слайды по методологии г�
 | `src/contracts.py` | DATA до заморозки 11:30; после — любой | отдельный PR, метка `contract`, перечень потребителей; затем `make openapi` в том же PR |
 | `docs/openapi.json`, `src/ui/src/api-types.ts` | генерируются | только `make openapi`; руками не правятся |
 | `pyproject.toml`, `uv.lock`, `src/ui/package*.json` | тот, кому нужна зависимость | в своём PR + строка в `research/DECISIONS.md` |
+| `src/settings.py`, `.env.example` | любой, по задаче | единственное место, где читается окружение: новая переменная — поле `Settings` и строка в `.env.example`; файл из `scripts/settings_allowlist.txt` переводится на `get_settings()` и вычёркивается из списка (`make settings-check`, D-106) |
 | `src/ui/e2e/demo.spec.ts` | APP; область, подключившая свою часть, добавляет шаг | PR, ломающий сценарий, не вливается |
 | `research/DECISIONS.md`, `docs/tz-compliance.md` | все, в своём PR | append-only; при конфликте сохраняются обе строки |
 | `CLAUDE.md`, `GIT.md`, `.claude/`, `docs/timeline.md` | любой, по задаче | ревью `reviewer` обязательно; сроки — одним решением (D-014) |

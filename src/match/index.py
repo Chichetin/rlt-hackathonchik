@@ -32,14 +32,13 @@ import pyarrow.parquet as pq
 from src.match.store import LotHits, ParquetStore, Store, get_store
 from src.match.store import processed_dir as processed_dir
 from src.match.text import tokenize, tokenizer_version
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def index_root() -> Path:
-    d = Path(os.environ.get("INDEX_DIR") or ROOT / "indexes")
-    return d if d.is_absolute() else ROOT / d
+    return get_settings().index_dir
 
 
 def check_processed(processed: Path) -> dict:

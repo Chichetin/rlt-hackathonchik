@@ -13,27 +13,21 @@ at request time, the third at start):
 from __future__ import annotations
 
 import hmac
-import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 from fastapi import Header, HTTPException
 
-QUEUE_MAX_DEFAULT = 2000
-LIVE_MAX_DEFAULT = 2
+from src.settings import COUNTERPARTY_LIVE_MAX_DEFAULT, ENRICH_QUEUE_MAX_DEFAULT, get_settings
+
+QUEUE_MAX_DEFAULT = ENRICH_QUEUE_MAX_DEFAULT
+LIVE_MAX_DEFAULT = COUNTERPARTY_LIVE_MAX_DEFAULT
 RETRY_AFTER_S = "30"
 
 
-def _int_env(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.environ.get(name) or default))
-    except ValueError:
-        return default
-
-
 def queue_max() -> int:
-    return _int_env("ENRICH_QUEUE_MAX", QUEUE_MAX_DEFAULT)
+    return get_settings().enrich_queue_max
 
 
 def busy(detail: str) -> HTTPException:
@@ -43,7 +37,7 @@ def busy(detail: str) -> HTTPException:
 
 def require_api_key(x_api_key: str | None = Header(None, description="ключ API, если на сервере задан API_KEY"),
                     ) -> None:
-    expected = (os.environ.get("API_KEY") or "").strip()
+    expected = get_settings().api_key
     if not expected:
         return
     # bytes: compare_digest raises on a non-ASCII str, and a wrong key must be a 401, not a 500. Starlette decodes the
@@ -68,4 +62,4 @@ class LiveSlots:
             self._sem.release()
 
 
-live_slots = LiveSlots(_int_env("COUNTERPARTY_LIVE_MAX", LIVE_MAX_DEFAULT))
+live_slots = LiveSlots(get_settings().counterparty_live_max)

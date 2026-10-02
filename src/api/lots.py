@@ -15,15 +15,14 @@ still searched.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import duckdb
 
 from src.contracts import Query
 from src.match.store import StoreUnavailable, get_store
+from src.settings import get_settings
 
-ROOT = Path(__file__).resolve().parents[2]
 log = logging.getLogger(__name__)
 _testsets: dict[tuple[str, float], object] = {}
 
@@ -36,22 +35,17 @@ class LotNotFound(KeyError):
     pass
 
 
-def _dir(env: str, default: str) -> Path:
-    d = Path(os.environ.get(env, ROOT / default))
-    return d if d.is_absolute() else ROOT / d
-
-
 def _lit(path: Path) -> str:
     return "'" + path.as_posix().replace("'", "''") + "'"
 
 
 def _sources() -> tuple[str, str | None]:
     """SQL table expressions for notices and items: ingest parquet if both exist, else raw CSV."""
-    proc = _dir("DATA_PROCESSED_DIR", "data/processed")
+    proc = get_settings().data_processed_dir
     n_pq, i_pq = proc / "notices.parquet", proc / "items.parquet"
     if n_pq.exists() and i_pq.exists():
         return f"read_parquet({_lit(n_pq)})", f"read_parquet({_lit(i_pq)})"
-    raw = _dir("DATA_RAW_DIR", "data/raw")
+    raw = get_settings().data_raw_dir
     notices = sorted(raw.glob("Извещения*.csv"))
     if not notices:
         raise LotDataUnavailable("данные организаторов не подключены (нет parquet и Извещения*.csv в data/raw)")
@@ -71,10 +65,9 @@ def _test_lot(ident: str) -> Query | None:
     """Lot from TEST_DATA_DIR (re-read when the folder changes); None when unset, absent or broken."""
     from src.ingest.testset import TestDataError, TestSet, load_testset
 
-    folder = os.environ.get("TEST_DATA_DIR")
-    if not folder:
+    path = get_settings().test_data_dir
+    if path is None:
         return None
-    path = _dir("TEST_DATA_DIR", folder)
     try:
         key = (str(path), max((p.stat().st_mtime for p in path.glob("*.csv")), default=0.0))
         ts = _testsets.get(key)
@@ -82,7 +75,7 @@ def _test_lot(ident: str) -> Query | None:
             _testsets.clear()
             ts = _testsets[key] = load_testset(path)
     except (TestDataError, OSError) as e:
-        log.warning("TEST_DATA_DIR=%s не читается: %s", folder, e)
+        log.warning("TEST_DATA_DIR=%s не читается: %s", path, e)
         return None
     assert isinstance(ts, TestSet)
     lot = ts.find(ident)

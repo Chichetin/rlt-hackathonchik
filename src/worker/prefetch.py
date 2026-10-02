@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -22,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
 from src.enrich.enrich import enrich
+from src.settings import get_settings
 from src.sources.pb_nalog import CaptchaRequired
 from src.worker.queue import claim_keys, engine_from_env, enqueue, finish, release, requeue_stale, tasks
 
@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--suppliers", type=Path, default=None)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    path = args.suppliers or Path(os.environ.get("DATA_PROCESSED_DIR", "data/processed")) / "suppliers.parquet"
+    path = args.suppliers or get_settings().data_processed_dir / "suppliers.parquet"
     res = run(top_inns(path, args.top), engine_from_env(), pause_s=args.pause)
     return 0 if res["done_total"] == res["total"] else 1
 
