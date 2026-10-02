@@ -9,6 +9,8 @@
 
 Датасет хранится ассетами релиза **`data-2026-10-02`** (с профилем поставщиков; прежний `data-2026-10-01` собран до него, #435) этого (приватного) репозитория — в git он не попадает.
 
+Уже скачали `data-2026-10-01`? Повторите `make data`: докачаются только `suppliers*.parquet` и `manifest.json`. Работаете через Postgres (`make up`) — затем `make db-load`, иначе в базе останется профиль без 18 колонок. Индекс поиска перестроится сам при первом запросе (новый `built_at`).
+
 ```bash
 make data                  # data/processed (parquet, 216 МБ) + data/raw (CSV, 680 МБ)
 make data PART=processed   # только parquet — хватает для make demo и make eval
