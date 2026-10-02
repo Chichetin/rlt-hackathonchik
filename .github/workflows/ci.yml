@@ -1,0 +1,88 @@
+# CI (#285, D-105): the same checks as `make check` and `make e2e`, in a clean environment.
+# Organizers' data is not needed: pytest skips tests without data/Postgres, e2e runs on fixtures
+# (tests/fixtures, src/ui/playwright.config.ts). Postgres service — #291.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHONUTF8: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  check:
+    name: check (make check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/ui/package-lock.json
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --extra pg
+          cd src/ui && npm ci --no-fund --no-audit
+      # The target itself, not a copy of its list: a check added to `make check` lands here too.
+      # -k: run every prerequisite and show all failures, not only the first.
+      - run: make -k check
+
+  e2e:
+    name: e2e (make e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/ui/package-lock.json
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --extra pg
+          cd src/ui && npm ci --no-fund --no-audit
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('src/ui/package-lock.json') }}
+      - name: Install Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: src/ui
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: src/ui
+        run: npx playwright install-deps chromium
+      - run: make e2e
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces
+          path: src/ui/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

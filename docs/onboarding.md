@@ -76,3 +76,19 @@ research/DECISIONS.md, src/contracts.py. Перескажи мне в 5 стро
 | Проверить всё (freeze, сдача, общие файлы) | `make check && make e2e` |
 | Эксперимент | `make eval EXP=<id>` → строка в `research/EXPERIMENTS.md` |
 | Демо | `make demo` → http://127.0.0.1:8000 |
+
+## Красный CI
+
+CI (`.github/workflows/ci.yml`, D-105) запускается на каждый PR и push в `main`: job **check** —
+`make -k check`, job **e2e** — `make e2e` на фикстурах. Данные организаторов и Postgres в CI не
+нужны: тесты без них пропускаются (Postgres-сервис — #291).
+
+1. Открыть упавший job → шаг `make -k check`: `-k` прогоняет все цели, ищите строки
+   `make: *** [Makefile:…: <цель>] Error` — это и есть упавшие цели (`lint`, `typecheck`, `test`, …).
+2. Повторить у себя ту же цель: `make <цель>` (например, `make typecheck`). Зелёная локально,
+   красная в CI — обычно незакоммиченный файл, зависимость не из lockfile или `--extra ml`
+   (в CI его нет: тяжёлые импорты — с `# pyright: ignore[reportMissingImports]`).
+3. e2e: внизу запуска — артефакт `playwright-traces` (трассы упавших тестов), открывается
+   `npx playwright show-trace <zip>`; локально — `make e2e`.
+4. Красный не из-за вашего PR (тот же job красный на `main`) — задача с меткой `blocker`, а не
+   повторный запуск «на удачу».
