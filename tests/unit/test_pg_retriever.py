@@ -196,3 +196,71 @@ def test_lost_connection_falls_back_then_reconnects(search_data, pg_vectors, tmp
     pg_retriever._state["down_until"] = 0.0  # retry window over
     res = search_mod.search(Query(query_id="q", text="бумага"))
     assert "по словам и смыслу" in next(c for c in res[0].components if c.name == "product_fit").explanation
+
+
+# hybrid_short (#485): a short query goes to pg_hybrid with its own model, a long one stays on BM25.
+def _short_cfg(tmp_path: Path, extra: str = "") -> dict:
+    p = tmp_path / "search.yaml"
+    p.write_text("retriever: bm25\nk: 20\nweights: {product_fit: 1.0}\n"
+                 f"hybrid_short: {{model: e3/user-base-okpd2, max_words: 2{extra}}}\n", encoding="utf-8")
+    return search_mod.load_config(p)
+
+
+@pytest.mark.parametrize("block", ["{model: e3/user-base-okpd2}", "{model: e3/user-base-okpd2, max_words: 0}",
+                                   "{max_words: 3}", "{model: m, max_words: 3, scores: cosine}",
+                                   "{model: m, max_words: 3, extra: 1}"])
+def test_hybrid_short_block_is_checked(tmp_path, block):
+    p = tmp_path / "search.yaml"
+    p.write_text(f"retriever: bm25\nk: 20\nweights: {{product_fit: 1.0}}\nhybrid_short: {block}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="hybrid_short"):
+        search_mod.load_config(p)
+
+
+def test_hybrid_short_only_over_bm25(tmp_path):
+    p = tmp_path / "search.yaml"
+    p.write_text("retriever: pg_hybrid\nk: 20\nweights: {product_fit: 1.0}\n"
+                 "hybrid_short: {model: m, max_words: 3}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="retriever: bm25"):
+        search_mod.load_config(p)
+
+
+def test_short_query_goes_to_pg_hybrid_with_its_model_long_stays_bm25(search_data, tmp_path, monkeypatch):
+    cfg = _short_cfg(tmp_path)
+    monkeypatch.setattr(search_mod, "load_config", lambda: cfg)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://app:app@127.0.0.1:1/app")
+    calls = []
+
+    def fake_hybrid(idx, text, hits, top, model=None):
+        calls.append((text, model))
+        return hits, True
+
+    monkeypatch.setattr(pg_retriever, "hybrid", fake_hybrid)
+    short = search_mod.search(Query(query_id="q", text="бумага офисная"))
+    assert calls == [("бумага офисная", "e3/user-base-okpd2")] and short
+    assert "по словам и смыслу" in next(c for c in short[0].components if c.name == "product_fit").explanation
+    search_mod.search(Query(query_id="q", text="бумага офисная белая"))  # 3 words > max_words
+    assert len(calls) == 1
+
+
+def test_short_query_without_postgres_is_plain_bm25(search_data, tmp_path, monkeypatch):
+    """No DATABASE_URL: the product answers exactly as with retriever bm25 and never touches the vectors."""
+    plain = {k: v for k, v in _short_cfg(tmp_path).items() if k != "hybrid_short"}
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(pg_retriever, "hybrid", lambda *a, **kw: pytest.fail("векторы без Postgres"))
+    q = Query(query_id="q", text="бумага")
+    got = search_mod.search(q, config=_short_cfg(tmp_path))
+    want = search_mod.search(q, config=plain)
+    assert [(m.counterparty.inn, m.score) for m in got] == [(m.counterparty.inn, m.score) for m in want] and got
+    # eval: the short query is routed anyway, so missing vectors fail the run instead of measuring BM25
+    monkeypatch.setattr(search_mod, "STRICT_RETRIEVER", True)
+    assert search_mod.routed(_short_cfg(tmp_path), "бумага")["retriever"] == "pg_hybrid"
+
+
+def test_hybrid_scores_bm25_rescales_rrf_to_the_query_bm25(monkeypatch):
+    monkeypatch.setattr(pg_retriever, "hybrid",
+                        lambda idx, text, hits, top, model=None: ([(5, 0.032), (6, 0.016)], True))
+    bm25 = [(1, 10.0), (2, 4.0)]
+    fused, how = search_mod._hybrid_hits(None, "бумага", bm25, {"hybrid_scores": "bm25"})  # type: ignore[arg-type]
+    assert fused == [(5, pytest.approx(10.0)), (6, pytest.approx(5.0))] and how
+    fused, _ = search_mod._hybrid_hits(None, "бумага", bm25, {})  # type: ignore[arg-type]
+    assert fused == [(5, 0.032), (6, 0.016)]
