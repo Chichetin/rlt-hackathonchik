@@ -9,11 +9,10 @@ import pytest
 
 from src.contracts import Query
 from src.enrich import discover as D
-from src.enrich import role
 from src.enrich.enrich import enrich
 from src.enrich.evidence import check_counterparty, strip_unverified
 from src.match.filters import apply_filters
-from src.sources import bo_nalog, pb_nalog, rmsp
+from src.sources import bo_nalog, pb_nalog, rmsp, role
 from src.sources.cache import SourceCache
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures"

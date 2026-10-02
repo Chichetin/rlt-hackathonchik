@@ -9,10 +9,9 @@ import pytest
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query
 from src.enrich import discover as discover_mod
-from src.enrich import role
 from src.enrich.evidence import check_counterparty, strip_unverified
 from src.match import pipeline
-from src.sources import msp_dump
+from src.sources import msp_dump, role
 from src.sources.cache import SourceCache
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "msp_dump" / "sample.xml"

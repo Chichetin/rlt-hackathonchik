@@ -25,6 +25,7 @@ freeze (02.10, 14:00) цифры и слайды по методологии г�
 | `src/contracts.py` | DATA до заморозки 11:30; после — любой | отдельный PR, метка `contract`, перечень потребителей; затем `make openapi` в том же PR |
 | `docs/openapi.json`, `src/ui/src/api-types.ts` | генерируются | только `make openapi`; руками не правятся |
 | `pyproject.toml`, `uv.lock`, `src/ui/package*.json` | тот, кому нужна зависимость | в своём PR + строка в `research/DECISIONS.md` |
+| `src/settings.py`, `.env.example` | любой, по задаче | единственное место, где читается окружение: новая переменная — поле `Settings` и строка в `.env.example`; файл из `scripts/settings_allowlist.txt` переводится на `get_settings()` и вычёркивается из списка (`make settings-check`, D-139) |
 | `src/ui/e2e/demo.spec.ts` | APP; область, подключившая свою часть, добавляет шаг | PR, ломающий сценарий, не вливается |
 | `research/DECISIONS.md`, `docs/tz-compliance.md` | все, в своём PR | append-only; при конфликте сохраняются обе строки |
 | `CLAUDE.md`, `GIT.md`, `.claude/`, `docs/timeline.md` | любой, по задаче | ревью `reviewer` обязательно; сроки — одним решением (D-014) |
@@ -37,7 +38,7 @@ src/
   contracts.py        # Query, Evidence, Counterparty, ScoreComponent, CounterpartyMatch, SearchResponse
   ingest/             # DATA: data/raw → data/processed (parquet), склейка по ИНН
   match/              # MATCH: search.py (# STUB), filters.py — жёсткие фильтры
-  sources/            # SOURCES: cache.py — кеш внешних источников (SQLite, TTL); клиенты источников
+  sources/            # SOURCES: cache.py — кеш внешних источников (SQLite, TTL); клиенты источников; role.py — роль по ОКВЭД (D-057)
   enrich/             # SOURCES: enrich.py (# STUB), evidence.py — механическая проверка фактов
   llm/                # SOURCES: provider.py — LLM из .env, режим без LLM обязателен
   eval/               # DATA: metrics.py, split.py (печать holdout), run.py (make eval), final.py (make eval-final)
@@ -67,10 +68,10 @@ scripts/              # issues.sh, download-models.sh, check_stubs.py, check_lay
 
 | Слой | Что | Модули `src/` |
 |---|---|---|
-| L0 | типы и настройки | `contracts.py`; `regions`, `settings` — когда появятся (#292, #290) |
+| L0 | типы и настройки | `contracts.py`, `settings.py` (#290); `regions` — когда появится (#292) |
 | L1 | внешний мир и хранение | `sources/`, `db/`, `llm/`, `ingest/` (build, load, notice, okpd2, profile, split_config, testset), `worker/queue.py` |
 | L2 | ядро match | `match/` — store, index, search, fallback, filters, signals, profiles, purchase_type, text, pg_retriever |
-| L3 | обогащение | `enrich/` — enrich, discover, evidence, role |
+| L3 | обогащение | `enrich/` — enrich, discover, evidence, web_leads_warm (прогрев веб-лидов, #108), fns_lookup (факты ФНС с проверкой, #59); роль по ОКВЭД — `sources/role.py` (L1, #294) |
 | L4 | сценарии поверх ядра | `match/pipeline.py`, `ingest/predict.py` |
 | L5 | точки входа | `api/`, `worker/` (кроме `queue.py`) |
 | L6 | инструменты | `eval/`, `match/ranker_train.py` (обучение ранжировщика, #198) — импортируют продукт; продукт их не импортирует |

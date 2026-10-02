@@ -10,7 +10,7 @@ Rules (CLAUDE.md, «Проверки кодом»):
 4. an INN passes the checksum (10 and 12 digits);
 5. the counterparty INN and every contact are backed by an Evidence with the same field/value;
    the role (`kind`) by an `okved` Evidence whose value is a WHOLE line of the page with the main OKVED
-   of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/enrich/role.py
+   of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/sources/role.py
    (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; `unknown` also by such a line
    whose fact is the service basis of #188 (`role.is_service_basis`: roles do not apply to services and works);
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
@@ -27,7 +27,7 @@ from collections.abc import Callable
 from functools import cached_property
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
-from src.enrich.role import basis_kind, is_service_basis
+from src.sources.role import basis_kind, is_service_basis
 
 PageText = Callable[[str], str | None]  # url -> cached page text or None
 

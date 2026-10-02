@@ -30,13 +30,13 @@ from dataclasses import dataclass, field
 from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
-from src.enrich import role
 from src.enrich.evidence import cached_pages, strip_unverified
 from src.match import confidence, fallback, speller
 from src.match import search as search_mod
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
 from src.match.index import get_index
 from src.match.purchase_type import purchase_type
+from src.sources import role
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)

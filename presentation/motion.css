@@ -1,0 +1,57 @@
+/* Motion/art direction: the homepage's black canvas, silk dots and chromatic glass edge. */
+@property --rim-angle{syntax:'<angle>';initial-value:205deg;inherits:false}
+#stage{isolation:isolate;background:#020203}
+#stage:before{display:none}
+.ambient{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:radial-gradient(ellipse at 95% 15%,#21233022,transparent 55%)}
+.silk-field{width:100%;height:100%;opacity:.26;mask-image:linear-gradient(90deg,transparent 30%,#000 76%);transition:opacity 600ms}
+#stage[data-scene="s1"] .silk-field,#stage[data-scene="s7"] .silk-field{opacity:.72}
+.ambient-jewel{position:absolute;width:345px;height:345px;right:116px;top:190px;opacity:0;transition:opacity 600ms;display:none}
+#stage[data-scene="s1"] .ambient-jewel,#stage[data-scene="s7"] .ambient-jewel{display:block;opacity:1}
+.jewel-glass{position:absolute;inset:0;border-radius:24%;transform:rotate(45deg);background:linear-gradient(135deg,#ffffff09,#ffffff02 46%,#0005);box-shadow:0 40px 90px -30px #000,inset 0 2px 1px #ffffff15,inset 0 -14px 34px #0006;overflow:hidden}
+.jewel-rim{position:absolute;inset:0;border-radius:inherit;padding:1.5px;background:conic-gradient(from var(--rim-angle),#34373e00,#eef1f6aa 26deg,#6b707935 58deg,#24272d 104deg,#c4cad388 140deg,#ffd27aaa 150deg,#ff7ab8aa 156deg,#7ad7ffaa 162deg,#f2f4f8aa 172deg,#4b4f5733 214deg,#24272d 250deg,#f2f4f899 282deg,#9cf0ff99 292deg,#ffe9a888 298deg,#34373e00);mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude}
+.jewel-light{position:absolute;inset:-35%;background:linear-gradient(110deg,transparent 28%,#ffffff12 42%,#ffffff03 52%,transparent 62%);opacity:0;pointer-events:none}
+.jewel-glass svg{position:absolute;width:58%;height:58%;left:21%;top:21%;transform:rotate(-45deg);opacity:.28}
+.slide{z-index:1;backface-visibility:hidden}
+.motion-ghost{z-index:0!important;pointer-events:none!important;user-select:none;will-change:transform,opacity}
+.motion-ghost .source{display:none}
+/* A little more air, with surfaces reserved for evidence and interactive objects. */
+.hero-result{position:relative;background:linear-gradient(130deg,#14141bea,#07070beb);border-color:#ffffff26;box-shadow:inset 0 1px #ffffff0f,0 35px 90px #0009;backdrop-filter:blur(18px)}
+.hero-result:before,.evidence-card:before{content:'';position:absolute;left:22%;right:22%;top:-1px;height:1px;background:linear-gradient(90deg,transparent,#cad0e7aa,transparent);pointer-events:none}
+.node{background:linear-gradient(130deg,#14141acc,#08080ac9);border-color:#ffffff1d}
+.mapping .node{border:0;border-radius:0;background:transparent;box-shadow:none;border-top:1px solid #ffffff32;padding:30px 20px}
+.mapping .node.strong{border-top-color:#91baff;background:linear-gradient(180deg,#91baff0a,transparent)}
+.mapping .number{font-size:14px;letter-spacing:1px}
+.mapping .node:after{opacity:.5}
+.evidence-card{position:relative;background:linear-gradient(130deg,#17171dbb,#08080acc)}
+.meter i,.chart-track>span{transform-origin:left center}
+.chart-track>span{background:linear-gradient(90deg,#666b79,#9195a5)}
+.current .chart-track>span{background:linear-gradient(90deg,#5c82c5,#afc8fa)}
+.architecture{position:relative}
+.request-route{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.route-rail{stroke:#ffffff12;stroke-width:1;opacity:0}
+.route-active{stroke:#b3ceff;stroke-width:1.5;opacity:0;filter:drop-shadow(0 0 4px #91baff99)}
+.route-packet{fill:#e0ebff;stroke:#91baff;stroke-width:1;opacity:0;filter:drop-shadow(0 0 7px #91baff)}
+.is-active .route-active,.is-active .route-packet{opacity:1}
+[data-step].emphasis{border-color:#91baff88;background:linear-gradient(135deg,#91baff16,#0a0d1599);box-shadow:0 0 0 1px #91baff25}
+[data-step].step-complete{border-color:#91baff44}
+.query-flow .node{transition:border-color 320ms,background 320ms,box-shadow 320ms}
+.factor{transition:border-color 320ms,background 320ms}
+.demo-panel figure{transform-origin:40% 50%;border-radius:18px}
+.demo-panel img{border-radius:12px;box-shadow:0 25px 75px #0006}
+.demo-tabs button{transition:background 200ms,border-color 200ms;position:relative}
+.demo-tabs button[aria-selected=true]{background:linear-gradient(130deg,#f0f0f6,#cdcddf);box-shadow:inset 0 1px #fff6,0 8px 25px #0003}
+.deck-header{opacity:.8}.header-right{font-size:12px;letter-spacing:1.8px}
+.deck-footer{opacity:.48;transition:opacity 200ms}.deck-footer:hover,.deck-footer:focus-within{opacity:1}
+#progress{height:2px;background:linear-gradient(90deg,#697c9f,#c8d8f7)}
+#stage[data-scene="s7"] .ambient-jewel{top:235px;right:230px;width:285px;height:285px;filter:brightness(.6)}
+.next-step{position:relative;background:linear-gradient(90deg,#08080bcc,transparent)}
+.qa-links button{transition:background 180ms,border-color 180ms,transform 180ms}
+.qa-links button:hover{transform:translateY(-3px)}
+.motion-off *, .motion-off *:before,.motion-off *:after{animation:none!important;transition:none!important}
+@media(prefers-reduced-motion:reduce){.ambient *,.slide *,.deck-footer{transition:none!important}}
+@media print{.ambient,.request-route,.motion-ghost{display:none!important}}
+.silk-field{opacity:.13}
+#stage[data-scene="s1"] .ambient-jewel{display:none}
+.hero-jewel{position:absolute;width:102px;height:102px;right:48px;top:-68px;pointer-events:none}
+.hero-jewel .jewel-glass{background:linear-gradient(135deg,#2a2a34,#0d0d13 60%,#020204);box-shadow:0 10px 35px #000b,inset 0 2px 1px #ffffff28}
+.hero-jewel .jewel-glass svg{opacity:.95}
