@@ -23,7 +23,7 @@ from src.contracts import Query
 from src.eval import baselines
 from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
-from src.match import confidence, pipeline
+from src.match import pipeline
 from src.match import search as search_mod
 from src.match.profiles import procurement_type
 
@@ -90,14 +90,18 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
     return query
 
 
-def _rank_search(query: Query, cfg: dict) -> list[str]:
+def _picked_search(query: Query, cfg: dict) -> tuple[list[str], bool]:
     """What the user sees: the history block of /api/search — the same pipeline (src/match/pipeline.py, #220)
     in its backtest mode: user filters on organizers' data and the Evidence check, top-k as on screen; no
     «Новые» (never relevant) and nothing from the cache — status, РНП, МСП, role there are today's facts,
-    a leak in a backtest (D-097)."""
+    a leak in a backtest (D-097). Also: whether the user would see the weak-match warning (#281)."""
     picked = pipeline.pick(query, config=cfg, backtest=True)
     shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
-    return [m.counterparty.inn for m in shown if m.counterparty.inn]
+    return [m.counterparty.inn for m in shown if m.counterparty.inn], picked.weak_match is not None
+
+
+def _rank_search(query: Query, cfg: dict) -> list[str]:
+    return _picked_search(query, cfg)[0]
 
 
 def _summary(rows: list[dict]) -> dict:
@@ -172,7 +176,11 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     try:
         for i, case in enumerate(cases):
             query = with_cutoff(case.query, cutoff)
-            ranked = _rank_search(query, cfg) if method == "search" else baselines.rank(query, cfg)
+            weak: bool | None = None
+            if method == "search":
+                ranked, weak = _picked_search(query, cfg)
+            else:
+                ranked = baselines.rank(query, cfg)
             rel = set(case.relevant_inns)
             winners = {inn for inn, g in case.grades.items() if g >= 2}
             if audit is not None:
@@ -180,8 +188,8 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
                          "channel": case.query.channel, "type": procurement_type(case.query.okpd2) or "unknown"}
             row.update({name: fn(ranked, winners) if winners else None for name, fn in WINNER_METRICS.items()})
-            if method == "search":  # the weak-match warning the user would see (#281): measured, not assumed
-                row["weak"] = confidence.weak_match(search_mod.fit_signals()) is not None
+            if weak is not None:  # the weak-match warning the user would see (#281): measured, not assumed
+                row["weak"] = weak
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:
@@ -334,7 +342,10 @@ def main(argv: list[str] | None = None) -> int:
         keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
         cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
         part = f"{args.part}-s{args.sample}"
-    if args.words:
+    if args.words is not None:
+        if args.words < 1:
+            print("--words: ожидается целое число ≥ 1", file=sys.stderr)
+            return 2
         cases, part = first_words(cases, args.words), f"{part}-w{args.words}"
     rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
     RESULTS.mkdir(parents=True, exist_ok=True)

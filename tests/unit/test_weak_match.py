@@ -9,7 +9,7 @@ from src.match.search import fit_signals, search
 
 
 def _sig(**kw):
-    return {"tokens": 2, "top_bm25": 10.0, "ladder": False, "lots": 500, "candidates": 200, **kw}
+    return {"tokens": 2, "top_bm25": 10.0, "ladder": False, "retriever": "bm25", **kw}
 
 
 def test_weak_only_for_short_query_with_low_bm25_per_token():
@@ -29,7 +29,23 @@ def test_search_records_what_it_found(search_data):
     assert search(Query(query_id="q", text="бумага", as_of=None), k=5)
     sig = fit_signals()
     assert sig and sig["tokens"] == 1 and sig["ladder"] is False and sig["top_bm25"] > 0
-    assert sig["candidates"] >= 1 and sig["lots"] >= 1
+    assert sig["retriever"] == "bm25"
+
+
+def test_signals_do_not_leak_into_the_next_search(search_data):
+    """The eval loop runs every case in one context: a query that finds nothing must not inherit the previous
+    query's signals (review #281)."""
+    search(Query(query_id="a", text="бумага", as_of=None), k=5)
+    assert fit_signals() is not None
+    search(Query(query_id="b", text="zzzzqq qqqzzz", as_of=None), k=5)
+    assert fit_signals() is None
+
+
+def test_no_warning_off_bm25_and_no_code_advice_when_the_code_is_given():
+    assert confidence.weak_match(_sig(top_bm25=0.02, retriever="pg_hybrid")) is None  # RRF scores, not BM25
+    assert confidence.weak_match(_sig(top_bm25=1.0)) == confidence.WEAK_TEXT
+    assert confidence.weak_match(_sig(top_bm25=1.0), has_code=True) == confidence.WEAK_TEXT_WITH_CODE
+    assert "ОКПД2" not in confidence.WEAK_TEXT_WITH_CODE
 
 
 def test_api_header_only_when_weak(search_data, tmp_path, monkeypatch):

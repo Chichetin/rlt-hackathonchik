@@ -16,13 +16,18 @@ MAX_TOKENS = 4  # longer queries: BM25 per token tells nothing
 MIN_BM25_PER_TOKEN = 2.0
 WEAK_TEXT = ("Слабое совпадение с названиями прошлых закупок — проверьте название предмета закупки "
              "или укажите код ОКПД2: рекомендации могут быть неточными.")
+WEAK_TEXT_WITH_CODE = ("Слабое совпадение с названиями прошлых закупок — проверьте название предмета закупки: "
+                       "рекомендации могут быть неточными.")
 
 
-def weak_match(signals: dict | None) -> str | None:
-    """The sentence for the user when the match is weak, else None. `signals` — src.match.search.fit_signals()."""
+def weak_match(signals: dict | None, has_code: bool = False) -> str | None:
+    """The sentence for the user when the match is weak, else None. `signals` — src.match.search.fit_signals();
+    `has_code` — the query already has an OKPD2 code, so the advice to give one is dropped."""
     if not signals or signals["ladder"]:  # nothing searched, or found not by name (the search note says so)
+        return None
+    if signals.get("retriever", "bm25") != "bm25":  # pg_hybrid keeps RRF scores, not BM25: the threshold is BM25's
         return None
     tokens = signals["tokens"]
     if 0 < tokens <= MAX_TOKENS and signals["top_bm25"] / tokens < MIN_BM25_PER_TOKEN:
-        return WEAK_TEXT
+        return WEAK_TEXT_WITH_CODE if has_code else WEAK_TEXT
     return None

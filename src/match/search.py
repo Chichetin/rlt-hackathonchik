@@ -460,10 +460,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     fetched = store.built_at()
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
-    _fit_signals.set({"lots": len(lots), "candidates": len(cands), "top_bm25": top_bm25,
-                      "tokens": len(set(tokens)),
-                      "ladder": any(c.found_by for c in cands), "predicted": predicted,
-                      "code_hits": sum(c.okpd_level > 0 for c in cands[:10])})
+    _fit_signals.set({"top_bm25": top_bm25, "tokens": len(set(tokens)), "retriever": cfg["retriever"],
+                      "ladder": any(c.found_by for c in cands)})
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break

@@ -80,7 +80,8 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
     # `config` only when given: the product reads configs/search.yaml on every call (and tests stub search())
     kw = {"config": config, "weights": config.get("weights")} if config is not None else {}
     found = search_mod.search(query, k=search_mod.CANDIDATES, **kw)
-    out = Picked(matches=[], note=fallback.search_note(), weak_match=confidence.weak_match(search_mod.fit_signals()))
+    weak = confidence.weak_match(search_mod.fit_signals(), has_code=bool(query.okpd2))
+    out = Picked(matches=[], note=fallback.search_note(), weak_match=weak)
     candidates: list[CounterpartyMatch] | None = None  # «Новые» before the user filters, None — no discovery
     if not is_stub() and not backtest:
         discovered: list[CounterpartyMatch] = []
