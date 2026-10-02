@@ -376,3 +376,29 @@ def test_shadow_never_breaks_the_page(search_data, mode, monkeypatch):
 
     monkeypatch.setattr(ParquetStore, "supplier_history", down)
     assert shadow_reliability(found, CUTOFF) == found
+
+
+def test_small_sample_note_only_where_it_changes_the_percent():
+    """Review #127: «с поправкой на малую выборку» only when the smoothing moves the shown percent."""
+    _, few = history_reliability(h(lots=3, wins=3), PRIOR, REF)
+    assert "Побед в ЭМ 3 из 3 лотов — " in few and "с поправкой на малую выборку" in few
+    _, many = history_reliability(h(lots=500, wins=400, em_lots=500, em_wins=400), PRIOR, REF)
+    assert "Побед в ЭМ 400 из 500 лотов — 80% (в среднем по ЭМ 40%)" in many and "поправк" not in many
+
+
+def test_start_up_warms_the_prior_and_never_fails(monkeypatch):
+    """The prior is one SQL over every supplier (1–1.5 s on Postgres): the API warms it at start-up, in the
+    background; a store that is not there is no start-up error."""
+    from src.api import app as app_mod
+
+    seen: list[object] = []
+    monkeypatch.setattr(search_mod, "reliability_prior", lambda store, as_of: seen.append(as_of))
+    monkeypatch.setattr(app_mod, "get_store", lambda: "store")
+    app_mod._warm_reliability()
+    assert seen == [None]
+
+    def down():
+        raise OSError("no data")
+
+    monkeypatch.setattr(app_mod, "get_store", down)
+    app_mod._warm_reliability()  # logged, not raised

@@ -35,6 +35,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
 from typing import Any
@@ -64,6 +65,7 @@ from src.match import pipeline
 from src.match import search as search_mod
 from src.match.filters import entity_of, kind_of, near_of, parse_filters
 from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
+from src.match.reliability import reliability_mode
 from src.match.store import get_store
 from src.settings import get_settings
 from src.sources.cache import SourceCache
@@ -84,14 +86,28 @@ MAX_CORRECTIONS = 10  # X-Query-Corrected: pairs (typed, searched) shown to the 
 HISTORY_UNCHECKED = "history_unchecked"  # X-Discovery-Error: found, but novelty not checked (#287)
 SOURCE_UNAVAILABLE = "source_unavailable"  # X-Discovery-Error: a registry request was refused or failed (#287)
 
+def _warm_reliability() -> None:
+    """The reliability prior (#72: one SQL over every supplier, cached per process) before the first search — on
+    Postgres it costs 1–1.5 s. Background thread: start-up does not wait; no data / no store — the first search
+    pays it (or shows «Нет данных»), the start-up never fails."""
+    try:
+        search_mod.reliability_prior(get_store(), None)
+    except Exception:  # noqa: BLE001 — a warm-up only
+        log.info("reliability: prior не прогрет при старте", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Q-24: with retriever pg_hybrid load the query model and check the vectors before the first request."""
+    """Q-24: with retriever pg_hybrid load the query model and check the vectors before the first request;
+    with reliability shadow / on warm its prior in the background (#72)."""
     try:
         cfg = search_mod.load_config()
         retriever, model = cfg["retriever"], cfg.get("embedding_model")
+        reliability = reliability_mode(cfg)
     except (OSError, ValueError, KeyError):
-        retriever = model = None
+        retriever = model = reliability = None
+    if reliability in ("shadow", "on") and not _is_stub():
+        threading.Thread(target=_warm_reliability, name="warm-reliability", daemon=True).start()
     if retriever == "pg_hybrid":
         from src.match import pg_retriever
 

@@ -165,8 +165,11 @@ def history_reliability(h: History | None, prior: Prior, ref: date) -> tuple[flo
             if h.won_customers else "побед у заказчиков ещё не было")
     contracts = f"{h.aisgz} {plural(h.aisgz, 'контракт', 'контракта', 'контрактов')}"
     if "win_rate" in s:
-        wins = (f"Побед в ЭМ {h.em_wins} из {_of(h.em_lots, 'лота', 'лотов')} — {_pct(s['win_rate'])} с поправкой "
-                f"на малую выборку (в среднем по ЭМ {_pct(prior.win_rate)})")
+        # «с поправкой на малую выборку» only where the smoothing changes the shown percent (few lots): 400 of 500
+        # stays «80%» without it, 1 of 1 is «58% с поправкой…», not a bare 58 % next to «1 из 1»
+        fix = " с поправкой на малую выборку" if _pct(s["win_rate"]) != _pct(h.em_wins / h.em_lots) else ""
+        wins = (f"Побед в ЭМ {h.em_wins} из {_of(h.em_lots, 'лота', 'лотов')} — {_pct(s['win_rate'])}{fix} "
+                f"(в среднем по ЭМ {_pct(prior.win_rate)})")
         if h.aisgz:
             wins += f"; в АИС ГЗ {contracts} (в данных только победители)"
     else:
