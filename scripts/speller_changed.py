@@ -23,6 +23,7 @@ import duckdb
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src.eval.run import tree_dirty  # noqa: E402
 from src.eval.split import load_cases, split_config  # noqa: E402
 from src.match import speller  # noqa: E402
 from src.match.index import get_index, processed_dir  # noqa: E402
@@ -53,8 +54,7 @@ def main() -> int:
     short = [" ".join(n.split()[: rng.randint(1, 3)]) for n in names if n.split()][:N_SHORT]
     git = ["git", "-C", str(ROOT)]
     commit = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    dirty = bool(subprocess.run([*git, "status", "--porcelain", "--", "src", "configs"], capture_output=True,
-                                text=True).stdout.strip())
+    dirty = tree_dirty()  # the same paths as every eval result and the eval-final gate (#455)
     rec = {"exp_id": "S-282-changed", "created_at": datetime.now(UTC).isoformat(timespec="seconds"), "commit": commit,
            "dirty": dirty, "as_of": cutoff.isoformat(), "long": _changed(sp, [c.query.text for c in cases]),
            "short": _changed(sp, short)}

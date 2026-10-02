@@ -29,7 +29,7 @@ from pathlib import Path
 from src.contracts import Query
 from src.enrich import discover as D
 from src.enrich.evidence import check_counterparty, strip_unverified
-from src.eval.run import RESULTS, git
+from src.eval.run import RESULTS, git, tree_dirty
 from src.eval.split import ROOT
 from src.sources.cache import SourceCache
 
@@ -118,7 +118,7 @@ def build_record(exp_id: str, thin_id: str, results: list[GroupResult], *, offli
         "kind": "thin-discovery",
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": git("rev-parse", "HEAD"),
-        "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
+        "dirty": tree_dirty(),
         "config": {"thin_result": thin_id,
                    "block_cap_lifted": f"в блоке /api/search не более {D.MAX_SHOWN}, здесь считаются все",
                    "groups": [r.okpd2 for r in results], "offline": offline,

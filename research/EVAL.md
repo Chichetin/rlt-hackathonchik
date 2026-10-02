@@ -228,7 +228,8 @@ make parity A=parity-base-<sha> B=parity-new-<sha>
 ## Как это устроено в коде
 
 - `make eval EXP=<id>` → таблица в терминал и `eval/results/<id>.json`: `exp_id`, `part`,
-  `created_at`, `commit`, `dirty`, `config` (`configs/search.yaml`), `config_sha256`, `stub`,
+  `created_at`, `commit`, `dirty` (незакоммиченная правка в тех же путях, что замораживает eval-final: `src`, `configs`,
+  `models/ranker`, `pyproject.toml`, `uv.lock` — `run.FROZEN_PATHS`, #455), `config` (`configs/search.yaml`), `config_sha256`, `stub`,
   `n_queries`, `elapsed_s`, `metrics` (`value`, `ci95`), `slices`, `per_query` — по строке на кейс:
   метрики, `channel`, `winner_new` и `ranked` — выданные top-k ИНН по порядку (для частей до 5 000
   кейсов; `dev_full` пишется без `ranked`, иначе файл не пройдёт стража 5 МБ). Любая цифра на слайде воспроизводится этой
@@ -265,9 +266,9 @@ make parity A=parity-base-<sha> B=parity-new-<sha>
 - `src/eval/split.py`: `load_cases("holdout")` вне `make eval-final` бросает `SealedError`;
   кейс dev вне своих дат — ошибка «split leak».
 - `make eval-final CONFIRM=<sha256>` (`src/eval/final.py`) читает holdout, только если:
-  1. `CONFIRM` равен sha256 конфигурации (`configs/search.yaml` + `configs/split.yaml` + закоммиченный код метода `src/{match,enrich,sources,ingest,eval,llm}`, `src/contracts.py`; UI и API не входят, D-015); без
+  1. `CONFIRM` равен sha256 конфигурации (`configs/search.yaml` + `configs/split.yaml` + закоммиченный код метода `src/{match,enrich,sources,ingest,eval,llm,db}`, `src/contracts.py`, `src/settings.py`, `src/regions.py` и модели ранжировщика `models/ranker` (#451, D-151) — `METHOD_PATHS`; полноту по графу импортов от `src.eval.run` и `src.eval.final` проверяет тест, #448, D-150; заданный `BM25_TOKENIZER` тоже входит в хэш, #447; UI и API не входят, D-015); без
      `CONFIRM` команда печатает текущий хеш;
-  2. дерево чистое для `src/ configs/ pyproject.toml uv.lock`;
+  2. дерево чистое для `src/ configs/ models/ranker/ pyproject.toml uv.lock` (`FROZEN_PATHS`; `models/ranker` — #451);
   3. эта конфигурация на holdout ещё не запускалась;
   4. `search()` — не `# STUB`.
   Каждый запуск — строка в `eval/final-log.md`. Запускает только `evaluator` и только по заморозке.

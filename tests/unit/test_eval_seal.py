@@ -240,3 +240,96 @@ def test_tokenizer_override_changes_the_signature(repo, monkeypatch):
     assert len({plain, snowball, R.config_sha256(repo)}) == 3
     monkeypatch.delenv("BM25_TOKENIZER")
     assert R.config_sha256(repo) == plain
+
+
+def test_every_module_the_evaluation_imports_is_in_the_hashed_method_code():
+    """A module the backtest runs but the eval-final hash does not cover lets a changed method pass the gate under
+    the old sha (#448: src/settings.py and src/regions.py were outside). Walk the import graph from src.eval.run —
+    all imports, lazy ones too (scripts/check_layers.py) — and require every reached file under METHOD_PATHS."""
+    import importlib.util
+    import sys
+
+    name = "check_layers_for_seal"
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / "check_layers.py")
+    assert spec and spec.loader
+    layers = importlib.util.module_from_spec(spec)
+    sys.modules[name] = layers  # @dataclass looks its module up here
+    try:
+        spec.loader.exec_module(layers)
+        modules = layers.find_modules(ROOT)
+        graph: dict[str, set[str]] = {}
+        for e in layers.collect_edges(ROOT, modules):
+            graph.setdefault(e.src, set()).add(e.dst)
+    finally:
+        del sys.modules[name]
+    reached, todo = set(), ["src.eval.run", "src.eval.final"]  # make eval and make eval-final
+    while todo:
+        m = todo.pop()
+        if m not in reached:
+            reached.add(m)
+            todo.extend(graph.get(m, ()))
+    files = {modules[m].relative_to(ROOT).as_posix() for m in reached}
+    outside = sorted(f for f in files if f != "src/__init__.py"
+                     and not any(f == p or f.startswith(p + "/") for p in R.METHOD_PATHS))
+    assert not outside, f"eval импортирует код вне METHOD_PATHS: {outside}"
+    assert {"src/settings.py", "src/regions.py", "src/match/search.py"} <= files  # the walk really went through
+
+
+def test_ranker_model_is_part_of_the_signature_and_of_the_clean_tree(repo):
+    """The product ranks with a learned model file (D-103): retraining it under the same name is another method, so it
+    changes the hash, and an uncommitted edit is refused like an edit of the code (#451)."""
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    model = repo / "models" / "ranker" / "m.txt"
+    model.parent.mkdir(parents=True)
+    model.write_text("tree 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "model"], check=True)
+    before = R.config_sha256(repo)
+    model.write_text("tree 2\n", encoding="utf-8")
+    with pytest.raises(PermissionError, match="не чистое"):
+        F.gate(before, repo, repo / "log.md")
+    subprocess.run([*git, "commit", "-qam", "retrained"], check=True)
+    assert R.config_sha256(repo) != before
+
+
+def test_the_configured_ranker_model_is_tracked_and_hashed():
+    """The model `configs/search.yaml` names must sit under METHOD_PATHS and be committed: an untracked file would
+    not enter `git ls-tree`, and the signature would not name the method (#451)."""
+    import yaml
+
+    spec = yaml.safe_load((ROOT / "configs" / "search.yaml").read_text(encoding="utf-8")).get("ranker")
+    if not spec:
+        pytest.skip("ранжировщик выключен (ranker: null) — модели в методе нет")
+    if subprocess.run(["git", "-C", str(ROOT), "rev-parse"], capture_output=True).returncode != 0:
+        pytest.skip("не git-копия (архив) — проверять нечего")
+    rel = spec["model"]
+    assert any(rel == p or rel.startswith(p + "/") for p in R.METHOD_PATHS), rel
+    tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--error-unmatch", rel], capture_output=True)
+    assert tracked.returncode == 0, f"{rel} не в git"
+
+
+def test_dev_results_are_dirty_on_an_uncommitted_ranker_model(repo):
+    """A dev result records `dirty` for the very paths the eval-final gate freezes, the ranker models too: a retrained
+    model left uncommitted made `make eval` say dirty: false, and `make parity` did not warn (#455)."""
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    model = repo / "models" / "ranker" / "m.txt"
+    model.parent.mkdir(parents=True)
+    model.write_text("tree 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "model"], check=True)
+    assert R.tree_dirty() is False
+    model.write_text("tree 2\n", encoding="utf-8")
+    assert R.tree_dirty() is True
+    assert R.result_record("x", "dev", {}, {})["dirty"] is True
+    assert F.FROZEN_PATHS == R.FROZEN_PATHS  # one list for the gate and for the results
+
+
+
+def test_dirty_is_computed_in_one_place():
+    """A new eval tool copied from an old one would compute `dirty` over its own paths again (#455): `git status
+    --porcelain` stays in run.tree_dirty, the eval-final gate and fns_coverage (whole repo, tracked files on purpose,
+    #396 — it already sees a modified tracked model)."""
+    allowed = {"src/eval/run.py", "src/eval/final.py", "src/eval/fns_coverage.py"}
+    found = {p.relative_to(ROOT).as_posix() for d in ("src", "scripts") for p in (ROOT / d).rglob("*.py")
+             if "node_modules" not in p.parts and '"--porcelain"' in p.read_text(encoding="utf-8")}
+    assert found <= allowed, f"dirty считается вне run.tree_dirty: {sorted(found - allowed)}"
