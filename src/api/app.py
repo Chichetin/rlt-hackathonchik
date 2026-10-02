@@ -190,9 +190,10 @@ def _discovery_error(res: pipeline.Picked) -> str | None:
 
 
 def _found(query: Query, uncached: set[str] | None = None
-           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]], str | None]:
+           ) -> tuple[list[CounterpartyMatch], str | None, dict[str, dict[str, dict[str, int]]], str | None,
+                      str | None]:
     """Every candidate of the query after the filters, best first; why history is empty (#113); X-Facets;
-    X-Discovery-Error.
+    X-Discovery-Error; X-Weak-Match (#281).
 
     The selection itself is src/match/pipeline.py — the same for make eval and make predict (#220).
     """
@@ -205,7 +206,7 @@ def _found(query: Query, uncached: set[str] | None = None
                                  "или база не отвечает") from e
     if uncached is not None:
         uncached.update(res.uncached)
-    return res.matches, res.note, res.facets, _discovery_error(res)
+    return res.matches, res.note, res.facets, _discovery_error(res), res.weak_match
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
@@ -234,9 +235,11 @@ def api_search(query: Query, response: Response,
                limit: int = Param(20, ge=1, le=search_mod.CANDIDATES, description="строк в каждом блоке"),
                offset: int = Param(0, ge=0, description="сдвиг в каждом блоке")) -> SearchResponse:
     uncached: set[str] = set()
-    matches, note, chips, discovery_error = _found(query, uncached)
+    matches, note, chips, discovery_error, weak = _found(query, uncached)
     if note:
         response.headers["X-Search-Note"] = quote(note)
+    if weak:  # a short query with a weak match (#281): the UI warns above the history block
+        response.headers["X-Weak-Match"] = quote(weak)
     if discovery_error:
         response.headers["X-Discovery-Error"] = discovery_error
     response.headers["X-Facets"] = json.dumps(chips, ensure_ascii=True, separators=(",", ":"))

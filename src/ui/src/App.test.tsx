@@ -101,6 +101,27 @@ test("a failed open source is shown in «Новые», not passed off as «nobod
   expect(discoveryAlert(undefined)).toBeUndefined();
 });
 
+test("a weak match is flagged above the history block (#281)", async () => {
+  const warn = "Слабое совпадение с названиями прошлых закупок — проверьте название.";
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(response), { status: 200, headers: { "X-Weak-Match": encodeURIComponent(warn) } }),
+  );
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "вентиляция");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const block = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(within(block).getByTestId("weak-match")).toHaveTextContent(warn);
+});
+
+test("no weak-match warning when the server did not send one (#281)", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
+  render(<App />);
+  await userEvent.type(screen.getByLabelText("Что нужно закупить"), "бумага");
+  await userEvent.click(screen.getByRole("button", { name: "Найти поставщиков" }));
+  const clean = await screen.findByRole("region", { name: "С опытом госзакупок" });
+  expect(within(clean).queryByTestId("weak-match")).toBeNull();
+});
+
 test("no alert in «Новые» when the sources answered", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
   render(<App />);

@@ -29,7 +29,7 @@ from src.contracts import CounterpartyMatch, Query, inn_is_valid
 from src.enrich import discover as discover_mod
 from src.enrich import enrich as enrich_mod
 from src.enrich.evidence import cached_pages, strip_unverified
-from src.match import fallback
+from src.match import confidence, fallback
 from src.match import search as search_mod
 from src.match.filters import apply_legal, apply_user_filters, chip_facets, legal_ok, parse_filters
 from src.sources.cache import SourceCache
@@ -47,6 +47,7 @@ class Picked:
     uncached: set[str] = field(default_factory=set)  # history INNs without a cached card (queue them)
     discovery: discover_mod.Discovery | None = None  # None — the block was not asked for or failed
     discovery_error: str | None = None  # the exception type when discover() failed
+    weak_match: str | None = None  # X-Weak-Match (#281): the match with past lots is weak — the sentence for the user
 
     @property
     def history(self) -> list[CounterpartyMatch]:
@@ -79,7 +80,7 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
     # `config` only when given: the product reads configs/search.yaml on every call (and tests stub search())
     kw = {"config": config, "weights": config.get("weights")} if config is not None else {}
     found = search_mod.search(query, k=search_mod.CANDIDATES, **kw)
-    out = Picked(matches=[], note=fallback.search_note())
+    out = Picked(matches=[], note=fallback.search_note(), weak_match=confidence.weak_match(search_mod.fit_signals()))
     candidates: list[CounterpartyMatch] | None = None  # «Новые» before the user filters, None — no discovery
     if not is_stub() and not backtest:
         discovered: list[CounterpartyMatch] = []

@@ -121,12 +121,14 @@ export type Totals = { history: number; discovered: number };
 // note: why the answer is empty or came from the fallback ladder — X-Search-Note, percent-encoded UTF-8 (#113)
 // excludedLot: the loaded notice is in the data and was left out of its own results — X-Excluded-Lot (#249, F-13)
 // discoveryError: why «Новые» may be incomplete — X-Discovery-Error: an exception type or "history_unchecked" (#287)
+// weakMatch: a short query matched past lots weakly — X-Weak-Match, percent-encoded UTF-8 (#281)
 export type SearchPage = SearchResponse & {
   total: Totals; note?: string; facets?: Facets; context?: SearchContext; excludedLot?: string; discoveryError?: string;
+  weakMatch?: string;
 };
 
-function searchNote(r: Response): string | undefined {
-  const raw = r.headers.get("X-Search-Note");
+function searchNote(r: Response, header = "X-Search-Note"): string | undefined {
+  const raw = r.headers.get(header);
   if (!raw) return undefined;
   try {
     return decodeURIComponent(raw);
@@ -147,6 +149,7 @@ export async function search(q: Query, page: { limit?: number; offset?: number }
     ...body,
     total: { history: total("X-Total-History", body.history.length), discovered: total("X-Total-Discovered", body.discovered.length) },
     note: searchNote(r),
+    weakMatch: searchNote(r, "X-Weak-Match"),
     facets: facets(r),
     context: searchContext(r),
     excludedLot: r.headers.get("X-Excluded-Lot") ?? undefined,

@@ -23,7 +23,7 @@ from src.contracts import Query
 from src.eval import baselines
 from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
-from src.match import pipeline
+from src.match import confidence, pipeline
 from src.match import search as search_mod
 from src.match.profiles import procurement_type
 
@@ -143,7 +143,8 @@ def slice_names(q: dict) -> list[str]:
     ch = f"channel={q['channel']}" if q.get("channel") else None
     nov = {True: "winner=new", False: "winner=known"}.get(q.get("winner_new"))  # type: ignore[arg-type]
     kind = f"type={q['type']}" if q.get("type") else None
-    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind) if name]
+    weak = {True: "weak=yes", False: "weak=no"}.get(q.get("weak"))  # type: ignore[arg-type]  # #281
+    return [name for name in (ch, nov, f"{ch},{nov}" if ch and nov else None, kind, weak) if name]
 
 
 def slices(per_query: list[dict]) -> dict:
@@ -179,6 +180,8 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
                          "channel": case.query.channel, "type": procurement_type(case.query.okpd2) or "unknown"}
             row.update({name: fn(ranked, winners) if winners else None for name, fn in WINNER_METRICS.items()})
+            if method == "search":  # the weak-match warning the user would see (#281): measured, not assumed
+                row["weak"] = confidence.weak_match(search_mod.fit_signals()) is not None
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:

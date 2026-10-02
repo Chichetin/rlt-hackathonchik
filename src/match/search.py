@@ -373,6 +373,13 @@ def _component(name: str, value: float, weights: dict[str, float], explanation: 
 # exact text match, so its participants would top the list on the answer itself (#249, review #145 F-13).
 _OWN_LOT = re.compile(r"lot-(\d+)")
 _excluded: ContextVar[int | None] = ContextVar("excluded_lot", default=None)
+# What the last search() in this context found, in absolute terms (not normalized by the best candidate):
+# the raw material of src/match/confidence.py (#281).
+_fit_signals: ContextVar[dict | None] = ContextVar("fit_signals", default=None)
+
+
+def fit_signals() -> dict | None:
+    return _fit_signals.get()
 
 
 def own_lot(query: Query) -> int | None:
@@ -400,6 +407,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     """
     fallback.reset_note()
     _excluded.set(None)
+    _fit_signals.set(None)
     own = own_lot(query)
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
     w = weights or cfg["weights"]
@@ -448,6 +456,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     fetched = store.built_at()
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
+    _fit_signals.set({"lots": len(lots), "candidates": len(cands), "top_bm25": top_bm25,
+                      "tokens": len(set(tokens)),
+                      "ladder": any(c.found_by for c in cands), "predicted": predicted,
+                      "code_hits": sum(c.okpd_level > 0 for c in cands[:10])})
     ref = as_of or idx.data_end
     out: list[CounterpartyMatch] = []
     bm25_of: list[float] = []  # BM25 of each match, for options.tie_break
