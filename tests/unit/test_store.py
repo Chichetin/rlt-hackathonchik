@@ -266,6 +266,7 @@ DIRECT_PARQUET_OK = {
     "src/sources/msp_dump.py": "the SMB register dump, not organizers' data",
     "src/sources/fns_opendata.py": "FNS open data, not organizers' data",
     "src/enrich/discover.py": "waits for PR #131 and #258 — the second part of #293",
+    "src/match/new_fit.py": "OKPD2 item profile of «Новые» (#77, shadow) — the second part of #293",
 }
 
 

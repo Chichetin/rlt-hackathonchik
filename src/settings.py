@@ -84,6 +84,8 @@ class Settings:
     database_url = _Var("DATABASE_URL", lambda v: v or "")  # "" — not set
     index_dir = _Var("INDEX_DIR", _directory("indexes"))  # BM25 indexes
     bm25_tokenizer = _Var("BM25_TOKENIZER", lambda v: v)  # overrides `tokenizer:` of configs/search.yaml
+    # block «Новые» (src/match/new_fit.py, #77): off | shadow | on, overrides `mode:` of configs/discover.yaml
+    discovery_new_fit = _Var("DISCOVERY_NEW_FIT", lambda v: (v or "").strip() or None)
     # worker (src/worker): unlike the two limits above this one always raised on garbage, a typo is not a default
     queue_stale_running_s = _Var("QUEUE_STALE_RUNNING_S", lambda v: int(v or QUEUE_STALE_RUNNING_DEFAULT_S))
 
