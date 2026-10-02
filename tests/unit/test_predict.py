@@ -221,3 +221,24 @@ def test_predict_uses_the_search_pipeline_hard_filters_and_evidence_check(search
     P.run(FIX, second, top=5, offline=True)
     assert top not in {r["inn"] for r in _rows(second) if r["lot_id"] == "9001"}
     assert len(checked) == 3  # one Evidence check per lot
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_thin_lots_go_first_only_when_yandex_is_on(search_data, tmp_path, monkeypatch, on):
+    """#263: with the paid fallback on, the lot of a thin category (11.07 here) is processed first — the ceiling per
+    run goes to it; off (the default) — the order of the export is kept."""
+    from src.enrich import web_discover as W
+
+    monkeypatch.setattr(W, "enabled", lambda: on)
+    monkeypatch.setattr(W, "thin_classes", lambda path=None: frozenset({"11.07"}))
+    monkeypatch.setenv("DISCOVERY_OFFLINE", "1")  # the registry from the cache only: no network in a test
+    seen: list[str] = []
+    real = P.recommend
+
+    def spy(lot, top, offline=None):
+        seen.append(lot.lot_id)
+        return real(lot, top, offline)
+
+    monkeypatch.setattr(P, "recommend", spy)
+    P.run(FIX, tmp_path / "o.csv", top=3, offline=None, mode="demo")  # None: not «offline», the fallback may plan
+    assert seen == (["9002", "9001", "9003"] if on else ["9001", "9002", "9003"])

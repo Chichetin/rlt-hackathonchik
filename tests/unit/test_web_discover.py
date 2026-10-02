@@ -253,3 +253,40 @@ def test_off_by_default_changes_nothing(cache, tmp_path, monkeypatch):
     assert off.matches[0].components[0].explanation.startswith("Найдена веб-поиском по товару")
     assert {e.source for e in off.matches[0].counterparty.evidence} == {pb_nalog.SOURCE}
     assert len(off.leads) == 1 and off.leads[0].startswith("веб-лиды:")
+
+
+# --- #263: thin categories first under the ceiling of a run ----------------------------------------------------
+
+def test_thin_first_keeps_the_order_inside_each_part(tmp_path):
+    from src.enrich import web_discover as W
+
+    lots = [("a", ["17.12.14.110"]), ("b", ["21.20.10.110"]), ("c", ["10.51.40"]), ("d", ["21.20.23.110"])]
+    ordered, line = W.thin_first(lots, lambda x: x[1], frozenset({"21.20"}))
+    assert [x[0] for x in ordered] == ["b", "d", "a", "c"]
+    assert "в тонких категориях 2" in line
+
+
+def test_thin_first_without_the_metric_keeps_the_order(tmp_path):
+    from src.enrich import web_discover as W
+
+    assert W.thin_classes(tmp_path / "missing.json") == frozenset()
+    lots = [("a", ["21.20.10.110"]), ("b", ["17.12"])]
+    ordered, line = W.thin_first(lots, lambda x: x[1], W.thin_classes(tmp_path / "missing.json"))
+    assert ordered == lots and "недоступна" in line
+
+
+def test_thin_classes_read_from_the_metric_of_122():
+    from src.enrich import web_discover as W
+
+    thin = W.thin_classes()
+    assert "21.20" in thin and all(len(g) == 5 for g in thin)  # eval/results/T-thin-v1.json
+
+
+def test_min_strong_and_the_trigger_are_unchanged(monkeypatch):
+    """#263 changes the order only: whether a lot asks Yandex is still `needed()` against `min_strong`."""
+    from src.enrich import web_discover as W
+
+    monkeypatch.setattr(W.yandex_search, "disabled_reason", lambda: None)
+    cfg = W.load_config()
+    k = int(cfg["min_strong"])
+    assert W.needed(k - 1, cfg)[0] is True and W.needed(k, cfg)[0] is False
