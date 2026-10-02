@@ -99,3 +99,75 @@ def test_value_text_reads_like_a_card():
     row[ranker.NAMES.index("channel_share")] = math.nan
     contrib[ranker.NAMES.index("channel_share")] = -2.0
     assert ranker.explain(ranker.Model("lgbm", ranker.ROOT, {}), contrib, row) == text
+
+
+def test_ablate_feeds_features_as_missing():
+    import numpy as np
+    import pytest
+
+    sp = ranker.spec({"ranker": {"kind": "logreg", "model": "m.json", "ablate": ["win_rate"]}})
+    assert sp is not None and sp["ablate"] == ["win_rate"]
+    with pytest.raises(ValueError):
+        ranker.spec({"ranker": {"kind": "logreg", "model": "m.json", "ablate": ["no_such_feature"]}})
+    n = len(ranker.NAMES)
+    params = {"fill": np.full(n, 0.5), "mean": np.zeros(n), "std": np.ones(n), "coef": np.arange(n, dtype=float),
+              "intercept": 0.0}
+    full = ranker.Model("logreg", ranker.ROOT, params)
+    i = ranker.NAMES.index("win_rate")
+    ablated = ranker.Model("logreg", ranker.ROOT, params, ablate=(i,))
+    x = np.ones((2, n))
+    missing = x.copy()
+    missing[:, i] = np.nan
+    assert np.allclose(ablated.raw(x), full.raw(missing))
+    assert not np.allclose(ablated.raw(x), full.raw(x))
+    assert np.allclose(ablated.contrib(x)[:, i], 0.5 * i)  # missing -> fill, the same as for any NaN
+
+
+def _lr_body(features: list[str]) -> dict:
+    k = len(features)
+    return {"features": features, "fill": [0.0] * k, "mean": [0.0] * k, "std": [1.0] * k,
+            "coef": [float(i + 1) for i in range(k)], "intercept": 0.5}
+
+
+def test_older_model_with_fewer_features_runs_on_its_columns(tmp_path):
+    """A model trained before a feature was added (R-198: 43 of 44) keeps working (#105)."""
+    old = ranker.NAMES[:-1]
+    f = tmp_path / "old.json"
+    f.write_text(json.dumps(_lr_body(old)), encoding="utf-8")
+    model = ranker.load({"kind": "logreg", "model": str(f)})
+    assert model.cols == list(range(len(old)))
+    x = np.arange(len(ranker.NAMES), dtype=float).reshape(1, -1) + 1
+    want = float(x[0, :len(old)] @ np.arange(1, len(old) + 1) + 0.5)
+    assert model.raw(x)[0] == pytest.approx(want)
+    c = model.contrib(x)
+    assert c.shape == (1, len(ranker.NAMES))
+    assert c[0, ranker.NAMES.index(ranker.NAMES[-1])] == 0.0
+    assert c[0, 0] == pytest.approx(1.0 * x[0, 0])
+
+
+def test_model_columns_errors(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(_lr_body([*ranker.NAMES[:3], "no_such_feature"])), encoding="utf-8")
+    with pytest.raises(ValueError, match="no_such_feature"):
+        ranker.load({"kind": "logreg", "model": str(bad)})
+    empty = tmp_path / "empty.json"
+    body = _lr_body([])
+    body.pop("features")
+    empty.write_text(json.dumps(body), encoding="utf-8")
+    with pytest.raises(ValueError, match="списка признаков"):
+        ranker.load({"kind": "logreg", "model": str(empty)})
+
+
+def test_default_ranker_model_loads_and_ranks(search_data):
+    """The product default (R-198, 43 of the 44 features) loads and orders the result, no fallback note."""
+    from src.match import fallback
+
+    cfg = search_mod.load_config()
+    sp = ranker.spec(cfg)
+    assert sp is not None
+    model = ranker.load(sp)
+    assert model.cols is None or [ranker.NAMES[i] for i in model.cols] == model.booster.feature_name()
+    res = search(Q, config=cfg)
+    assert res
+    assert any(ranker.MARKER in c.explanation for m in res for c in m.components)
+    assert "ранжировщик недоступен" not in (fallback.search_note() or "")

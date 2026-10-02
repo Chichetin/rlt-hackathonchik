@@ -17,9 +17,8 @@ from fastapi.testclient import TestClient
 from src.api import app as app_mod
 from src.contracts import Query, inn_is_valid
 from src.enrich import discover as D
-from src.enrich import role
 from src.enrich.evidence import check_counterparty
-from src.sources import pb_nalog, rmsp
+from src.sources import pb_nalog, rmsp, role
 from src.sources.cache import SourceCache
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "rmsp"
@@ -254,36 +253,67 @@ def test_offline_without_cache_is_empty_and_says_why(tmp_path):
     assert res.matches == [] and res.requests and all("нет в кеше" in r for r in res.requests)
 
 
-def test_query_without_okpd2_and_history_does_not_search(cache, tmp_path, monkeypatch):
-    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")
+def test_query_without_okpd2_and_history_does_not_search(cache, tmp_path):
     res = _run(cache, _processed(tmp_path, []), query=_query(okpd2=[]), client=_client(_no_network))
     assert res.matches == [] and res.requests == [] and "не определён" in res.notes[0]
 
 
-@pytest.mark.parametrize("flag", [None, "0", "true"])  # only "1" switches the predicted class on
-def test_predicted_class_is_off_by_default_no_block_no_network(search_data, tmp_path, monkeypatch, flag):
+@pytest.mark.parametrize("flag", [None, "", "1", "true"])  # #394: on by default, only "0" switches it off
+def test_predicted_class_is_on_by_default(search_data, tmp_path, monkeypatch, flag):
     from src.match.search import search
     if flag is None:
         monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS", raising=False)
     else:
         monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", flag)
-    q = Query(query_id="q", text="бумага А4")  # no OKPD2: search() would predict 17.12
+    q = Query(query_id="q", text="бумага А4")  # no OKPD2: search() predicts 17.12
+    history = search(q)
+    c = SourceCache(tmp_path / "c.sqlite")
+    rmsp.seed(FIX / "e2e", c)
+    on = D.discover(q, history, cache=c, weights=WEIGHTS, processed=search_data, offline=True)
+    assert on.predicted and on.okpd_classes == ["17.12"] and len(on.matches) == 10
+
+
+def test_predicted_class_flag_0_gives_no_block_and_no_network(search_data, tmp_path, monkeypatch):
+    from src.match.search import search
+    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "0")
+    q = Query(query_id="q", text="бумага А4")
     history = search(q)
     assert D.stated_class(history) == "17.12"
     c = SourceCache(tmp_path / "c.sqlite")
     rmsp.seed(FIX / "e2e", c)  # even a warm cache is not used for a predicted class
     res = D.discover(q, history, cache=c, weights=WEIGHTS, processed=search_data, offline=False,
-                     client=_client(_no_network))
+                     client=_client(_no_network), predicted_code="17.12.14.110")
     assert res.matches == [] and res.requests == [] and res.okpd_classes == [] and not res.predicted
-    assert "DISCOVERY_PREDICTED_CLASS" in res.notes[0]
-    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")
-    on = D.discover(q, history, cache=c, weights=WEIGHTS, processed=search_data, offline=True)
-    assert on.predicted and on.okpd_classes == ["17.12"] and len(on.matches) == 10
+    assert "DISCOVERY_PREDICTED_CLASS выключен" in res.notes[0]
     # an explicit OKPD2 never needs the flag
-    monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS")
     explicit = D.discover(q.model_copy(update={"okpd2": ["17.12.14.110"]}), history, cache=c, weights=WEIGHTS,
                           processed=search_data, offline=True)
     assert len(explicit.matches) == 10 and not explicit.predicted
+
+
+def test_discovery_takes_the_code_search_predicted(cache, tmp_path):
+    """#394: the code search() predicted from the text (P-02, search.predicted_code()) is the class of the block —
+    the same classifier as the history block, read as data, not parsed from an explanation."""
+    processed = _processed(tmp_path, [])
+    q = _query(okpd2=[])
+    res = _run(cache, processed, query=q, predicted_code="17.23.13.130", client=_client(_no_network))
+    assert res.predicted and res.okpd_classes == ["17.23"] and len(res.matches) == 5
+    why = res.matches[0].components[0].explanation
+    assert "ОКПД2 17.23 (в запросе ОКПД2 не указан — класс определён автоматически" in why
+    assert "ОКПД2 запроса" not in why
+    # it wins over what the history explanations state (another class)
+    other = _stated(["x; ОКПД2 определён по похожим позициям: совпадает код 26.20.40.110"])
+    assert D.discover(q, other, cache=cache, weights=WEIGHTS, processed=processed, offline=True,
+                      predicted_code="17.23.13.130").okpd_classes == ["17.23"]
+    # the full code, not only its class, decides the wholesale row (22.19.60 → 46.46.2, 22.19 has no row)
+    gloves = D.discover(q, (), cache=cache, weights=WEIGHTS, processed=processed, offline=True,
+                        predicted_code="22.19.60.119")
+    assert gloves.okpd_classes == ["22.19"] and any(r.startswith("ОКВЭД 46.46.2,") for r in gloves.requests)
+    # an explicit OKPD2 of the query is never replaced by a prediction
+    explicit = _run(cache, processed, predicted_code="26.20.40.110")
+    assert explicit.okpd_classes == ["17.23"] and not explicit.predicted
+    # a code shorter than a class predicts nothing: the history is read as before
+    assert _run(cache, processed, query=q, predicted_code="17").notes[0].startswith("ОКПД2 запроса не указан")
 
 
 def test_known_inns_are_cached_per_file_version(tmp_path):
@@ -615,9 +645,31 @@ def test_stated_class_takes_the_majority_and_ignores_short_codes():
     assert D.stated_class(_stated(["Похожие позиции в лоте 26.20.40; ОКПД2 запроса: совпадает код 17.12.14"])) is None
 
 
+def test_search_states_its_predicted_code_and_the_pipeline_passes_it(search_data, monkeypatch):
+    """#394: one classifier for both blocks — the code search() predicted (P-02) reaches discover() as data."""
+    from src.match import pipeline
+    from src.match import search as search_mod
+    search_mod.search(Query(query_id="q", text="бумага А4"))
+    code = search_mod.predicted_code()
+    assert code is not None and code.startswith("17.12.")
+    search_mod.search(Query(query_id="q", text="бумага А4", okpd2=["17.12.14.110"]))
+    assert search_mod.predicted_code() is None  # a code in the query: nothing predicted, the last call forgotten
+    seen: dict = {}
+
+    def fake(query, history, **kw):
+        seen.update(kw)
+        return D.Discovery()
+
+    monkeypatch.setattr(D, "discover", fake)
+    pipeline.pick(Query(query_id="q", text="бумага А4"))
+    assert seen["predicted_code"] == code
+    pipeline.pick(Query(query_id="q", text="бумага А4", okpd2=["17.12.14.110"]))
+    assert seen["predicted_code"] is None
+
+
 @pytest.fixture
 def api(tmp_path, monkeypatch, search_data):
-    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "1")  # these tests search by text, without OKPD2
+    monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS", raising=False)  # these tests search by text: on by default (#394)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/q.sqlite")
     monkeypatch.setattr(app_mod, "_engine", None)
     c = SourceCache()  # SOURCE_CACHE of this test (conftest)
@@ -631,7 +683,10 @@ def api(tmp_path, monkeypatch, search_data):
 
 
 def test_api_search_fills_the_discovered_block(api):
-    body = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"}).json()  # no OKPD2 in the query
+    r = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"})  # no OKPD2 in the query
+    body = r.json()
+    # the class the block searched, and that it was predicted from the text (#394): the UI chip, ASCII JSON
+    assert json.loads(r.headers["X-Discovery-Class"]) == {"classes": ["17.12"], "predicted": True}
     assert body["history"] and [m["counterparty"]["inn"] for m in body["discovered"]] == ["4703173460"]
     m = body["discovered"][0]
     assert m["origin"] == "discovered" and m["counterparty"]["name"] == 'ООО "МАРКЛИП"'
@@ -678,19 +733,23 @@ def test_api_facets_of_the_new_block_count_the_candidates(api):
         "entity": {"ul": 0, "ip": 0, "unknown": 0}, "near": {"worked": 0, "near": 1, "any": 1}}
 
 
-def test_api_text_query_without_flag_gives_an_empty_block_and_no_network(api, monkeypatch):
-    monkeypatch.delenv("DISCOVERY_PREDICTED_CLASS")
+def test_api_text_query_with_flag_0_gives_an_empty_block_and_no_network(api, monkeypatch):
+    monkeypatch.setenv("DISCOVERY_PREDICTED_CLASS", "0")
     monkeypatch.delenv("DISCOVERY_OFFLINE")  # the network is allowed — and still must not be touched
     attempts = []
     monkeypatch.setattr(rmsp, "_post", lambda *a, **k: attempts.append(a) or 1 / 0)
-    body = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"}).json()
+    r = api.post("/api/search", json={"query_id": "q", "text": "бумага А4"})
+    body = r.json()
     assert body["history"] and body["discovered"] == [] and attempts == []
+    assert "X-Discovery-Class" not in r.headers  # no class was searched — the UI says the code is unknown
     hist = {m["counterparty"]["inn"] for m in body["history"] if m["counterparty"]["inn"]}
     assert api.get("/api/health").json()["queue"] == {"pending": len(hist)}  # history INNs only (#38), no «новые»
     # the same request with the code from the notice fills the block without the flag
     monkeypatch.setenv("DISCOVERY_OFFLINE", "1")
-    with_code = api.post("/api/search", json={"query_id": "q", "text": "бумага А4", "okpd2": ["17.12.14.110"]}).json()
+    r = api.post("/api/search", json={"query_id": "q", "text": "бумага А4", "okpd2": ["17.12.14.110"]})
+    with_code = r.json()
     assert [m["counterparty"]["inn"] for m in with_code["discovered"]] == ["4703173460"]
+    assert json.loads(r.headers["X-Discovery-Class"]) == {"classes": ["17.12"], "predicted": False}
     assert "ОКПД2 запроса 17.12" in with_code["discovered"][0]["components"][0]["explanation"]
 
 

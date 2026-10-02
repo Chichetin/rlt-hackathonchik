@@ -18,6 +18,7 @@ from src.ingest.build import build
 from src.match import index as index_mod
 from src.match import search as search_mod
 from src.match.search import search
+from src.match.store import ParquetStore
 from src.match.text import tokenize, tokenizer_version
 
 pytestmark = pytest.mark.usefixtures("v2_formula")  # the v2 formula; the ranker on top — test_ranker.py
@@ -79,7 +80,10 @@ def test_default_scoring_is_h15f_normalized(search_data):
     cfg = search_mod.load_config()
     assert sum(cfg["weights"].values()) == pytest.approx(1.0) and cfg["weights"]["geography"] == 0.0
     assert search_mod.scoring_options(cfg) == {"fit_bm25_share": 0.8, "experience_by": "similar", "tie_break": "bm25",
-                                               "sat_lots": 20, "sat_wins": 10}  # caps: the default, #196 is opt-in
+                                               "sat_lots": 20, "sat_wins": 10,  # caps: the default, #196 is opt-in
+                                               "price": "none", "activity_by": "all",
+                                               # #105 options are opt-in
+                                               "experience_wins": "count", "price_decades": 2.0}
     m = search(Query(query_id="q", text="бумага", okpd2=["17.12.14.110"]))[0]
     assert "с похожими позициями" in comp(m, "experience").explanation
     assert comp(m, "geography").weight == 0.0 and comp(m, "geography").explanation  # shown, not scored
@@ -209,7 +213,7 @@ def test_new_ingest_build_gives_new_index_key(search_data, tmp_path):
 
 def test_index_has_only_lots_before_as_of(search_data):
     import duckdb
-    idx = index_mod.get_index(search_data, CUTOFF)
+    idx = index_mod.get_index(ParquetStore(search_data), CUTOFF)
     lots = {r[0] for r in duckdb.sql(f"SELECT DISTINCT lot_id FROM read_parquet({idx.docs_parquet})").fetchall()}
     assert lots == {9, 1, 2, 3, 4, 5}  # 6, 7 after the cutoff; 8 has no participants
 
@@ -252,7 +256,7 @@ def test_product_fit_follows_bm25_similarity(search_data):
 
 def test_index_boundary_excludes_lot_on_as_of_day(search_data):
     import duckdb
-    idx = index_mod.get_index(search_data, date(2025, 8, 1))  # lot 6 is published that day
+    idx = index_mod.get_index(ParquetStore(search_data), date(2025, 8, 1))  # lot 6 is published that day
     lots = {r[0] for r in duckdb.sql(f"SELECT DISTINCT lot_id FROM read_parquet({idx.docs_parquet})").fetchall()}
     assert 6 not in lots and 5 in lots
     assert idx.data_end == date(2025, 5, 20)
@@ -279,7 +283,8 @@ def _cfg(**options) -> dict:
 def test_scoring_options_default_is_v1_and_unknown_is_an_error():
     assert search_mod.scoring_options({}) == {"fit_bm25_share": search_mod.FIT_BM25_SHARE, "experience_by": "class",
                                               "tie_break": "inn", "sat_lots": search_mod.SAT_LOTS,
-                                              "sat_wins": search_mod.SAT_WINS}
+                                              "sat_wins": search_mod.SAT_WINS, "price": "none", "activity_by": "all",
+                                              "experience_wins": "count", "price_decades": 2.0}
     for bad in ({"typo": 1}, {"experience_by": "text"}, {"fit_bm25_share": 1.5}, {"tie_break": "random"},
                 {"sat_lots": 0}, {"sat_wins": 2.5}, {"sat_lots": True}):
         with pytest.raises(ValueError):

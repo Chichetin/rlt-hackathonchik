@@ -75,6 +75,16 @@ R-198-lr:        # обученный ранжировщик (#198): логис�
 R-198-gbm:       # обученный ранжировщик (#198): LightGBM LambdaMART, объяснение — pred_contrib
   spell: false
   ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}
+# Шире набор кандидатов (#195): + поставщики заказчика и частые поставщики группы ОКПД2, поверх v2 (без ранжировщика).
+C-195-cg:        # заказчик 30 + группа ОКПД2 30
+  spell: false
+  ranker: null
+  candidates: {customer: 30, okpd2: 30}
+C-195-cgi:       # то же + инкумбент-сигнал 0.3 (как H-15g): поставщикам заказчика есть чем подняться
+  spell: false
+  ranker: null
+  candidates: {customer: 30, okpd2: 30}
+  signals: {incumbent: 0.3}
 H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (география от заказчика); не прогоняется — см. EXPERIMENTS
   spell: false
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
@@ -117,3 +127,61 @@ S-282-spell:     # #282: исправление раскладки и опеча
   spell: true
 S-282-nospell:   # #282: запрос как введён — база замера S-282 (прогоны S-282-off-* сняты при spell: false в search.yaml)
   spell: false
+# #361: абляция признака win_rate в обученном ранжировщике (без переобучения) — у 59 % поставщиков (только АИС ГЗ) он 1.0 по построению
+A361-no-winrate:
+  ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt, ablate: [win_rate]}
+# Абляция компонент (#191): формула v2 (как `v2`) с весом одной компоненты = 0; ранжировщик выключен — у него вес
+# компоненты = 0 без переобучения не определён. `abl-base` — та же база на том же коде (парное сравнение).
+abl-base:
+  spell: false
+  ranker: null
+abl-product_fit:
+  spell: false
+  ranker: null
+  weights: {product_fit: 0.0}
+abl-experience:
+  spell: false
+  ranker: null
+  weights: {experience: 0.0}
+abl-activity:
+  spell: false
+  ranker: null
+  weights: {activity: 0.0}
+# #105: компонента price — масштаб НМЦК запроса против медианы НМЦК лотов поставщика до as_of
+# (src/match/search.py::_price), поверх дефолта H-15f; вес price добавляется к сумме (баллы не нормированы).
+H-105-price05:
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.05}
+  options: {price: scale}
+H-105-price10:
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.10}
+  options: {price: scale}
+# #105: свежесть опыта — activity по последней закупке с похожими позициями, а не по последнему участию вообще
+H-105-fresh:
+  ranker: null   # измерено на v2 до #198 (D-103)
+  options: {activity_by: similar}
+H-105-fresh10:   # то же, вес activity 0.10 вместо 0.048
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {activity: 0.10}
+  options: {activity_by: similar}
+# #105: доля побед (сглаженная) вместо числа побед во второй половине experience
+H-105-winrate:
+  ranker: null   # измерено на v2 до #198 (D-103)
+  options: {experience_wins: rate}
+H-105-price05-d1:   # price обнуляется при 10× (как в предложении METHODOLOGY), вес 0.05
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.05}
+  options: {price: scale, price_decades: 1.0}
+H-105-combo:     # price 0.05 (масштаб НМЦК) + свежесть по похожим позициям — две компоненты, что не ухудшили dev
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.05}
+  options: {price: scale, activity_by: similar}
+H-105-combo-aisgz:   # combo + сглаженная доля побед только для канала АИС ГЗ (там один исполнитель на лот)
+  ranker: null   # измерено на v2 до #198 (D-103)
+  weights: {price: 0.05}
+  options: {price: scale, activity_by: similar, experience_wins: rate_aisgz}
+# #105 поверх дефолта D-103 (ранжировщик): признак days_similar — давность последней похожей закупки.
+# R-105-gbm обучен src.match.ranker_train --name R-105 теми же данными и seed, что R-198, плюс этот признак.
+H-105-rk:
+  ranker: {kind: lgbm, model: models/ranker/R-105-gbm.txt}

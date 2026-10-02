@@ -38,13 +38,13 @@ import yaml
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
 from src.ingest.okpd2 import label
-from src.match import fallback, ranker
-from src.match.filters import REGION_CODE
+from src.match import candidates, fallback, ranker
 from src.match.index import LotIndex, get_index
 from src.match.profiles import profile_overrides, profile_weights
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
+from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_IN, REGION_NAME, REGION_PREP
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,11 +67,6 @@ OKPD_LEVEL_TEXT = {4: "совпадает код", 3: "совпадает до �
                    1: "совпадает только класс"}
 SAT_LOTS, SAT_WINS = 20, 10  # experience saturates at 20 lots / 10 wins in the group
 HALF_LIFE_DAYS = 90  # activity halves every 90 days without participation
-REGION_NAME = {v: k for k, v in REGION_CODE.items()}
-REGION_IN = {"78": "в Санкт-Петербурге", "47": "в Ленинградской области"}
-REGION_PREP = {"78": "Санкт-Петербурге", "47": "Ленинградской области"}
-NEIGHBOUR = {"78": "47", "47": "78"}
-NEIGHBOUR_VALUE = 0.8
 # Components without data (D-029): shown with value 0 and weight 0, not invented.
 UNAVAILABLE = {
     "reliability": "Нет данных: статус, РНП и расторжения ещё не подключены — в score не входит",
@@ -88,7 +83,16 @@ OPTIONS: dict[str, tuple] = {
     # lots / wins at which experience reaches 1.0 (#196): low caps make active suppliers indistinguishable
     "sat_lots": (SAT_LOTS, None),
     "sat_wins": (SAT_WINS, None),
+    # price (#105): none — «нет данных» (v1); scale — НМЦК запроса против медианы НМЦК лотов поставщика
+    "price": ("none", ("none", "scale")),
+    "price_decades": (2.0, None),  # price reaches 0 at a 10^price_decades difference of scale
+    # activity (#105): all — the last participation of any kind; similar — the last lot with similar positions
+    "activity_by": ("all", ("all", "similar")),
+    # experience (#105): count — 0.5·sat(lots) + 0.5·sat(wins); rate — the wins half is the smoothed win rate
+    # (wins + 1) / (lots + 2), so 1 win of 20 lots is not «experienced winner»
+    "experience_wins": ("count", ("count", "rate", "rate_aisgz")),  # rate_aisgz: rate only for channel АИС ГЗ
 }
+PRICE_DECADES = 2.0  # price = 1 − |log10(budget / median)| / 2: 0 at a 100× difference
 
 
 def scoring_options(cfg: dict) -> dict:
@@ -101,6 +105,9 @@ def scoring_options(cfg: dict) -> dict:
         if allowed is not None and out[name] not in allowed:
             raise ValueError(f"options.{name} = {out[name]!r}: ожидается одно из {allowed}")
     out["fit_bm25_share"] = float(out["fit_bm25_share"])
+    out["price_decades"] = float(out["price_decades"])
+    if out["price_decades"] <= 0:
+        raise ValueError(f"options.price_decades = {out['price_decades']}: ожидается число > 0")
     if not 0.0 <= out["fit_bm25_share"] <= 1.0:
         raise ValueError(f"options.fit_bm25_share = {out['fit_bm25_share']}: доля должна быть в [0, 1]")
     for name in ("sat_lots", "sat_wins"):
@@ -113,6 +120,7 @@ def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     scoring_options(cfg)
+    candidates.sizes(cfg)
     ranker.spec(cfg)  # learned ranker (#198): on by default since D-103
     profile_overrides(cfg)  # weights by procurement type (#104), off by default
     return cfg
@@ -144,13 +152,15 @@ class Candidate:
     class_lots: int = 0
     class_wins: int = 0
     found_by: str = ""  # fallback ladder (src/match/fallback.py): the first phrase of product_fit
+    last_similar: date | None = None  # the latest matched lot (#105, options.activity_by: similar)
+    counted: str = ""  # what n_lots / n_wins count when not lots with similar positions (#195 extra candidates)
 
 
 def _retrieve(store: Store, idx: LotIndex, lots: LotHits, as_of: date | None) -> list[Candidate]:
     """Participants of the matched lots before as_of, best BM25 first (src/match/store.py: _CANDIDATES)."""
     rows = store.candidates(lots, as_of, CANDIDATES)
-    return [Candidate(inn, bm25, n_lots, n_wins, best_lot, idx.text(doc), best_date)
-            for inn, bm25, n_lots, n_wins, best_lot, doc, best_date in rows]
+    return [Candidate(inn, bm25, n_lots, n_wins, best_lot, idx.text(doc), best_date, last_similar=last)
+            for inn, bm25, n_lots, n_wins, best_lot, doc, best_date, last in rows]
 
 
 _codes_lock = threading.Lock()
@@ -299,14 +309,20 @@ def _product_fit(c: Candidate, top_bm25: float, codes: list[str], predicted: boo
 
 
 def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "class",
-                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS) -> tuple[float, str]:
+                sat_lots: int = SAT_LOTS, sat_wins: int = SAT_WINS, wins: str = "count") -> tuple[float, str]:
     if codes and by == "class":
         groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
-        lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
+        lots, wins_n, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
-        lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
-    value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(wins, sat_wins)
-    return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
+        lots, wins_n, what = c.n_lots, c.n_wins, c.counted or "с похожими позициями"
+    n_wins = wins_n
+    if wins == "rate":
+        rate = (n_wins + 1) / (lots + 2)
+        value = 0.5 * _sat(lots, sat_lots) + 0.5 * rate
+        return value, (f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {n_wins} "
+                       f"(доля побед со сглаживанием {rate:.0%})")
+    value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(n_wins, sat_wins)
+    return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {n_wins}"
 
 
 # Assortment summary thresholds (D-064, research/DATA_DICTIONARY.md): shown only with enough history.
@@ -333,9 +349,41 @@ def _activity(cp: Counterparty, ref: date | None, as_of: date | None) -> tuple[f
     last = cp.stats.get("last_seen")
     if not isinstance(last, str) or ref is None:
         return 0.0, "Нет данных о последнем участии"
-    days = max(0, (ref - date.fromisoformat(last)).days)
+    return _recency(date.fromisoformat(last), ref, as_of, "Последнее участие")
+
+
+def _recency(last: date, ref: date | None, as_of: date | None, what: str) -> tuple[float, str]:
+    if ref is None:
+        return 0.0, "Нет данных о последнем участии"
+    days = max(0, (ref - last).days)
     anchor = f"до {_fmt(ref)}" if as_of else f"до конца данных ({_fmt(ref)})"
-    return 0.5 ** (days / HALF_LIFE_DAYS), f"Последнее участие {_fmt(date.fromisoformat(last))} — {days} дн. {anchor}"
+    return 0.5 ** (days / HALF_LIFE_DAYS), f"{what} {_fmt(last)} — {days} дн. {anchor}"
+
+
+def _rub(x: float) -> str:
+    return f"{x:,.0f}".replace(",", " ") + " ₽"
+
+
+def _price(cp: Counterparty, budget: float | None, as_of: date | None,
+           decades: float = PRICE_DECADES) -> tuple[float, str] | None:
+    """Scale fit (#105): the query's НМЦК against the median НМЦК of the supplier's lots before as_of —
+    a supplier of 5 000 ₽ lots is a poor fit for a 5 000 000 ₽ lot and vice versa. 1.0 at the same scale,
+    0 at a PRICE_DECADES-decade difference. None — not computed (no budget or no history of prices)."""
+    median = cp.stats.get("median_start_price")
+    if budget is None or budget <= 0 or not isinstance(median, int | float) or median <= 0:
+        return None
+    ratio = budget / float(median)
+    value = max(0.0, 1.0 - abs(math.log10(ratio)) / decades)
+    if 0.5 <= ratio <= 2:
+        how = "масштаб сопоставим"
+    elif ratio > 1:
+        how = f"закупка в {ratio:.0f} раз крупнее его типичного лота" if ratio >= 10 else \
+            f"закупка в {ratio:.1f} раза крупнее его типичного лота"
+    else:
+        how = f"закупка в {1 / ratio:.0f} раз мельче его типичного лота" if ratio <= 0.1 else \
+            f"закупка в {1 / ratio:.1f} раза мельче его типичного лота"
+    return value, (f"НМЦК запроса {_rub(budget)}; медиана НМЦК лотов поставщика {_period(as_of)} — "
+                   f"{_rub(float(median))}: {how}")
 
 
 def _inn_geography(inn: str | None, want: str | None, share: float, why: str) -> tuple[float, str]:
@@ -393,6 +441,7 @@ def _component(name: str, value: float, weights: dict[str, float], explanation: 
 # exact text match, so its participants would top the list on the answer itself (#249, review #145 F-13).
 _OWN_LOT = re.compile(r"lot-(\d+)")
 _excluded: ContextVar[int | None] = ContextVar("excluded_lot", default=None)
+_predicted: ContextVar[str | None] = ContextVar("predicted_code", default=None)
 # What the last search() in this context found, in absolute terms (not normalized by the best candidate):
 # the raw material of src/match/confidence.py (#281).
 _fit_signals: ContextVar[dict | None] = ContextVar("fit_signals", default=None)
@@ -405,6 +454,13 @@ def fit_signals() -> dict | None:
 def own_lot(query: Query) -> int | None:
     m = _OWN_LOT.fullmatch(query.query_id)
     return int(m.group(1)) if m else None
+
+
+def predicted_code() -> str | None:
+    """The OKPD2 code the last search() in this context predicted for a query without a code (D-045, P-02);
+    None — the query had a code, or nothing matched to predict it from. The block «Новые» searches by its
+    class (src/match/pipeline.py passes it to discover(), #394): one classifier for both blocks."""
+    return _predicted.get()
 
 
 def excluded_lot() -> int | None:
@@ -428,6 +484,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     """
     fallback.reset_note()
     _excluded.set(None)
+    _predicted.set(None)
     _fit_signals.set(None)
     own = own_lot(query)
     cfg = check_config(config) if config is not None else load_config()  # the product reads the file every call
@@ -469,7 +526,9 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if not codes:
         guess = _predict_okpd2(store, idx, hits, lots, words)
         codes, predicted = ([guess], True) if guess else ([], False)
+        _predicted.set(guess)
     if codes:
+        cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg, own)  # #195
         _class_history(store, cands, codes, as_of)
     rk = ranker.spec(cfg)
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)
@@ -478,6 +537,10 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     if (shares["incumbent"] > 0 or ranked) and query.customer_inn:
         incumbent = customer_lots(store, [c.inn for c in cands], query.customer_inn, as_of)
     fetched = store.built_at()
+    # H-105-winrate: the win rate helps АИС ГЗ (one executor per lot) and hurts ЭМ (many offers, one winner)
+    wins_mode = opts["experience_wins"]
+    if wins_mode == "rate_aisgz":
+        wins_mode = "rate" if query.channel == "АИС ГЗ" else "count"
     parties = from_rows(store.supplier_rows([c.inn for c in cands], as_of), fetched)
     top_bm25 = max(c.bm25 for c in cands)
     _fit_signals.set({"top_bm25": top_bm25, "tokens": len(set(tokens)), "retriever": cfg["retriever"],
@@ -492,11 +555,16 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         if cp is None:
             continue
         fit, fit_why = _product_fit(c, top_bm25, codes, predicted, how, opts["fit_bm25_share"])
-        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"])
+        exp, exp_why = _experience(c, codes, as_of, opts["experience_by"], opts["sat_lots"], opts["sat_wins"],
+                                   wins_mode)
         if query.customer_inn:
             exp, exp_why = mix_incumbent(exp, exp_why, incumbent.get(c.inn, 0), shares["incumbent"])
         exp_why += _profile_note(cp)
-        act, act_why = _activity(cp, ref, as_of)
+        if opts["activity_by"] == "similar" and c.last_similar is not None:
+            act, act_why = _recency(c.last_similar, ref, as_of, "Последнее участие в закупке с похожими позициями")
+        else:
+            act, act_why = _activity(cp, ref, as_of)
+        price = _price(cp, query.budget, as_of, opts["price_decades"]) if opts["price"] == "scale" else None
         geo, geo_why = _geography(cp, target, shares["inn_region"])
         if target_note:  # the comparison is with the customer's region, say so
             geo_why = f"{geo_why.replace('регион запроса', 'регион заказчика')}; {target_note}"
@@ -506,7 +574,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             _component("product_fit", fit, w, fit_why),
             _component("experience", exp, w, exp_why),
             *(ScoreComponent(name=n, value=0.0, weight=0.0, explanation=why)  # type: ignore[arg-type]
-              for n, why in UNAVAILABLE.items()),
+              for n, why in UNAVAILABLE.items() if not (n == "price" and price is not None)),
+            *([_component("price", price[0], w, price[1])] if price is not None else []),
             _component("activity", act, w, act_why),
             _component("geography", geo, w, geo_why),
         ]

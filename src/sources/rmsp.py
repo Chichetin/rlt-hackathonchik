@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,17 +35,20 @@ from typing import Any
 import httpx
 
 from src.contracts import inn_is_valid
+from src.settings import get_settings
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.pacing import HostPacer, NoTimeLeft
 
 BASE = "https://rmsp.nalog.ru"
 SOURCE = "ФНС: единый реестр субъектов МСП"
+# the registry's category codes (the card, the dump, the open data): enrich, discover and msp_dump read it here (#294)
+MSP_CATEGORY = {"1": "микропредприятие", "2": "малое предприятие", "3": "среднее предприятие"}
 UA = "Mozilla/5.0 (compatible; RLTHack-Discovery/0.1; hackathon, cached, paced)"
-MIN_INTERVAL_S = float(os.environ.get("RMSP_MIN_INTERVAL_S", "1.0"))
-TIMEOUT_S = float(os.environ.get("RMSP_TIMEOUT_S", "3.0"))
-QUICK_TIMEOUT_S = float(os.environ.get("RMSP_QUICK_TIMEOUT_S", "10.0"))  # enrich is not on the 4 s search budget
+MIN_INTERVAL_S = get_settings().rmsp_min_interval_s
+TIMEOUT_S = get_settings().rmsp_timeout_s
+QUICK_TIMEOUT_S = get_settings().rmsp_quick_timeout_s  # enrich is not on the 4 s search budget
 BLOCK_COOLDOWN_S = 900.0
-DOWN_COOLDOWN_S = float(os.environ.get("RMSP_DOWN_COOLDOWN_S", "90"))
+DOWN_COOLDOWN_S = get_settings().rmsp_down_cooldown_s
 MIN_ATTEMPT_S = 0.2  # less time than this before the deadline — do not start a request
 
 NP_TYPES = ("UL", "IP")

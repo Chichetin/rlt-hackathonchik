@@ -7,7 +7,7 @@
 
 Tables (the same in parquet and in Postgres):
 - `companies` — one record per INN (the latest `ДатаСост` when the dump repeats an INN), every column as in
-  src/sources/msp_dump.py, ИП without locality, role by the main OKVED (`kind`, `kind_why`, src/enrich/role.py),
+  src/sources/msp_dump.py, ИП without locality, role by the main OKVED (`kind`, `kind_why`, src/sources/role.py),
   `fetched_at` of the dump download; sorted by INN;
 - `okved` — (code, inn, main, region_code): the main and every additional OKVED of a company, one row per
   (inn, code); the candidate index by an OKVED prefix (human decision 01.10: an additional OKVED counts too);
@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -41,8 +40,8 @@ import pyarrow as pa
 
 from src.contracts import Counterparty
 from src.db.load import pg_dsn
-from src.enrich import role
-from src.sources import msp_dump
+from src.settings import get_settings
+from src.sources import msp_dump, role
 from src.sources.cache import SourceCache
 
 log = logging.getLogger(__name__)
@@ -300,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         result: dict[str, Any] = build(args.parts, args.pool, fetched_at=msp_dump.ZIP.stat().st_mtime)
     elif args.command == "load":
-        url = os.environ.get("DATABASE_URL", "")
+        url = get_settings().database_url
         if not url.startswith("postgres"):
             print("нужен DATABASE_URL=postgresql://… (docker compose up -d db)", file=sys.stderr)
             return 2

@@ -81,7 +81,7 @@
 и такие же Evidence для контактов, которые показываются в карточке. Без них `strip_unverified()`
 (API и `make eval`) покажет «ИНН не подтверждён» и уберёт контакты. Тест — в задаче загрузчика.
 
-Сделано в T-01: `src/ingest/load.py` `counterparties(inns, as_of)` — Evidence
+Сделано в T-01: `src/ingest/load.py` `from_rows` (вызов — `src/match/search.py`, строки из `store.supplier_rows(inns, as_of)`) — Evidence
 `data:participants#<lot_id>` последнего лота ИНН до `as_of`, `fetched_at` = время сборки
 (`manifest.json`); тест — `tests/unit/test_ingest.py`.
 

@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import random
 import subprocess
 import sys
@@ -41,9 +40,10 @@ from src.match.index import get_index
 from src.match.pg_retriever import KNN, norm_map, rrf
 from src.match.store import ParquetStore, processed_dir
 from src.match.text import tokenize, tokenizer_name, tokenizer_version
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
-GPU_DIR = Path(os.environ.get("DATA_GPU_DIR") or ROOT / "data" / "gpu")
+GPU_DIR = get_settings().data_gpu_dir
 TEXTS = ("texts-e5-small.parquet", "texts-rest.parquet")  # 1 031 361 distinct normalized names
 TOP_DOCS = 500  # as search.TOP_DOCS
 CANDIDATES = 200  # as search.CANDIDATES
@@ -61,6 +61,16 @@ PREFIX = {
     "intfloat/multilingual-e5-large": ("query: ", "passage: "),
     "ai-forever/FRIDA": ("search_query: ", "search_document: "),
 }
+# #270 (E3): models fine-tuned by src/eval/finetune.py -> their base model. The weights are not in git: the
+# folder MODELS_DIR/<slug> (default models/, gitignored); prefixes are those of the base model.
+FINETUNED = {
+    "e3/user-base-okpd2": "deepvk/USER-base",
+    "e3/user-base-okpd2-full": "deepvk/USER-base",
+    "e3/user-base-supplier": "deepvk/USER-base",
+    "e3/e5-small-okpd2": "intfloat/multilingual-e5-small",
+}
+PREFIX.update({ft: PREFIX[base] for ft, base in FINETUNED.items()})
+MODELS_DIR = get_settings().models_dir
 # T5 encoders overflow in fp16 (inf/NaN activations): bf16 keeps the range at the same speed
 BF16 = {"ai-forever/FRIDA"}
 METRICS = ("cand_recall@200", "winner_hit@200", "recall@10", "mrr")
@@ -78,18 +88,32 @@ def vec_files(model: str, gpu_dir: Path = GPU_DIR) -> list[Path]:
     return [gpu_dir / n for n in names]
 
 
-def load_model(model: str, device: str | None = None):
-    from sentence_transformers import SentenceTransformer, models  # pyright: ignore[reportMissingImports]
+def model_path(model: str) -> str:
+    """HF id, or the local folder of a fine-tuned model (#270)."""
+    return str(MODELS_DIR / slug(model)) if model in FINETUNED else model
+
+
+def build_model(model: str, device: str | None = None):
+    """fp32 SentenceTransformer (training starts here, #270); load_model() casts it for inference."""
+    from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
+
+    # sentence-transformers 6: the modules live here (`st.models` is a lazy deprecated alias, not an attribute)
+    from sentence_transformers.sentence_transformer import modules as models  # pyright: ignore[reportMissingImports]
 
     try:
-        m = SentenceTransformer(model, device=device)
+        m = SentenceTransformer(model_path(model), device=device)
     except TypeError:
         # USER-base keeps Normalize at the model root: sentence-transformers 6 reads the HF config.json
         # into it and fails. The same pipeline by hand: Transformer -> mean pooling -> Normalize.
-        tr = models.Transformer(model, max_seq_length=MAX_SEQ)
-        pool = models.Pooling(tr.get_word_embedding_dimension(), pooling_mode="mean")
+        tr = models.Transformer(model_path(model), max_seq_length=MAX_SEQ)
+        pool = models.Pooling(tr.get_embedding_dimension(), pooling_mode="mean")
         m = SentenceTransformer(modules=[tr, pool, models.Normalize()], device=device)
     m.max_seq_length = MAX_SEQ
+    return m
+
+
+def load_model(model: str, device: str | None = None):
+    m = build_model(model, device)
     if m.device.type == "cuda" and model in BF16:
         import torch  # pyright: ignore[reportMissingImports]
 
@@ -105,7 +129,7 @@ def encode_corpus(model: str, gpu_dir: Path = GPU_DIR, chunk: int = 50_000) -> P
     m = load_model(model)
     dim = m.get_sentence_embedding_dimension()
     passage = PREFIX[model][1]
-    bs = 512 if dim <= 384 else 256
+    bs = 512 if dim <= 384 else 256  # pyright: ignore[reportOptionalOperand]
     out = gpu_dir / f"vecs-{slug(model)}.parquet"
     schema = pa.schema([("norm", pa.string()), ("emb", pa.list_(pa.float16(), dim))],
                        metadata={"model": model, "prefix": passage})
@@ -157,20 +181,43 @@ class Corpus:
         del chunks
         log.info("%s: %d имён в индексе cutoff из корпуса", slug(model), len(norms))
 
-    def search(self, q: np.ndarray, k: int = KNN) -> list[list[int]]:
-        """doc_ids nearest by cosine for each query vector, best first (as pg_retriever.vector_docs)."""
+    def search(self, q: np.ndarray, k: int = KNN) -> list[list[tuple[int, float]]]:
+        """(doc_id, cosine) nearest for each query vector, best first (as pg_retriever.vector_docs + sim, #313).
+
+        A document with several names keeps the cosine of its best name.
+        """
         import torch  # pyright: ignore[reportMissingImports]
 
-        out: list[list[int]] = []
+        out: list[list[tuple[int, float]]] = []
         qs = torch.from_numpy(np.asarray(q, dtype=np.float16)).cuda()
         for i in range(0, len(qs), 64):
-            top = torch.topk(qs[i:i + 64] @ self.emb.T, k, dim=1).indices.cpu().numpy()
-            for row in top:
-                docs: list[int] = []
-                for r in row:
-                    docs.extend(self.docs[r])
-                out.append(list(dict.fromkeys(docs)))
+            top = torch.topk((qs[i:i + 64] @ self.emb.T).float(), k, dim=1)
+            for rows, sims in zip(top.indices.cpu().numpy(), top.values.cpu().numpy(), strict=True):
+                best: dict[int, float] = {}
+                for r, sim in zip(rows, sims, strict=True):
+                    for d in self.docs[r]:
+                        best.setdefault(d, float(sim))
+                out.append(list(best.items()))
         return out
+
+
+def convex(bm25_hits: list[tuple[int, float]], vec_hits: list[tuple[int, float]], alpha: float,
+           top: int = TOP_DOCS) -> list[tuple[int, float]]:
+    """Convex combination (Bruch et al. 2023): alpha * vector_norm + (1 - alpha) * bm25_norm.
+
+    Each list is min-max normalized per query (a single hit or equal scores -> 1.0); a document missing
+    from a list gets 0 there. Ties by doc_id, as rrf. alpha = 0 is the BM25 order, alpha = 1 the vector order.
+    """
+    def norm(hits: list[tuple[int, float]]) -> dict[int, float]:
+        if not hits:
+            return {}
+        lo = min(s for _, s in hits)
+        span = max(s for _, s in hits) - lo
+        return {d: ((s - lo) / span if span > 0 else 1.0) for d, s in hits}
+
+    b, v = norm(bm25_hits), norm(vec_hits)
+    score = {d: (1 - alpha) * b.get(d, 0.0) + alpha * v.get(d, 0.0) for d in b.keys() | v.keys()}
+    return sorted(score.items(), key=lambda x: (-x[1], x[0]))[:top]
 
 
 def _cands(store, idx, hits: list[tuple[int, float]], as_of: date) -> list[str]:
@@ -228,8 +275,40 @@ def short_text(text: str) -> str:
     return parts[1] if len(parts) > 1 else parts[0]
 
 
+def _slice_groups(cases, bm25_hits: list, idx, as_of: date) -> dict[str, list[int]]:
+    """Slices (#267): channel, winner new for the customer (as src.eval.run), a "new name" — the normalized
+    short query (first position) is not a name of the cutoff index, so BM25 can only match it by tokens."""
+    names = norm_map(idx)
+    novelty = winner_novelty(cases, as_of) or [None] * len(cases)
+    groups = {ch: [i for i, c in enumerate(cases) if c.query.channel == ch] for ch in ("ЭМ", "АИС ГЗ")}
+    groups["winner=new"] = [i for i, v in enumerate(novelty) if v is True]
+    groups["winner=known"] = [i for i, v in enumerate(novelty) if v is False]
+    groups["new_name"] = [i for i, c in enumerate(cases) if normalize(short_text(c.query.text)) not in names]
+    groups["bm25_empty"] = [i for i, h in enumerate(bm25_hits) if not h]
+    return groups
+
+
+def _slices(groups: dict[str, list[int]], rows: list[dict], vs: list[dict] | None = None,
+            rr: list[dict] | None = None) -> dict:
+    """Per slice: summary and paired Δ to BM25 (vs) and, if given, to RRF (rr)."""
+    out = {}
+    for name, ix in groups.items():
+        out[name] = _summary([rows[i] for i in ix])
+        if vs is not None and ix:
+            out[name]["delta_vs_bm25"] = _deltas([rows[i] for i in ix], [vs[i] for i in ix])
+        if rr is not None and ix:
+            out[name]["delta_vs_rrf"] = _deltas([rows[i] for i in ix], [rr[i] for i in ix])
+    return out
+
+
+def _vs_base(groups: dict[str, list[int]], rows: list[dict], base: list[dict]) -> dict:
+    """#270: paired Δ (fine-tuned − base model) overall and per slice, the same queries of one run."""
+    per_slice = {name: _deltas([rows[i] for i in ix], [base[i] for i in ix]) for name, ix in groups.items() if ix}
+    return {"all": _deltas(rows, base), "slices": per_slice}
+
+
 def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = False,
-          latency: bool = True) -> dict[str, dict]:
+          latency: bool = True, tag: str = "emb") -> dict[str, dict]:
     cfg = split_config()
     as_of = date.fromisoformat(str(cfg["cutoff"]))
     store = ParquetStore(processed_dir())
@@ -242,23 +321,10 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
     bm25_hits = [idx.retrieve(tokenize(t), TOP_DOCS) for t in raw]
     base = [_row(_cands(store, idx, h, as_of), c) for h, c in zip(bm25_hits, cases, strict=True)]
     log.info("BM25: %.0f с", time.time() - t0)
-    # slices (#267): channel, winner new for the customer (as src.eval.run), a "new name" — the normalized
-    # short query (first position) is not a name of the cutoff index, so BM25 can only match it by tokens
-    names = norm_map(idx)
-    novelty = winner_novelty(cases, as_of) or [None] * len(cases)
-    groups = {ch: [i for i, c in enumerate(cases) if c.query.channel == ch] for ch in ("ЭМ", "АИС ГЗ")}
-    groups["winner=new"] = [i for i, v in enumerate(novelty) if v is True]
-    groups["winner=known"] = [i for i, v in enumerate(novelty) if v is False]
-    groups["new_name"] = [i for i, c in enumerate(cases) if normalize(short_text(c.query.text)) not in names]
-    groups["bm25_empty"] = [i for i, h in enumerate(bm25_hits) if not h]
+    groups = _slice_groups(cases, bm25_hits, idx, as_of)
 
     def slices(rows: list[dict], vs: list[dict] | None = None) -> dict:
-        out = {}
-        for name, ix in groups.items():
-            out[name] = _summary([rows[i] for i in ix])
-            if vs is not None and ix:
-                out[name]["delta_vs_bm25"] = _deltas([rows[i] for i in ix], [vs[i] for i in ix])
-        return out
+        return _slices(groups, rows, vs)
 
     meta = {"part": "dev", "query": "short" if short else "lot", "n": len(cases), "seed": seed,
             "as_of": as_of.isoformat(), "commit": _commit(),
@@ -278,10 +344,11 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def save(key: str) -> None:  # after each model: a crash later keeps what is measured
-        name = f"emb-{key}-s1{'-short' if short else ''}.json"
+        name = f"{tag}-{key}-s1{'-short' if short else ''}.json"
         (out_dir / name).write_text(json.dumps(results[key], ensure_ascii=False, indent=2), encoding="utf-8")
 
     save(bm25_key)
+    rows: dict[str, tuple[list[dict], list[dict]]] = {}  # model -> (vector, hybrid) rows, for delta_vs_base
     for model in models:
         import torch  # pyright: ignore[reportMissingImports]
 
@@ -290,7 +357,7 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
         t0 = time.time()
         qv = m.encode([PREFIX[model][0] + t for t in texts], batch_size=64, normalize_embeddings=True,
                       show_progress_bar=False, convert_to_numpy=True)
-        vec_docs = corpus.search(qv)
+        vec_docs = [[d for d, _ in v] for v in corpus.search(qv)]
         vec = [_row(_cands(store, idx, [(d, 1.0 / (1 + r)) for r, d in enumerate(v[:TOP_DOCS])], as_of), c)
                for v, c in zip(vec_docs, cases, strict=True)]
         hyb = [_row(_cands(store, idx, rrf(h, v, TOP_DOCS), as_of), c)
@@ -307,10 +374,131 @@ def bench(models: list[str], n: int, seed: int, out_dir: Path, short: bool = Fal
             "gpu_seconds": round(elapsed, 1), "cpu_query_latency": cpu_latency(model, texts) if latency else None,
         }
         r = results[slug(model)]
+        rows[model] = (vec, hyb)
+        if (b := FINETUNED.get(model)) in rows:  # the base model ran earlier in this call: one variable differs
+            r["base_model"] = b
+            r["vector"]["delta_vs_base"] = _vs_base(groups, vec, rows[b][0])
+            r["hybrid_rrf"]["delta_vs_base"] = _vs_base(groups, hyb, rows[b][1])
         log.info("%s: recall@10 vec %.3f, hybrid %.3f, bm25 %.3f", model, r["vector"]["metrics"]["recall@10"]["mean"],
                  r["hybrid_rrf"]["metrics"]["recall@10"]["mean"], results[bm25_key]["metrics"]["recall@10"]["mean"])
         save(slug(model))
     return results
+
+
+# --- #313 (E5): convex combination instead of RRF ---------------------------------------------------------
+ALPHA_GRID = (0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+VARIANTS = ("lot", "short", "mixed")  # mixed: the short query to the vector branch, the full one to BM25
+TUNE_SEED = 20261003
+
+
+def tune_cases(n: int, seed: int = TUNE_SEED) -> list:
+    """alpha-tuning sample: dev_full cases that are not among the dev cases (no leak into the evaluation)."""
+    cfg = split_config()
+    dev_ids = {c.query.query_id for c in load_cases("dev", cfg)}
+    pool = sorted((c for c in load_cases("dev_full", cfg) if c.query.query_id not in dev_ids),
+                  key=lambda c: c.query.query_id)
+    return random.Random(seed).sample(pool, min(n, len(pool)))
+
+
+def _query_texts(cases, variant: str) -> tuple[list[str], list[str]]:
+    """(BM25 raw texts, vector raw texts) of a variant."""
+    full = [c.query.text for c in cases]
+    short = [short_text(t) for t in full]
+    return {"lot": (full, full), "short": (short, short), "mixed": (full, short)}[variant]
+
+
+def _mean(rows: list[dict], key: str) -> float:
+    return float(np.mean([r[key] for r in rows])) if rows else 0.0
+
+
+def convex_bench(models: list[str], variants: list[str], n: int, seed: int, tune_n: int, out_dir: Path,
+                 tune_seed: int = TUNE_SEED) -> None:
+    import torch  # pyright: ignore[reportMissingImports]
+
+    cfg = split_config()
+    as_of = date.fromisoformat(str(cfg["cutoff"]))
+    store = ParquetStore(processed_dir())
+    idx = get_index(store, as_of)
+    ev = random.Random(seed).sample(load_cases("dev", cfg), n)
+    tune = tune_cases(tune_n, tune_seed)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tune_ids = [c.query.query_id for c in tune]
+    (out_dir / "E5-tune-sample.json").write_text(json.dumps(
+        {"source": "dev_full minus dev", "seed": tune_seed, "n": len(tune_ids), "query_ids": tune_ids},
+        ensure_ascii=False), encoding="utf-8")
+    groups = _slice_groups(ev, [[1]] * len(ev), idx, as_of)  # bm25_empty is per variant, set below
+    novelty_ids = [c.query.query_id for c in ev]
+
+    def cands(hits: list[tuple[int, float]]) -> list[str]:
+        return _cands(store, idx, hits, as_of)
+
+    for model in models:
+        corpus = Corpus(model, idx)
+        m = load_model(model)
+
+        def encode(texts: list[str], m=m, prefix: str = PREFIX[model][0]) -> np.ndarray:
+            return m.encode([prefix + normalize(t) for t in texts], batch_size=64,
+                            normalize_embeddings=True, show_progress_bar=False, convert_to_numpy=True)
+
+        for variant in variants:
+            t0 = time.time()
+            # --- alpha on the tuning sample ---
+            bt, vt = _query_texts(tune, variant)
+            b_hits = [idx.retrieve(tokenize(t), TOP_DOCS) for t in bt]
+            v_hits = corpus.search(encode(vt))
+            grid = {}
+            for a in ALPHA_GRID:
+                rows = [_row(cands(convex(h, v, a)), c) for h, v, c in zip(b_hits, v_hits, tune, strict=True)]
+                grid[a] = {"recall@10": round(_mean(rows, "recall@10"), 4), "mrr": round(_mean(rows, "mrr"), 4)}
+            rows = [_row(cands(h), c) for h, c in zip(b_hits, tune, strict=True)]
+            grid["bm25"] = {"recall@10": round(_mean(rows, "recall@10"), 4), "mrr": round(_mean(rows, "mrr"), 4)}
+            alpha = max(ALPHA_GRID, key=lambda a: (grid[a]["recall@10"], grid[a]["mrr"], -a))
+            log.info("%s/%s: alpha=%.2f on %d tuning cases (%s)", slug(model), variant, alpha, len(tune), grid)
+            # --- evaluation on dev ---
+            be, ve = _query_texts(ev, variant)
+            bm = [idx.retrieve(tokenize(t), TOP_DOCS) for t in be]
+            vh = corpus.search(encode(ve))
+            base = [_row(cands(h), c) for h, c in zip(bm, ev, strict=True)]
+            vec = [_row(cands([(d, 1.0 / (1 + r)) for r, (d, _s) in enumerate(v[:TOP_DOCS])]), c)
+                   for v, c in zip(vh, ev, strict=True)]
+            rr = [_row(cands(rrf(h, [d for d, _s in v], TOP_DOCS)), c) for h, v, c in zip(bm, vh, ev, strict=True)]
+            cv = [_row(cands(convex(h, v, alpha)), c) for h, v, c in zip(bm, vh, ev, strict=True)]
+            g = {**groups, "bm25_empty": [i for i, h in enumerate(bm) if not h]}
+
+            def pq_(rows: list[dict], ids: list[str] = novelty_ids) -> dict:
+                return {i: {k: r[k] for k in DELTA_METRICS} for i, r in zip(ids, rows, strict=True)}
+
+            res = {
+                "model": model, "variant": variant, "part": "dev", "n": len(ev), "seed": seed,
+                "as_of": as_of.isoformat(), "commit": _commit(),
+                "created": datetime.now(UTC).isoformat(timespec="seconds"),
+                "top_docs": TOP_DOCS, "knn": KNN, "candidates": CANDIDATES, "store": store.name,
+                "index_docs": idx.n_docs, "tokenizer": tokenizer_version(), "prefix": PREFIX[model],
+                "corpus_files": [p.name for p in vec_files(model)],
+                "alpha": alpha, "alpha_grid": list(ALPHA_GRID),
+                "tuning": {"source": "dev_full minus dev", "seed": tune_seed, "n": len(tune), "grid": grid,
+                           "criterion": "max recall@10, then MRR, then smaller alpha",
+                           "ids_file": "E5-tune-sample.json"},
+                "queries": {"bm25": "short" if variant == "short" else "lot",
+                            "vector": "lot" if variant == "lot" else "short"},
+                "bm25": {"metrics": _summary(base), "slices": _slices(g, base), "per_query": pq_(base)},
+                "vector": {"metrics": _summary(vec), "slices": _slices(g, vec, base),
+                           "delta_vs_bm25": _deltas(vec, base)},
+                "hybrid_rrf": {"metrics": _summary(rr), "slices": _slices(g, rr, base),
+                               "delta_vs_bm25": _deltas(rr, base), "per_query": pq_(rr)},
+                "hybrid_convex": {"alpha": alpha, "metrics": _summary(cv), "slices": _slices(g, cv, base, rr),
+                                  "delta_vs_bm25": _deltas(cv, base), "delta_vs_rrf": _deltas(cv, rr),
+                                  "per_query": pq_(cv)},
+                "seconds": round(time.time() - t0, 1),
+            }
+            (out_dir / f"E5-{slug(model)}-{variant}.json").write_text(
+                json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+            c = res["hybrid_convex"]
+            log.info("%s/%s: recall@10 bm25 %.4f rrf %.4f convex(%.2f) %.4f; Δ bm25 %s", slug(model), variant,
+                     _mean(base, "recall@10"), _mean(rr, "recall@10"), alpha, _mean(cv, "recall@10"),
+                     c["delta_vs_bm25"]["recall@10"])
+        del corpus, m
+        torch.cuda.empty_cache()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -326,6 +514,14 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--short", action="store_true", help="query = the first position name (user-like)")
     b.add_argument("--no-latency", action="store_true",
                    help="skip CPU query latency (parallel runs make it noisy; measure on an idle machine)")
+    b.add_argument("--tag", default="emb", help="result file prefix: <tag>-<model>-s1[-short].json (E3 for #270)")
+    c = sub.add_parser("convex", help="#313 (E5): convex combination vs RRF, alpha tuned on dev_full minus dev")
+    c.add_argument("--model", action="append", required=True, choices=sorted(PREFIX))
+    c.add_argument("--variant", action="append", choices=VARIANTS, help="default: all")
+    c.add_argument("--n", type=int, default=2000)
+    c.add_argument("--seed", type=int, default=20261001)
+    c.add_argument("--tune-n", type=int, default=1000)
+    c.add_argument("--out-dir", type=Path, default=ROOT / "eval" / "results")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -333,7 +529,10 @@ def main(argv: list[str] | None = None) -> int:
         for model in args.model:
             print({"model": model, "out": str(encode_corpus(model))}, flush=True)
         return 0
-    res = bench(args.model, args.n, args.seed, args.out_dir, args.short, latency=not args.no_latency)
+    if args.cmd == "convex":
+        convex_bench(args.model, args.variant or list(VARIANTS), args.n, args.seed, args.tune_n, args.out_dir)
+        return 0
+    res = bench(args.model, args.n, args.seed, args.out_dir, args.short, latency=not args.no_latency, tag=args.tag)
     print(json.dumps({k: (v.get("metrics") or {kk: v[kk]["metrics"] for kk in ("vector", "hybrid_rrf")})
                       for k, v in res.items()}, ensure_ascii=False, indent=1))
     return 0
