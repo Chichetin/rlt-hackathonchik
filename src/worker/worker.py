@@ -57,7 +57,9 @@ def run(once: bool = False, pause_s: float = 1.0, captcha_sleep_s: float | None 
         db_retry_s: float = DB_RETRY_S) -> int:
     """Drain the queue. `captcha_sleep_s`: None = stop on captcha (default); a number = night mode: the task
     goes back, the worker sleeps that long (sources' own 15-min cooldown) and continues. The cooldown
-    lives in the process: a container restart forgets it (D-080), so the sleep is the only protection.
+    lives in the process: a container restart forgets it (D-142), so the sleep is the only protection.
+    РНП ЕИС (after #111) is not covered: its refusal does not fail the task (the card goes without `in_rnp`),
+    eis_rnp keeps its own Crawl-delay and 15-min pause after a refusal (D-141).
     Database errors never end the run: wait `db_retry_s` and continue (the `running` task of a lost
     connection returns to the queue by requeue_stale)."""
     _count_live_writes()
@@ -81,7 +83,7 @@ def run(once: bool = False, pause_s: float = 1.0, captcha_sleep_s: float | None 
                 finish(eng, task_id)
                 done += 1
             except CaptchaRequired:
-                # research/SOURCES.md: captcha → never solve it, never keep hitting the host
+                # captcha: not solved here (D-085 allows it, nothing implements it) — never keep hitting the host
                 release(eng, task_id)
                 if captcha_sleep_s is None:
                     log.error("captcha on %s — worker stops, task %s back in the queue", inn, task_id)
