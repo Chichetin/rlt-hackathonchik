@@ -1,4 +1,4 @@
-"""2ГИС (2gis.ru): cards of organizations and their reviews, ON DEMAND, one supplier at a time (#234, D-113).
+"""2ГИС (2gis.ru): cards of organizations and their reviews, ON DEMAND, one supplier at a time (#234, D-142).
 Owner: SOURCES.
 
 What we read, and only this (robots.txt of 2gis.ru allows both paths; `robots.allowed` is asked before each request):

@@ -146,7 +146,7 @@ def test_every_setting_is_documented_in_env_example() -> None:
 
 
 def test_gis2_reviews_defaults_and_overrides() -> None:
-    """2GIS reviews on demand (#234, D-113): pacing, timeouts, the off switch and the live-read limit."""
+    """2GIS reviews on demand (#234, D-142): pacing, timeouts, the off switch and the live-read limit."""
     s = get_settings({})
     assert (s.gis2_min_interval_s, s.gis2_timeout_s, s.gis2_down_cooldown_s) == (3.0, 20.0, 90.0)
     assert s.gis2_disabled is False and s.reviews_live_max == 2

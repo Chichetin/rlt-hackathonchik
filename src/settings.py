@@ -87,7 +87,7 @@ class Settings:
     bm25_tokenizer = _Var("BM25_TOKENIZER", lambda v: v)  # overrides `tokenizer:` of configs/search.yaml
     # block «Новые» (src/match/new_fit.py, #77): off | shadow | on, overrides `mode:` of configs/discover.yaml
     discovery_new_fit = _Var("DISCOVERY_NEW_FIT", lambda v: (v or "").strip() or None)
-    # 2GIS reviews on demand (src/sources/gis2.py, src/api/reviews.py; #234, D-113): a typo in a pause raises
+    # 2GIS reviews on demand (src/sources/gis2.py, src/api/reviews.py; #234, D-142): a typo in a pause raises
     gis2_min_interval_s = _Var("GIS2_MIN_INTERVAL_S", lambda v: float(v or 3.0))  # between requests to 2gis.ru
     gis2_timeout_s = _Var("GIS2_TIMEOUT_S", lambda v: float(v or 20.0))
     gis2_down_cooldown_s = _Var("GIS2_DOWN_COOLDOWN_S", lambda v: float(v or 90.0))  # pause after a timeout
