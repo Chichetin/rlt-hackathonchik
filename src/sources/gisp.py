@@ -376,9 +376,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="command", required=True)
     b = sub.add_parser("build", help="XLSX выгрузки → products.parquet + meta.json")
     b.add_argument("xlsx", type=Path)
-    b.add_argument("--out", type=Path, default=None, help="каталог (по умолчанию <DATA_PROCESSED_DIR>/../external/gisp)")
+    b.add_argument("--out", type=Path, default=None, help="каталог (по умолчанию <processed>/../external/gisp)")
     st = sub.add_parser("stats", help="сколько продукции и компаний в выгрузке")
-    st.add_argument("--dir", type=Path, default=None, help="каталог (по умолчанию <DATA_PROCESSED_DIR>/../external/gisp)")
+    st.add_argument("--dir", type=Path, default=None, help="каталог (по умолчанию <processed>/../external/gisp)")
     args = ap.parse_args(argv)
     if args.command == "build":
         if not args.xlsx.is_file():
