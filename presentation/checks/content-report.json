@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-02T12:03:12.919Z",
+  "checked_at": "2026-10-02T12:39:40.191Z",
   "checks": [
     {
       "name": "Opening contains case, solution, team; supplier belongs to the example",
@@ -74,7 +74,7 @@
       "passed": true
     },
     {
-      "name": "S6 numbers come from pitch/facts.md F-33/F-34 and name the eval runs",
+      "name": "S6 numbers come from pitch/facts.md F-43 and name the eval runs",
       "passed": true
     },
     {
