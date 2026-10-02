@@ -26,12 +26,14 @@ def _exp(res, inn):
 def with_signal(monkeypatch):
     def apply(share):
         cfg = search_mod.load_config()
-        monkeypatch.setattr(search_mod, "load_config", lambda: {**cfg, "signals": {"incumbent": share}})
+        signals = {**(cfg.get("signals") or {}), "incumbent": share}  # other signals as in the product (#588)
+        monkeypatch.setattr(search_mod, "load_config", lambda: {**cfg, "signals": signals})
     return apply
 
 
-def test_default_config_has_no_active_signal():
-    assert signal_shares(search_mod.load_config()) == {"incumbent": 0.0, "inn_region": 0.0}
+def test_default_config_signals():
+    # incumbent stays opt-in; the region of an IP by its INN is on since geography entered the score (D-197)
+    assert signal_shares(search_mod.load_config()) == {"incumbent": 0.0, "inn_region": 1.0}
 
 
 def test_signal_shares_validate():

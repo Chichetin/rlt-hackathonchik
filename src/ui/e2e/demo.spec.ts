@@ -62,7 +62,8 @@ test("демо: запрос → два блока → карточка → фи
   await discovered.locator(".item").first().click();
   await page.getByRole("button", { name: /Открыть полную карточку/ }).click();
   await expect(card.getByText("не подтверждён")).toHaveCount(0);
-  await expect(card.locator(".components li")).toHaveCount(6);
+  // criteria with weight 0 are hidden since #576 — how many are left depends on the company
+  await expect(card.locator(".components li").first()).toBeVisible();
   await expect(card.locator(".evidence li a").first()).toHaveAttribute("href", /^https:\/\/rmsp\.nalog\.ru\//);
   await expect(card.locator(".evidence li").first()).toContainText(/\d{2}\.\d{2}\.\d{4}/);
   // роль и её основание — факт с источником (D-057): основной ОКВЭД из реестра МСП

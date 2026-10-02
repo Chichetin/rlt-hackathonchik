@@ -123,9 +123,10 @@ def test_search_off_matches_v1(search_data):
 
 
 def _geo_weighted() -> dict:
-    """The product config with geography weight 0.1 (D-077 has 0): the profile has something to change."""
+    """The product config with geography weight 0.1: the profile has something to change. Price 0 (#588): without
+    НМЦК its weight is spread over the rest (D-198), so zeroing geography would rescale the other weights too."""
     cfg = search_mod.load_config()
-    return {**cfg, "weights": {**cfg["weights"], "geography": 0.1}}
+    return {**cfg, "weights": {**cfg["weights"], "geography": 0.1, "price": 0.0}}
 
 
 def test_search_services_profile_zeroes_geography(search_data):
