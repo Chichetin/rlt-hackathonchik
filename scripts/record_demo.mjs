@@ -46,7 +46,7 @@ try {
 
   // 1. the entry point: the link from the procurement card of АИС ГЗ opens the search for the lot, no manual steps
   await page.goto(`${base}/search?lot=${lot}`);
-  await caption(`Встраивание в АИС ГЗ: ссылка из карточки закупки — ${new URL(base).host}/search?lot=${lot}`);
+  await caption(`Так откроется по ссылке из карточки закупки АИС ГЗ (кнопку добавляет владелец системы): ${new URL(base).host}/search?lot=${lot}`);
   const result = await results;
   if (!result.ok()) throw new Error(`Search: HTTP ${result.status()}`);
   await history.locator(".item").first().waitFor();

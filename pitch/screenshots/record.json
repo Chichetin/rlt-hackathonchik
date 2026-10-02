@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-10-02T07:15:07.874Z",
+  "recorded_at": "2026-10-02T07:24:13.823Z",
   "base": "http://127.0.0.1:8010",
   "lot": "5903085",
   "query": {
@@ -21,12 +21,12 @@
     "height": 1080
   },
   "seconds": {
-    "results": 1,
-    "new": 29.3,
-    "card": 50.8,
-    "filter": 59.3,
+    "results": 0.8,
+    "new": 29.1,
+    "card": 50.7,
+    "filter": 59.2,
     "near": 65.9,
-    "export": 75.1,
+    "export": 75,
     "end": 80.2
   },
   "health": {
