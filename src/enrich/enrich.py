@@ -3,8 +3,9 @@
 Main source: ФНС «Прозрачный бизнес» (src/sources/pb_nalog.py) through the disk cache, so the demo
 works on cache without internet. While pb asks for a captcha (#58, D-052) the fallback is the registry
 of МСП by INN (src/sources/rmsp.py), then ГИР БО (src/sources/bo_nalog.py): fewer facts, each with its
-own source and url. Every fact is an Evidence whose `value` literally occurs in the
-cached card text (src/enrich/evidence.py checks it; the API shows only what passes).
+own source and url. On top of any of them: offline facts from ФНС open data (src/sources/fns_opendata.py:
+headcount, income, tax regime, tax debt) when its parquet is built. Every fact is an Evidence whose `value`
+literally occurs in the cached card text (src/enrich/evidence.py checks it; the API shows only what passes).
 Organizers' data stats (`Counterparty.stats`) come from search(), not from here.
 
 `ENRICH_OFFLINE=1` — cache only, no network (KeyError for an INN that is not cached).
@@ -20,7 +21,7 @@ import httpx
 
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
 from src.enrich import role
-from src.sources import bo_nalog, pb_nalog, rmsp
+from src.sources import bo_nalog, fns_opendata, pb_nalog, rmsp
 from src.sources.cache import CachedPage, SourceCache
 
 log = logging.getLogger(__name__)
@@ -218,13 +219,32 @@ def _fallback(inn: str, cache: SourceCache, offline: bool) -> Counterparty | Non
     return None
 
 
-def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None) -> Counterparty:
+def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counterparty]:
+    """The cards plus the offline facts of ФНС open data, each with its own url (one query for all, no network)."""
+    facts = fns_opendata.lookup_many([c.inn for c in cards if c.inn and inn_is_valid(c.inn)], cache)
+
+    def merged(c: Counterparty) -> Counterparty:
+        have = {(e.url, e.field, e.value) for e in c.evidence}  # a card that already has them gets them once
+        new = [e for e in facts.get(c.inn or "", []) if (e.url, e.field, e.value) not in have]
+        return c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
+    return [merged(c) for c in cards]
+
+
+def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
+           open_data: bool = True) -> Counterparty:
+    """The base card (below) plus add_open_data(); `open_data=False` — the base card only (the search
+    loop over 200 candidates needs no ФНС facts: the page and the export add them to what they show)."""
+    cache = cache or SourceCache()
+    cp = _enrich(inn, cache, offline)
+    return add_open_data([cp], cache)[0] if open_data else cp
+
+
+def _enrich(inn: str, cache: SourceCache, offline: bool | None) -> Counterparty:
     """pb card from cache → pb live (unless blocked) → rmsp by INN → bo. The error of pb is raised
     only if no fallback source answered; otherwise the source of every fact is in its Evidence.
     `offline=True` — cache only (KeyError when nothing is cached); None — by `ENRICH_OFFLINE`."""
     if not inn_is_valid(inn):
         raise ValueError(f"INN {inn!r} fails the checksum")
-    cache = cache or SourceCache()
     if offline is None:
         offline = os.environ.get("ENRICH_OFFLINE") == "1"
     err: Exception

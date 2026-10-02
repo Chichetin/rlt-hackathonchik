@@ -96,7 +96,8 @@ def _picked_search(query: Query, cfg: dict) -> tuple[list[str], bool]:
     «Новые» (never relevant) and nothing from the cache — status, РНП, МСП, role there are today's facts,
     a leak in a backtest (D-097). Also: whether the user would see the weak-match warning (#281)."""
     picked = pipeline.pick(query, config=cfg, backtest=True)
-    shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
+    # a row without an INN takes its slot, as on screen
+    shown = pipeline.verified(picked.history[: cfg.get("k", 20)], open_data=False)
     return [m.counterparty.inn for m in shown if m.counterparty.inn], picked.weak_match is not None
 
 

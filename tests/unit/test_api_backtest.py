@@ -44,7 +44,7 @@ def test_todays_cached_card_does_not_move_the_backtest(client, monkeypatch):
     from src.contracts import Counterparty
     from src.match import pipeline
 
-    def cached(inn, cache=None, offline=False):
+    def cached(inn, cache=None, offline=False, open_data=True):
         if inn != "7801000012":
             raise KeyError(inn)
         return Counterparty(inn=inn, name="ООО Тест", status="Организация ликвидирована")
