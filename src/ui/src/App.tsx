@@ -39,6 +39,7 @@ import {
 } from "./api";
 import { deepLinkSearch, parseDeepLink, type DeepLink } from "./deeplink";
 import { reviewLinks } from "./reviews";
+import { ExternalReviews } from "./ExternalReviews";
 import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
 import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
@@ -1100,6 +1101,7 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
     <section aria-label="Отзывы">
       <h3>Отзывы в открытых источниках</h3>
       <p className="hint">Внешние отзывы можно проверить по ссылкам. Их рейтинг не переносится в Митрандир и не влияет на подбор.</p>
+      <ExternalReviews key={cp.inn ?? "no-inn"} inn={cp.inn} />
       {links.length > 0 ? (
         <p className="review-links">
           Искать отзывы самостоятельно:{" "}
