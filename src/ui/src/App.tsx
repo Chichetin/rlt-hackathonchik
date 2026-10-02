@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
 import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
+import { SearchProgress } from "./SearchProgress";
+import { ResultsReader } from "./ResultsReader";
 import { ResultInspector } from "./ResultInspector";
 import { SupplierAvatar, SupplierId, SupplierMetrics, supplierKey, recommendationSummary } from "./SupplierIdentity";
 import { SupplierScore } from "./SupplierScore";
@@ -11,11 +13,12 @@ import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
 import { easeOut, glide, ScrollTools } from "./Motion";
-import { okpd2Text, useOkpd2Labels } from "./okpd2";
+import { lookupOkpd2Name, okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
   PAGE,
   buildQuery,
+  enteredOkpd2,
   COMPONENT_LABEL,
   exportXlsx,
   fetchLot,
@@ -75,18 +78,6 @@ function BrandMark() {
     <path d="M32 3 60 32 32 61 4 32Z" stroke="currentColor" strokeWidth="2" />
     <path d="M18 44V21l14 17 14-17v23M14 44h9m18 0h9" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
   </svg>;
-}
-
-function Skeleton() {
-  return (
-    <div className="skeleton" aria-hidden="true">
-      {[0, 1, 2].map((i) => (
-        <div className="skeleton-item" key={i}>
-          <i /><i /><i />
-        </div>
-      ))}
-    </div>
-  );
 }
 
 /** «Новые» emptied by the role chip «Производитель» alone, judged by the filters of the shown answer (#84): the role of
@@ -312,7 +303,7 @@ function usePath(): [Path, (next: Path) => void] {
 
 // the last query survives a reload of /results; storage may be unavailable — the page works without it
 const STORE = "mitrandir.query";
-type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string; customerRegion?: string };
+type Saved = { okpd2?: string; text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string; customerRegion?: string };
 function loadSaved(): Partial<Saved> {
   try {
     return JSON.parse(window.sessionStorage.getItem(STORE) ?? "{}") as Partial<Saved>;
@@ -396,7 +387,9 @@ export function App() {
   const [path, go] = usePath();
   const filterReturn = useRef<Path>("/search");
   useEffect(() => { if (path === "/search" || path === "/results") filterReturn.current = path; }, [path]);
-  const [text, setText] = useState(saved.text ?? "");
+  const urlParams = new URLSearchParams(window.location.search);
+  const [text, setText] = useState(urlParams.has("okpd2") && !urlParams.has("q") ? "" : saved.text ?? "");
+  const [okpd2Input, setOkpd2Input] = useState(() => urlParams.has("q") || urlParams.has("lot") || urlParams.has("okpd2") ? urlParams.get("okpd2") ?? "" : saved.okpd2 ?? "");
   const [filters, setFilters] = useState<Filters>(() => normalizeFilters(saved.filters));
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
@@ -419,23 +412,22 @@ export function App() {
   // #242: the customer's region when the INN is not given (goes to Query.region); with an INN the server takes it from there
   const [customerRegion, setCustomerRegion] = useState(saved.customerRegion ?? "Санкт-Петербург");
   const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  const [lotBusy, setLotBusy] = useState(false);
   const resetLot = () => {
     setLot(null);
     setLotQueryId(undefined);
   };
-  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId, customer_region: customerRegion });
+  const extra = (): Extra => ({ okpd2: okpd2Input, budget, customer_inn: customerInn, lot, query_id: lotQueryId, customer_region: customerRegion });
 
   // the query of a loaded lot, for a search that must not wait for the form state to update
   type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
 
   async function loadLot(id: string = lotId, auto = false): Promise<Ready | null> {
     if (!id.trim()) return null;
-    setLotBusy(true);
     setLotMsg(null);
     try {
       const q = await fetchLot(id);
       setText(q.text);
+      setOkpd2Input("");
       setBudget(q.budget ? String(q.budget) : "");
       setCustomerInn(q.customer_inn ?? "");
       setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
@@ -462,10 +454,8 @@ export function App() {
             : st === 422
               ? "Номер закупки — только цифры (lot_id или реестровый номер)."
               : `Не удалось загрузить закупку: ${String(e)}.`;
-      setLotMsg({ kind: "err", text: `${why} Опишите предмет закупки текстом ниже.` });
+      setLotMsg({ kind: "err", text: `${why} Введите название товара или код ОКПД2 в форме поиска.` });
       return null;
-    } finally {
-      setLotBusy(false);
     }
   }
 
@@ -512,21 +502,29 @@ export function App() {
   // asTyped: «искать как введено» (#282) — this exact text, the server's correction off
   async function run(nextFilters: Filters = filters, ready?: Ready, asTyped?: string) {
     // the query of this run: a picked test lot (#207), the shown query as typed, or the form
-    const qText = asTyped ?? ready?.text ?? text;
+    const qText = asTyped ?? ready?.text ?? (text.trim() || okpd2Input);
     if (asTyped !== undefined) asTypedFor.current = asTyped.trim();
     const qExtra = ready ? () => ready.extra : extra;
-    if (!qText.trim()) return;
+    if (!qText.trim() && !qExtra().okpd2?.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
     setState("loading");
     setOpen(null);
     try {
+      const manualCode = qExtra().okpd2?.trim();
+      const code = manualCode ? enteredOkpd2(manualCode) : enteredOkpd2(qText);
+      if (manualCode && !code) throw new Error("Проверьте формат ОКПД2: например, 31.01.11.150.");
+      const category = code ? await lookupOkpd2Name(code) : undefined;
+      const categoryName = !qText.trim() || enteredOkpd2(qText) ? category : undefined;
+      if (seq !== runSeq.current) return;
       const active = filtersActive(nextFilters);
       const none: Filters = NO_FILTERS;
       // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
       const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
-      const spellOff = asTypedFor.current === q.text;
+      if (categoryName) q.text = categoryName;
+      const spellOff = !!code || asTypedFor.current === q.text;
       if (spellOff) q.filters = { ...q.filters, spell: "off" };
       const baseQuery = buildQuery(qText, none, qExtra());
+      if (categoryName) baseQuery.text = categoryName;
       if (spellOff) baseQuery.filters = { ...baseQuery.filters, spell: "off" }; // counts by the same text as the answer
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
@@ -543,14 +541,17 @@ export function App() {
       // weights switched on while this page-sized answer was in flight
       if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
       save(ready
-        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
-        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
-      if (window.location.pathname === "/search") go("/results");
+        ? { okpd2: ready.extra.okpd2, text: ready.text, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
+        : { okpd2: okpd2Input, text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
+      if (window.location.pathname === "/results") go("/search");
       // the address bar keeps a link that repeats this search (#395): a copied URL opens the same query
-      if (window.location.pathname === "/results") {
+      if (window.location.pathname === "/search") {
         const loaded = ready ? ready.extra.lot != null : lot != null;
-        const link = deepLinkSearch(ready ? ready.lotId : lotId, loaded, qText);
-        window.history.replaceState(null, "", `/results${link}${window.location.hash}`);
+        const submittedText = ready?.text ?? text;
+        const codeParam = qExtra().okpd2?.trim();
+        const link = (!loaded && !submittedText.trim() ? "" : deepLinkSearch(ready ? ready.lotId : lotId, loaded, submittedText))
+          + (codeParam ? `${submittedText.trim() || loaded ? "&" : "?"}okpd2=${encodeURIComponent(codeParam)}` : "");
+        window.history.replaceState(null, "", `/search${link}${window.location.hash}`);
       }
     } catch (e) {
       if (seq !== runSeq.current) return;
@@ -588,14 +589,14 @@ export function App() {
       const nav = (window.performance?.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
       if (nav !== "reload" && nav !== "back_forward") return d;
       if (d.lot && saved.lotId === d.lot && saved.lot) return {};
-      if (d.q && !d.lot && saved.text === d.q && !saved.lot) return {};
+      if ((d.q || d.okpd2) && !d.lot && (saved.text ?? "") === (d.q ?? "") && (saved.okpd2 ?? "") === (d.okpd2 ?? "") && !saved.lot) return {};
       return d;
     })(),
   );
   const deepDone = useRef(false);
   useEffect(() => {
     const d = deepAtMount.current;
-    if ((!d.lot && !d.q) || deepDone.current) return;
+    if ((!d.lot && !d.q && !d.okpd2) || deepDone.current) return;
     deepDone.current = true;
     setState("loading");
     setFilters(NO_FILTERS); // a shared link is a plain search, not the filters left in this browser
@@ -608,12 +609,13 @@ export function App() {
           setState("idle");
           go("/search"); // not found: the form with the reason
         }
-      } else if (d.q) {
+      } else if (d.q || d.okpd2) {
         resetLot();
         setBudget("");
         setCustomerInn("");
-        setText(d.q);
-        await run(NO_FILTERS, { text: d.q, lotId: "", budget: "", customerInn: "", extra: { budget: "", customer_inn: "", lot: null, query_id: undefined, customer_region: customerRegion } });
+        setText(d.q ?? "");
+        setOkpd2Input(d.okpd2 ?? "");
+        await run(NO_FILTERS, { text: d.q ?? "", lotId: "", budget: "", customerInn: "", extra: { budget: "", customer_inn: "", lot: null, okpd2: d.okpd2, query_id: undefined, customer_region: customerRegion } });
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -621,7 +623,7 @@ export function App() {
 
   // a reload of /results repeats the saved query
   useEffect(() => {
-    if (path === "/results" && !deepAtMount.current.lot && !deepAtMount.current.q && !res && state === "idle" && text.trim()) void run();
+    if ((path === "/search" || path === "/results") && !deepAtMount.current.lot && !deepAtMount.current.q && !deepAtMount.current.okpd2 && !res && state === "idle" && (text.trim() || okpd2Input.trim())) void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
@@ -638,6 +640,7 @@ export function App() {
     runSeq.current++; // drop an answer still in flight
     setFilters(NO_FILTERS);
     setText("");
+    setOkpd2Input("");
     setLotId("");
     setBudget("");
     setCustomerInn("");
@@ -656,7 +659,7 @@ export function App() {
 
   const link = (to: Path) => ({
     href: to,
-    "aria-current": path === to ? ("page" as const) : undefined,
+    "aria-current": (path === to || (path === "/results" && to === "/search")) ? ("page" as const) : undefined,
     onClick: (e: React.MouseEvent) => {
       if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return; // new tab/window: let the browser do it
       e.preventDefault();
@@ -700,12 +703,15 @@ export function App() {
   const selectedIndex = selectedResult ? activeRows.indexOf(selectedResult) : -1;
   const revealSelection = useRef(false);
   const mobileListY = useRef(0);
+  const mobileReaderPosition = useRef<{ element: HTMLElement; top: number } | null>(null);
   const selectResult = (m: CounterpartyMatch, reveal = false) => {
     revealSelection.current = reveal;
     setSelectedSuppliers(prev => ({ ...prev, [resultGroup]: supplierKey(m) }));
     if (window.matchMedia("(max-width: 900px)").matches) {
       if (mobileDetails) return;
       mobileListY.current = window.scrollY;
+      const reader = document.querySelector<HTMLElement>('.results-reader[data-expanded="true"]');
+      mobileReaderPosition.current = reader ? { element: reader, top: reader.scrollTop } : null;
       setMobileDetails(true);
       requestAnimationFrame(() => {
       const pane = document.getElementById("supplier-preview");
@@ -732,7 +738,9 @@ export function App() {
     requestAnimationFrame(() => {
     const row = document.querySelector<HTMLElement>('.result-list-scroll:not([hidden]) .item[aria-pressed="true"]');
     row?.focus({ preventScroll: true });
-    window.scrollTo({ top: mobileListY.current, behavior: "instant" });
+    const position = mobileReaderPosition.current;
+    if (position?.element.isConnected) position.element.scrollTop = position.top;
+    else window.scrollTo({ top: mobileListY.current, behavior: "instant" });
     });
   }
 
@@ -740,9 +748,9 @@ export function App() {
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
     <div inert={!!open}><ScrollTools /></div>
-    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path} inert={!!open}
+    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path === "/search" && res ? "/results" : path} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
-      <GlassHeader path={path} link={link} mark={<BrandMark />} />
+      <GlassHeader path={path === "/results" ? "/search" : path} link={link} mark={<BrandMark />} />
       {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
       <div className="content">
       {STATIC_DEMO && (
@@ -760,13 +768,13 @@ export function App() {
       : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => {
         // back to the results keeps the link of their search (#395)
         const s = loadSaved();
-        go(filterReturn.current === "/results" && s.text ? `/results${deepLinkSearch(s.lotId ?? "", !!s.lot, s.text)}` : filterReturn.current);
+        go((s.text || s.okpd2) ? `/search${s.text ? deepLinkSearch(s.lotId ?? "", !!s.lot, s.text) : ""}${s.okpd2 ? `${s.text ? "&" : "?"}okpd2=${encodeURIComponent(s.okpd2)}` : ""}` : "/search");
       }} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
       <div className="top">
-        <h1>{path === "/results" ? "Поставщики для вашей закупки" : "Подбор поставщиков для закупки"}</h1>
-        {path !== "/results" && <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>}
+        <h1>Подбор поставщиков для закупки</h1>
+        {!res && <p className="sub">Кого пригласить: компании с опытом госзакупок и новые — из открытых реестров. Каждая оценка и факт — с объяснением и источником.</p>}
       </div>
 
       {res?.stub && (
@@ -775,22 +783,10 @@ export function App() {
         </div>
       )}
 
-      {path === "/results" && res && <div className="results-commandbar">
-        <p><span>Закупка</span><strong>{res.query.text}</strong></p>
-        <div className="results-commands">
-          <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
-          {!STATIC_DEMO && <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
-            setError(`выгрузка в Excel: ${String(e)}`); setState("error");
-          })}>Выгрузить в Excel</button>}
-        </div>
-        <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
-        {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
-      </div>}
-      <div className={`search-workbench ${path === "/search" ? "search-compose" : ""} ${path === "/results" && res ? "results-workspace" : ""}`}>
+      <div className="search-workbench results-workspace">
       <form
         id="supplier-search"
         className="query"
-        hidden={path === "/results" && !!res}
         onSubmit={(e) => {
           e.preventDefault();
           void run();
@@ -799,58 +795,39 @@ export function App() {
         <div className="query-main">
         <div className="section-heading">
           <div>
-            <h2>Параметры закупки</h2>
-            <p>Загрузите извещение или опишите, что вам нужно.</p>
+            <h2>Что вы хотите найти?</h2>
+            <p>Введите название товара, описание или код ОКПД2 — найдём подходящих поставщиков и объясним рекомендации.</p>
           </div>
         </div>
-        <div className="lot-section">
-          <label htmlFor="lot">Номер закупки (необязательно)</label>
-          <div className="lotrow">
-            <input
-              id="lot"
-              inputMode="numeric"
-              value={lotId}
-              placeholder="Введите номер извещения"
-              onChange={(e) => {
-                setLotId(e.target.value);
-                resetLot();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void loadLot();
-                }
-              }}
-            />
-            <button type="button" className="secondary" disabled={!lotId.trim() || lotBusy} onClick={() => void loadLot()}>
-              {lotBusy ? "Загружаем…" : "Загрузить закупку"}
-            </button>
-          </div>
-          {lotMsg && (
-            <p className={lotMsg.kind === "ok" ? "lotmsg" : "lotmsg lotmsg-err"} role={lotMsg.kind === "ok" ? "status" : "alert"}>
-              {lotMsg.text}
-            </p>
-          )}
-          {lot && lotMsg?.kind === "ok" && <BacktestPanel key={lotQueryId} ident={lotId} />}
-        </div>
-        <div className="query-divider"><span>или введите описание</span></div>
-        <label htmlFor="q">Что нужно закупить</label>
+        <label htmlFor="q">Название товара</label>
         <textarea
           id="q"
+          aria-describedby="query-help"
           rows={3}
           value={text}
-          placeholder="Наименование товара или позиции из ТЗ, например: бумага офисная А4, 80 г/м²"
+          placeholder="Например: офисная мебель, столы для переговорной"
           onChange={(e) => {
             setText(e.target.value);
             resetLot();
           }}
         />
+        <p id="query-help" className="hint">Можно добавить характеристики: размер, материал, назначение.</p>
+        <label className="product-code-field" htmlFor="product-code">Код ОКПД2
+          <input id="product-code" aria-label="Код ОКПД2" value={okpd2Input} placeholder="Например: 31.01.11.150" aria-describedby="product-code-help"
+            onChange={e => { setOkpd2Input(e.target.value); resetLot(); }} />
+          <small id="product-code-help">Заполните название, код или оба поля.</small>
+        </label>
+        <div className="actions product-search-action">
+          <button type="submit" disabled={(!text.trim() && !okpd2Input.trim()) || state === "loading"}><SearchIcon />{state === "loading" ? "Ищем…" : "Найти поставщиков"}</button>
+        </div>
         <ExampleWheel onConfirm={() => document.getElementById("q")?.focus()} options={EXAMPLES} value={lot ? "" : text} onChange={example => {
           setText(example);
+          setOkpd2Input("");
           resetLot();
         }} />
         </div>
-        <div className="query-options">
+        <details className="query-options" open={!res}>
+        <summary>Уточнить подбор</summary>
         <div className="section-heading refinement-heading"><div>
           <h2>Уточнить подбор</h2>
           <p>Необязательные параметры</p>
@@ -887,33 +864,42 @@ export function App() {
         <div className="row query-finish">
           <div className="query-refinements">
             <a className="filter-link" {...link("/settings")}>Фильтры {filtersActive(filters) && <span className="filter-applied">применены</span>}<span aria-hidden="true">↗</span></a>
-            <label className="query-region">Может работать у заказчика
-              <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} facets={res?.facets} />
-            </label>
+            {!res && <label className="query-region">Может работать у заказчика
+              <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} />
+            </label>}
           </div>
-          <div className="actions">
-            <button type="submit" disabled={!text.trim() || state === "loading"}>
-              <SearchIcon />
-              {state === "loading" ? "Ищем…" : "Найти поставщиков"}
-            </button>
 
-          </div>
         </div>
-        </div>
+        </details>
         <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
       </form>
       <div className="output">
+      {lotMsg?.kind === "err" && <p className="lotmsg lotmsg-err" role="alert">{lotMsg.text}</p>}
+      {lot && lotQueryId && <BacktestPanel key={lotQueryId} ident={lotId} />}
+      {state === "loading" && <SearchProgress />}
+      {res && <div className="results-commandbar">
+        <p><span>Закупка</span><strong>{res.query.text}</strong></p>
+        <div className="results-commands">
+          <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
+          {!STATIC_DEMO && <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
+            setError(`выгрузка в Excel: ${String(e)}`); setState("error");
+          })}>Выгрузить в Excel</button>}
+        </div>
+        <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
+        {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
+      </div>}
+
       {state === "error" && (
         <div className="error" role="alert">
           Не удалось получить подбор: {error}
         </div>
       )}
 
-      {(!res || path === "/search") && state !== "error" && (
-        state === "loading" ? <Skeleton /> : path === "/results" ? (
+      {!res && state === "idle" && (
+        path === "/results" ? (
           <section className="getting-started" aria-label="Результаты">
             <h2>Вы ещё не запускали подбор</h2>
-            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки и нажмите «Найти поставщиков».</p>
+            <p className="empty-lead">Введите название товара или ОКПД2 и нажмите «Найти поставщиков».</p>
           </section>
         ) : (
         <section id="about" className="getting-started" aria-label="Как работает подбор">
@@ -921,7 +907,7 @@ export function App() {
           <ol className="steps">
             <li>
               <h3>Опишите закупку</h3>
-              <p>Номер извещения из АИС ГЗ или текст позиции из ТЗ. По номеру подтянутся ОКПД2, НМЦК и заказчик.</p>
+              <p>Напишите название товара или код ОКПД2. Можно добавить характеристики и требования.</p>
             </li>
             <li>
               <h3>Получите два списка</h3>
@@ -936,13 +922,13 @@ export function App() {
         )
       )}
 
-      {path === "/results" && res && state !== "loading" && filterNotes(base, filters, res.facets, res.context?.purchase_type).map((n) => (
+      {res && state !== "loading" && filterNotes(base, filters, res.facets, res.context?.purchase_type).map((n) => (
         <p key={n} className="filternote" role="note">
           {n}
         </p>
       ))}
 
-      {path === "/results" && res?.corrections && shownQuery && state !== "loading" && (
+      {res?.corrections && shownQuery && state !== "loading" && (
         <p className="lotmsg spell-note" role="note" data-testid="query-corrected">
           Запрос исправлен (раскладка или опечатки):{" "}
           {res.corrections.map(([typed, searched], i) => <span key={i}>{i > 0 && ", "}«{typed}» → «{searched}»</span>)}.{" "}
@@ -953,7 +939,7 @@ export function App() {
         </p>
       )}
 
-      {path === "/results" && res?.excludedLot && state !== "loading" && (
+      {res?.excludedLot && state !== "loading" && (
         <p className="lotmsg own-lot-note" role="note">
           Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
           выдачу только по другим своим закупкам. Для закупок июля–сентября 2025 места участников по истории до
@@ -961,11 +947,12 @@ export function App() {
         </p>
       )}
 
-      {path === "/results" && res && (
-        <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"}>
+      {res && (
+        <motion.main initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.18, ease: easeOut }} id="results" className="results" aria-busy={state === "loading"} inert={state === "loading"}>
           {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
             Оценка: {presetTitle(weightSet)} · только у вас
           </a>}
+          <ResultsReader>
           <div className="result-browser" data-mobile-details={mobileDetails && !!selectedResult}>
           <div className="result-list-pane">
             <div className="result-groups" role="group" aria-label="Группа поставщиков">
@@ -1031,6 +1018,7 @@ export function App() {
             onPrevious={selectedIndex > 0 ? () => selectResult(activeRows[selectedIndex - 1], true) : undefined}
             onNext={selectedIndex >= 0 && selectedIndex + 1 < activeRows.length ? () => selectResult(activeRows[selectedIndex + 1], true) : undefined} />
           </div>
+          </ResultsReader>
         </motion.main>
       )}
       </div>
@@ -1330,7 +1318,7 @@ function AboutPage({ onStart }: { onStart: () => void }) {
       <ol className="steps">
         <li>
           <h3>Опишите закупку</h3>
-          <p>Номер извещения из АИС ГЗ или текст позиции из ТЗ. По номеру подтягиваются ОКПД2, НМЦК и заказчик.</p>
+          <p>Напишите название товара или код ОКПД2. Можно добавить характеристики и требования.</p>
         </li>
         <li>
           <h3>Два списка</h3>

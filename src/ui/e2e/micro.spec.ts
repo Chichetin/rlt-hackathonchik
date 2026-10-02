@@ -28,7 +28,7 @@ test("примеры выбираются с клавиатуры и сохра�
   const paper = examples.getByRole("button", { name: "Бумага офисная А4, 80 г/м²", exact: true });
   const furniture = examples.getByRole("button", { name: "Офисная мебель", exact: true });
   const laptops = examples.getByRole("button", { name: "Ноутбуки", exact: true });
-  const query = page.getByLabel("Что нужно закупить");
+  const query = page.getByLabel("Название товара");
   await expect(paper).toBeVisible();
   await expect(furniture).toBeVisible();
   await expect(laptops).toBeVisible();
@@ -63,7 +63,7 @@ test("подсказка меню доступна с клавиатуры, за
   await page.goto("/");
   const link = page.getByRole("navigation").getByRole("link", { name: "Подбор", exact: true });
   await link.focus();
-  await expect(page.getByRole("tooltip")).toContainText("Опишите закупку");
+  await expect(page.getByRole("tooltip")).toContainText("Название товара или ОКПД2");
   await expect(link).toHaveAttribute("aria-describedby", /.+/);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("tooltip")).toHaveCount(0);
@@ -80,7 +80,7 @@ test("прокрутка на главной сразу ведёт в «Подб
   await page.mouse.move(400, 400);
   await page.mouse.wheel(0, 400);
   await expect(page).toHaveURL(/\/search$/);
-  await expect(page.getByLabel("Что нужно закупить")).toBeVisible();
+  await expect(page.getByLabel("Название товара")).toBeVisible();
   // keyboard: ↓ outside of a control does the same
   await page.goto("/");
   await page.locator("body").press("ArrowDown");
