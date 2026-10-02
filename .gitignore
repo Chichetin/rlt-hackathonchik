@@ -37,3 +37,6 @@ src/ui/playwright-report/
 # make predict output (INN lists, incl. individuals) — not committed
 eval/predict/
 eval/judge/
+
+# make parity: прогоны-близнецы для сравнения выдач (research/EVAL.md), не коммитятся
+eval/results/parity-*.json
