@@ -241,7 +241,7 @@ def _discovered(query: Query, history: list[CounterpartyMatch], enqueue: Callabl
     if not res.history_checked:
         return [], [], res, None
     # matches ⊆ candidates: a Discovery built without candidates (a test double) still counts its own block
-    return res.matches, res.candidates or res.matches, res, None
+    return discover_mod.full_scale(res.matches), discover_mod.full_scale(res.candidates or res.matches), res, None
 
 
 @dataclass

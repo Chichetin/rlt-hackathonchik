@@ -418,6 +418,28 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
             for n in COMPONENT_ORDER]
 
 
+NO_HISTORY = ("experience", "activity")  # always 0 for a company outside the organizers' data
+
+
+def full_scale(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """Score of «Новые» on 0–1 (#614, human decision 02.10, confirmation №3): experience and activity are 0 by
+    definition, so their weight moves to the other weighted components (product_fit, geography) in proportion; the
+    components still add up to the score, the order inside the block does not change."""
+    out = []
+    for m in matches:
+        rest = sum(c.weight for c in m.components if c.name not in NO_HISTORY)
+        if rest <= 0:
+            out.append(m)
+            continue
+        comps = [c.model_copy(update={"weight": 0.0, "explanation": f"{c.explanation} — у новой компании истории "
+                                      "нет: вес перенесён на соответствие товару и географию (балл по шкале 0–1)"})
+                 if c.name in NO_HISTORY else c.model_copy(update={"weight": round(c.weight / rest, 4)})
+                 for c in m.components]
+        out.append(m.model_copy(update={"components": comps,
+                                        "score": round(sum(c.value * c.weight for c in comps), 4)}))
+    return out
+
+
 def _order(backed: set[str]) -> Callable[[CounterpartyMatch], tuple[float, bool, str]]:
     """Score order; among equal scores a product confirmed by the registry (ГИСП) first, then by INN."""
     return lambda m: (-m.score, (m.counterparty.inn or "") not in backed, m.counterparty.inn or "~")
@@ -635,7 +657,7 @@ def live_search(query: Query, *, cache: SourceCache | None = None, processed: Pa
     if no_card:
         note += f"; без карточки ФНС не показаны {len(no_card)}"
     log.info("живой поиск %s: %d компаний; %s", query.query_id, len(found), note)
-    return Live(matches=sorted(apply_filters(found, query), key=_order(set())), note=note)
+    return Live(matches=sorted(apply_filters(full_scale(found), query), key=_order(set())), note=note)
 
 
 GISP_MARK = "реестру Минпромторга (ГИСП)"  # in product_fit of a product confirmed by the registry (#74)
