@@ -483,6 +483,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
     `features_out`: gets (inn, ranker features) of every scored candidate — training of the ranker (#198).
     """
     fallback.reset_note()
+    ranker.forget()  # rank reasons of a previous search must not reach this one (#278)
     _excluded.set(None)
     _predicted.set(None)
     _fit_signals.set(None)

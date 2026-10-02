@@ -9,7 +9,7 @@ from pathlib import Path
 import src.worker.worker  # noqa: F401  (so that the test selector reruns this test when the worker changes)
 
 ROOT = Path(__file__).resolve().parents[2]
-HEAVY = ("torch", "sentence_transformers", "transformers", "fastapi", "uvicorn", "bm25s")
+HEAVY = ("torch", "sentence_transformers", "transformers", "fastapi", "uvicorn", "bm25s", "lightgbm")  # lightgbm: api
 
 CODE = (
     "import sys, src.worker.worker, src.worker.prefetch\n"

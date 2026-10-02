@@ -3,12 +3,17 @@
 from pathlib import Path
 
 import duckdb
+import httpx
 import pytest
 
+from src.contracts import Counterparty
+from src.enrich.enrich import _merge_rnp
 from src.match.store import ParquetStore, clear_stores
+from src.sources import eis_rnp
+from src.sources.cache import SourceCache
 from src.sources.pb_nalog import CaptchaRequired
 from src.worker import prefetch
-from src.worker.queue import engine_from_env, status_counts
+from src.worker.queue import claim, engine_from_env, enqueue, finish, status_counts
 
 GOOD = ["7811756312", "7811726371", "7804428656", "7736050003", "7707049388"]  # valid INNs
 
@@ -232,3 +237,93 @@ def test_night_mode_is_an_overlay_not_the_default_of_make_up():
     assert night["worker"]["command"][-2:] == ["--captcha-sleep", "900"]
     assert night["worker"]["restart"] == night["db"]["restart"] == "unless-stopped"
     assert not (root / "docker-compose.override.yml").exists()  # compose would load an override on every `make up`
+
+
+# --- РНП pass of the shortlist (D-154): enrich() reads РНП from the cache only, this pass fills it -------------
+
+RNP_NEG = (Path(__file__).resolve().parents[1] / "fixtures" / "eis_rnp" / "inn_7804428656_no_results.html").read_text(
+    encoding="utf-8")
+
+
+def _zakupki(monkeypatch: pytest.MonkeyPatch, answer=lambda r: httpx.Response(200, text=RNP_NEG)) -> list[str]:
+    asked: list[str] = []
+
+    def handler(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        assert "dishonestsupplier" in str(request.url), f"only РНП may be asked: {request.url}"
+        asked.append(str(request.url))
+        return answer(request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", handler)
+    monkeypatch.setattr(eis_rnp, "MIN_INTERVAL_S", 0.0)
+    return asked
+
+
+def test_rnp_pass_checks_inns_whose_card_task_is_done_and_enrich_then_reads_it(eng, monkeypatch):
+    for inn in GOOD[:2]:
+        enqueue(eng, "enrich", inn)
+    task = claim(eng, "enrich")
+    assert task is not None
+    finish(eng, task[0])  # the card of this INN is done: the РНП pass must not skip it
+    asked = _zakupki(monkeypatch)
+    out = prefetch.rnp_pass([*GOOD[:2], GOOD[0], "1234567890"], sleep=lambda s: None)  # a duplicate, a bad INN
+    assert out["total"] == 2 and out["live"] == 2 and out["not_in_rnp"] == 2 and out["stopped"] is None
+    assert len(asked) == 2
+    again = prefetch.rnp_pass(GOOD[:2], sleep=lambda s: None)  # a rerun: fresh answers are not asked again
+    assert again["from_cache"] == 2 and again["live"] == 0 and len(asked) == 2
+    cp = _merge_rnp(GOOD[0], Counterparty(inn=GOOD[0], name="x"), SourceCache(), offline=True)
+    assert cp.in_rnp is False  # what enrich(offline=True) and the search now see
+
+
+def test_rnp_pass_stops_on_a_refusal(monkeypatch):
+    asked = _zakupki(monkeypatch, lambda r: httpx.Response(429, text="Too Many Requests"))
+    out = prefetch.rnp_pass(GOOD[:3], sleep=lambda s: None)
+    assert str(out["stopped"]).startswith(GOOD[0]) and len(asked) == 1 and out["live"] == 0  # stopped at the first
+
+
+def test_rnp_pass_waits_the_short_pause_after_a_network_error_and_stops_after_three(monkeypatch):
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("timeout", request=request)
+
+    asked = _zakupki(monkeypatch, boom)
+    slept: list[float] = []
+
+    def wait(s: float) -> None:
+        slept.append(s)
+        eis_rnp.PACER.reset()  # the pause is over
+
+    out = prefetch.rnp_pass(GOOD[:5], sleep=wait)
+    assert out["errors"] == 3 and out["stopped"] and len(asked) == 3
+    assert slept == [eis_rnp.DOWN_COOLDOWN_S + 1] * 2
+
+
+def test_rnp_pass_goes_on_after_network_errors_that_are_not_in_a_row(monkeypatch):
+    n = {"calls": 0}
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        n["calls"] += 1
+        if n["calls"] % 2:  # every other request fails: 3 errors of 5, never 3 in a row
+            raise httpx.ConnectTimeout("timeout", request=request)
+        return httpx.Response(200, text=RNP_NEG)
+
+    _zakupki(monkeypatch, flaky)
+    out = prefetch.rnp_pass(GOOD[:5], sleep=lambda s: eis_rnp.PACER.reset())
+    assert out["errors"] == 3 and out["not_in_rnp"] == 2 and out["stopped"] is None
+
+
+def test_main_rnp_reads_the_shortlist_file(tmp_path, monkeypatch):
+    _zakupki(monkeypatch)
+    f = tmp_path / "shortlist.txt"
+    f.write_text(f"# demo lots\n{GOOD[0]}\n\n{GOOD[1]}  # second\n", encoding="utf-8")
+    assert prefetch.read_inns(f) == GOOD[:2]
+    assert prefetch.main(["--rnp", "--inns-file", str(f)]) == 0
+
+
+def test_main_refuses_enqueue_only_together_with_rnp(tmp_path, monkeypatch, capsys):
+    """The queue is for the cards; the РНП pass does not use it — the two flags together are an operator error."""
+    monkeypatch.setattr(prefetch, "rnp_pass", lambda inns: pytest.fail("nothing may run"))
+    monkeypatch.setattr(prefetch, "enqueue_only", lambda inns, eng: pytest.fail("nothing may run"))
+    f = tmp_path / "shortlist.txt"
+    f.write_text(f"{GOOD[0]}\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as ex:
+        prefetch.main(["--enqueue-only", "--rnp", "--inns-file", str(f)])
+    assert ex.value.code == 2 and "--enqueue-only" in capsys.readouterr().err

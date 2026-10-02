@@ -36,10 +36,18 @@ def _sources_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     pacers = [mod.PACER for mod in (bo_nalog, eis_rnp, pb_nalog, rmsp)]
     for pacer in pacers:
         pacer.reset()
+    # enrich() merges РНП ЕИС (#111): a test that calls enrich() live (the worker's own call shape) twice must not
+    # sit out the real 60 s Crawl-delay pause before `no_network` above even raises. Pacing tests set it back.
+    monkeypatch.setattr(eis_rnp, "MIN_INTERVAL_S", 0.0)
+    monkeypatch.setattr(eis_rnp, "_ANSWERS", {})  # parsed РНП answers are memoized per page: none from another test
     # web leads (#108): no test depends on the real configs/leads; tests/unit/test_web_leads.py sets its own
     from src.sources import web_leads
 
     monkeypatch.setattr(web_leads, "LEADS_DIR", tmp_path / "leads-default")
+    # the registry export of industrial products (#74): not the dev machine's; tests/unit/test_gisp.py builds its own
+    from src.sources import gisp
+
+    monkeypatch.setattr(gisp, "DIR", tmp_path / "gisp-default")
     yield
     for pacer in pacers:
         pacer.reset()

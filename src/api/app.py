@@ -336,7 +336,9 @@ def api_counterparty(inn: str) -> Counterparty:
         raise HTTPException(422, "ИНН не проходит контрольные цифры")
     try:
         with nullcontext() if _answers_from_cache(inn) else guard.live_slots.take():
-            cp = enrich_mod.enrich(inn)
+            # rnp_offline=True: a direct card lookup must not wait on the 60 s РНП Crawl-delay pause
+            # (research/SOURCES.md, D-154) — only the РНП pass `prefetch --rnp` asks it live.
+            cp = enrich_mod.enrich(inn, rnp_offline=True)
     except KeyError as e:
         raise HTTPException(404, "контрагент не найден") from e
     except (CaptchaRequired, TimeoutError, httpx.HTTPError) as e:
@@ -369,15 +371,18 @@ def api_export(query: Query) -> StreamingResponse:
     ws = wb.active
     assert ws is not None
     ws.title = "Поставщики"
-    ws.append(["Блок", "Наименование", "ИНН", "Роль", "ЮЛ/ИП", "Регион", "МСП", "Score", "Почему в списке",
-               "Источники"])
+    # «Место» — the order of the block («С опытом» — the ranker's, D-103); «Релевантность» — the formula of the
+    # components, as the card's sum (D-156): a lower row may have a higher one, «Выше следующего» says why
+    ws.append(["Блок", "Наименование", "ИНН", "Роль", "ЮЛ/ИП", "Регион", "МСП", "Место в блоке",
+               "Релевантность (формула критериев)", "Выше следующего", "Почему в списке", "Источники"])
     for block, rows in (("С опытом госзакупок", res.history), ("Новые из открытых источников", res.discovered)):
-        for m in rows:
+        for place, m in enumerate(rows, 1):
             cp = m.counterparty
             ws.append([
                 block, cp.name, cp.inn or "ИНН не подтверждён",
                 KIND_LABEL[kind_of(cp)], ENTITY_LABEL.get(entity_of(cp) or "", "не определено"), cp.region or "",
-                {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], round(m.score, 3),
+                {True: "да", False: "нет", None: "не проверено"}[cp.is_msp], place, round(m.score, 3),
+                m.rank_reason or "",
                 "; ".join(c.explanation for c in m.components),
                 "; ".join(f"{e.source}: {e.url}" for e in cp.evidence),
             ])
