@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from datetime import date
 from pathlib import Path
@@ -115,6 +116,15 @@ def test_store_rows_are_identical(loaded):
     assert pg.lot_codes([1, 2, 3, 6]) == pq.lot_codes([1, 2, 3, 6])
     assert pg.lot_codes([]) == pq.lot_codes([]) == []
     assert pg.lot_names(1) == pq.lot_names(1) and pq.lot_names(1)
+    # #293: the prefetch order and the backtest baselines (row order is not part of these two tables)
+    assert pg.top_suppliers(50) == pq.top_suppliers(50) and pq.top_suppliers(50)
+    keys = [("lot_id", "ascending"), ("inn", "ascending"), ("customer_inn", "ascending")]
+    for as_of in (None, CUTOFF):
+        a, b = pq.participations(as_of), pg.participations(as_of)
+        assert a.num_rows and a.schema == b.schema and a.sort_by(keys).equals(b.sort_by(keys))
+    by = [("lot_id", "ascending"), ("l4", "ascending"), ("l2", "ascending")]
+    a, b = pq.lot_classes(), pg.lot_classes()
+    assert a.num_rows and a.sort_by(by).equals(b.sort_by(by))
 
 
 @needs_pg
@@ -195,7 +205,7 @@ def test_strict_postgres_without_db_is_unavailable(search_data, monkeypatch):
 
 
 def test_lot_hits_keep_the_best_document_per_lot(search_data):
-    idx = index_mod.get_index(search_data, None)
+    idx = index_mod.get_index(store_mod.ParquetStore(search_data), None)
     hits = idx.retrieve(["бумаг", "офисн", "a4"], 50)
     lots = idx.lot_hits(hits)
     assert len(set(lots.lot_id.tolist())) == len(lots)
@@ -234,3 +244,52 @@ def test_database_down_after_start_is_503_and_auto_falls_back(loaded, use, monke
     assert store_mod.get_store().name == "parquet"  # forgotten, auto re-checked and fell back
     assert client.get("/api/lot/6").json()["query_id"] == "lot-6"
     assert client.post("/api/search", json={"query_id": "q", "text": "бумага"}).json()["history"]
+
+
+ROOT = Path(__file__).resolve().parents[2]
+# Organizers' data only through Store (#293): the files that may still read parquet directly, and why.
+DIRECT_PARQUET_OK = {
+    "src/match/store.py": "the seam itself (ParquetStore)",
+    "src/db/load.py": "loads the ingest into Postgres",
+    "src/db/pool.py": "the SMB pool: its own parquet, loaded into Postgres",
+    "src/ingest/okpd2.py": "builds data/processed/okpd2.parquet from items.parquet — part of the ingest",
+    "src/eval/thin.py": "one-off tool (#293: not touched)",
+    "src/eval/okpd2_predict.py": "one-off tool (#293: not touched)",
+    "src/eval/emb_bench.py": "the GPU embedding bench (#115), not the product path",
+    "src/sources/msp_dump.py": "the SMB register dump, not organizers' data",
+    "src/sources/fns_opendata.py": "FNS open data, not organizers' data",
+    "src/enrich/discover.py": "waits for PR #131 and #258 — the second part of #293",
+}
+
+
+def test_organizers_data_is_read_only_through_the_store():
+    """A new direct read of the ingest parquet bypasses Postgres (D-054) — add a Store method instead."""
+    pattern = re.compile(r"read_parquet|ParquetStore\(")
+    found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "src").rglob("*.py")
+             if pattern.search(p.read_text(encoding="utf-8"))}
+    assert found <= DIRECT_PARQUET_OK.keys(), f"прямое чтение parquet вне Store: {sorted(found - DIRECT_PARQUET_OK.keys())}"
+    assert DIRECT_PARQUET_OK.keys() <= found, f"уже через Store — убрать из списка: {sorted(DIRECT_PARQUET_OK.keys() - found)}"
+
+
+def test_parquet_store_names_the_command_for_a_missing_table(tmp_path):
+    with pytest.raises(store_mod.StoreUnavailable, match="src.ingest.build"):
+        store_mod.ParquetStore(tmp_path).lot("1")
+    with pytest.raises(store_mod.StoreUnavailable, match="src.ingest.build"):
+        store_mod.ParquetStore(tmp_path).participations(None)
+
+
+def test_baseline_tables_on_the_fixture(search_data):
+    """participations: one row per lot x supplier x customer, valid INNs, strictly before as_of."""
+    pq = store_mod.ParquetStore(search_data)
+    full, past = pq.participations(None), pq.participations(CUTOFF)
+    assert 0 < past.num_rows < full.num_rows and full.schema == store_mod.PARTICIPATIONS
+    con = duckdb.connect()
+    con.register("p", past)
+    assert con.execute("SELECT count(*) FROM (SELECT DISTINCT lot_id, inn, customer_inn FROM p)").fetchone()[0] \
+        == past.num_rows
+    dates = con.execute(
+        f"SELECT max(publish_date) FROM read_parquet('{(search_data / 'participants.parquet').as_posix()}') "
+        "WHERE lot_id IN (SELECT lot_id FROM p)").fetchone()[0]
+    assert dates < CUTOFF
+    classes = pq.lot_classes()
+    assert classes.num_rows and classes.schema == store_mod.LOT_CLASSES and None not in classes.column("l2").to_pylist()

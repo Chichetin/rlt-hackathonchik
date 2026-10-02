@@ -18,6 +18,7 @@ from src.contracts import Query
 from src.eval import okpd2_predict
 from src.ingest.build import build
 from src.match import index as index_mod
+from src.match.store import ParquetStore
 from src.match import search as search_mod
 from src.match.search import search
 from src.match.store import get_store
@@ -166,7 +167,7 @@ def test_no_codes_at_all_means_no_class(own_data):
 def test_position_codes_are_built_once_next_to_the_index(own_data, monkeypatch):
     own_data([(1, "2024-02-01", "Поставка", [("Бумага офисная", PAPER), ("Краска красная", PAINT)])])
     assert predicted("бумага офисная") == PAPER
-    idx = index_mod.get_index(index_mod.processed_dir(), None)
+    idx = index_mod.get_index(ParquetStore(index_mod.processed_dir()), None)
     sidecar = idx.path / search_mod.DOC_CODES
     assert sidecar.exists() and not list(idx.path.glob("*.tmp*"))
     stamp = sidecar.stat().st_mtime_ns
@@ -178,7 +179,7 @@ def test_position_codes_are_built_once_next_to_the_index(own_data, monkeypatch):
 def test_read_only_index_dir_still_predicts(own_data, tmp_path, monkeypatch):
     """docker-compose mounts indexes read-only: the sidecar goes to the temp directory."""
     own_data([(1, "2024-02-01", "Поставка", [("Бумага офисная", PAPER), ("Краска красная", PAINT)])])
-    idx = index_mod.get_index(index_mod.processed_dir(), None)
+    idx = index_mod.get_index(ParquetStore(index_mod.processed_dir()), None)
     monkeypatch.setattr(search_mod.tempfile, "gettempdir", lambda: str(tmp_path / "tmp"))
     idx.path.chmod(0o555)
     try:

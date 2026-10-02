@@ -14,6 +14,7 @@ import pytest
 
 from src.contracts import Query
 from src.match import index as index_mod
+from src.match.store import ParquetStore
 from src.match import pg_retriever
 from src.match import search as search_mod
 from tests.unit.test_db_embed import fake_encode
@@ -121,7 +122,7 @@ def pg_vectors(search_data, monkeypatch):
 
 @needs_pg
 def test_vector_half_never_returns_documents_after_as_of(search_data, pg_vectors):
-    idx = index_mod.get_index(search_data, CUTOFF)
+    idx = index_mod.get_index(ParquetStore(search_data), CUTOFF)
     texts = dict(zip(*[c.to_pylist() for c in __import__("pyarrow.parquet", fromlist=["x"]).read_table(
         idx.path / "texts.parquet", columns=["doc_id", "text"]).columns], strict=True))
     docs = pg_retriever.vector_docs(idx, "Ручки шариковые")

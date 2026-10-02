@@ -14,9 +14,13 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
 from src.ingest.build import DEFAULT_OUT
+
+if TYPE_CHECKING:  # src.match.search imports this module: no import of src.match at load time
+    from src.match.store import Store
 
 STATS_KEYS = (
     "lots_participated",
@@ -81,16 +85,16 @@ def _stats(row: dict) -> dict[str, float | int | str]:
     return out
 
 
-def counterparties(
-    inns: list[str], as_of: date | None = None, processed: Path = DEFAULT_OUT
-) -> dict[str, Counterparty]:
-    """Counterparty per INN found in the history before as_of (ingest parquet); unknown INNs are absent."""
-    from src.match.store import ParquetStore
+def counterparties(inns: list[str], as_of: date | None = None, store: Store | None = None) -> dict[str, Counterparty]:
+    """Counterparty per INN found in the history before as_of; unknown INNs are absent.
+
+    `store`: where organizers' data is read (#293) — default the store of the environment, as search() reads."""
+    from src.match.store import get_store
 
     if not inns:
         return {}
-    suppliers_path(as_of, processed)  # the error names the command that builds it
-    return from_rows(ParquetStore(processed).supplier_rows(inns, as_of), built_at(processed))
+    store = store or get_store()
+    return from_rows(store.supplier_rows(inns, as_of), store.built_at())  # StoreUnavailable names the command
 
 
 def from_rows(rows: list[dict], fetched: datetime) -> dict[str, Counterparty]:
