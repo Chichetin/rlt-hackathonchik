@@ -61,6 +61,8 @@ def _run(query: Query, cache: SourceCache, gisp_dir: Path, pairs: list[dict] | N
         pairs.extend(_pair(query, m) for m in backed)
     fails = sum(bool(check_counterparty(m.counterparty, cache.page_text)) for m in backed)
     return {"new": len(shown), "fit1": sum(m.components[0].value >= 1.0 for m in shown), "gisp": len(backed),
+            "gisp_1_0": sum(res.relation.get(m.counterparty.inn or "") == "registry" for m in backed),
+            "gisp_0_8": sum(res.relation.get(m.counterparty.inn or "") == "registry_kind" for m in backed),
             "gisp_only": sum(not any(e.source != gisp.SOURCE for e in m.counterparty.evidence) for m in backed),
             "evidence_fail": fails}
 
@@ -100,13 +102,15 @@ def main(argv: list[str] | None = None) -> int:
     with_code = [p for p in per if p["okpd2"]]
 
     def lots(when: str, key: str) -> int:
-        return sum(p[when][key] > 0 for p in per)
+        return sum(p[when].get(key, 0) > 0 for p in per)
 
     summary = {
         "lots": len(per), "lots_with_okpd2": len(with_code),
         "lots_with_new": {"before": lots("before", "new"), "after": lots("after", "new")},
         "lots_with_fit1": {"before": lots("before", "fit1"), "after": lots("after", "fit1")},
         "lots_with_gisp_fit1": {"before": lots("before", "gisp"), "after": lots("after", "gisp")},
+        "lots_with_gisp_step_1_0": lots("after", "gisp_1_0"),
+        "lots_with_gisp_step_0_8": lots("after", "gisp_0_8"),
         "lots_with_gisp_only_company": lots("after", "gisp_only"),
         "gisp_candidates_in_top10": sum(p["after"]["gisp"] for p in per),
         "gisp_candidates_evidence_fail": sum(p["after"]["evidence_fail"] for p in per),
