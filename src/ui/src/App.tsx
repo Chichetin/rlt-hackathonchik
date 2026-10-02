@@ -26,6 +26,7 @@ import {
   KIND_LABEL,
   LotError,
   regionLabel,
+  rnpLabel,
   search,
   type SearchPage,
   STAT_LABEL,
@@ -1212,7 +1213,7 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
         <dt>МСП</dt>
         <dd>{yesNo(cp.is_msp)}</dd>
         <dt>В РНП</dt>
-        <dd>{yesNo(cp.in_rnp)}</dd>
+        <dd>{rnpLabel(cp)}</dd>
         {customerRegion && relationToCustomer(cp, customerRegion) && (
           <>
             <dt>Относительно заказчика</dt>
