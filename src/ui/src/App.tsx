@@ -398,6 +398,8 @@ export function App() {
   // #242: the customer's region when the INN is not given (goes to Query.region); with an INN the server takes it from there
   const [customerRegion, setCustomerRegion] = useState(saved.customerRegion ?? "Санкт-Петербург");
   const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // #617: the procedure number (Извещения.procedure_id) — the search takes the query from its notice
+  const [procedureInput, setProcedureInput] = useState("");
   const resetLot = () => {
     setLot(null);
     setLotQueryId(undefined);
@@ -407,11 +409,16 @@ export function App() {
   // the query of a loaded lot, for a search that must not wait for the form state to update
   type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
 
-  async function loadLot(id: string = lotId, auto = false): Promise<Ready | null> {
+  async function loadLot(id: string = lotId, auto = false, by: "lot" | "procedure" = "lot"): Promise<Ready | null> {
     if (!id.trim()) return null;
     setLotMsg(null);
+    const what = by === "procedure" ? "Процедура" : "Закупка";
+    const typed = id.trim();
     try {
-      const q = await fetchLot(id);
+      const q = await fetchLot(id, by);
+      // a procedure opens its lot: the lot number goes to the link and the backtest (query_id is lot-<lot_id>)
+      if (by === "procedure") id = q.query_id.replace(/^lot-/, "");
+      setLotId(id);
       setText(q.text);
       setOkpd2Input("");
       setBudget(q.budget ? String(q.budget) : "");
@@ -419,7 +426,7 @@ export function App() {
       setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget, as_of: q.as_of });
       setLotQueryId(q.query_id);
       const dated = q.as_of ? ` от ${new Date(q.as_of).toLocaleDateString("ru-RU")} — история до этой даты` : "";
-      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}${dated}: запрос заполнен из извещения.${auto ? "" : " Проверьте и нажмите «Найти поставщиков»."}` });
+      setLotMsg({ kind: "ok", text: `${what} ${typed}${dated}: запрос заполнен из извещения.${auto ? "" : " Проверьте и нажмите «Найти поставщиков»."}` });
       const budgetText = q.budget ? String(q.budget) : "";
       const lotCtx = { okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget, as_of: q.as_of };
       return {
@@ -435,15 +442,25 @@ export function App() {
       const st = e instanceof LotError ? e.status : 0;
       const why =
         st === 404
-          ? "Закупка с таким номером не найдена в данных."
-          : st === 503
+          ? by === "procedure" ? "Процедура с таким номером не найдена в загруженных файлах выгрузки." : "Закупка с таким номером не найдена в данных."
+          : st === 409
+            ? "Файлы выгрузки не загружены: загрузите Извещения и ТРУ (Потоварку) в блоке тестовой выгрузки, поиск по номеру процедуры идёт по ним."
+            : st === 503
             ? "Данные закупок на сервере не подключены."
             : st === 422
-              ? "Номер закупки — только цифры (lot_id или реестровый номер)."
-              : `Не удалось загрузить закупку: ${String(e)}.`;
+              ? by === "procedure" ? "Номер процедуры — только цифры." : "Номер закупки — только цифры (lot_id или реестровый номер)."
+              : `Не удалось загрузить ${by === "procedure" ? "процедуру" : "закупку"}: ${String(e)}.`;
       setLotMsg({ kind: "err", text: `${why} Введите название товара или код ОКПД2 в форме поиска.` });
       return null;
     }
+  }
+
+  // the form's submit: a procedure number not loaded yet opens its notice first (#617), then the search runs
+  async function submit() {
+    const procedure = procedureInput.trim();
+    if (!procedure || lot) return run();
+    const ready = await loadLot(procedure, true, "procedure");
+    if (ready) await run(filters, ready);
   }
 
   // a procedure of the uploaded test export (#207): load it by number and search at once
@@ -654,6 +671,7 @@ export function App() {
     setFilters(NO_FILTERS);
     setText("");
     setOkpd2Input("");
+    setProcedureInput("");
     setLotId("");
     setBudget("");
     setCustomerInn("");
@@ -802,7 +820,7 @@ export function App() {
         className="query"
         onSubmit={(e) => {
           e.preventDefault();
-          void run();
+          void submit();
         }}
       >
         <div className="query-main">
@@ -821,21 +839,30 @@ export function App() {
           placeholder="Например: офисная мебель, столы для переговорной"
           onChange={(e) => {
             setText(e.target.value);
+            setProcedureInput("");
             resetLot();
           }}
         />
         <p id="query-help" className="hint">Можно добавить характеристики: размер, материал, назначение.</p>
+        <div className="query-codes">
         <label className="product-code-field" htmlFor="product-code">Код ОКПД2
           <input id="product-code" aria-label="Код ОКПД2" value={okpd2Input} placeholder="Например: 31.01.11.150" aria-describedby="product-code-help"
-            onChange={e => { setOkpd2Input(e.target.value); resetLot(); }} />
+            onChange={e => { setOkpd2Input(e.target.value); setProcedureInput(""); resetLot(); }} />
           <small id="product-code-help">Заполните название, код или оба поля.</small>
         </label>
+        <label className="product-code-field" htmlFor="procedure-id">Номер процедуры
+          <input id="procedure-id" aria-label="Номер процедуры" value={procedureInput} inputMode="numeric" placeholder="Например: 1841706"
+            aria-describedby="procedure-id-help" onChange={e => { setProcedureInput(e.target.value); resetLot(); }} />
+          <small id="procedure-id-help">Процедура АИС ГЗ или Электронного магазина: возьмём предмет, ОКПД2, НМЦК и заказчика из извещения.</small>
+        </label>
+        </div>
         <div className="actions product-search-action">
-          <button type="submit" disabled={(!text.trim() && !okpd2Input.trim()) || state === "loading"}><SearchIcon />{state === "loading" ? "Ищем…" : "Найти поставщиков"}</button>
+          <button type="submit" disabled={(!text.trim() && !okpd2Input.trim() && !procedureInput.trim()) || state === "loading"}><SearchIcon />{state === "loading" ? "Ищем…" : "Найти поставщиков"}</button>
         </div>
         <ExampleWheel onConfirm={() => document.getElementById("q")?.focus()} options={EXAMPLES} value={lot ? "" : text} onChange={example => {
           setText(example);
           setOkpd2Input("");
+          setProcedureInput("");
           resetLot();
         }} />
         </div>
