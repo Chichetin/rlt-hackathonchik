@@ -38,5 +38,5 @@ check(overflow.length===0,'All architecture labels fit inside their nodes');
 check(await page.locator('#s4 .architecture-links [marker-end] path').count()===4,'Data feed arrows have explicit endpoints');
 check(await page.locator('button,dialog').count()===0,'No mouse-only controls');
 check((await page.locator('#s6 .hill-value').allTextContents()).join('/')==='1×/3,0×','Chart labels use normalized new-winner comparison');
-check(text('b1').includes('0.50 F')&&text('b1').includes('0.10 G')&&cfg.includes('product_fit: 0.5')&&cfg.includes('geography: 0.1'),'Reserve formula agrees with current upstream weights');
+check(text('b1').includes('0.40 F')&&text('b1').includes('0.08 P')&&cfg.includes('product_fit: 0.4')&&cfg.includes('price: 0.08'),'Reserve formula agrees with current upstream weights');
 const report={checked_at:new Date().toISOString(),checks,overflow};fs.writeFileSync(path.join(here,'content-report.json'),JSON.stringify(report,null,2)+'\n');fs.writeFileSync(path.join(here,'slide-content.json'),JSON.stringify(all,null,2)+'\n');await browser.close();console.log(JSON.stringify(report,null,2));if(checks.some(c=>!c.passed))process.exitCode=1;

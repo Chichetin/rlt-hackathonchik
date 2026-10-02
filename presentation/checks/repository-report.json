@@ -1,9 +1,12 @@
 {
   "command": "make check-changed",
-  "upstream": "3ee8298f",
+  "upstream": "3747a954",
   "passed": false,
-  "summary": "25 failed, 1981 passed, 36 skipped",
+  "summary": "38 failed, 1970 passed, 36 skipped",
   "failures": [
+    "tests/unit/test_api.py::test_search_rejects_client_as_of_without_building_an_index",
+    "tests/unit/test_api.py::test_reliability_is_read_for_the_shown_page_and_the_export_rows_only",
+    "tests/unit/test_baselines.py::test_lost_explain_on_fixture - assert No...",
     "tests/unit/test_baselines.py::test_lost_reruns_the_recorded_config_not_the_product_default",
     "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[v1-E-002]",
     "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[H-15a-03-H-15a-03]",
@@ -21,12 +24,22 @@
     "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[R-198-gbm-R-198-gbm]",
     "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[S-282-spell-S-282-on-dev]",
     "tests/unit/test_eval_run.py::test_experiment_entries_reproduce_recorded_configs[S-282-nospell-S-282-off-dev]",
-    "tests/unit/test_eval_seal.py::test_config_hash_changes_with_weights - ...",
     "tests/unit/test_experiment_compat.py::test_legacy_saturation_experiment_keeps_its_recorded_formula",
     "tests/unit/test_experiment_compat.py::test_recorded_routing_experiments_keep_the_original_formula[G-490-free]",
     "tests/unit/test_experiment_compat.py::test_recorded_routing_experiments_keep_the_original_formula[G-490-dev]",
     "tests/unit/test_experiment_compat.py::test_recorded_routing_experiments_keep_the_original_formula[G-490L-free]",
+    "tests/unit/test_okpd2_predict.py::test_index_cli_prebuilds_position_codes_next_to_both_indexes",
+    "tests/unit/test_okpd2_predict.py::test_index_cli_survives_unbuildable_position_codes",
+    "tests/unit/test_price_component.py::test_option_validates_and_is_off_by_default",
+    "tests/unit/test_price_component.py::test_search_price_component_only_with_option",
+    "tests/unit/test_profiles.py::test_search_services_profile_zeroes_geography",
     "tests/unit/test_profiles.py::test_profile_experiment_reproduces_its_recorded_config",
+    "tests/unit/test_reliability.py::test_on_adds_the_weighted_component_to_the_score",
+    "tests/unit/test_reliability.py::test_months_count_to_the_day_before_as_of",
+    "tests/unit/test_search.py::test_unavailable_components_have_zero_weight_and_say_no_data",
+    "tests/unit/test_search.py::test_as_of_hides_later_lots_and_suppliers",
+    "tests/unit/test_search.py::test_as_of_boundary_is_strict - assert False",
+    "tests/unit/test_search_edge.py::test_empty_answer_says_why[body5-422-as_of \\u0437\\u0430\\u0434\\u0430\\u0451\\u0442\\u0441\\u044f \\u0442\\u043e\\u043b\\u044c\\u043a\\u043e \\u0432 backtest]",
     "tests/unit/test_signals.py::test_default_config_has_no_active_signal",
     "tests/unit/test_signals.py::test_incumbent_without_customer_is_noop - ..."
   ],
@@ -37,5 +50,6 @@
     "motion": 18
   },
   "previous_upstream": "0c81afb1",
-  "previous_result": "2004 passed, 36 skipped; check-changed OK"
+  "previous_result": "2004 passed, 36 skipped; check-changed OK",
+  "reviewer": "merge: diff is presentation-only; upstream product failures documented"
 }
