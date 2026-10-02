@@ -220,3 +220,21 @@ test("which files are a template", () => {
   expect(isTemplate(new File([""], "ТРУ_24-25.csv"))).toBe(false);
   expect(isTemplate(new File([""], "Поставщики.csv"))).toBe(false);
 });
+
+test("a template picked together with the export is not sent, a note names it", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (!init?.method) return json({ detail: "нет" }, 404);
+    return json(SET);
+  });
+  render(<TestsetPanel onPick={vi.fn()} busyLot={null} />);
+  await userEvent.click(screen.getByRole("button", { name: "Тестовая выгрузка" }));
+  await userEvent.upload(screen.getByLabelText("Файлы тестовой выгрузки"), [
+    new File(["lot_id;subject\n9001;Бумага\n"], "Извещения_тест.csv", { type: "text/csv" }),
+    new File(["x"], "мои.xlsx"),
+  ]);
+  await screen.findByRole("list", { name: "Процедуры выгрузки" });
+  expect(calls.filter((c) => c.init?.method === "POST").map((c) => c.url)).toEqual(["/api/testset"]);
+  expect(screen.getByText(/Не загружено вместе с выгрузкой организаторов: мои\.xlsx/)).toBeInTheDocument();
+});

@@ -39,6 +39,7 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
   const [drag, setDrag] = useState(false);
   const [filter, setFilter] = useState("");
   const [skipped, setSkipped] = useState(false); // «Поставщики*» were picked and left in the browser
+  const [ignored, setIgnored] = useState<string[]>([]); // template files picked together with the export
   const input = useRef<HTMLInputElement>(null);
   const [preparing, setPreparing] = useState(false);
 
@@ -76,6 +77,7 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
     setSkipped(files.some(isSuppliers));
     const template = files.filter(isTemplate);
     const csv = files.filter((f) => !isSuppliers(f) && !isTemplate(f) && f.name.toLowerCase().endsWith(".csv"));
+    setIgnored(csv.length ? template.map((f) => f.name) : []);
     if (!csv.length && template.length !== 1) {
       setState("error");
       setError(
@@ -101,6 +103,7 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
     await dropTestset().catch(() => undefined);
     setSet(null);
     setSkipped(false);
+    setIgnored([]);
     setState("idle");
     setError("");
   }
@@ -175,6 +178,11 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
         )}
 
         {skipped && <p className="testset-note">Поставщики не загружаем — ответ из него не берём.</p>}
+        {ignored.length > 0 && (
+          <p className="testset-note">
+            Не загружено вместе с выгрузкой организаторов: {ignored.join(", ")} — список закупок по шаблону загружайте отдельно.
+          </p>
+        )}
 
         {state === "error" && (
           <p className="testset-error" role="alert">

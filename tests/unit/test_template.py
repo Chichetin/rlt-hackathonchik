@@ -113,3 +113,9 @@ def test_inn_control_digits():
     assert not T._inn_ok("7707083894")
     assert T._inn_ok("500100732259")  # a valid 12-digit one
     assert not T._inn_ok("12345")
+
+
+def test_xlsx_that_unpacks_too_big_is_refused(monkeypatch):
+    monkeypatch.setattr(T, "MAX_UNZIPPED", 100)
+    with pytest.raises(T.TemplateError, match="распакованном виде"):
+        T.parse("x.xlsx", _xlsx([list(T.HEADERS), ["1", "Бумага", None, None, None]]))

@@ -39,6 +39,7 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi import Query as Param
 from fastapi.responses import JSONResponse
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from pydantic import BaseModel, Field
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -124,8 +125,8 @@ class UploadLimit:
         await self.app(scope, receive, send)
 
 
-def _too_big() -> str:
-    return f"файлы больше {MAX_UPLOAD_BYTES / 1024 / 1024:g} МБ вместе — загрузите только Извещения и ТРУ"
+def _too_big(hint: str = "загрузите только Извещения и ТРУ") -> str:
+    return f"файлы больше {MAX_UPLOAD_BYTES / 1024 / 1024:g} МБ вместе — {hint}"
 
 
 def _base(name: str) -> str:
@@ -285,7 +286,7 @@ def upload_template(body: UploadTemplateRequest) -> UploadedTestset:
     except (binascii.Error, ValueError) as e:
         raise HTTPException(422, "файл не передан (ожидается base64)") from e
     if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, _too_big())
+        raise HTTPException(413, _too_big("разбейте список закупок на несколько файлов"))
     name = _base(body.name)
     try:
         parsed = template_mod.parse(name, data)
@@ -360,6 +361,11 @@ def _predict(top: int) -> tuple[str, Path, TestSet, bytes]:
 ERROR_HEADERS = ("Строка файла", "Номер закупки", "Что не так", "Итог")
 
 
+def _xl(row: list) -> list:
+    """A row for openpyxl: no control characters (IllegalCharacterError), «=…» stays text (csv_cell)."""
+    return [predict_mod.csv_cell(ILLEGAL_CHARACTERS_RE.sub("", v)) if isinstance(v, str) else v for v in row]
+
+
 @router.get("/api/testset/predict.xlsx", response_class=Response,
             responses={200: {"content": {XLSX: {}}, "description": "листы «Рекомендации» и «Ошибки»"},
                        404: {"description": "набор не загружен"}})
@@ -371,7 +377,7 @@ def predict_xlsx(top: int = Param(10, ge=1, le=50, description="кандидат
     assert ws is not None
     ws.title = "Рекомендации"
     for row in csv.reader(io.StringIO(data.decode("utf-8-sig")), delimiter=";"):
-        ws.append(row)  # the cells are csv_cell'ed: «=…» already has the «'» prefix, no formula
+        ws.append(_xl(row))
     err = wb.create_sheet("Ошибки")
     err.append(list(ERROR_HEADERS))
     try:
@@ -379,12 +385,12 @@ def predict_xlsx(top: int = Param(10, ge=1, le=50, description="кандидат
     except (OSError, ValueError):
         meta = {}
     for e in meta.get("errors", []):
-        err.append([e["row"], e["reqnum"], e["reason"], "подобрано без этого значения" if e["kept"] else
-                    "строка не принята"])
+        err.append(_xl([e["row"], e["reqnum"], e["reason"], "подобрано без этого значения" if e["kept"] else
+                        "строка не принята"]))
     for lot in ts.lots:
         row = int(lot.lot_id) if "errors" in meta and lot.lot_id.isdigit() else ""
         for n in lot.notes:
-            err.append([row, lot.reqnum or lot.lot_id, n, "подобрано с ограничением"])
+            err.append(_xl([row, lot.reqnum or lot.lot_id, n, "подобрано с ограничением"]))
     buf = io.BytesIO()
     wb.save(buf)
     return Response(buf.getvalue(), media_type=XLSX,

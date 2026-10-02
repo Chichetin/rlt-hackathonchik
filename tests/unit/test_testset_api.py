@@ -329,3 +329,20 @@ def test_template_upload_errors(client):
 
 def test_predict_xlsx_needs_a_set(client):
     assert client.get("/api/testset/predict.xlsx").status_code == 404
+
+
+def test_template_row_number_wins_over_a_users_number(client):
+    # the user's «Номер закупки» 3 is row 2; row 3 has its own subject: a pick by lot_id must open row 3
+    text = "Номер закупки;Предмет закупки\n3;Бумага\n7;Ремонт кровли\n"
+    assert client.post("/api/testset/template", json=_template_body("l.csv", text.encode())).status_code == 200
+    assert client.get("/api/lot/3").json()["text"] == "Ремонт кровли"
+    assert client.get("/api/lot/7").json()["text"] == "Ремонт кровли"  # the user's number still finds its row
+
+
+def test_errors_sheet_is_text_not_formulas(client, search_data):
+    text = "Номер закупки;Предмет закупки;ИНН заказчика\n=1+1;Бумага\x02 офисная;123\n"
+    assert client.post("/api/testset/template", json=_template_body("l.csv", text.encode())).status_code == 200
+    x = client.get("/api/testset/predict.xlsx?top=3")
+    assert x.status_code == 200, x.text  # a control character from the data does not break the book
+    err = load_workbook(io.BytesIO(x.content))["Ошибки"]
+    assert all(c.data_type != "f" for row in err.iter_rows() for c in row)

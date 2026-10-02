@@ -22,6 +22,8 @@ from src.ingest.testset import ITEM_COLUMNS, NOTICE_COLUMNS
 
 SHEET = "Закупки"
 MAX_ROWS = 10_000
+MAX_COLS = 50
+MAX_UNZIPPED = 200 * 1024 * 1024  # a small .xlsx may unpack to gigabytes (zip bomb)
 HEADERS = ("Номер закупки", "Предмет закупки", "ОКПД2", "ИНН заказчика", "НМЦК, руб.")
 FIELDS = ("reqnum", "subject", "okpd2", "customer_inn", "start_price")
 # normalized header (casefold, ё -> е, letters, digits and № only) -> field
@@ -106,17 +108,27 @@ def _cell(value: object) -> str:
 
 
 def _xlsx_rows(data: bytes) -> list[list[str]]:
+    unreadable = "файл не читается как .xlsx — сохраните его в Excel заново или как CSV"
     try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            if sum(i.file_size for i in z.infolist()) > MAX_UNZIPPED:
+                raise TemplateError("файл .xlsx слишком большой в распакованном виде — оставьте только лист закупок")
         wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except (zipfile.BadZipFile, KeyError, ValueError, OSError) as e:
-        raise TemplateError("файл не читается как .xlsx — сохраните его в Excel заново или как CSV") from e
-    ws = wb[SHEET] if SHEET in wb.sheetnames else wb.worksheets[0]
+        if isinstance(e, TemplateError):
+            raise
+        raise TemplateError(unreadable) from e
     rows: list[list[str]] = []
-    for values in ws.iter_rows(values_only=True):
-        rows.append([_cell(v) for v in values])
-        if len(rows) > MAX_ROWS + 1:
-            break
-    wb.close()
+    try:
+        ws = wb[SHEET] if SHEET in wb.sheetnames else wb.worksheets[0]
+        for values in ws.iter_rows(max_col=MAX_COLS, values_only=True):
+            rows.append([_cell(v) for v in values])
+            if len(rows) > MAX_ROWS + 1:
+                break
+    except Exception as e:  # broken sheet XML (ParseError), a book without sheets: the user's file, not our bug
+        raise TemplateError(unreadable) from e
+    finally:
+        wb.close()
     return rows
 
 
