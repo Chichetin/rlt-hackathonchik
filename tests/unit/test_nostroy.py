@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import httpx
@@ -35,7 +36,7 @@ def cache(tmp_path) -> SourceCache:
     return SourceCache(tmp_path / "c.sqlite")
 
 
-def _client(answers: dict[str, object], seen: list[dict] | None = None) -> httpx.Client:
+def _client(answers: Mapping[str, object], seen: list[dict] | None = None) -> httpx.Client:
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         if seen is not None:
