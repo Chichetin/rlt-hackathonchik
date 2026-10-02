@@ -11,7 +11,7 @@ history (names of the items of the lots it took part in before the cutoff) conta
     python -m src.eval.judge_hist score --exp J-301 -> eval/results/J-301.json: precision@10 per system, paired delta
 
 The packets hold neither the system, the rank nor the INN: candidates are shuffled and keyed c01…; the map
-key → INN and the ranked lists per system are copied by import into the tracked labels file (eval/labels/judge_hist.json).
+key → INN and the ranked lists per system are copied by import into the tracked labels file.
 """
 
 from __future__ import annotations
