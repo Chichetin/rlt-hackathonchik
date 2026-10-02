@@ -303,7 +303,24 @@ def _found(query: Query, uncached: set[str] | None = None) -> pipeline.Picked:
                                  "или база не отвечает") from e
     if uncached is not None:
         uncached.update(res.uncached)
+    res.matches = by_score(res.matches)
     return res
+
+
+def by_score(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
+    """The shown order is the shown score, descending (#624, the human's decision 02.10): a lower score never
+    stands above a higher one. The model's order (ranker, order_weights D-201) only breaks ties — sorted() is
+    stable. «Выше следующего» (rank_reason) stays only where the neighbour below is the one it was written for."""
+    out: list[CounterpartyMatch] = []
+    for origin in ("history", "discovered"):
+        group = [m for m in matches if m.origin == origin]
+        below = {id(a): id(b) for a, b in zip(group, group[1:], strict=False)}
+        ranked = sorted(group, key=lambda m: -m.score)
+        for i, m in enumerate(ranked):
+            nxt = id(ranked[i + 1]) if i + 1 < len(ranked) else None
+            same = m.rank_reason is None or below.get(id(m)) == nxt
+            out.append(m if same else m.model_copy(update={"rank_reason": None}))
+    return out + [m for m in matches if m.origin not in ("history", "discovered")]
 
 
 def _verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
