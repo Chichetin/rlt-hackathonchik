@@ -1,8 +1,8 @@
 {
   "exp_id": "J-301",
   "part": "dev_fresh_free_text(n=50,seed=301)",
-  "created_at": "2026-10-02T03:44:08+00:00",
-  "commit": "a9854435ea103b505fee243467fb2c6a9d9803fe",
+  "created_at": "2026-10-02T03:45:27+00:00",
+  "commit": "e15779622e38246abac41ed829caca951464ad16",
   "dirty": false,
   "config": {
     "judge_model": "claude-opus-5-5",
@@ -15,11 +15,14 @@
     "seed": 301,
     "pool": 300,
     "names_per_supplier": 15,
+    "internal_only": true,
+    "human_agreement": null,
+    "decision": "D-133",
     "tokenizer": "prefix5"
   },
   "tokenizer_version": "prefix5-v1",
   "exact_docs": 20,
-  "config_sha256": "7592d7a5a9757b0cf3d678115547b32ce4a5ebad8ac964183f3c97db7e33785c",
+  "config_sha256": "7cf4aed74946c77c42216470d280cebd0a1c7ea69a7ab4c74d6f726408b81357",
   "stub": false,
   "vectors": null,
   "store": "parquet",
