@@ -259,8 +259,8 @@ def test_office_paper_is_not_a_till_roll(gdir, cache, tmp_path):
 def test_short_and_service_stems_do_not_make_a_match(gdir, cache, tmp_path):
     """Review of PR #429: «при», «лот», «мнн», «препараты», «медицинские» matched unrelated products. Stems of ≤ 3
     letters and service words do not count; the lot's title with the customer is not read."""
-    assert D.query_stems("Поставка папок для нужд ГБОУ (Лот №3); Бахилы одноразовые при МНН препараты медицинские") \
-        == ["бахил"]
+    assert D.query_stems("Поставка папок для нужд ГБОУ (Лот №3); Бахилы одноразовые при МНН препараты медицинские; "
+                         "средства защиты электрические материалы") == ["бахил"]
     res = D.discover(_query(text="Поставка папок для нужд ГБОУ; при лот мнн №5 препараты медицинские"), cache=cache,
                      weights=WEIGHTS, processed=_processed(tmp_path, []), offline=True)
     assert res.matches == []  # ЭКО-НЕВА has this very code, but no word of the items is in its product's name
@@ -404,3 +404,13 @@ def test_card_of_any_supplier_gets_the_registry_role_once(gdir, cache):
     assert other == cards[1]
     again = add_open_data([poly], cache)[0]
     assert again.evidence == poly.evidence
+
+
+def test_a_card_with_registry_facts_gets_no_second_role(gdir, cache):
+    """Discovery gave the card the product of the lot (10487155); the card's add_open_data() reads the INN's first
+    product by registry number (10487154) — it must not add a second role fact."""
+    found = gisp.counterparty(EKO, gisp.by_okpd2(["17.23.13.130"], gdir)[EKO], cache, gdir)
+    assert found is not None
+    card = add_open_data([found], cache)[0]
+    assert card.evidence == found.evidence
+    assert sum(e.fact.startswith("Роль") for e in card.evidence) == 1
