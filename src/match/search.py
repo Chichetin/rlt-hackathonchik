@@ -127,13 +127,6 @@ def scoring_options(cfg: dict) -> dict:
     return out
 
 
-def no_customer_options(cfg: dict) -> dict:
-    """Scoring options of the path without a customer and without the ranker (#511): `no_customer_options:` of the
-    config over `options:`. The ranker reads the components as features (#198) and was trained on `options:`, so
-    these apply only where the formula itself orders the answer: free text without a customer (#490)."""
-    return scoring_options({"options": {**(cfg.get("options") or {}), **(cfg.get("no_customer_options") or {})}})
-
-
 def hybrid_short(cfg: dict) -> dict | None:
     """`hybrid_short:` of the config checked (#485): {model, max_words, scores}; None when the block is absent."""
     raw = cfg.get("hybrid_short")
@@ -163,6 +156,13 @@ def routed(cfg: dict, text: str) -> dict:
     if not STRICT_RETRIEVER and not get_settings().database_url.startswith("postgres"):
         return cfg
     return {**cfg, "retriever": "pg_hybrid", "embedding_model": hs["model"], "hybrid_scores": hs["scores"]}
+
+
+def no_customer_options(cfg: dict) -> dict:
+    """Scoring options of the path without a customer and without the ranker (#511): `no_customer_options:` of the
+    config over `options:`. The ranker reads the components as features (#198) and was trained on `options:`, so
+    these apply only where the formula itself orders the answer: free text without a customer (#490)."""
+    return scoring_options({"options": {**(cfg.get("options") or {}), **(cfg.get("no_customer_options") or {})}})
 
 
 def check_config(cfg: dict) -> dict:

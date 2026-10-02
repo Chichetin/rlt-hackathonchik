@@ -1,0 +1,19 @@
+{
+ "recorded_at": 1790937617,
+ "url": "https://grp.nalog.gov.by/api/grp-public/data?unp=100026583&charset=UTF-8&type=json",
+ "answer": {
+  "row": {
+   "vunp": "100026583",
+   "vnaimp": "Закрытое акционерное общество \"ВИТЭКС\"",
+   "vnaimk": "ЗАО \"ВИТЭКС\"",
+   "vpadres": "г. Минск,ул. Смирнова, д.2, ком. 202",
+   "dreg": "1993-12-10",
+   "nmns": "104",
+   "vmns": "Инспекция МНС по Московскому району г.Минска ",
+   "ckodsost": "1",
+   "vkods": "Действующий",
+   "dlikv": null,
+   "vlikv": null
+  }
+ }
+}
