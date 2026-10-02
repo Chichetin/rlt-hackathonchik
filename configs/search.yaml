@@ -68,7 +68,10 @@ signals:
 # на свободном тексте без него R-198 хуже v2: dev 2 000, `--free-text`, winner@10 0.425 → 0.467
 # (eval/results/G-490-free-off.json → G-490-free.json); R-long: 0.413 → 0.467, Δ +0.055 [+0.037, +0.071]
 # (G-490L-free-off.json → G-490L-free.json, research/EXPERIMENTS.md, строка G-490).
-ranker: {kind: lgbm, model: models/ranker/R-long-gbm.txt, customer_only: true}
+# model_weight (#630, решение человека 02.10, подтверждение №3): оценка модели (min-max внутри выдачи) — 7-я компонента
+# балла «Оценка модели» с этим весом, веса выше × (1 − model_weight); балл = Σ вес · значение, выдача — по баллу.
+# Метрики R-long выше считались до #630 (порядок — модель): перезапуск eval — на стенде.
+ranker: {kind: lgbm, model: models/ranker/R-long-gbm.txt, customer_only: true, model_weight: 0.5}
 # Профили весов по типу закупки (#104, src/match/profiles.py): тип — по классу ОКПД2 запроса (явного или
 # предсказанного): товар — 01–32, 35; работы/услуги — 33, 36–99; смешанный или неизвестный — веса выше.
 # Значения — правки поверх weights, например {goods: {geography: 0.048}}. Пусто = один набор weights для всех;

@@ -151,7 +151,7 @@ def scoring_options(cfg: dict) -> dict:
         if isinstance(out[name], bool) or not isinstance(out[name], int) or out[name] < 1:
             raise ValueError(f"options.{name} = {out[name]!r}: ожидается целое число ≥ 1")
     ow = out["order_weights"]
-    if not isinstance(ow, dict) or set(ow) - set(get_args(ComponentName)) or any(
+    if not isinstance(ow, dict) or set(ow) - (set(get_args(ComponentName)) - {"model"}) or any(
             isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v) or v < 0
             for v in ow.values()) or (ow and sum(ow.values()) <= 0):
         raise ValueError(f"options.order_weights = {ow!r}: ожидается {{критерий: вес ≥ 0}}")
@@ -780,7 +780,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
             why = "ранжировщик недоступен — порядок по формуле v2"
             fallback.set_note(f"{prev}; {why}" if prev else why)
         else:
-            return ranker.rerank(model, out, rows, k)
+            return ranker.rerank(model, out, rows, k, rk["model_weight"])
     # #612: an equal order key goes by the score the card shows, then as options.tie_break says
     keys = ({id(m): (o, m.score) for m, o in zip(out, order_of, strict=True)} if order_w
             else {id(m): (m.score, m.score) for m in out})

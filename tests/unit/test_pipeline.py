@@ -118,7 +118,8 @@ def test_rank_reason_compares_with_the_neighbour_left_after_the_filters(no_cache
     model = tmp_path / "lr.json"
     model.write_text(json.dumps({"features": ranker.NAMES, "fill": [0.0] * n, "mean": [0.0] * n, "std": [1.0] * n,
                                  "coef": coef.tolist(), "intercept": 0.0}), encoding="utf-8")
-    cfg = {**search_mod.load_config(), "ranker": {"kind": "logreg", "model": str(model)}}
+    # model_weight 1.0 (#630): the score is the model's component alone, its feature is the reason
+    cfg = {**search_mod.load_config(), "ranker": {"kind": "logreg", "model": str(model), "model_weight": 1.0}}
     got: list = []
     search_mod.search(_query(), k=search_mod.CANDIDATES, config={k: v for k, v in cfg.items() if k != "ranker"},
                       features_out=got)
@@ -126,7 +127,9 @@ def test_rank_reason_compares_with_the_neighbour_left_after_the_filters(no_cache
     before = pipeline.pick(_query(), config=cfg).history
     first, second, third = (m.counterparty.inn for m in before[:3])
     assert first and second and third and lots[first] != lots[third]  # preconditions of the fixture
-    want = f"выше следующего: лоты с похожими позициями — {lots[first]} против {lots[third]}"
+    va, vc = (next(c.value for c in m.components if c.name == "model") for m in (before[0], before[2]))
+    want = (f"выше следующего: оценка модели — {va:.2f} против {vc:.2f} "
+            f"(лоты с похожими позициями — {lots[first]} против {lots[third]})")
     # a user filter hides the second one: the reason is computed after the user filters too
     user = pipeline.apply_user_filters
     monkeypatch.setattr(pipeline, "apply_user_filters",

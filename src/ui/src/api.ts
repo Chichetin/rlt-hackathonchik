@@ -264,6 +264,7 @@ export const COMPONENT_LABEL: Record<ScoreComponent["name"], string> = {
   activity: "Активность",
   geography: "География",
   price: "Цена",
+  model: "Оценка модели", // #630: the learned ranker's score, min-max within the answer
 };
 
 export const KIND_LABEL: Record<string, string> = {

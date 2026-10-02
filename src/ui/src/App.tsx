@@ -1264,7 +1264,7 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
       {rankerReason(m) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(m)}</p>}
       {nextReason(m) && <p className="ranker-reason"><strong>Выше следующего:</strong> {nextReason(m)}</p>}
       <p className="hint">{rankerReason(m)
-        ? "Порядок задаёт модель, обученная на истории закупок; оценка — сумма критериев × вес ниже, как и без модели."
+        ? "Оценка — сумма критериев × вес ниже; «Оценка модели» — вклад модели, обученной на истории закупок. Список — по оценке."
         : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
         {m.components.filter((c) => c.weight > 0).map((c) => (
@@ -1349,7 +1349,7 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
   );
 }
 
-const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa6b2"];
+const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa6b2", "#e3a86b"]; // 7th — «Оценка модели» (#630)
 
 /** Score as a stacked bar: each segment is value × weight of one component, so their sum is the total. */
 function Breakdown({ m }: { m: CounterpartyMatch }) {
@@ -1357,7 +1357,7 @@ function Breakdown({ m }: { m: CounterpartyMatch }) {
   const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }))
     .filter(({ c }) => c.weight > 0);
   return (
-    <figure className="breakdown" aria-label={rankerReason(m) ? "Из чего сложилась оценка (порядок задаёт модель)" : "Из чего сложилась оценка"}>
+    <figure className="breakdown" aria-label={rankerReason(m) ? "Из чего сложилась оценка (с оценкой модели)" : "Из чего сложилась оценка"}>
       <div className="stack" aria-hidden="true">
         {parts.map(({ c, v, color }) =>
           v > 0 ? <span key={c.name} style={{ width: `${v * 100}%`, background: color }} title={`${COMPONENT_LABEL[c.name]}: +${v.toFixed(2)}`} /> : null,
@@ -1393,9 +1393,9 @@ function AboutPage({ onStart }: { onStart: () => void }) {
         </li>
         <li>
           <h3>Объяснимая оценка</h3>
-          <p>Когда известен заказчик (номер извещения или ИНН заказчика), порядок задаёт модель, обученная на истории закупок СПб 2024–2025; её входы — критерии ниже. В карточке видно, что подняло поставщика и что опустило, с цифрами. Без заказчика и со своими весами порядок — по формуле «критерий × вес»:</p>
+          <p>Когда известен заказчик (номер извещения или ИНН заказчика), в оценку входит оценка модели, обученной на истории закупок СПб 2024–2025; её входы — критерии ниже. В карточке видно, что подняло поставщика и что опустило, с цифрами. Список — по оценке «критерий × вес»; без заказчика оценки модели нет:</p>
           <ul className="crit">
-            {Object.values(COMPONENT_LABEL).map((l) => (
+            {Object.entries(COMPONENT_LABEL).filter(([c]) => c !== "model").map(([, l]) => (
               <li key={l}>{l}</li>
             ))}
           </ul>

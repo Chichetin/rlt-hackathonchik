@@ -8,10 +8,12 @@ is v2 (D-077) byte for byte. One feature function (`feature_row`) serves trainin
            weights are a readable formula; contribution of a feature = w_j · z_j.
   lgbm   — LightGBM LambdaMART; contribution of a feature = pred_contrib (SHAP values of the trees).
 
-The card says which features lifted the supplier the most and which pulled it down (product_fit explanation);
-the six components are unchanged — they keep their values and weights, the order is the model's. The score stays
-the formula of the components (#278, M1hairu's confirmation №3): the relevance the customer reads, the same scale
-as «Новые» and filters.min_score; rank_reason says why the model put a supplier above its visible neighbour.
+The card says which features lifted the supplier the most and which pulled it down (product_fit explanation).
+#630 (human's decision 02.10, confirmation №3): the model's raw output, min-max normalized within the answer, is the
+7th component «model» with weight W (`ranker.model_weight`, 0.5 by default); the six formula weights are × (1 − W),
+the score is Σ weight · value and the list is ordered by it — the number the customer reads and the order agree
+(before #630 the order was the model's and the score the formula's, #278). rank_reason says which component put a
+supplier above its visible neighbour; where it is the model — with the feature that lifted it.
 """
 
 from __future__ import annotations
@@ -21,14 +23,14 @@ import logging
 import math
 import threading
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from src.contracts import Counterparty, CounterpartyMatch, Query
+from src.contracts import Counterparty, CounterpartyMatch, Query, ScoreComponent
 from src.regions import REGION_CODE
 
 if TYPE_CHECKING:
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 KINDS = ("logreg", "lgbm")
+MODEL_WEIGHT = 0.5  # #630: weight of the «model» component when the config does not say
 
 # Supplier profile keys (#114, D-064): log1p for counts, as is for shares; a missing key is NaN.
 PROFILE_LOG = ("okpd2_classes", "okpd2_groups", "distinct_codes", "active_months", "lots_last_90d", "em_offers",
@@ -218,8 +221,11 @@ def spec(cfg: dict) -> dict | None:
     raw = cfg.get("ranker")
     if not raw:
         return None
-    if not isinstance(raw, dict) or set(raw) - {"kind", "model", "ablate", "customer_only"}:
-        raise ValueError(f"ranker: ожидается {{kind, model[, ablate, customer_only]}}, получено {raw!r}")
+    if not isinstance(raw, dict) or set(raw) - {"kind", "model", "ablate", "customer_only", "model_weight"}:
+        raise ValueError(f"ranker: ожидается {{kind, model[, ablate, customer_only, model_weight]}}, получено {raw!r}")
+    w = raw.get("model_weight", MODEL_WEIGHT)
+    if isinstance(w, bool) or not isinstance(w, int | float) or not 0.0 <= w <= 1.0:
+        raise ValueError(f"ranker.model_weight = {w!r}: ожидается доля в [0, 1]")
     bad = set(raw.get("ablate") or []) - set(NAMES)
     if bad:
         raise ValueError(f"ranker.ablate: неизвестные признаки {sorted(bad)}")
@@ -227,7 +233,8 @@ def spec(cfg: dict) -> dict | None:
         raise ValueError(f"ranker.kind = {raw.get('kind')!r}: ожидается одно из {KINDS}")
     if not raw.get("model"):
         raise ValueError("ranker.model: нужен путь к файлу модели")
-    return {**raw, "customer_only": bool(raw.get("customer_only", False))}  # no key — as before #490
+    return {**raw, "customer_only": bool(raw.get("customer_only", False)),  # no key — as before #490
+            "model_weight": float(w)}
 
 
 def _cols(path: Path, features: list[str]) -> list[int] | None:
@@ -342,9 +349,11 @@ class Ranked:
     """What the model knew about one ordered supplier: rank_reason is built from it after the filters."""
 
     raw: float
-    score: float  # the formula of the components (the relevance shown)
+    score: float  # Σ weight · value of the components, «model» included (#630) — the relevance shown
     row: np.ndarray
     contrib: np.ndarray
+    parts: dict[str, float] = field(default_factory=dict)  # component -> weight · value (#630)
+    values: dict[str, float] = field(default_factory=dict)  # component -> value
 
 
 # key -> Ranked of the last rerank() in this context (search() clears it): pipeline.pick() explains the order
@@ -367,7 +376,8 @@ _ordered: ContextVar[tuple[dict[str, float], dict[str, Ordered]] | None] = Conte
 # the components of the order key named as the model's features are (FEATURES)
 ORDER_NAMES: dict[str, str] = {"product_fit": "компонента «соответствие предмету»", "experience": "компонента «опыт»",
                                "activity": "компонента «активность»", "geography": "компонента «география»",
-                               "reliability": "компонента «надёжность»", "price": "компонента «цена»"}
+                               "reliability": "компонента «надёжность»", "price": "компонента «цена»",
+                               "model": "оценка модели"}
 
 
 def forget() -> None:
@@ -387,31 +397,53 @@ def _key(m: CounterpartyMatch) -> str:
     return m.counterparty.inn or m.counterparty.name
 
 
-def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int) -> list[CounterpartyMatch]:
-    """Top-k in the model's order; the product_fit explanation gets the model's reason, rank_reason — why above
-    the next one; equal model scores — by the formula score.
+def _features(n: int) -> str:
+    """«44 признака», «41 признак», «45 признаков»."""
+    word = ("признак" if n % 10 == 1 and n % 100 != 11
+            else "признака" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "признаков")
+    return f"{n} {word}"
 
-    The score is exactly the formula of the components (Σ weight · component, D-077), uncapped (#278): a cap by
-    the supplier above turned five of ten «1.00» of the demo query into «0.96» — numbers that are not the card's
-    sum and more equal numbers. The model's raw output is not a relevance scale (LambdaMART ranks within a
-    query). Where the number does not explain the order, rank_reason does."""
+
+def rerank(model: Model, matches: list[CounterpartyMatch], rows: list[list[float]], k: int,
+           weight: float = MODEL_WEIGHT) -> list[CounterpartyMatch]:
+    """Top-k by the score with the model's component (#630); the product_fit explanation gets the model's reason,
+    rank_reason — why above the next one.
+
+    The model's raw output is not a relevance scale (LambdaMART ranks within a query): it is min-max normalized
+    within this answer (all equal → 1.0) and enters the score as the component «model» with `weight`; the six
+    formula weights are × (1 − weight). The score is Σ weight · value (D-077), uncapped (#278), and the list is
+    ordered by it; equal scores — by the model's raw output, then by INN."""
     forget()
     if not matches:
         return []
     x = np.asarray(rows, dtype=float)
     _check_profile(x)
     raw = model.raw(x)
+    lo, hi = float(raw.min()), float(raw.max())
+    norm = [1.0 if hi - lo <= SAME else (float(r) - lo) / (hi - lo) for r in raw]
+    feats = _features(len(NAMES) if model.cols is None else len(model.cols))
+    total = len(matches)
+    scored: list[CounterpartyMatch] = []
+    for i, m in enumerate(matches):
+        place = 1 + int((raw > raw[i]).sum())
+        comps = [c.model_copy(update={"weight": round(c.weight * (1.0 - weight), 4)}) for c in m.components]
+        comps.append(ScoreComponent(name="model", value=round(min(1.0, max(0.0, norm[i])), 4), weight=weight,
+                                    explanation=f"оценка модели подбора ({feats} истории закупок): "
+                                                f"место {place} из {total}"))
+        scored.append(m.model_copy(update={"components": comps,
+                                           "score": round(sum(c.value * c.weight for c in comps), 4)}))
     order = sorted(range(len(matches)),
-                   key=lambda i: (-raw[i], -matches[i].score, matches[i].counterparty.inn or "~"))[:k]
+                   key=lambda i: (-scored[i].score, -raw[i], matches[i].counterparty.inn or "~"))[:k]
     contrib = model.contrib(x[order])
     out, seen = [], {}
     for j, i in enumerate(order):
-        m = matches[i]
+        m = scored[i]
         line = explain(model, contrib[j], x[i])
         comps = [c.model_copy(update={"explanation": f"{c.explanation}; {line}"}) if c.name == "product_fit" else c
                  for c in m.components]
         out.append(m.model_copy(update={"components": comps}))
-        seen[_key(m)] = Ranked(float(raw[i]), m.score, x[i], contrib[j])
+        seen[_key(m)] = Ranked(float(raw[i]), m.score, x[i], contrib[j],
+                               {c.name: c.value * c.weight for c in comps}, {c.name: c.value for c in comps})
     _ranked.set(seen)
     return reasons(out)
 
@@ -469,6 +501,33 @@ def reason(a: Ranked, b: Ranked) -> str:
     return "по совокупности признаков модели"
 
 
+def next_reason(a: Ranked, b: Ranked) -> str:
+    """Why `a` is right above `b` in the score order (#630): the component with the largest weighted lead whose
+    values differ as shown; when it is the model's — with the feature that lifted it (reason()). Equal scores —
+    the model's raw output decides (the tie-break of rerank). Without components (a Ranked built by hand) — the
+    model's reason as before #630."""
+    if not a.parts:
+        return reason(a, b)
+    if abs(a.score - b.score) <= SAME:
+        if a.raw - b.raw > SAME:
+            return f"релевантность равна; выше оценка модели — {a.values['model']:.4f} против {b.values['model']:.4f}"
+        return "релевантность и оценка модели равны — порядок условный (по ИНН)"
+    lead = sorted(((a.parts[n] - b.parts.get(n, 0.0), n) for n in a.parts), reverse=True)
+    for d, name in lead:
+        if d <= 0:
+            break
+        va, vb = a.values[name], b.values.get(name, 0.0)
+        if f"{va:.2f}" == f"{vb:.2f}":
+            continue  # «0.50 против 0.50» is no reason a customer can see
+        what = f"выше следующего: {ORDER_NAMES[name]} — {va:.2f} против {vb:.2f}"
+        if name != "model" or a.raw - b.raw <= SAME:
+            return what
+        why = reason(a, b)
+        why = why.removeprefix("выше следующего: ").removeprefix("по совокупности признаков модели, в том числе: ")
+        return what if why == "по совокупности признаков модели" else f"{what} ({why})"
+    return f"по совокупности компонент — {a.score:.4f} против {b.score:.4f}"
+
+
 def reasons(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     """rank_reason of each supplier the model ordered, against the next such supplier of THIS list — after the
     filters it is the neighbour the customer sees. Others («Новые», v2 without a model) pass unchanged."""
@@ -479,7 +538,7 @@ def reasons(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
     out = list(matches)
     for n, a in enumerate(at):
         b = at[n + 1] if n + 1 < len(at) else None
-        why = None if b is None else reason(seen[_key(matches[a])], seen[_key(matches[b])])
+        why = None if b is None else next_reason(seen[_key(matches[a])], seen[_key(matches[b])])
         out[a] = matches[a].model_copy(update={"rank_reason": why})
     return out
 

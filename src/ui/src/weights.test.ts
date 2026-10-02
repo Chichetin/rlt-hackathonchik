@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "vitest";
-import type { CounterpartyMatch } from "./api";
-import { DEFAULT_WEIGHTS, PRESETS, activeWeights, loadWeights, normalize, offNote, rerank, reweight, saveWeights, STANDARD, UNAVAILABLE } from "./weights";
+import { COMPONENT_LABEL, type CounterpartyMatch } from "./api";
+import { COMPONENT_COLOR, COMPONENTS, DEFAULT_WEIGHTS, PRESETS, activeWeights, loadWeights, normalize, offNote, rerank, reweight, saveWeights, STANDARD, UNAVAILABLE } from "./weights";
 
 // server weights as in a real response: no-data components (reliability, price) come with weight 0
 const SERVER = { product_fit: 0.762, experience: 0.19, reliability: 0, activity: 0.048, geography: 0, price: 0 };
@@ -77,4 +77,30 @@ test("reweight drops the ranker's reason for the next supplier (#278)", () => {
 test("reliability is for reference, price has no data — the slider rows say which (#72)", () => {
   expect(offNote("reliability")).toBe("справочно — в оценку не входит");
   expect(offNote("price")).toBe("нет данных — в оценку не входит");
+});
+
+test("«Оценка модели» (#630): a label and a colour, not a user weight — presets keep its server weight", () => {
+  expect(COMPONENT_LABEL.model).toBe("Оценка модели");
+  expect(COMPONENT_COLOR.model).toBeTruthy();
+  expect(COMPONENTS).not.toContain("model");
+  const base = match("M", { product_fit: 1, experience: 0.5, activity: 1 });
+  // the server halves the six weights and adds the model's component with weight 0.5
+  const m: CounterpartyMatch = {
+    ...base,
+    components: [
+      ...base.components.map((c) => ({ ...c, weight: Math.round(c.weight * 0.5 * 1e4) / 1e4 })),
+      { name: "model", value: 0.8, weight: 0.5, explanation: "оценка модели подбора: место 2 из 9" },
+    ],
+  };
+  for (const p of PRESETS) {
+    if (!p.weights) continue;
+    const r = reweight(m, p.weights);
+    const model = r.components.find((c) => c.name === "model");
+    expect(model).toEqual({ name: "model", value: 0.8, weight: 0.5, explanation: "оценка модели подбора: место 2 из 9" });
+    // the other components share the rest of the mass (0.5) and the score is Σ value × weight
+    const rest = r.components.filter((c) => c.name !== "model").reduce((a, c) => a + c.weight, 0);
+    expect(rest).toBeCloseTo(0.5, 3);
+    expect(r.score).toBeCloseTo(r.components.reduce((a, c) => a + c.value * c.weight, 0), 4);
+    expect(Number.isFinite(r.score)).toBe(true);
+  }
 });

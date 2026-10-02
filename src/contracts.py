@@ -21,7 +21,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-ComponentName = Literal["product_fit", "experience", "reliability", "activity", "geography", "price"]
+# model (#630): the learned ranker's score, min-max within the answer — the 7th component (confirmation №3)
+ComponentName = Literal["product_fit", "experience", "reliability", "activity", "geography", "price", "model"]
 Origin = Literal["history", "discovered"]
 Kind = Literal["manufacturer", "distributor", "dealer", "unknown"]
 # Извещения.is_eshop_or_aisgz: Электронный магазин / АИС ГЗ (порталы 44, 223 [ПРОВЕРИТЬ])
