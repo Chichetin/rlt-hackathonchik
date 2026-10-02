@@ -25,7 +25,6 @@ import argparse
 import json
 import logging
 import math
-import os
 import sys
 import time
 from datetime import date
@@ -37,6 +36,7 @@ from src.eval.build_cases import SEED, _h, exclusion, read_lots, stratified_samp
 from src.match import ranker
 from src.match.search import load_config, search
 from src.match.store import processed_dir
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -140,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         n_cases = int(d["n_cases"])
     else:
         processed = processed_dir()
-        print(f"данные: {processed} (DATA_PROCESSED_DIR), INDEX_DIR={os.environ.get('INDEX_DIR', 'indexes')}")
+        print(f"данные: {processed} (DATA_PROCESSED_DIR), INDEX_DIR={get_settings().index_dir}")
         cases = training_cases(processed, args.as_of, args.until, args.n)
         if any(c.query.as_of != args.as_of for c in cases):
             raise AssertionError("as_of признаков не равен началу окна обучения")

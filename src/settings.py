@@ -5,8 +5,7 @@ each module's own `os.environ.get` did before. So there is no cache to go stale 
 a variable after the import and the next access sees it), a hot path such as `tokenize()` pays for one read, and
 a garbage value of one variable cannot break the others. Names and defaults live here and in .env.example
 (tests/unit/test_settings.py keeps the two in step); `make settings-check` (scripts/check_settings.py) fails on
-a new `os.environ` read anywhere else in src/ — files not migrated yet are on scripts/settings_allowlist.txt,
-which only shrinks.
+an `os.environ` read anywhere else in src/ (no exceptions since #297).
 
 An empty value (`NAME=` in .env or in a docker env_file) means «not set», as .env.example shows.
 """
@@ -131,6 +130,13 @@ class Settings:
     discovery_leads = _Var("DISCOVERY_LEADS", lambda v: v != "0")  # 0 — web leads (#108) are not added
     discovery_np_types = _Var("DISCOVERY_NP_TYPES", lambda v: v or "UL")  # rmsp entity types, comma-separated
     llm_provider = _Var("LLM_PROVIDER", lambda v: (v or "none").strip().lower())  # none — the mode without LLM
+    # tools (src/eval, src/match/ranker_train.py) — read at every call, except the two directories of emb_bench (import)
+    eval_final_confirm = _Var("EVAL_FINAL_CONFIRM", lambda v: v)  # sha256 from make eval-final CONFIRM=…
+    eval_user = _Var("USER", lambda v: v or "?")  # who ran eval-final: written to eval/final-log.md
+    dev_full = _Var("DEV_FULL", lambda v: v)  # dev_full.jsonl outside this checkout (a worktree without data/)
+    pool_dir = _Var("POOL_DIR", lambda v: Path(v) if v else None)  # as given; None — `pool_dir:` of the eval config
+    data_gpu_dir = _Var("DATA_GPU_DIR", _directory("data/gpu"))  # embeddings computed on the GPU stand (emb_bench)
+    models_dir = _Var("MODELS_DIR", _directory("models"))  # fine-tuned embedding models (emb_bench, finetune)
     # worker (src/worker): unlike the two limits above this one always raised on garbage, a typo is not a default
     queue_stale_running_s = _Var("QUEUE_STALE_RUNNING_S", lambda v: int(v or QUEUE_STALE_RUNNING_DEFAULT_S))
 

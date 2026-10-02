@@ -157,6 +157,29 @@ def test_every_setting_is_documented_in_env_example() -> None:
     assert not missing, f"нет в .env.example: {missing}"
 
 
+# placeholders for providers not wired yet ([СПРОСИТЬ Q-04, Q-13]): documented, read by no code
+RESERVED_IN_ENV_EXAMPLE = {"LLM_API_KEY", "LLM_MODEL", "DADATA_API_KEY", "DADATA_SECRET", "SEARCH_API_KEY"}
+
+
+def test_env_example_lists_only_what_the_code_reads() -> None:
+    """The reverse of the test above: a line in .env.example that no `Settings` field reads (a typo, a removed
+    variable) misleads whoever deploys. The placeholders are an explicit list, so a new stray name fails here."""
+    documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]*)=", ENV_EXAMPLE.read_text(encoding="utf-8"), re.M))
+    assert documented - set(settings.env_names()) == RESERVED_IN_ENV_EXAMPLE
+
+
+def test_eval_tool_defaults_are_the_ones_the_modules_had() -> None:
+    """src/eval and ranker_train (#297): the same defaults as their own `os.environ.get` had."""
+    s = get_settings({})
+    assert (s.eval_final_confirm, s.eval_user, s.dev_full, s.pool_dir) == (None, "?", None, None)
+    assert (s.data_gpu_dir, s.models_dir) == (ROOT / "data" / "gpu", ROOT / "models")
+    over = get_settings({"EVAL_FINAL_CONFIRM": "ab12", "USER": "anna", "DEV_FULL": "/x/dev_full.jsonl",
+                         "POOL_DIR": "rel/pool", "DATA_GPU_DIR": "g", "MODELS_DIR": str(ROOT.parent / "m")})
+    assert (over.eval_final_confirm, over.eval_user, over.dev_full) == ("ab12", "anna", "/x/dev_full.jsonl")
+    assert over.pool_dir == Path("rel/pool")  # as given, as pool_recall had it
+    assert (over.data_gpu_dir, over.models_dir) == (ROOT / "g", ROOT.parent / "m")  # absolute — as given
+
+
 def test_gis2_reviews_defaults_and_overrides() -> None:
     """2GIS reviews on demand (#234, D-142): pacing, timeouts, the off switch and the live-read limit."""
     s = get_settings({})

@@ -20,7 +20,6 @@ is fixed in the hashed config before the run, so it cannot depend on any result.
 from __future__ import annotations
 
 import hashlib
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +29,7 @@ import yaml
 from src.eval import run as R
 from src.eval.split import ROOT, EvalCase, load_cases, split_config, unseal
 from src.match import search as search_mod
+from src.settings import get_settings
 
 CONFIRM_ENV = "EVAL_FINAL_CONFIRM"
 FROZEN_PATHS = ("src", "configs", "pyproject.toml", "uv.lock")
@@ -51,7 +51,7 @@ def seen_file(root: Path) -> Path:
 
 def gate(confirm: str | None, root: Path = ROOT, log: Path = FINAL_LOG) -> str:
     """Returns the config sha256 if the holdout may be read, else raises PermissionError."""
-    if "BM25_TOKENIZER" in os.environ:
+    if get_settings().bm25_tokenizer is not None:  # an empty value is «not set»: search() ignores it too
         raise PermissionError("BM25_TOKENIZER задан: eval-final оценивает только токенизатор из configs/search.yaml")
     try:
         sha = R.config_sha256(root)
@@ -76,7 +76,7 @@ def gate(confirm: str | None, root: Path = ROOT, log: Path = FINAL_LOG) -> str:
 
 def main() -> int:
     try:
-        sha = gate(os.environ.get(CONFIRM_ENV))
+        sha = gate(get_settings().eval_final_confirm)
     except PermissionError as e:
         print(f"eval-final: отказ — {e}", file=sys.stderr)
         return 2
@@ -89,7 +89,7 @@ def main() -> int:
               file=sys.stderr)
         return 2
     with seen_file(ROOT).open("a", encoding="utf-8") as f:  # the attempt, before the holdout is read
-        f.write(f"{sha} {datetime.now(UTC).isoformat(timespec='seconds')} {os.environ.get('USER', '?')}\n")
+        f.write(f"{sha} {datetime.now(UTC).isoformat(timespec='seconds')} {get_settings().eval_user}\n")
     with unseal():
         every = load_cases("holdout", split)
         cases = holdout_sample(every, n, seed)
@@ -100,7 +100,7 @@ def main() -> int:
     out.write_text(R.dump_record(rec), encoding="utf-8")
     m = rec["metrics"]
     row = (f"| {datetime.now(UTC):%Y-%m-%d %H:%M} UTC | {rec['commit'][:8]} | {sha} | "
-           f"{os.environ.get('USER', '?')} | {rec['n_queries']} из {len(every)} (seed {seed}) | "
+           f"{get_settings().eval_user} | {rec['n_queries']} из {len(every)} (seed {seed}) | "
            + " | ".join(f"{m[k]['value']:.3f} [{m[k]['ci95'][0]:.3f}, {m[k]['ci95'][1]:.3f}]" for k in m)
            + f" | {out.relative_to(ROOT)} |\n")
     with FINAL_LOG.open("a", encoding="utf-8") as f:
