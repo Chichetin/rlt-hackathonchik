@@ -375,11 +375,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.corrupt:  # the text only, deterministic per query: every experiment sees the same spoiled queries
         cases = [c.model_copy(update={"query": corrupt.spoil(c.query, args.corrupt)}) for c in cases]
         part = f"{part}-{args.corrupt}"
-    rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
+    pool = cfg.get("method") == "pool_recall"  # recall of the «Новые» pool, its own metrics (#187)
+    if pool:
+        from src.eval import pool_recall
+
+        body = pool_recall.evaluate(cases, cfg, date.fromisoformat(str(split_config()["cutoff"])))
+    else:
+        body = evaluate(cases, cfg)
+    rec = result_record(args.exp, part, cfg, body)
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(dump_record(rec), encoding="utf-8")
-    print_table(rec)
+    if pool:
+        pool_recall.print_table(rec)
+    else:
+        print_table(rec)
     print(f"-> {out.relative_to(ROOT)}")
     return 0
 
