@@ -377,7 +377,12 @@ async function detail(r: Response): Promise<string> {
   return body || `${r.status}`;
 }
 
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // the server's limit (src/api/testset.py): bigger files never get read into a string
+
 export async function uploadTestset(files: File[]): Promise<Testset> {
+  if (files.reduce((n, f) => n + f.size, 0) > MAX_UPLOAD_BYTES) {
+    throw new Error("Файлы больше 50 МБ вместе — загрузите только выгрузку организаторов (Извещения и Потоварка), без архивных данных 24-25.");
+  }
   const payload = { files: await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() }))) };
   const r = await fetch("/api/testset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   if (!r.ok) throw new Error(await detail(r));
