@@ -58,7 +58,16 @@ def test_precision_and_priority():
     assert per == {"a": pytest.approx(2 / 3), "b": 0.0}  # LLM labels excluded: overlap < 20
     assert body["metrics"]["precision@10"]["value"] == pytest.approx(1 / 3)
     assert body["labeled_by"] == {"человек": 4}
-    assert body["agreement_human_llm"] == {"overlap": 1, "share": 0.0, "llm_used": False}
+    assert body["agreement_human_llm"] == {"overlap": 1, "share": 0.0, "kappa": 0.0, "llm_used": False}
+
+
+def test_kappa_corrects_share_for_chance():
+    # 4 pairs: human 1,1,0,0 vs llm 1,0,0,0 -> share 0.75, p_e = (2*1 + 2*3) / 16 = 0.5, kappa = 0.5
+    rows = [lab("a", "1", "1"), lab("a", "2", "1"), lab("a", "3", "0"), lab("a", "4", "0"),
+            lab("a", "1", "1", "llm:m"), lab("a", "2", "0", "llm:m"), lab("a", "3", "0", "llm:m"),
+            lab("a", "4", "0", "llm:m")]
+    assert L.kappa(rows) == pytest.approx(0.5)
+    assert L.kappa([lab("a", "1", "0"), lab("a", "1", "0", "llm:m")]) is None  # one class on both sides: undefined
 
 
 def test_read_labels_semicolon_and_unconfirmed(tmp_path):
