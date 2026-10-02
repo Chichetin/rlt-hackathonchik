@@ -45,6 +45,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.contracts import Counterparty, Evidence, inn_is_valid
+from src.settings import get_settings
 from src.sources import role as role_mod
 from src.sources.cache import SourceCache
 
@@ -53,7 +54,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = "Минпромторг: реестр российской промышленной продукции (ГИСП)"
 REGISTRY_URL = "https://gisp.gov.ru/pp719v2/pub/prod/"
 DOWNLOAD_URL = "https://gisp.gov.ru/pp719v2/mptapp/view/dl/production_res_valid_only/"
-DIR = ROOT / "data" / "external" / "gisp"
+DIR: Path | None = None  # override (tests, the coverage script); None = next to DATA_PROCESSED_DIR, see gisp_dir()
 PRODUCTS = "products.parquet"
 META = "meta.json"
 SHEET = "Продукция"
@@ -89,7 +90,11 @@ class Product:
 
 
 def gisp_dir() -> Path:
-    return DIR  # read at the call: tests and the coverage script point it elsewhere
+    """The one place that says where the export lives: DIR if set, else <DATA_PROCESSED_DIR>/../external/gisp
+    (data/external/gisp by default; the e2e server has its own DATA_PROCESSED_DIR, so it never sees the real one)."""
+    if DIR is not None:
+        return DIR  # read at the call: tests and the coverage script point it elsewhere
+    return get_settings().data_processed_dir.parent / "external" / "gisp"
 
 
 def _text(v: object) -> str | None:
