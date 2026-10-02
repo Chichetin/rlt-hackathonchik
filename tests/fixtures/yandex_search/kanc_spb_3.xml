@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<yandexsearch version="1.0">
+<request>
+<query>поставщик канцтоваров Санкт-Петербург ИНН</query>
+<page>0</page>
+<sortby order="descending" priority="no">rlv</sortby>
+<maxpassages>5</maxpassages>
+<groupings>
+<groupby attr="d" mode="deep" groups-on-page="3" docs-in-group="1" curcateg="-1"/>
+</groupings>
+</request>
+<response date="20261002T013131">
+<reqid>1790904691054920-12794069383958419860-balancer-l7leveler-kubr-yp-sas-98-BAL</reqid>
+<found priority="phrase">7422663</found>
+<found priority="strict">7422663</found>
+<found priority="all">7422663</found>
+<found-human>Нашлось 7 млн ответов</found-human>
+<is-local>no</is-local>
+<results>
+<grouping attr="d" mode="deep" groups-on-page="3" docs-in-group="1" curcateg="-1">
+<page first="1" last="4">0</page>
+<group>
+<categ attr="d" name="rusprofile.ru"/>
+<doccount>533334</doccount>
+<relevance priority="all"/>
+<doc id="Z520149F946F1B059">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790904691&amp;tld=ru&amp;lang=ru&amp;la=1790471296&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%BA%D0%B0%D0%BD%D1%86%D1%82%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3+%D0%98%D0%9D%D0%9D&amp;url=https%3A//www.rusprofile.ru/id/6812177&amp;l10n=ru&amp;mime=html&amp;sign=f66cd021e6acbcfc87d633af691eeb4f&amp;keyno=0</saved-copy-url>
+<url>https://www.rusprofile.ru/id/6812177</url>
+<domain>www.rusprofile.ru</domain>
+<title>ООО &quot;Канцпроф СПБ&quot; <hlword>Санкт</hlword>-<hlword>Петербург</hlword> (<hlword>ИНН</hlword> 7813553580) адрес...</title>
+<headline>ООО &quot;Канцпроф СПБ&quot; (<hlword>ИНН</hlword> 7813553580) <hlword>Санкт</hlword>-<hlword>Петербург</hlword>  реквизиты и официальный сайт организации. Юридический адрес, руководство, учредители, телефон и другие данные на Rusprofile. Основным видом деятельности является Торговля оптовая писчебумажными и <hlword>канцелярскими</hlword> <hlword>товарами</hlword>, зарегистрированы 2 дополнительных вида деятельности. Организации ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ &quot;КАНЦПРОФ СПБ&quot; присвоены <hlword>ИНН</hlword> 7813553580, ОГРН 1137847027790, ОКПО 46941647.</headline>
+<modtime>20131115T065050</modtime>
+<size>3765</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+<extended-text>ИНН: 470300328581. Исполнительные производства.</extended-text>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="checko.ru"/>
+<doccount>8805</doccount>
+<relevance priority="all"/>
+<doc id="ZD81C6F489CFD81A1">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790904691&amp;tld=ru&amp;lang=ru&amp;la=1790259712&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%BA%D0%B0%D0%BD%D1%86%D1%82%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3+%D0%98%D0%9D%D0%9D&amp;url=https%3A//checko.ru/company/kancopttorg-1187847050918&amp;l10n=ru&amp;mime=html&amp;sign=b3587ba5abe5cbc0c566e1e4d611f3bc&amp;keyno=0</saved-copy-url>
+<url>https://checko.ru/company/kancopttorg-1187847050918</url>
+<domain>checko.ru</domain>
+<title>ООО &quot;КАНЦОПТТОРГ&quot; - <hlword>Санкт</hlword>-<hlword>Петербург</hlword> - <hlword>ИНН</hlword> 7840077322...</title>
+<modtime>20191123T005529</modtime>
+<size>4094</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage>Регистрационный <hlword>номер</hlword> 1086164801 от 1 марта 2018 года. Отделение Фонда пенсионного и социального страхования Российской Федерации по <hlword>Санкт</hlword>-<hlword>Петербургу</hlword> и Ленинградской области. Регистрация в ФСС.</passage>
+<passage>Компания ООО &quot;КАНЦОПТТОРГ&quot; из <hlword>Санкт</hlword>-<hlword>Петербурга</hlword> имеет несколько учредителей, контрольным пакетом владеет Хамлюку Анатолию Александровичу. Основным видом деятельности является &quot;Торговля оптовая книгами, газетами и журналами, писчебумажными и <hlword>канцелярскими</hlword> <hlword>товарами</hlword>&quot;.</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+<extended-text>ООО &quot;КАНЦОПТТОРГ&quot; - г. Санкт-Петербург - ИНН 7840077322 - ОГРН 1187847050918 - Генеральный директор Корпляков Константин Олегович - Реквизиты - Контакты - Учредители - Бухгалтерская отчетность - Исполнительные производства - Проверки - Госзакупки.</extended-text>
+</properties>
+</doc>
+</group>
+<group>
+<categ attr="d" name="star-pro.ru"/>
+<doccount>6</doccount>
+<relevance priority="all"/>
+<doc id="Z69140A11B62F4623">
+<relevance priority="all"/>
+<saved-copy-url>https://yandexwebcache.net/yandbtm?fmode=inject&amp;tm=1790904691&amp;tld=ru&amp;lang=ru&amp;la=1788268672&amp;text=%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D1%89%D0%B8%D0%BA+%D0%BA%D0%B0%D0%BD%D1%86%D1%82%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2+%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3+%D0%98%D0%9D%D0%9D&amp;url=https%3A//star-pro.ru/proverka-kontragenta/organization/1057810017760--ooo-peterburg-konsultant-kancelyarskie-tovary&amp;l10n=ru&amp;mime=html&amp;sign=ef1e92f2e1708cfbbb0e8a9983f5b0ca&amp;keyno=0</saved-copy-url>
+<url>https://star-pro.ru/proverka-kontragenta/organization/1057810017760--ooo-peterburg-konsultant-kancelyarskie-tovary</url>
+<domain>star-pro.ru</domain>
+<title>ООО &quot;<hlword>Петербург</hlword>-Консультант&quot; <hlword>Канцелярские</hlword> <hlword>Товары</hlword>: <hlword>ИНН</hlword>...</title>
+<modtime>20190418T185442</modtime>
+<size>3354</size>
+<charset>utf-8</charset>
+<mime-type>text/html</mime-type>
+<passages>
+<passage>Полная проверка организации онлайн - ООО &quot;Петербург-Консультант&quot; <hlword>Канцелярские</hlword> <hlword>Товары</hlword> - <hlword>ИНН</hlword> 7802314117 • КПП 781401001 • ОГРН 1057810017760. СТАР - сервис проверки контрагентов из 18 источников данных.</passage>
+<passage>197341, Г.<hlword>Санкт</hlword>-<hlword>петербург</hlword>, вн.тер.г. Муниципальный округ комендантский аэродром, ш фермское, д. 12, литера и, кв. 531.</passage>
+</passages>
+<properties>
+<_PassagesType>0</_PassagesType>
+<lang>ru</lang>
+<extended-text>Полная проверка организации онлайн - ООО &quot;Петербург-Консультант&quot; Канцелярские Товары - ИНН 7802314117 • КПП 781401001 • ОГРН 1057810017760. СТАР - сервис проверки контрагентов из 18 источников данных.</extended-text>
+</properties>
+</doc>
+</group>
+<found priority="phrase">1497</found>
+<found priority="strict">1497</found>
+<found priority="all">1497</found>
+<found-docs priority="phrase">7422663</found-docs>
+<found-docs priority="strict">7422663</found-docs>
+<found-docs priority="all">7422663</found-docs>
+<found-docs-human>нашёл 7 млн ответов</found-docs-human>
+</grouping>
+</results>
+</response>
+<resource-usage>
+<cpu-time-sum>6963297</cpu-time-sum>
+<cpu-time-max>24748</cpu-time-max>
+</resource-usage>
+</yandexsearch>
