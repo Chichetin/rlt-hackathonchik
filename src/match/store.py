@@ -73,6 +73,8 @@ class Store(Protocol):
     def supplier_rows(self, inns: list[str], as_of: date | None) -> list[dict]: ...
     def okpd2_suppliers(self, level: int, codes: list[str], as_of: date | None, limit: int,
                         exclude_lot: int = -1) -> list[tuple]: ...
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]: ...
     def lot(self, ident: str) -> tuple | None: ...
     def lot_okpd2(self, lot_id: int) -> list[str]: ...
     def lot_names(self, lot_id: int) -> list[str]: ...
@@ -168,6 +170,29 @@ SELECT agg.supplier_inn, agg.lvl, code.okpd2_code, agg.class_lots, agg.class_win
 FROM agg JOIN code USING (supplier_inn)
 """
 
+# The same answer for Postgres from `supplier_items` (src/db/load.py, D-135): the candidates' own (lot, code) rows, no
+# join of every lot of every candidate to `items`. Per lot: the deepest level, `<level><best code>` (bytewise max = the
+# deepest level, then the greatest code; NULL codes are skipped as NULLS LAST did) and whether a participant won;
+# then per supplier: the deepest level and its code, lots and wins in the group (level >= 2). Suppliers without
+# positions get no row, as with the inner join above.
+_CLASS_HISTORY_PG = """
+WITH li AS (
+    SELECT supplier_inn, lot_id, bool_or(is_winner) AS win, max(lvl) AS lvl, max((lvl::text || okpd2_code){c}) AS lc
+    FROM (
+        SELECT supplier_inn, lot_id, is_winner, okpd2_code,
+               CASE WHEN okpd2_code = ANY(%(q9)s{text_arr}) THEN 4
+                    WHEN okpd2_l6 = ANY(%(q6)s{text_arr}) THEN 3
+                    WHEN okpd2_l4 = ANY(%(q4)s{text_arr}) THEN 2
+                    WHEN okpd2_l2 = ANY(%(q2)s{text_arr}) THEN 1 ELSE 0 END AS lvl
+        FROM {t[supplier_items]}
+        WHERE supplier_inn = ANY(%(inns)s{text_arr}) AND {cond}
+    ) m GROUP BY supplier_inn, lot_id
+)
+SELECT supplier_inn, max(lvl), substr(max(lc{c}), 2),
+       count(*) FILTER (WHERE lvl >= 2), count(*) FILTER (WHERE lvl >= 2 AND win)
+FROM li GROUP BY supplier_inn
+"""
+
 # Lots of one customer per supplier before as_of: the incumbent signal (src/match/signals.py, #22).
 _CUSTOMER_LOTS = """
 SELECT supplier_inn, count(DISTINCT lot_id) FROM {t[participants]}
@@ -216,6 +241,35 @@ FROM agg JOIN best USING (supplier_inn) LEFT JOIN name USING (lot_id)
 ORDER BY agg.n_lots DESC, agg.n_wins DESC, agg.supplier_inn{c}
 """
 OKPD2_COLUMN = {4: "okpd2_code", 3: "okpd2_l6", 2: "okpd2_l4", 1: "okpd2_l2"}
+
+# Suppliers of one customer's lots in the query's OKPD2 groups before as_of, most lots first (#195):
+# (inn, lots, wins, latest lot, its position name, its date) — the same shape as _OKPD2_SUPPLIERS.
+_CUSTOMER_SUPPLIERS = """
+WITH j AS (
+    SELECT supplier_inn, lot_id, is_winner, publish_date FROM {t[participants]}
+    WHERE customer_inn = %(cust)s AND {cond}
+      AND lot_id <> %(exclude)s  -- the notice the query was built from (#249, F-13); -1 — none
+      AND lot_id IN (SELECT lot_id FROM {t[items]} WHERE okpd2_l4 IN (SELECT unnest(%(groups)s{text_arr})))
+),
+agg AS (
+    SELECT supplier_inn, count(DISTINCT lot_id) AS n_lots, count(DISTINCT lot_id) FILTER (WHERE is_winner) AS n_wins
+    FROM j GROUP BY supplier_inn
+    ORDER BY n_lots DESC, n_wins DESC, supplier_inn{c} LIMIT %(limit)s
+),
+best AS (
+    SELECT DISTINCT ON (j.supplier_inn) j.supplier_inn, j.lot_id, j.publish_date
+    FROM j JOIN agg USING (supplier_inn)
+    ORDER BY j.supplier_inn, j.publish_date DESC NULLS LAST, j.lot_id DESC
+),
+name AS (
+    SELECT lot_id, min(product_name{c}) AS text FROM {t[items]}
+    WHERE lot_id IN (SELECT lot_id FROM best) AND okpd2_l4 IN (SELECT unnest(%(groups)s{text_arr}))
+    GROUP BY lot_id
+)
+SELECT agg.supplier_inn, agg.n_lots, agg.n_wins, best.lot_id, name.text, best.publish_date
+FROM agg JOIN best USING (supplier_inn) LEFT JOIN name USING (lot_id)
+ORDER BY agg.n_lots DESC, agg.n_wins DESC, agg.supplier_inn{c}
+"""
 
 _LOT = """
 SELECT lot_id, subject, procedure_name, start_price, customer_inn, channel FROM {t[notices]}
@@ -337,6 +391,11 @@ class ParquetStore:
         params = {"codes": codes, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
         return self._fetch(_okpd2_sql(level), params, as_of=as_of)[1]
 
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]:
+        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
+        return self._fetch(_CUSTOMER_SUPPLIERS, params, as_of=as_of)[1]
+
     def lot(self, ident: str) -> tuple | None:
         rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})[1]
         return rows[0] if rows else None
@@ -362,6 +421,7 @@ class PgStore:
         self.dsn, self.schema = pg_dsn(url), schema
         self._local = threading.local()
         self._manifest: tuple[dict, float] | None = None
+        self._precomputed: tuple[bool, float] | None = None
         self._sql_kw = {"c": ' COLLATE "C"', "bigint_arr": "::bigint[]", "text_arr": "::text[]"}
 
     def __repr__(self) -> str:
@@ -381,7 +441,8 @@ class PgStore:
         import psycopg
 
         s = self.schema
-        t = {n: f"{s}.{n}" for n in ("notices", "items", "participants")} | {"suppliers": f"{s}.{suppliers}"}
+        t = {n: f"{s}.{n}" for n in ("notices", "items", "participants", "supplier_items")} | {
+            "suppliers": f"{s}.{suppliers}"}
         lots_sql = "unnest(%(l_lot)s::bigint[], %(l_score)s::float8[], %(l_doc)s::int[]) AS l(lot_id, score, doc_id)"
         if lots is not None:
             params = {**params, "l_lot": [int(x) for x in lots.lot_id], "l_score": [float(x) for x in lots.score],
@@ -436,8 +497,20 @@ class PgStore:
     def text_codes(self, as_of: date | None) -> list[tuple[str, str, int]]:
         return self._fetch(_TEXT_CODES, {"as_of": as_of}, as_of=as_of)[1]
 
+    def _has_supplier_items(self) -> bool:
+        """`supplier_items` exists (a schema loaded before D-135 has none); checked at most once per MANIFEST_TTL_S."""
+        if self._precomputed and self._precomputed[1] > time.monotonic():
+            return self._precomputed[0]
+        ok = self._fetch("SELECT to_regclass(%(t)s) IS NOT NULL", {"t": f"{self.schema}.supplier_items"})[1][0][0]
+        if not ok:
+            log.warning("Postgres: нет %s.supplier_items — class_history читает items, в несколько раз медленнее; "
+                        "`make db-load` (D-135)", self.schema)
+        self._precomputed = (ok, time.monotonic() + MANIFEST_TTL_S)
+        return ok
+
     def class_history(self, inns: list[str], codes: list[str], as_of: date | None) -> dict[str, tuple]:
-        _, rows = self._fetch(_CLASS_HISTORY, {"inns": inns, "as_of": as_of, **class_params(codes)}, as_of=as_of)
+        template = _CLASS_HISTORY_PG if self._has_supplier_items() else _CLASS_HISTORY
+        _, rows = self._fetch(template, {"inns": inns, "as_of": as_of, **class_params(codes)}, as_of=as_of)
         return {r[0]: tuple(r[1:]) for r in rows}
 
     def customer_lots(self, inns: list[str], customer_inn: str, as_of: date | None) -> dict[str, int]:
@@ -457,6 +530,11 @@ class PgStore:
                         exclude_lot: int = -1) -> list[tuple]:
         params = {"codes": codes, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
         return self._fetch(_okpd2_sql(level), params, as_of=as_of)[1]
+
+    def customer_suppliers(self, customer_inn: str, groups: list[str], as_of: date | None, limit: int,
+                           exclude_lot: int = -1) -> list[tuple]:
+        params = {"cust": customer_inn, "groups": groups, "as_of": as_of, "limit": limit, "exclude": exclude_lot}
+        return self._fetch(_CUSTOMER_SUPPLIERS, params, as_of=as_of)[1]
 
     def lot(self, ident: str) -> tuple | None:
         _, rows = self._fetch(_LOT, {"lot_id": _as_lot_id(ident), "ident": ident})

@@ -1,10 +1,13 @@
 import { useEffect, useRef } from "react";
+import { Ratings } from "./Ratings";
 import { levelOf, RelevanceTag } from "./roles";
-import { COMPONENT_LABEL, KIND_LABEL, regionLabel, type CounterpartyMatch } from "./api";
+import { componentText, rankerReason } from "./ranker";
+import { COMPONENT_LABEL, KIND_LABEL, regionLabel, relationToCustomer, type CounterpartyMatch } from "./api";
 
 /** A persistent reading pane. Full provenance and reviews remain in the full card. */
-export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext, onBack, onMore, loadingMore }: {
+export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext, onBack, onMore, loadingMore, customerRegion }: {
   match: CounterpartyMatch | null;
+  customerRegion?: string; // #242: where the supplier is relative to the customer
   onBack: () => void;
   onMore?: () => void;
   loadingMore?: boolean;
@@ -29,20 +32,21 @@ export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext
       <button type="button" className="secondary" disabled={!onPrevious} onClick={onPrevious}>← Предыдущий</button>
       {onMore ? <button type="button" className="secondary" disabled={loadingMore} onClick={onMore}>{loadingMore ? "Загружаем…" : "Загрузить ещё"}</button> : <button type="button" className="secondary" disabled={!onNext} onClick={onNext}>Следующий →</button>}
     </div>
-    <div className="inspector-topline">
-      <span>{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</span>
-      <span className={`inspector-score score-level-${levelOf(match.score)}`}><span>Соответствие</span><strong>{match.score.toFixed(2)}</strong><RelevanceTag score={match.score} /></span>
-    </div>
+    <p className="inspector-origin">{match.origin === "history" ? "История госзакупок" : "Новая компания из реестра"}</p>
     <h2>{cp.name}</h2>
-    <p className="inspector-meta">{KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}</p>
+    <p className="inspector-meta">{KIND_LABEL[cp.kind ?? "unknown"]} · {regionLabel(cp)}{relationToCustomer(cp, customerRegion) && <> — {relationToCustomer(cp, customerRegion)}</>}</p>
     <p className="inspector-inn">ИНН {cp.inn ?? "не подтверждён"}</p>
+    <div className="inspector-topline">
+      <span className={`inspector-score score-level-${levelOf(match.score)}`}><span>Соответствие</span><strong>{match.score.toFixed(2)}</strong><RelevanceTag score={match.score} /></span>
     <button type="button" className="inspector-open" onClick={() => onOpen(match)}>Открыть полную карточку <span aria-hidden="true">↗</span></button>
+    </div>
     <h3>Почему подходит</h3>
     {weightsNote && <p className="inspector-note">Оценка с вашими весами: «{weightsNote}».</p>}
+    {rankerReason(match) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(match)}</p>}
     <ul className="inspector-reasons">
       {components.map(c => <li key={c.name}>
         <div><strong>{COMPONENT_LABEL[c.name] ?? c.name}</strong><span>+{(c.value*c.weight).toFixed(2)}</span></div>
-        <p>{c.explanation}</p>
+        <p>{componentText(c)}</p>
       </li>)}
     </ul>
     <h3>Подтверждённые сведения</h3>
@@ -50,5 +54,6 @@ export function ResultInspector({ match, onOpen, weightsNote, onPrevious, onNext
       {(cp.evidence ?? []).slice(0,4).map((e,i) => <li key={i}><p>{e.fact}</p><a href={e.url} target="_blank" rel="noreferrer">{e.source}</a>{e.fetched_at && <small className="inspector-date"> · {new Date(e.fetched_at).toLocaleDateString("ru-RU")}</small>}</li>)}
     </ul> : <p className="inspector-note">Подтверждённых фактов с источниками пока нет.</p>}
     {(cp.evidence ?? []).length > 4 && <p className="inspector-note">Все источники доступны в полной карточке.</p>}
+    <Ratings inn={cp.inn} />
   </aside>;
 }

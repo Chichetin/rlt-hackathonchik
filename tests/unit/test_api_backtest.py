@@ -38,6 +38,22 @@ def test_no_leak_search_gets_cutoff_as_of(client, monkeypatch):
     assert [str(q.as_of) for q in seen] == ["2025-07-01"]
 
 
+def test_todays_cached_card_does_not_move_the_backtest(client, monkeypatch):
+    """#220, D-097: the place is computed as make eval does — a card «ликвидирована» cached today does not
+    drop 7801000012 from a lot of August 2025 (the product would drop it in /api/search)."""
+    from src.contracts import Counterparty
+    from src.match import pipeline
+
+    def cached(inn, cache=None, offline=False, open_data=True):
+        if inn != "7801000012":
+            raise KeyError(inn)
+        return Counterparty(inn=inn, name="ООО Тест", status="Организация ликвидирована")
+
+    monkeypatch.setattr(pipeline.enrich_mod, "enrich", cached)
+    ranks = {p["inn"]: p["rank"] for p in client.get("/api/lot/6/backtest").json()["participants"]}
+    assert ranks["7801000012"] == 1
+
+
 def test_aisgz_lot_counts_the_winner_only(client, monkeypatch):
     """research/EVAL.md: in АИС ГЗ only the contractor is relevant — lot 6 read as АИС ГЗ keeps the winner and drops
     the losing offer of 7801000012 (in ЭМ both count, test_recorded_lot_ranks_winner_and_participants)."""

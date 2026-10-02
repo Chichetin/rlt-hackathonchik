@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, MotionConfig, useReducedMotion } from "motion/react";
 import { ExampleWheel, RollingNumber } from "./Micro";
+import { Ratings, RatingPreview, useRatingSummaries, type RatingSummary } from "./Ratings";
 import { ResultInspector } from "./ResultInspector";
 import "./micro.css";
 import { GlassHeader } from "./GlassShell";
 import { WaveField } from "./WaveField";
 import { Landing } from "./Landing";
-import { easeOut, glide, ScrollTools } from "./Motion";
+import { easeOut, ScrollTools } from "./Motion";
 import { okpd2Text, useOkpd2Labels } from "./okpd2";
 import {
   ALL,
@@ -41,13 +42,17 @@ import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
 import { KINDS, LEVELS, levelLabel, levelOf, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
 import "./filters.css";
+import { nearHidden, relationToCustomer, type NearChoice, type SearchContext } from "./api";
 import "./testset.css";
+import { componentText, formulaScore, rankerReason, rankerShort } from "./ranker";
 import { activeWeights, COMPONENT_COLOR, COMPONENTS, UNAVAILABLE, DEFAULT_WEIGHTS, loadWeights, normalize, PRESETS, presetTitle, rerank, saveWeights, STANDARD, type WeightSettings, type Weights } from "./weights";
+import { STATIC_DEMO } from "./staticApi";
 
 // Сценарий демо (docs/ui.md): ввёл запрос → два блока → карточка → фильтры → выгрузка.
 // Пользователь по умолчанию — контрактный управляющий заказчика СПб [ПРОВЕРИТЬ] (CLAUDE.md «Факты»).
 
-const REGIONS = ["", "Санкт-Петербург", "Ленинградская область"];
+// #242: the filter is by the CUSTOMER's region (where the goods go, where the work is done), not the supplier's
+const CUSTOMER_REGIONS = ["Санкт-Петербург", "Ленинградская область"];
 const EXAMPLES = ["Бумага офисная А4, 80 г/м²", "Офисная мебель", "Компьютерное оборудование"];
 
 function SearchIcon({ className = "" }: { className?: string }) {
@@ -100,6 +105,18 @@ function atLeast(rows: CounterpartyMatch[], level: MinLevel): CounterpartyMatch[
   return min === undefined ? rows : rows.filter((m) => m.score >= min);
 }
 
+/** «Работал с заказчиками СПб» — a fact from the organizers' data (stats.customers_spb), only for a SPb customer (#242). */
+function WorkedWith({ cp, customerRegion }: { cp: Counterparty; customerRegion?: string }) {
+  const n = cp.stats?.customers_spb;
+  if (customerRegion !== "Санкт-Петербург" || typeof n !== "number" || n <= 0) return null;
+  return <span className="badge badge-worked">{`участвовал в закупках ${n.toLocaleString("ru-RU")} ${plural(n, "заказчика", "заказчиков", "заказчиков")} СПб`}</span>;
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+}
+
 /** Role chips: multiple choice; a count from X-Facets when the server sends it (#232). */
 function RoleChips({ filters, onChange, facets }: { filters: Filters; onChange: (f: Filters) => void; facets?: Facets }) {
   return (
@@ -122,6 +139,63 @@ function RoleChips({ filters, onChange, facets }: { filters: Filters; onChange: 
         );
       })}
     </fieldset>
+  );
+}
+
+const NEAR_LABEL: Record<NearChoice, string> = {
+  auto: "авто — по типу закупки",
+  // the server keeps the customer's region OR a bid for its customers (stats.customers_spb counts applications,
+  // not wins; «Новые» pass by the region alone) — the label says both halves
+  worked: "в регионе заказчика или участвовал в закупках заказчиков региона",
+  near: "в регионе заказчика или соседнем",
+  any: "любой регион",
+};
+
+function NearSelect({ value, onChange, facets }: { value: NearChoice; onChange: (v: NearChoice) => void; facets?: Facets }) {
+  return (
+    <select aria-label="Может работать у заказчика" value={value} onChange={(e) => onChange(e.target.value as NearChoice)}>
+      {(Object.keys(NEAR_LABEL) as NearChoice[]).map((k) => {
+        const n = k === "worked" || k === "near" ? facetCount(facets, "near", k) : undefined;
+        return (
+          <option key={k} value={k}>
+            {NEAR_LABEL[k]}
+            {n !== undefined ? ` (${n})` : ""}
+          </option>
+        );
+      })}
+    </select>
+  );
+}
+
+/** Who the customer is, what is bought and where the supplier may come from (#242): the server's decision over the
+ *  results, with the choice itself and what it hides (D-030) — no trip to the form to change it. */
+function ContextLine({ context, facets, near, onNear }: { context?: SearchContext; facets?: Facets; near: NearChoice; onNear: (v: NearChoice) => void }) {
+  const applied = context?.applied_near ?? context?.default_near;
+  const hidden = nearHidden(context, facets);
+  return (
+    <div className="search-context" role="group" aria-label="Заказчик и тип закупки">
+      {context && (
+        <span>
+          Заказчик: <strong>{context.customer_region}</strong> <small>({context.customer_basis})</small>
+        </span>
+      )}
+      {context?.purchase_label && (
+        <span>
+          Тип закупки: <strong>{context.purchase_label}</strong>
+          {context.type_basis.length > 0 && <small> (ОКПД2 {context.type_basis.join(", ")})</small>}
+        </span>
+      )}
+      <label>
+        Может работать у заказчика
+        <NearSelect value={near} onChange={onNear} facets={facets} />
+      </label>
+      {near === "auto" && applied && <small>авто: {NEAR_LABEL[applied]}</small>}
+      {hidden && (
+        <small role="note">
+          скрыто {hidden.hidden} из {hidden.of}: другой регион или регион не известен
+        </small>
+      )}
+    </div>
   );
 }
 
@@ -176,6 +250,15 @@ export function noteText(note: string | undefined): string | undefined {
   return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
+/** Why «Новые» may be incomplete (X-Discovery-Error, #287): the source failed, or novelty was not checked. */
+export function discoveryAlert(code: string | undefined): string | undefined {
+  if (!code) return undefined;
+  if (code === "history_unchecked") {
+    return "Данные организаторов не загружены — сверка с историей закупок не выполнена, поэтому новых компаний не показываем.";
+  }
+  return "Источники не ответили — список может быть неполным.";
+}
+
 type Path = "/" | "/search" | "/results" | "/settings" | "/about" | string;
 
 // History API routing without a router dependency; the API serves index.html for every page path (src/api/app.py)
@@ -196,7 +279,7 @@ function usePath(): [Path, (next: Path) => void] {
 
 // the last query survives a reload of /results; storage may be unavailable — the page works without it
 const STORE = "mitrandir.query";
-type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string };
+type Saved = { text: string; filters: Filters; lotId: string; budget: string; customerInn: string; lot: Extra["lot"]; lotQueryId?: string; customerRegion?: string };
 function loadSaved(): Partial<Saved> {
   try {
     return JSON.parse(window.sessionStorage.getItem(STORE) ?? "{}") as Partial<Saved>;
@@ -280,8 +363,7 @@ export function shortName(name: string): string {
 
 function CompanyName({ name }: { name: string }) {
   // the organizers' data has no supplier names (contracts.py): such a row is named by its INN
-  const short = shortName(name);
-  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={short !== name ? name : undefined}>{short}</span>;
+  return <span className={/^ИНН\s/.test(name) ? "name name-inn" : "name"} title={name}>{name}</span>;
 }
 
 export function App() {
@@ -295,7 +377,7 @@ export function App() {
   const [res, setRes] = useState<SearchPage | null>(null);
   const [shownQuery, setShownQuery] = useState<ReturnType<typeof buildQuery> | null>(null);
   const [more, setMore] = useState(false);
-  const [editQuery, setEditQuery] = useState(false);
+  const [mobileDetails, setMobileDetails] = useState(false);
   const [resultGroup, setResultGroup] = useState<"history" | "new">("history");
   const [selectedSuppliers, setSelectedSuppliers] = useState<Partial<Record<"history" | "new", string>>>({});
   // the same query without user filters: how many candidates a filter hides for an unknown attribute
@@ -309,13 +391,15 @@ export function App() {
   const [lotQueryId, setLotQueryId] = useState<string | undefined>(saved.lotQueryId);
   const [budget, setBudget] = useState(saved.budget ?? "");
   const [customerInn, setCustomerInn] = useState(saved.customerInn ?? "");
+  // #242: the customer's region when the INN is not given (goes to Query.region); with an INN the server takes it from there
+  const [customerRegion, setCustomerRegion] = useState(saved.customerRegion ?? "Санкт-Петербург");
   const [lotMsg, setLotMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [lotBusy, setLotBusy] = useState(false);
   const resetLot = () => {
     setLot(null);
     setLotQueryId(undefined);
   };
-  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId });
+  const extra = (): Extra => ({ budget, customer_inn: customerInn, lot, query_id: lotQueryId, customer_region: customerRegion });
 
   // the query of a loaded lot, for a search that must not wait for the form state to update
   type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
@@ -374,6 +458,8 @@ export function App() {
   }
 
   const runSeq = useRef(0);
+  // «искать как введено» (#282): the text for which the user turned the correction off; another text — on again
+  const asTypedFor = useRef<string | null>(null);
   // local scoring weights (#179): only in this browser; the server and the export keep the standard ones
   const [weightSet, setWeightSet] = useState<WeightSettings>(loadWeights);
   const weights = activeWeights(weightSet);
@@ -398,9 +484,11 @@ export function App() {
     }
   }
 
-  async function run(nextFilters: Filters = filters, ready?: Ready) {
-    // the query of this run: a picked test lot (#207) or the form
-    const qText = ready?.text ?? text;
+  // asTyped: «искать как введено» (#282) — this exact text, the server's correction off
+  async function run(nextFilters: Filters = filters, ready?: Ready, asTyped?: string) {
+    // the query of this run: a picked test lot (#207), the shown query as typed, or the form
+    const qText = asTyped ?? ready?.text ?? text;
+    if (asTyped !== undefined) asTypedFor.current = asTyped.trim();
     const qExtra = ready ? () => ready.extra : extra;
     if (!qText.trim()) return;
     const seq = ++runSeq.current; // a slower earlier answer must not overwrite a newer one
@@ -411,11 +499,15 @@ export function App() {
       const none: Filters = NO_FILTERS;
       // with local weights the minimal level applies to the re-ranked score on screen, not to the server's
       const q = buildQuery(qText, weightsRef.current ? { ...nextFilters, min_level: "" } : nextFilters, qExtra());
+      const spellOff = asTypedFor.current === q.text;
+      if (spellOff) q.filters = { ...q.filters, spell: "off" };
+      const baseQuery = buildQuery(qText, none, qExtra());
+      if (spellOff) baseQuery.filters = { ...baseQuery.filters, spell: "off" }; // counts by the same text as the answer
       const [r, b] = await Promise.all([
         // with local weights the whole candidate set is re-ranked here, so it comes in one page
         search(q, weightsRef.current ? { limit: ALL } : undefined),
         // every candidate without filters: how many of them a filter hides for an unknown attribute
-        active ? search(buildQuery(qText, none, qExtra()), { limit: ALL }) : Promise.resolve(null),
+        active ? search(baseQuery, { limit: ALL }) : Promise.resolve(null),
       ]);
       if (seq !== runSeq.current) return;
       setRes(r);
@@ -426,8 +518,8 @@ export function App() {
       // weights switched on while this page-sized answer was in flight
       if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
       save(ready
-        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id }
-        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId });
+        ? { text: qText, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
+        : { text: qText, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
       if (window.location.pathname === "/search") go("/results");
     } catch (e) {
       if (seq !== runSeq.current) return;
@@ -529,6 +621,7 @@ export function App() {
   const newRows = res ? (weights ? atLeast(rerank(res.discovered, weights), filters.min_level) : res.discovered) : [];
   const historyTotal = res ? (weights ? rankedHistory.length : res.total.history) : 0;
   const newTotal = res ? (weights ? newRows.length : res.total.discovered) : 0;
+  const customerRatings = useRatingSummaries([...historyRows, ...newRows].map(m => m.counterparty.inn));
   const activeRows = resultGroup === "history" ? historyRows : newRows;
   const selectedResult = activeRows.find(m => supplierKey(m) === selectedSuppliers[resultGroup]) ?? activeRows[0] ?? null;
   const selectedIndex = selectedResult ? activeRows.indexOf(selectedResult) : -1;
@@ -536,12 +629,18 @@ export function App() {
   const selectResult = (m: CounterpartyMatch) => {
     revealSelection.current = true;
     setSelectedSuppliers(prev => ({ ...prev, [resultGroup]: supplierKey(m) }));
-    if (window.matchMedia("(max-width: 900px)").matches) requestAnimationFrame(() => {
-      document.getElementById("supplier-preview")?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "start" });
-    });
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      setMobileDetails(true);
+      requestAnimationFrame(() => {
+      const pane = document.getElementById("supplier-preview");
+      pane?.querySelector<HTMLButtonElement>(".inspector-back")?.focus({ preventScroll: true });
+      pane?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "start" });
+      });
+    }
   };
 
   const selectedKey = selectedResult ? supplierKey(selectedResult) : "";
+  useEffect(() => { if (!selectedKey) setMobileDetails(false); }, [selectedKey]);
   useEffect(() => {
     if (!revealSelection.current) return;
     revealSelection.current = false;
@@ -553,22 +652,31 @@ export function App() {
     else if (item.bottom > box.bottom) list.scrollTop += item.bottom - box.bottom;
   }, [selectedKey, path]);
   function returnToList() {
+    setMobileDetails(false);
+    requestAnimationFrame(() => {
     const row = document.querySelector<HTMLElement>('.result-list-scroll:not([hidden]) .item[aria-pressed="true"]');
     row?.focus({ preventScroll: true });
     row?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "center" });
+    });
   }
 
   return (
     <MotionConfig reducedMotion="user">
     <LayoutGroup id="mitrandir">
     <div inert={!!open}><ScrollTools /></div>
-    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} inert={!!open}
+    <motion.div className={`page ${path === "/" ? "page-home" : "page-workspace"}`} data-route={path} inert={!!open}
       initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
       <GlassHeader path={path} link={link} mark={<BrandMark />} />
-      {path !== "/" && <div className="search-background"><WaveField pattern="slats" /></div>}
+      {path !== "/" && <div className="search-background"><WaveField pattern="slats" calm /></div>}
       <div className="content">
+      {STATIC_DEMO && (
+        <div className="stub" role="status" data-testid="static-demo">
+          Демонстрационные данные: статический стенд без сервера — заранее посчитанная выдача по трём примерам и
+          реальным закупкам; фильтры, выгрузка и оценки здесь не работают.
+        </div>
+      )}
       <AnimatePresence mode="wait" initial={false}>
-      <motion.div key={path === "/search" || path === "/results" ? "workspace" : path}
+      <motion.div className={path === "/" ? undefined : "interior-route"} key={path === "/search" || path === "/results" ? "workspace" : path}
         initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
       {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
@@ -591,20 +699,18 @@ export function App() {
         <p><span>Закупка</span><strong>{res.query.text}</strong></p>
         <div className="results-commands">
           <a className="filter-link" {...link("/settings")}>Фильтры ↗</a>
-          <button type="button" className="secondary" aria-expanded={editQuery} aria-controls="supplier-search" onClick={() => setEditQuery(v => !v)}>
-            {editQuery ? "Скрыть параметры" : "Изменить закупку"}
-          </button>
-          <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
+          {!STATIC_DEMO && <button type="button" className="secondary" onClick={() => void exportXlsx(shownQuery ?? buildQuery(text, filters, extra())).catch(e => {
             setError(`выгрузка в Excel: ${String(e)}`); setState("error");
-          })}>Выгрузить в Excel</button>
+          })}>Выгрузить в Excel</button>}
         </div>
+        <ContextLine context={res.context} facets={res.facets} near={filters.near} onNear={(near) => toggle({ ...filters, near })} />
         {weights && <p className="export-note">В Excel — стандартные веса методологии; ваши веса только на экране.</p>}
       </div>}
       <div className={`search-workbench ${path === "/search" ? "search-compose" : ""} ${path === "/results" && res ? "results-workspace" : ""}`}>
       <form
         id="supplier-search"
         className="query"
-        hidden={path === "/results" && !!res && !editQuery}
+        hidden={path === "/results" && !!res}
         onSubmit={(e) => {
           e.preventDefault();
           void run();
@@ -617,7 +723,6 @@ export function App() {
             <p>Загрузите извещение или опишите, что вам нужно.</p>
           </div>
         </div>
-        <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
         <div className="lot-section">
           <label htmlFor="lot">Номер закупки (необязательно)</label>
           <div className="lotrow">
@@ -666,10 +771,10 @@ export function App() {
         }} />
         </div>
         <div className="query-options">
-        {path === "/search" && <div className="section-heading"><div>
+        <div className="section-heading refinement-heading"><div>
           <h2>Уточнить подбор</h2>
-          <p>Необязательно. Поможет сузить круг компаний.</p>
-        </div></div>}
+          <p>Необязательные параметры</p>
+        </div></div>
         <div className="optional">
           <label>
             НМЦК, ₽
@@ -679,6 +784,19 @@ export function App() {
             ИНН заказчика
             <input value={customerInn} inputMode="numeric" placeholder="необязательно" onChange={(e) => setCustomerInn(e.target.value)} />
           </label>
+          {/* the server takes the customer's region from an INN 78 / 47 only (D-083); any other — from this select */}
+          {!/^(78|47)\d{8}$/.test(customerInn.trim()) && (
+            <label>
+              Регион заказчика
+              <select value={customerRegion} onChange={(e) => setCustomerRegion(e.target.value)}>
+                {CUSTOMER_REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         {(lot?.channel || lot?.okpd2?.length) && (
           <div className="chips">
@@ -686,13 +804,11 @@ export function App() {
             {lot?.okpd2?.length ? <span className="chip">ОКПД2: {okpd2Text(lot.okpd2, lotLabels)}</span> : null}
           </div>
         )}
-        <div className="row">
+        <div className="row query-finish">
           <div className="query-refinements">
-            <a className="filter-link" {...link("/settings")}>Фильтры <span aria-hidden="true">↗</span></a>
-            <label className="query-region">Регион поставщика
-              <select aria-label="Регион" value={filters.region} onChange={(e) => toggle({ ...filters, region: e.target.value })}>
-                {REGIONS.map(r => <option key={r} value={r}>{r || "Любой регион"}</option>)}
-              </select>
+            <a className="filter-link" {...link("/settings")}>Фильтры {filtersActive(filters) && <span className="filter-applied">применены</span>}<span aria-hidden="true">↗</span></a>
+            <label className="query-region">Может работать у заказчика
+              <NearSelect value={filters.near} onChange={(near) => toggle({ ...filters, near })} facets={res?.facets} />
             </label>
           </div>
           <div className="actions">
@@ -704,6 +820,7 @@ export function App() {
           </div>
         </div>
         </div>
+        <TestsetPanel onPick={(id) => void pickTestLot(id)} busyLot={pickedLot} />
       </form>
       <div className="output">
       {state === "error" && (
@@ -716,7 +833,7 @@ export function App() {
         state === "loading" ? <Skeleton /> : path === "/results" ? (
           <section className="getting-started" aria-label="Результаты">
             <h2>Вы ещё не запускали подбор</h2>
-            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки слева и нажмите «Найти поставщиков».</p>
+            <p className="empty-lead">Загрузите закупку по номеру или опишите предмет закупки и нажмите «Найти поставщиков».</p>
           </section>
         ) : (
         <section id="about" className="getting-started" aria-label="Как работает подбор">
@@ -745,6 +862,17 @@ export function App() {
         </p>
       ))}
 
+      {path === "/results" && res?.corrections && shownQuery && state !== "loading" && (
+        <p className="lotmsg spell-note" role="note" data-testid="query-corrected">
+          Запрос исправлен (раскладка или опечатки):{" "}
+          {res.corrections.map(([typed, searched], i) => <span key={i}>{i > 0 && ", "}«{typed}» → «{searched}»</span>)}.{" "}
+          <button type="button" className="spell-undo" title={shownQuery.text}
+            onClick={() => void run(filters, undefined, shownQuery.text)}>
+            Искать как введено
+          </button>
+        </p>
+      )}
+
       {path === "/results" && res?.excludedLot && state !== "loading" && (
         <p className="lotmsg own-lot-note" role="note">
           Закупка {res.excludedLot} есть в данных 2024–2025 — сама она в подбор не входит: её участники попадают в
@@ -758,19 +886,24 @@ export function App() {
           {weights && <a className="weights-chip" {...link("/settings")} aria-current={undefined}>
             Оценка: {presetTitle(weightSet)} · только у вас
           </a>}
-          <div className="result-browser">
+          <div className="result-browser" data-mobile-details={mobileDetails && !!selectedResult}>
           <div className="result-list-pane">
             <div className="result-groups" role="group" aria-label="Группа поставщиков">
               <button type="button" className="group-history" aria-pressed={resultGroup === "history"} onClick={() => setResultGroup("history")}>С опытом <span>{historyTotal}</span></button>
-              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span></button>
+              <button type="button" className="group-new" aria-pressed={resultGroup === "new"} onClick={() => setResultGroup("new")}>Новые <span>{newTotal}</span>
+                {res.discoveryError && <span className="group-alert" title={discoveryAlert(res.discoveryError)}>
+                  <span aria-hidden="true">!</span><span className="sr-only">список может быть неполным</span></span>}</button>
             </div>
             <div className="result-list-scroll" hidden={resultGroup !== "history"}>
           <Block
+            customerRegion={res.context?.customer_region}
             selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
             variant="history"
             tag="История закупок"
             title="С опытом госзакупок"
             hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
+            ratings={customerRatings.summaries} ratingsState={customerRatings.state}
+            alert={res.weakMatch}
             rows={historyRows}
             total={historyTotal}
             onMore={weights ? () => setShown((n) => n + PAGE) : () => void showMore()}
@@ -785,11 +918,14 @@ export function App() {
           </div>
           <div className="result-list-scroll" hidden={resultGroup !== "new"}>
           <Block
+            customerRegion={res.context?.customer_region}
             selectedKey={selectedResult ? supplierKey(selectedResult) : undefined}
             variant="new"
             tag="Открытые реестры"
             title="Новые из открытых источников"
             hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
+            ratings={customerRatings.summaries} ratingsState={customerRatings.state}
+            alert={discoveryAlert(res.discoveryError)}
             rows={newRows}
             total={newTotal}
             onOpen={selectResult}
@@ -802,7 +938,7 @@ export function App() {
           />
           </div>
           </div>
-          <ResultInspector onBack={returnToList} loadingMore={more} onMore={resultGroup === "history" && selectedIndex === activeRows.length - 1 && activeRows.length < historyTotal ? (weights ? () => setShown(n => n + PAGE) : () => void showMore()) : undefined} match={selectedResult} weightsNote={weights ? presetTitle(weightSet) : undefined} onOpen={setOpen}
+          <ResultInspector customerRegion={res.context?.customer_region} onBack={returnToList} loadingMore={more} onMore={resultGroup === "history" && selectedIndex === activeRows.length - 1 && activeRows.length < historyTotal ? (weights ? () => setShown(n => n + PAGE) : () => void showMore()) : undefined} match={selectedResult} weightsNote={weights ? presetTitle(weightSet) : undefined} onOpen={setOpen}
             onPrevious={selectedIndex > 0 ? () => selectResult(activeRows[selectedIndex - 1]) : undefined}
             onNext={selectedIndex >= 0 && selectedIndex + 1 < activeRows.length ? () => selectResult(activeRows[selectedIndex + 1]) : undefined} />
           </div>
@@ -815,7 +951,7 @@ export function App() {
       </AnimatePresence>
       </div>
     </motion.div>
-    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} />}</AnimatePresence>
+    <AnimatePresence>{open && <Card key={open.counterparty.inn ?? open.counterparty.name} m={open} onClose={() => setOpen(null)} weightsNote={weights ? presetTitle(weightSet) : undefined} customerRegion={res?.context?.customer_region} />}</AnimatePresence>
     </LayoutGroup>
     </MotionConfig>
   );
@@ -827,13 +963,17 @@ function Block(props: {
   title: string;
   hint: string;
   rows: CounterpartyMatch[];
+  ratings: Record<string, RatingSummary>;
+  ratingsState: "loading" | "ready" | "error";
   total: number;
   onOpen: (m: CounterpartyMatch) => void;
   onMore?: () => void;
   loadingMore?: boolean;
   empty?: string;
+  alert?: string; // «Новые»: the block may be incomplete and why (#287); history: weak match with past lots (#281)
   variant: "history" | "new";
   tag: string;
+  customerRegion?: string;
   selectedKey?: string;
 }) {
   const reduced = useReducedMotion();
@@ -844,18 +984,18 @@ function Block(props: {
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
       <p className="hint">{props.hint}</p>
+      {props.alert && <p className="stub block-alert" role="status" data-testid={props.variant === "new" ? "discovery-error" : "weak-match"}>{props.alert}</p>}
       {props.rows.length === 0 ? (
         <p className="empty">{props.empty ?? "Никого не нашли. Попробуйте переформулировать запрос или снять фильтры."}</p>
       ) : (
         <ol className="list">
-          {props.rows.map((m, i) => {
+          {props.rows.map((m) => {
             const cp = m.counterparty;
             const top = [...m.components].sort((a, b) => b.value * b.weight - a.value * a.weight)[0];
             return (
               <motion.li key={cp.inn ?? cp.name} layout={reduced ? false : "position"}
-                initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, amount: 0.05 }} transition={{ duration: reduced ? 0 : 0.45, delay: reduced ? 0 : Math.min(i, 4) * 0.04, ease: easeOut }}>
-                <motion.button className="item" aria-controls="supplier-preview" aria-pressed={props.selectedKey === supplierKey(m)} whileHover={reduced ? undefined : { y: -2 }} whileTap={reduced ? undefined : { scale: 0.99 }} transition={glide} onClick={() => props.onOpen(m)}>
+                initial={false} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.12 }}>
+                <motion.button className="item" aria-controls="supplier-preview" aria-pressed={props.selectedKey === supplierKey(m)} onClick={() => props.onOpen(m)}>
                   <Logo cp={cp} />
                   <CompanyName name={cp.name} />
                   <span className={`score score-level-${levelOf(m.score)}`} title="Итоговая оценка соответствия" aria-label={`Оценка соответствия: ${m.score.toFixed(2)}, релевантность ${levelLabel(levelOf(m.score))}`}>
@@ -867,13 +1007,17 @@ function Block(props: {
                   </span>
                   <span className="meta">
                     {regionLabel(cp)}
+                    {props.customerRegion && relationToCustomer(cp, props.customerRegion) && <> — {relationToCustomer(cp, props.customerRegion)}</>}
                     {cp.name.includes(cp.inn ?? "\u0000") ? null : <> · ИНН {cp.inn ?? "не подтверждён"}</>}
                   </span>
                   <span className="badges">
                     <RoleBadge kind={cp.kind} />
                     <OriginBadge m={m} />
+                    <WorkedWith cp={cp} customerRegion={props.customerRegion} />
                   </span>
-                  {top && <span className="why" title={top.explanation}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{top.explanation}</span>}
+                  <RatingPreview inn={cp.inn} summary={cp.inn ? props.ratings[cp.inn] : undefined} state={props.ratingsState} />
+                  {rankerShort(m) ? <span className="why" title={rankerReason(m) ?? ""}><span className="why-label">Почему на этом месте</span>{rankerShort(m)}</span>
+                    : top && <span className="why" title={componentText(top)}><span className="why-label">{COMPONENT_LABEL[top.name] ?? top.name}</span>{componentText(top)}</span>}
                 </motion.button>
               </motion.li>
             );
@@ -900,8 +1044,8 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   const links = reviewLinks(cp.name, cp.inn);
   return (
     <section aria-label="Отзывы">
-      <h3>Отзывы</h3>
-      <p className="hint">Не влияет на оценку подбора. Рейтинг из отзывов не показываем: нет источника, который можно честно проверить.</p>
+      <h3>Отзывы в открытых источниках</h3>
+      <p className="hint">Внешние отзывы можно проверить по ссылкам. Их рейтинг не переносится в Митрандир и не влияет на подбор.</p>
       {links.length > 0 ? (
         <p className="review-links">
           Искать отзывы самостоятельно:{" "}
@@ -919,7 +1063,7 @@ function ReviewsBlock({ cp }: { cp: Counterparty }) {
   );
 }
 
-function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () => void; weightsNote?: string }) {
+function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatch; onClose: () => void; weightsNote?: string; customerRegion?: string }) {
   const reduced = useReducedMotion();
   const cp = m.counterparty;
   const cardRef = useRef<HTMLElement>(null);
@@ -939,13 +1083,13 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
     <motion.div className="card-overlay" initial={{ opacity: reduced ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.2 }} onClick={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-    <motion.aside ref={cardRef} initial={reduced ? false : { x: "100%" }} animate={{ x: 0 }} exit={{ x: reduced ? 0 : "100%" }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 38 }} className="card" role="dialog" aria-modal="true" onKeyDown={(event) => {
+    <motion.aside ref={cardRef} initial={reduced ? false : { x: "100%" }} animate={{ x: 0 }} exit={{ x: reduced ? 0 : "100%" }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 38 }} className="card interior-card" role="dialog" aria-modal="true" onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
       }
       if (event.key === "Tab") {
-        const elements = cardRef.current?.querySelectorAll<HTMLElement>('button, a[href]');
+        const elements = [...(cardRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? [])].filter(el => el.getClientRects().length > 0 && el.tabIndex >= 0);
         if (!elements?.length) return;
         const first = elements[0];
         const last = elements[elements.length - 1];
@@ -974,7 +1118,12 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
       <Breakdown m={m} />
       <h3>Почему в списке</h3>
       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
-      <p className="hint">Оценка по каждому критерию × его вес в подборе.</p>
+      {rankerReason(m) && <p className="ranker-reason"><strong>Почему на этом месте:</strong> {rankerReason(m)}</p>}
+      <p className="hint">{rankerReason(m)
+        ? (Math.abs(formulaScore(m) - m.score) < 0.005
+          ? "Порядок задаёт модель, критерии ниже — её входы; число — соответствие по формуле «критерий × вес»."
+          : `Порядок задаёт модель, критерии ниже — её входы. По формуле «критерий × вес» — ${formulaScore(m).toFixed(2)}; в списке число не выше, чем у стоящего выше.`)
+        : "Оценка по каждому критерию × его вес в подборе."}</p>
       <ul className="components">
         {m.components.map((c) => (
           <li key={c.name}>
@@ -985,7 +1134,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
             <span className="cval">
               {c.value.toFixed(2)} × {c.weight.toFixed(2)}
             </span>
-            <span className="cexp">{c.explanation}</span>
+            <span className="cexp">{componentText(c)}</span>
           </li>
         ))}
       </ul>
@@ -1002,6 +1151,15 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         <dd>{yesNo(cp.is_msp)}</dd>
         <dt>В РНП</dt>
         <dd>{yesNo(cp.in_rnp)}</dd>
+        {customerRegion && relationToCustomer(cp, customerRegion) && (
+          <>
+            <dt>Относительно заказчика</dt>
+            <dd>
+              {relationToCustomer(cp, customerRegion)} (заказчик — {customerRegion})
+              {customerRegion === "Санкт-Петербург" && typeof cp.stats?.customers_spb === "number" && `; заказчиков в СПб: ${cp.stats.customers_spb}`}
+            </dd>
+          </>
+        )}
         <dt>Регион</dt>
         <dd>{regionLabel(cp)}</dd>
         {Object.entries(cp.contacts ?? {}).map(([k, v]) => [<dt key={`k-${k}`}>{k}</dt>, <dd key={`v-${k}`}>{v}</dd>])}
@@ -1019,6 +1177,7 @@ function Card({ m, onClose, weightsNote }: { m: CounterpartyMatch; onClose: () =
         </>
       )}
 
+      <Ratings inn={cp.inn} />
       <ReviewsBlock cp={cp} />
 
       <h3>Источники фактов</h3>
@@ -1052,7 +1211,7 @@ const SEG_COLORS = ["#9db4ff", "#7fd1b9", "#d9c38f", "#b8a6e8", "#d79aae", "#9aa
 function Breakdown({ m }: { m: CounterpartyMatch }) {
   const parts = m.components.map((c, i) => ({ c, v: c.value * c.weight, color: SEG_COLORS[i % SEG_COLORS.length] }));
   return (
-    <figure className="breakdown" aria-label="Из чего сложилась оценка">
+    <figure className="breakdown" aria-label={rankerReason(m) ? "Критерии — входы модели" : "Из чего сложилась оценка"}>
       <div className="stack" aria-hidden="true">
         {parts.map(({ c, v, color }) =>
           v > 0 ? <span key={c.name} style={{ width: `${v * 100}%`, background: color }} title={`${COMPONENT_LABEL[c.name]}: +${v.toFixed(2)}`} /> : null,
@@ -1088,7 +1247,7 @@ function AboutPage({ onStart }: { onStart: () => void }) {
         </li>
         <li>
           <h3>Объяснимая оценка</h3>
-          <p>Итог — сумма критериев с весами. В карточке видно вклад каждого:</p>
+          <p>Порядок задаёт модель, обученная на истории закупок СПб 2024–2025; её входы — критерии ниже. В карточке видно, что подняло поставщика и что опустило, с цифрами; со своими весами порядок — по формуле «критерий × вес»:</p>
           <ul className="crit">
             {Object.values(COMPONENT_LABEL).map((l) => (
               <li key={l}>{l}</li>
@@ -1209,7 +1368,7 @@ function SettingsPage({ facets, onBack, filters, onChange, onReset, weightSet, o
     <section className="subpage" aria-labelledby="settings-title">
       <header className="top">
         <h1 id="settings-title">Фильтры подбора</h1>
-        <p className="sub">Требования к поставщикам применяются к подбору и выгрузке. Регион выбирается в подборе. Веса оценки — только у вас.</p>
+        <p className="sub">Требования к поставщикам применяются к подбору и выгрузке. Где может работать исполнитель — в подборе и над результатами. Веса оценки — только у вас.</p>
       </header>
       <div className="settings">
         <fieldset className="setting-group">
