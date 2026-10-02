@@ -38,6 +38,7 @@ import pyarrow.parquet as pq
 from src.contracts import Counterparty, Evidence, inn_is_valid
 from src.enrich import role
 from src.enrich.enrich import MSP_CATEGORY
+from src.regions import REGION_NAME  # the names src/match/filters.py compares
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +48,6 @@ OUT = ROOT / "data" / "external" / "rsmp" / "parts"
 SOURCE = "ФНС: реестр МСП, выгрузка открытых данных"
 PASSPORT = "https://www.nalog.gov.ru/opendata/7707329152-rsmp/"
 AS_OF = "2026-09-10"  # date of the dump (file name, ДатаСост)
-REGION_NAME = {"78": "Санкт-Петербург", "47": "Ленинградская область"}  # names src/match/filters.py compares
 
 SCHEMA = pa.schema([
     ("inn", pa.string()), ("inn_valid", pa.bool_()), ("ogrn", pa.string()), ("entity", pa.string()),

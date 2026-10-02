@@ -21,6 +21,7 @@ import httpx
 
 from src.contracts import Counterparty, Evidence, Kind, inn_is_valid
 from src.enrich import role
+from src.regions import label_by_code, name_by_code
 from src.sources import bo_nalog, fns_opendata, pb_nalog, rmsp
 from src.sources.cache import CachedPage, SourceCache
 
@@ -30,7 +31,7 @@ MSP_CATEGORY = {"1": "микропредприятие", "2": "малое пре
 
 
 def _region(kpp: str) -> str | None:
-    return {"78": "Санкт-Петербург", "47": "Ленинградская область"}.get(kpp[:2])
+    return name_by_code(kpp)
 
 
 def from_card(inn: str, page: CachedPage) -> Counterparty:
@@ -114,8 +115,7 @@ def _evidence(source: str, page: CachedPage, ev: list[Evidence]):
 
 
 def _region_by_code(code: str | None) -> str | None:
-    return {"78": "Санкт-Петербург", "47": "Ленинградская область"}.get(code or "") or (
-        f"регион {code}" if code else None)
+    return label_by_code(code)
 
 
 def _msp(row: dict[str, str], add) -> bool | None:  # type: ignore[no-untyped-def]

@@ -39,12 +39,12 @@ from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, Scor
 from src.ingest.load import from_rows
 from src.ingest.okpd2 import label
 from src.match import fallback, ranker
-from src.match.filters import REGION_CODE
 from src.match.index import LotIndex, get_index
 from src.match.profiles import profile_overrides, profile_weights
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
 from src.match.store import LotHits, Store, get_store, levels
 from src.match.text import tokenize
+from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_IN, REGION_NAME, REGION_PREP
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,11 +67,6 @@ OKPD_LEVEL_TEXT = {4: "совпадает код", 3: "совпадает до �
                    1: "совпадает только класс"}
 SAT_LOTS, SAT_WINS = 20, 10  # experience saturates at 20 lots / 10 wins in the group
 HALF_LIFE_DAYS = 90  # activity halves every 90 days without participation
-REGION_NAME = {v: k for k, v in REGION_CODE.items()}
-REGION_IN = {"78": "в Санкт-Петербурге", "47": "в Ленинградской области"}
-REGION_PREP = {"78": "Санкт-Петербурге", "47": "Ленинградской области"}
-NEIGHBOUR = {"78": "47", "47": "78"}
-NEIGHBOUR_VALUE = 0.8
 # Components without data (D-029): shown with value 0 and weight 0, not invented.
 UNAVAILABLE = {
     "reliability": "Нет данных: статус, РНП и расторжения ещё не подключены — в score не входит",
