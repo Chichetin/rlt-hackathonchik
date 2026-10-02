@@ -296,6 +296,10 @@ def _note(basis: Basis, card: gis2.Card, proof: str, legal_orgs: int, names_ours
     if names_ours and legal_orgs > 1:
         return (f"Юрлицо «{card.legal_name}» в выдаче 2ГИС у нескольких разных организаций ({legal_orgs}): "
                 f"какая из них эта компания, по карточке не определить, ИНН 2ГИС не публикует. {shown}")
+    if names_ours:  # the card names OUR legal entity, but its uniqueness in the result is not established
+        return (f"Юрлицо «{card.legal_name}» в карточке совпадает с названием компании, но единственность этого "
+                "юрлица в выдаче 2ГИС не подтверждена (в выдаче поиска оно у этой карточки не указано), "
+                f"ИНН 2ГИС не публикует. {shown}")
     if card.legal_name and not form_known:
         return (f"2ГИС указывает юрлицо — {_other_legal_entity(card)}, а форму юрлица компании по её названию не "
                 f"определить: сверить не с чем, ИНН 2ГИС не публикует. {shown}")

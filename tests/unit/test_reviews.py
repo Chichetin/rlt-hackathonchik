@@ -424,6 +424,8 @@ def test_the_legal_name_found_only_on_the_tab_does_not_make_a_second_organizatio
     cards = {c.branch_id: c for c in reviews.find_reviews(cp, cache=cache, client=site.client()).cards}
     assert cards[first].basis == "legal_name" and len(cards[first].quotes) == 1
     assert cards[second].basis == "name" and cards[second].quotes == [] and cards[second].rating is None
+    # the card of the second organization does name OUR legal entity (on its tab): it must not be called «another one»
+    assert "другое юрлицо" not in cards[second].note and "совпадает с названием компании" in cards[second].note
 
 
 def test_a_natural_person_is_refused_by_the_inn_even_when_the_name_has_no_ip_prefix(cache):
