@@ -88,7 +88,8 @@ CI (`.github/workflows/ci.yml`, D-105) запускается на каждый 
 2. Повторить у себя ту же цель: `make <цель>` (например, `make typecheck`). Зелёная локально,
    красная в CI — обычно незакоммиченный файл, зависимость не из lockfile или `--extra ml`
    (в CI его нет: тяжёлые импорты — с `# pyright: ignore[reportMissingImports]`).
-3. e2e: внизу запуска — артефакт `playwright-traces` (трассы упавших тестов), открывается
-   `npx playwright show-trace <zip>`; локально — `make e2e`.
+3. e2e: внизу запуска — артефакт `playwright-traces` (каталог `test-results/` упавших тестов).
+   Скачать, распаковать; в каталоге теста — `error-context.md` (снимок страницы) и трасса:
+   `npx playwright show-trace <каталог теста>/trace.zip`. Локально — `make e2e`.
 4. Красный не из-за вашего PR (тот же job красный на `main`) — задача с меткой `blocker`, а не
    повторный запуск «на удачу».

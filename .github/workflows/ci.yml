@@ -8,12 +8,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_call: # deploy.yml (#312) checks the very sha it ships
 
 permissions:
   contents: read
 
+# A PR keeps only its latest run. Anything else is grouped by sha: every commit of main gets its own run, and a
+# run called from deploy.yml (github.workflow is the caller's name there) never waits on the push run.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -54,6 +57,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
+          save-cache: false # the same key is saved by the check job
       - uses: actions/setup-node@v7
         with:
           node-version: 22
