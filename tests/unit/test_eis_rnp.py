@@ -24,6 +24,7 @@ from src.contracts import Counterparty
 from src.enrich.evidence import check_counterparty, check_evidence
 from src.sources import eis_rnp
 from src.sources.cache import SourceCache
+from src.sources.pacing import HostPacer
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "eis_rnp"
 LIST_PAGE = (FIX / "list_10_entries.html").read_text(encoding="utf-8")
@@ -362,8 +363,10 @@ def test_stale_answer_is_used_when_blocked_and_carries_its_own_date(live, monkey
 def test_requests_are_paced_by_crawl_delay(live, monkeypatch):
     slept: list[float] = []
     monkeypatch.setattr(eis_rnp, "MIN_INTERVAL_S", 60.0)
-    monkeypatch.setattr(eis_rnp, "_last_request", time.monotonic())
-    monkeypatch.setattr(eis_rnp.time, "sleep", slept.append)
+    pacer = HostPacer(lambda: eis_rnp.MIN_INTERVAL_S, sleep=slept.append)  # the real clock, nobody really waits
+    monkeypatch.setattr(eis_rnp, "PACER", pacer)
+    with pacer.slot():  # a request that has just ended
+        pass
     client = _client(lambda r: httpx.Response(200, text=NEG_PAGE))
     eis_rnp.check(NOT_IN_RNP, live, client)
     assert len(slept) == 1 and 58 < slept[0] <= 60  # robots.txt Crawl-delay: 60

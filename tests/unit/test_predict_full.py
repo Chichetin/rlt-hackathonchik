@@ -282,7 +282,6 @@ def test_rmsp_page_url_keeps_page_one_key():
 
 
 def test_discover_reads_next_pages_when_asked(tmp_path, monkeypatch):
-    monkeypatch.setattr(rmsp, "_blocked_until", 0.0)
     cache = SourceCache(tmp_path / "c.sqlite")
     rmsp.seed(FIX / "rmsp", cache)  # page 1 of 17.23 / 78: 10 rows, a full page
     extra = {"inn": "7802000008", "ogrn": "1027800000006", "nptype": "UL", "category": 1, "regioncode": "78",
