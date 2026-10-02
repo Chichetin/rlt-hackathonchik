@@ -1074,7 +1074,7 @@ def discover(
                  "; ".join(f"{m.counterparty.inn} {res.fit_new[m.counterparty.inn or ''].value:.2f}"
                            for m in res.matches if (m.counterparty.inn or "") in res.fit_new))
     if enqueue is not None:
-        for m in res.matches[:MAX_SHOWN]:  # the first screen; the rest gets its card on a later search
+        for m in res.matches[:MAX_SHOWN]:  # the first screen only: rows 11+ are not queued (no flood of the registries)
             if m.counterparty.inn in no_card:
                 enqueue(m.counterparty.inn)
         for inn in lead_no_card[:MAX_SHOWN]:  # a lead is shown only with a card: get it for the next search

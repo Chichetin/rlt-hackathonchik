@@ -1,0 +1,94 @@
+{
+  "checked_at": "2026-10-02T12:03:12.919Z",
+  "checks": [
+    {
+      "name": "Opening contains case, solution, team; supplier belongs to the example",
+      "passed": true
+    },
+    {
+      "name": "Comparison uses identical query IDs",
+      "passed": true
+    },
+    {
+      "name": "Backup Recall values agree with reports",
+      "passed": true
+    },
+    {
+      "name": "Backup evaluation sample size agrees",
+      "passed": true
+    },
+    {
+      "name": "Candidate ceilings explicitly labelled as limits",
+      "passed": true
+    },
+    {
+      "name": "Candidate ceilings match source constants",
+      "passed": true
+    },
+    {
+      "name": "Concrete legal and user filters are displayed",
+      "passed": true
+    },
+    {
+      "name": "Unknown legal status is distinguished from positive user-filter confirmation",
+      "passed": true
+    },
+    {
+      "name": "Routing decision is grounded in paired reports, with winner denominator",
+      "passed": true
+    },
+    {
+      "name": "Both active ranking paths are explicit",
+      "passed": true
+    },
+    {
+      "name": "Backup metrics agree with saved reports",
+      "passed": true
+    },
+    {
+      "name": "Removed redundant editorial labels",
+      "passed": true
+    },
+    {
+      "name": "Twelve technology pictograms in component groups",
+      "passed": true
+    },
+    {
+      "name": "Optional vector branch and observed storage remain explicit",
+      "passed": true
+    },
+    {
+      "name": "Product fonts loaded locally",
+      "passed": true
+    },
+    {
+      "name": "All architecture labels fit inside their nodes",
+      "passed": true
+    },
+    {
+      "name": "Data feed arrows have explicit endpoints",
+      "passed": true
+    },
+    {
+      "name": "No mouse-only controls",
+      "passed": true
+    },
+    {
+      "name": "S6 numbers come from pitch/facts.md F-33/F-34 and name the eval runs",
+      "passed": true
+    },
+    {
+      "name": "Additional sample compares identical queries between models",
+      "passed": true
+    },
+    {
+      "name": "Additional sample overlap disclosed",
+      "passed": true
+    },
+    {
+      "name": "Additional sample values agree with reports",
+      "passed": true
+    }
+  ],
+  "overflow": []
+}

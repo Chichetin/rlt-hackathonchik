@@ -5,7 +5,7 @@
   const motion=window.DeckMotion;
   const storage={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
   let current=main[0],step=0,returnId=storage.get('rlt-return')||'s7',returnStep=Number(storage.get('rlt-return-step')||0);
-  const maxStep=(s=current)=>s.id==='s2'?2:Math.max(0,...[...s.querySelectorAll('[data-step]')].map(n=>+n.dataset.step));
+  const maxStep=(s=current)=>Math.max(0,...[...s.querySelectorAll('[data-step]')].map(n=>+n.dataset.step));
   function fit(){const scale=Math.min(innerWidth/1600,innerHeight/900);stage.style.transform=`scale(${scale})`;stage.style.left=`${(innerWidth-1600*scale)/2}px`;stage.style.top=`${(innerHeight-900*scale)/2}px`;}
   function render(){
     slides.forEach(s=>s.hidden=s!==current);
@@ -14,10 +14,7 @@
     document.getElementById('keyboard-hint').textContent=!isMain?'← →   ·   ↑ к выступлению':current.id==='s7'?'↓ вопросы':'← →';
     document.getElementById('progress').style.width=`${(isMain?main.indexOf(current)+1:main.findIndex(s=>s.id===returnId)+1)/main.length*100}%`;
     current.querySelectorAll('[data-step]').forEach(el=>{el.classList.toggle('emphasis',+el.dataset.step===step);el.classList.toggle('step-complete',+el.dataset.step<step)});
-    if(current.id==='s2'){
-      ['input','result','reasons'].forEach((name,i)=>document.getElementById(`demo-${name}`).hidden=i!==step);
-      current.querySelectorAll('[data-phase]').forEach(el=>{el.classList.toggle('selected',+el.dataset.phase===step);if(+el.dataset.phase===step)el.setAttribute('aria-current','step');else el.removeAttribute('aria-current')});
-    }
+
     const hash=`#${current.id}/${step}`;if(location.hash!==hash)history.replaceState(null,'',hash);
     storage.set('rlt-slide',`${current.id}/${step}`);document.title=`${current.dataset.title} — Митрандир`;
   }
@@ -25,12 +22,12 @@
     const target=slides.find(s=>s.id===id);if(!target)return;
     const previous=current,direction=slides.indexOf(target)<slides.indexOf(previous)?-1:1;
     if(remember&&current.dataset.kind==='main'&&target.dataset.kind==='backup'){returnId=current.id;returnStep=step;storage.set('rlt-return',returnId);storage.set('rlt-return-step',String(returnStep))}
-    current=target;step=Math.max(0,Math.min(wantedStep,maxStep()));render();motion?.enter(current,previous,direction);if(step&&current.id!=='s2')motion?.accent(current,step,step);
+    current=target;step=Math.max(0,Math.min(wantedStep,maxStep()));render();motion?.enter(current,previous,direction);if(step)motion?.accent(current,step,step);
   }
   function advance(direction){
     if((direction>0&&step<maxStep())||(direction<0&&step>0)){
       const before=step;step+=direction;render();
-      if(current.id==='s2')motion?.tab(current.querySelector('.demo-panel:not([hidden])'));else motion?.accent(current,step,before);return;
+      motion?.accent(current,step,before);return;
     }
     const group=current.dataset.kind==='main'?main:backup,target=group[group.indexOf(current)+direction];
     if(target)show(target.id,direction<0?maxStep(target):0);

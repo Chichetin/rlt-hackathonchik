@@ -544,7 +544,7 @@ export function App() {
       setBase(b ?? r);
       setState("idle");
       // weights switched on while this page-sized answer was in flight
-      if (weightsRef.current && r.history.length < r.total.history) void loadAll(q, seq);
+      if (weightsRef.current && (r.history.length < r.total.history || r.discovered.length < r.total.discovered)) void loadAll(q, seq);
       save(ready
         ? { okpd2: ready.extra.okpd2, text: ready.text, filters: nextFilters, lotId: ready.lotId, budget: ready.budget, customerInn: ready.customerInn, lot: ready.extra.lot, lotQueryId: ready.extra.query_id, customerRegion: ready.extra.customer_region }
         : { okpd2: okpd2Input, text, filters: nextFilters, lotId, budget, customerInn, lot, lotQueryId, customerRegion });
@@ -705,7 +705,7 @@ export function App() {
     weightsRef.current = nextWeights;
     if (!res || !shownQuery) return;
     // a page-sized answer cannot be re-ranked as a whole: fetch every candidate once
-    if (nextWeights && res.history.length < res.total.history) void loadAll(shownQuery, runSeq.current);
+    if (nextWeights && (res.history.length < res.total.history || res.discovered.length < res.total.discovered)) void loadAll(shownQuery, runSeq.current);
     // back to the standard: the server order, page by page again
     if (!nextWeights && res.history.length > PAGE) {
       setRes({ ...res, history: res.history.slice(0, PAGE) });
