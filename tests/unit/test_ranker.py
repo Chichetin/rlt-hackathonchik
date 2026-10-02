@@ -6,11 +6,12 @@ import json
 import logging
 import math
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from src.contracts import Query
+from src.contracts import Counterparty, CounterpartyMatch, Query, ScoreComponent
 from src.match import ranker
 from src.match import search as search_mod
 from src.match.search import search
@@ -48,7 +49,7 @@ def test_off_is_v2_and_features_are_deterministic(search_data):
                 pytest.approx(math.log1p(lots)), pytest.approx(math.log1p(wins)))
 
 
-def test_model_reorders_and_explains(search_data, tmp_path):
+def _lots_model(tmp_path) -> dict:
     n = len(ranker.NAMES)
     coef = np.zeros(n)
     coef[ranker.NAMES.index("n_lots")] = 1.0  # rank by matched lots only
@@ -58,7 +59,13 @@ def test_model_reorders_and_explains(search_data, tmp_path):
     body = {"features": ranker.NAMES, "fill": [0.0] * n, "mean": mean.tolist(), "std": std.tolist(),
             "coef": coef.tolist(), "intercept": 0.0}
     model.write_text(json.dumps(body), encoding="utf-8")
-    cfg = {**search_mod.load_config(), "ranker": {"kind": "logreg", "model": str(model)}}
+    return {**search_mod.load_config(), "ranker": {"kind": "logreg", "model": str(model)}}
+
+
+def test_model_reorders_and_explains(search_data, tmp_path):
+    """model_weight 1.0: the score is the model's component alone — the order is the model's (as before #630)."""
+    cfg = _lots_model(tmp_path)
+    cfg["ranker"] = {**cfg["ranker"], "model_weight": 1.0}
     plain_cfg = {k: v for k, v in cfg.items() if k != "ranker"}
     got: list = []
     search(Q, config=plain_cfg, features_out=got)
@@ -66,23 +73,21 @@ def test_model_reorders_and_explains(search_data, tmp_path):
     lots = {inn: r[ranker.NAMES.index("n_lots")] for inn, r in got}
     assert [lots[m.counterparty.inn] for m in res] == sorted(lots.values(), reverse=True)[:len(res)]
     top = lots[res[0].counterparty.inn]
-    # #278: the score stays the formula of the components — the relevance level, not the model's raw score
-    plain = {m.counterparty.inn: m.score for m in search(Q, config=plain_cfg, k=search_mod.CANDIDATES)}
-    assert all(m.score == plain[m.counterparty.inn] for m in res)
     assert all(m.score == round(sum(c.value * c.weight for c in m.components), 4) for m in res)
+    assert all(c.weight == 0 for m in res for c in m.components if c.name != "model")
+    assert res[0].score == 1.0  # the top of the model is 1.0 after min-max
     # why above the next one: n_lots is the only feature with a weight, so it is the reason whenever it differs
     ties = 0
     for a, b in zip(res, res[1:], strict=False):
         la, lb = round(math.expm1(lots[a.counterparty.inn])), round(math.expm1(lots[b.counterparty.inn]))
-        if la != lb:
-            assert a.rank_reason == f"выше следующего: лоты с похожими позициями — {la} против {lb}"
-        else:  # equal for the model: the formula decides (#278), and the reason says so truthfully
+        va, vb = (next(c.value for c in m.components if c.name == "model") for m in (a, b))
+        if la != lb and f"{va:.2f}" != f"{vb:.2f}":
+            assert a.rank_reason == (f"выше следующего: оценка модели — {va:.2f} против {vb:.2f} "
+                                     f"(лоты с похожими позициями — {la} против {lb})")
+        elif la == lb:  # equal for the model and so for the score: the order is conditional, and the reason says so
             ties += 1
-            assert a.score >= b.score
-            if a.score > b.score:
-                assert a.rank_reason == f"оценка модели равна; выше релевантность — {a.score:.4f} против {b.score:.4f}"
-            else:
-                assert a.rank_reason == "оценка модели и релевантность равны — порядок условный (по ИНН)"
+            assert a.score == b.score
+            assert a.rank_reason == "релевантность и оценка модели равны — порядок условный (по ИНН)"
     assert ties > 0  # the fixture has suppliers with equal matched lots: the tie order is exercised
     assert res[-1].rank_reason is None
     fit = next(c for c in res[0].components if c.name == "product_fit")
@@ -91,6 +96,121 @@ def test_model_reorders_and_explains(search_data, tmp_path):
     assert f"за — лоты с похожими позициями: {n_top}" in fit.explanation  # the value, not only the name
     with pytest.raises(ValueError, match="ranker.kind"):
         search_mod.check_config({**cfg, "ranker": {"kind": "svm", "model": "x"}})
+
+
+def test_model_is_the_seventh_component_and_the_order_is_the_score(search_data, tmp_path):
+    """#630: the model's raw output, min-max within the answer, is the component «model» with weight W; the six
+    formula weights are × (1 − W); score = Σ weight · value and the list never goes up by it."""
+    cfg = _lots_model(tmp_path)
+    plain_cfg = {k: v for k, v in cfg.items() if k != "ranker"}
+    sp = ranker.spec(cfg)
+    assert sp is not None and sp["model_weight"] == ranker.MODEL_WEIGHT == 0.5  # no key — the default
+    res = search(Q, config=cfg)
+    plain = {m.counterparty.inn: m for m in search(Q, config=plain_cfg, k=search_mod.CANDIDATES)}
+    assert len(res) >= 3
+    for m in res:
+        comps = {c.name: c for c in m.components}
+        assert len(m.components) == 7 and comps["model"].weight == 0.5
+        assert 0.0 <= comps["model"].value <= 1.0
+        assert re.fullmatch(r"оценка модели подбора \(44 признака истории закупок\): место \d+ из \d+",
+                            comps["model"].explanation)
+        assert m.score == round(sum(c.value * c.weight for c in m.components), 4)
+        base = {c.name: c.weight for c in plain[m.counterparty.inn].components}
+        assert all(c.weight == round(base[c.name] * 0.5, 4) for c in m.components if c.name != "model")
+        assert m.score == pytest.approx(0.5 * plain[m.counterparty.inn].score + 0.5 * comps["model"].value, abs=1e-3)
+    assert [m.score for m in res] == sorted((m.score for m in res), reverse=True)
+    assert max(next(c.value for c in m.components if c.name == "model") for m in res) == 1.0
+    assert any(c.explanation.endswith(f"место 1 из {len(plain)}") for m in res for c in m.components
+               if c.name == "model")
+    assert all(m.rank_reason for m in res[:-1]) and res[-1].rank_reason is None
+    # W = 0: the model's component carries nothing, the order is the formula's score
+    zero = search(Q, config={**cfg, "ranker": {**cfg["ranker"], "model_weight": 0.0}})
+    assert [m.score for m in zero] == sorted((plain[m.counterparty.inn].score for m in zero), reverse=True)
+    for bad in (1.5, -0.1, "half", True):
+        with pytest.raises(ValueError, match="model_weight"):
+            search_mod.check_config({**cfg, "ranker": {**cfg["ranker"], "model_weight": bad}})
+
+
+def test_without_the_ranker_six_components_as_before(search_data, tmp_path):
+    """No customer (customer_only) or no ranker: no «model» component, the score is the formula of the six."""
+    cfg = _lots_model(tmp_path)
+    cfg["ranker"] = {**cfg["ranker"], "customer_only": True}
+    free = Q.model_copy(update={"customer_inn": None})
+    for res in (search(free, config=cfg), search(Q, config={k: v for k, v in cfg.items() if k != "ranker"})):
+        assert res
+        assert all(len(m.components) == 6 and "model" not in {c.name for c in m.components} for m in res)
+        assert all(m.score == round(sum(c.value * c.weight for c in m.components), 4) for m in res)
+
+
+def test_rerank_normalizes_within_the_answer(search_data, tmp_path):
+    """Equal raw outputs → every «model» is 1.0; the score order has the raw output as its tie-break."""
+    model = ranker.load({"kind": "logreg", "model": str(_lots_model(tmp_path)["ranker"]["model"])})
+    res = search(Q, config={k: v for k, v in _lots_model(tmp_path).items() if k != "ranker"})[:3]
+    rows = [[0.0] * len(ranker.NAMES)] * len(res)
+    out = ranker.rerank(model, res, rows, 3, 0.5)
+    assert all(next(c for c in m.components if c.name == "model").value == 1.0 for m in out)
+    assert [m.score for m in out] == sorted((m.score for m in out), reverse=True)
+
+
+def _hand_match(name: str, fit: float) -> CounterpartyMatch:
+    """Six components as search() gives them: product_fit with weight 1.0, the rest with weight 0."""
+    comps = [ScoreComponent(name=n, value=fit if n == "product_fit" else 0.0, weight=1.0 if n == "product_fit" else 0.0,
+                            explanation="x") for n in ("product_fit", "experience", "reliability", "price", "activity",
+                                                       "geography")]
+    return CounterpartyMatch(counterparty=Counterparty(inn=None, name=name), score=fit, components=comps,
+                             origin="history")
+
+
+def test_rerank_by_hand_score_order_tie_break_places_and_reasons():
+    """raw = the first feature (a fixed logreg): A — best formula, worst model; B — best model; X — the score of A,
+    higher model (the tie-break); C — the rest. W = 0.5: B 0.75, X 0.50, A 0.50, C 0.25."""
+    n = len(ranker.NAMES)
+    coef = np.zeros(n)
+    coef[0] = 1.0
+    model = ranker.Model("logreg", Path("hand.json"), {"fill": np.zeros(n), "mean": np.zeros(n), "std": np.ones(n),
+                                                       "coef": coef, "intercept": 0.0})
+    given = {"A": (1.0, 0.0), "B": (0.5, 10.0), "X": (0.5, 5.0), "C": (0.0, 5.0)}  # name: (formula, raw)
+    matches = [_hand_match(k, f) for k, (f, _) in given.items()]
+    rows = [[r] + [0.0] * (n - 1) for _, r in given.values()]
+    out = ranker.rerank(model, matches, rows, 10, 0.5)
+    assert [m.counterparty.name for m in out] == ["B", "X", "A", "C"]
+    assert [m.score for m in out] == [0.75, 0.5, 0.5, 0.25]
+    model_of = {m.counterparty.name: next(c for c in m.components if c.name == "model") for m in out}
+    assert {k: c.value for k, c in model_of.items()} == {"A": 0.0, "B": 1.0, "X": 0.5, "C": 0.5}
+    assert model_of["B"].explanation.endswith("место 1 из 4")
+    assert model_of["X"].explanation.endswith("место 2 из 4") and model_of["C"].explanation.endswith("место 2 из 4")
+    assert model_of["A"].explanation.endswith("место 4 из 4")
+    assert all(c.weight == 0.5 for m in out for c in m.components if c.name == "product_fit")
+    # the model's own reason is its feature («fit» here): the raw values, as the card shows them
+    assert out[0].rank_reason == ("выше следующего: оценка модели — 1.00 против 0.50 "
+                                  "(компонента «соответствие предмету» — 10.00 против 5.00)")
+    assert out[1].rank_reason == "релевантность равна; выше оценка модели — 0.5000 против 0.0000"
+    assert out[2].rank_reason == "выше следующего: компонента «соответствие предмету» — 1.00 против 0.00"
+    assert out[3].rank_reason is None
+    assert [m.counterparty.name for m in ranker.rerank(model, matches, rows, 2, 0.5)] == ["B", "X"]  # top-k
+
+
+def test_next_reason_names_the_leading_component():
+    def r(raw: float, parts: dict[str, float], values: dict[str, float]) -> ranker.Ranked:
+        return ranker.Ranked(raw, round(sum(parts.values()), 4), np.full(len(ranker.NAMES), math.nan),
+                             np.zeros(len(ranker.NAMES)), parts, values)
+
+    a = r(0.1, {"experience": 0.4, "model": 0.1}, {"experience": 0.8, "model": 0.2})
+    b = r(0.9, {"experience": 0.1, "model": 0.3}, {"experience": 0.2, "model": 0.6})
+    # the formula put a above b though the model rated b higher: the reason is the formula's component
+    assert ranker.next_reason(a, b) == "выше следующего: компонента «опыт» — 0.80 против 0.20"
+    c = r(1.0, {"experience": 0.1, "model": 0.45}, {"experience": 0.2, "model": 0.9})
+    assert ranker.next_reason(c, b) == "выше следующего: оценка модели — 0.90 против 0.60"
+    same = r(0.5, {"experience": 0.3}, {"experience": 0.6, "model": 0.5})
+    lower = r(0.4, {"experience": 0.3}, {"experience": 0.6, "model": 0.4})
+    assert ranker.next_reason(same, lower) == "релевантность равна; выше оценка модели — 0.5000 против 0.4000"
+    assert ranker.next_reason(same, same).endswith("порядок условный (по ИНН)")
+    near = r(0.5, {"experience": 0.301}, {"experience": 0.6})
+    assert ranker.next_reason(near, same) == "по совокупности компонент — 0.3010 против 0.3000"
+    # a component where the upper one is worse is never its reason, however visible
+    upper = r(0.5, {"experience": 0.301, "activity": 0.0}, {"experience": 0.6, "activity": 0.0})
+    worse = r(0.5, {"experience": 0.3, "activity": 0.0}, {"experience": 0.6, "activity": 0.5})
+    assert ranker.next_reason(upper, worse) == "по совокупности компонент — 0.3010 против 0.3000"
 
 
 def test_missing_model_falls_back_to_v2(search_data, tmp_path):
@@ -134,6 +254,7 @@ def test_reasons_follow_the_visible_neighbour(search_data, tmp_path):
     """After the filters the next supplier on screen is another one: the reason compares with it (#278),
     and a later search without the model leaves no stale reasons."""
     cfg = _logreg_on_lots(tmp_path)
+    cfg["ranker"]["model_weight"] = 1.0  # the order is the model's: its feature is the reason (#630)
     res = search(Q, config=cfg)
     assert len(res) >= 3
     shown = ranker.reasons([res[0], *res[2:]])  # the filters removed the second one
@@ -141,7 +262,9 @@ def test_reasons_follow_the_visible_neighbour(search_data, tmp_path):
         c for c in m.components if c.name == "experience").explanation)[0]) for m in res}
     a, c = lots[res[0].counterparty.inn], lots[res[2].counterparty.inn]
     assert a != c  # precondition: otherwise the reason would not name the lots
-    assert shown[0].rank_reason == f"выше следующего: лоты с похожими позициями — {a} против {c}"
+    assert shown[0].rank_reason is not None
+    assert shown[0].rank_reason.startswith("выше следующего: оценка модели — 1.00 против ")
+    assert shown[0].rank_reason.endswith(f" (лоты с похожими позициями — {a} против {c})")
     plain_cfg = {k: v for k, v in cfg.items() if k != "ranker"}
     assert all(m.rank_reason is None for m in ranker.reasons(search(Q, config=plain_cfg)))
 

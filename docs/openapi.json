@@ -588,6 +588,46 @@
         }
       }
     },
+    "/api/procedure/{ident}": {
+      "get": {
+        "summary": "Api Procedure",
+        "description": "Procedure number (Извещения.procedure_id, #617) -> Query of its lot; query_id names the lot (lot-<lot_id>).",
+        "operationId": "api_procedure_api_procedure__ident__get",
+        "parameters": [
+          {
+            "name": "ident",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ident"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Query"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/lot/{ident}/backtest": {
       "get": {
         "summary": "Api Lot Backtest",
@@ -1763,7 +1803,8 @@
               "reliability",
               "activity",
               "geography",
-              "price"
+              "price",
+              "model"
             ],
             "title": "Name"
           },

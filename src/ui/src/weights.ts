@@ -6,9 +6,11 @@ import { componentText } from "./ranker";
 // the browser: other users, the methodology and the Excel export keep the standard weights.
 
 export type ComponentName = CounterpartyMatch["components"][number]["name"];
-export type Weights = Record<ComponentName, number>;
+/** The criteria a user may weigh: «model» (#630, the learned ranker's score) keeps the server's weight. */
+export type UserComponent = Exclude<ComponentName, "model">;
+export type Weights = Record<UserComponent, number>;
 
-export const COMPONENTS: ComponentName[] = ["product_fit", "experience", "reliability", "activity", "geography", "price"];
+export const COMPONENTS: UserComponent[] = ["product_fit", "experience", "reliability", "activity", "geography", "price"];
 
 /** Mirrors `weights` in configs/search.yaml (#576); weights.test.ts reads the yaml so the two cannot drift. */
 export const DEFAULT_WEIGHTS: Weights = {
@@ -22,13 +24,13 @@ export const DEFAULT_WEIGHTS: Weights = {
 
 /** Out of the score: the server gives them weight 0 — price: no data (UNAVAILABLE in src/match/search.py, D-029);
  * reliability: computed for the shown rows, for reference only (reliability.mode shadow, #72). */
-export const UNAVAILABLE: ComponentName[] = []; // #585: reliability and price are in the score
+export const UNAVAILABLE: UserComponent[] = []; // #585: reliability and price are in the score
 
 /** Why a component is out of the score — the text of its row in the advanced mode. */
-export function offNote(c: ComponentName): string {
+export function offNote(c: UserComponent): string {
   return c === "reliability" ? "справочно — в оценку не входит" : "нет данных — в оценку не входит";
 }
-export const AVAILABLE: ComponentName[] = COMPONENTS.filter((c) => !UNAVAILABLE.includes(c));
+export const AVAILABLE: UserComponent[] = COMPONENTS.filter((c) => !UNAVAILABLE.includes(c));
 
 export const COMPONENT_COLOR: Record<ComponentName, string> = {
   product_fit: "#9db4ff",
@@ -37,6 +39,7 @@ export const COMPONENT_COLOR: Record<ComponentName, string> = {
   activity: "#b8a6e8",
   geography: "#d79aae",
   price: "#9aa6b2",
+  model: "#e3a86b",
 };
 
 export type Preset = { id: string; title: string; hint: string; weights: Weights | null };
@@ -89,17 +92,21 @@ export function normalize(w: Weights): Weights {
 /** The same match with the user's weights: each component keeps its value, the score is Σ value × weight.
  *  The weight the server gave to the components with data is redistributed (a weight of 0 by decision, like
  *  geography in H-15f, may be raised; no-data components stay at 0), so the scale of the score stays the same as
- *  with the standard weights and only the order changes. The learned ranker's reasons (#198, #278) are dropped. */
+ *  with the standard weights and only the order changes. The learned ranker's reasons (#198, #278) are dropped.
+ *  «Оценка модели» (#630) is not the user's to weigh: it keeps its value and the server's weight. */
 export function reweight(m: CounterpartyMatch, w: Weights): CounterpartyMatch {
+  type C = CounterpartyMatch["components"][number];
+  const fixed = (c: C) => c.name === "model";
+  const userWeight = (c: C) => Math.max(0, w[c.name as UserComponent] ?? 0);
   // a criterion the server could not compute for this supplier («Нет данных», e.g. price without НМЦК) stays at 0
-  const off = (c: CounterpartyMatch["components"][number]) => UNAVAILABLE.includes(c.name) || c.explanation.startsWith("Нет данных");
-  const scored = m.components.filter((c) => !off(c));
+  const off = (c: C) => !fixed(c) && (UNAVAILABLE.includes(c.name as UserComponent) || c.explanation.startsWith("Нет данных"));
+  const scored = m.components.filter((c) => !off(c) && !fixed(c));
   const mass = scored.reduce((a, c) => a + c.weight, 0);
-  const share = scored.reduce((a, c) => a + Math.max(0, w[c.name] ?? 0), 0);
+  const share = scored.reduce((a, c) => a + userWeight(c), 0);
   const components = m.components.map((c) => ({
     ...c,
-    explanation: componentText(c), // the order is the formula's now: the learned ranker's reason (#198) does not apply
-    weight: !off(c) && share > 0 ? Math.round((Math.max(0, w[c.name] ?? 0) / share) * mass * 1e4) / 1e4 : 0,
+    explanation: componentText(c), // the order is the user's formula now: the learned ranker's reason (#198) does not apply
+    weight: fixed(c) ? c.weight : !off(c) && share > 0 ? Math.round((userWeight(c) / share) * mass * 1e4) / 1e4 : 0,
   }));
   const score = Math.round(components.reduce((a, c) => a + c.value * c.weight, 0) * 1e4) / 1e4;
   return { ...m, components, score, rank_reason: null };
