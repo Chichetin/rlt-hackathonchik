@@ -225,9 +225,9 @@ def add_open_data(cards: list[Counterparty], cache: SourceCache) -> list[Counter
 
     def merged(c: Counterparty) -> Counterparty:
         have = {(e.url, e.field, e.value) for e in c.evidence}  # a card that already has them gets them once
-        new = [e for e in facts[c.inn] if (e.url, e.field, e.value) not in have]
+        new = [e for e in facts.get(c.inn or "", []) if (e.url, e.field, e.value) not in have]
         return c.model_copy(update={"evidence": [*c.evidence, *new]}) if new else c
-    return [merged(c) if c.inn in facts else c for c in cards]
+    return [merged(c) for c in cards]
 
 
 def enrich(inn: str, cache: SourceCache | None = None, *, offline: bool | None = None,
