@@ -61,22 +61,26 @@ def src_of(path: Path) -> str:
 OKV = "CASE WHEN length(code) >= 5 THEN substr(code, 1, 5) ELSE code END"
 
 
-def prepare(con: duckdb.DuckDBPyConnection, processed: Path, pool: Path, as_of: date) -> None:
-    """Temp tables: lc (lot → class), ok (supplier → main OKVED), tr (class → supplier before as_of), link."""
-    con.execute(f"CREATE TEMP VIEW p AS SELECT * FROM {src_of(processed / 'participants.parquet')} WHERE inn_valid")
+def prepare(con: duckdb.DuckDBPyConnection, processed: Path, pool: Path, as_of: date,
+            until: date | None = None) -> None:
+    """Temp tables: lc (lot → class), ok (supplier → main OKVED: full `code` and class-level `okv`),
+    tr (class → supplier before as_of), link. Lots published from `until` (default `as_of`) on are not read."""
+    con.execute(f"CREATE TEMP VIEW p AS SELECT * FROM {src_of(processed / 'participants.parquet')} "
+                f"WHERE inn_valid AND publish_date < DATE {lit((until or as_of).isoformat())}")
     con.execute("CREATE TEMP TABLE lc AS SELECT DISTINCT lot_id, okpd2_l4 AS cls "
                 f"FROM {src_of(processed / 'items.parquet')} WHERE okpd2_l4 IS NOT NULL")
-    con.execute(f"CREATE TEMP TABLE ok AS SELECT DISTINCT o.inn, {OKV} AS okv FROM {src_of(pool / 'okved.parquet')} o "
-                "WHERE o.main AND o.inn IN (SELECT supplier_inn FROM p)")
+    con.execute(f"CREATE TEMP TABLE ok AS SELECT DISTINCT o.inn, o.code, {OKV} AS okv "
+                f"FROM {src_of(pool / 'okved.parquet')} o WHERE o.main AND o.inn IN (SELECT supplier_inn FROM p)")
     con.execute("CREATE TEMP TABLE tr AS SELECT DISTINCT lc.cls, p.supplier_inn AS inn FROM p JOIN lc USING (lot_id) "
                 f"JOIN ok ON ok.inn = p.supplier_inn WHERE p.publish_date < DATE {lit(as_of.isoformat())}")
     total = con.execute("SELECT count(DISTINCT inn) FROM tr").fetchone()[0]  # type: ignore[index]
     con.execute(f"""CREATE TEMP TABLE link AS
         SELECT l.cls, l.okv AS okved, l.n AS suppliers, c.n AS class_suppliers, l.n * 1.0 / c.n AS share,
                (l.n * 1.0 / c.n) / (o.n * 1.0 / {max(total, 1)}) AS lift
-        FROM (SELECT tr.cls, ok.okv, count(*) AS n FROM tr JOIN ok USING (inn) GROUP BY 1, 2) l
+        FROM (SELECT tr.cls, ok.okv, count(DISTINCT tr.inn) AS n FROM tr JOIN ok USING (inn) GROUP BY 1, 2) l
         JOIN (SELECT cls, count(*) AS n FROM tr GROUP BY 1) c USING (cls)
-        JOIN (SELECT ok.okv, count(*) AS n FROM ok WHERE inn IN (SELECT inn FROM tr) GROUP BY 1) o USING (okv)""")
+        JOIN (SELECT ok.okv, count(DISTINCT inn) AS n FROM ok WHERE inn IN (SELECT inn FROM tr) GROUP BY 1) o
+          USING (okv)""")
 
 
 def build(as_of: date, processed: Path = PROCESSED, pool: Path = POOL, out: Path | None = None) -> dict[str, int]:
@@ -112,7 +116,11 @@ def select(min_lift: float, min_suppliers: int, top: int, table: str = "link") -
 
 def okveds(cls: str, table: Path = PROCESSED / TABLE, *, min_lift: float = MIN_LIFT,
            min_suppliers: int = MIN_SUPPLIERS, top: int = TOP) -> list[Link]:
-    """OKVED codes learned for an OKPD2 class, the most frequent first; [] without the table or the class."""
+    """OKVED codes learned for an OKPD2 class, the most frequent first; [] without the table or the class.
+
+    A code is the class level of a company's main OKVED and is matched EXACTLY at that level: `46.46` covers
+    46.46, 46.46.1, 46.46.2; a short code (`46.3`) means companies registered with exactly that code, not
+    every 46.3x — the counts and the lift of the row are those of the exact code."""
     if not table.exists():
         return []
     rows = duckdb.connect().execute(
@@ -122,7 +130,8 @@ def okveds(cls: str, table: Path = PROCESSED / TABLE, *, min_lift: float = MIN_L
 
 
 def rule_d036(classes: Sequence[str]) -> list[tuple[str, str]]:
-    """(class, OKVED prefix) of rule D-036 at class level: the class itself + the wholesale row of the table."""
+    """(class, OKVED prefix) of rule D-036: the class itself + the wholesale row of the table for the class.
+    A prefix is matched against the FULL main OKVED of a company (`46.46.2` is a row of the table)."""
     return [(c, p) for c in classes for p in (c, *wholesale_okveds(c))]
 
 

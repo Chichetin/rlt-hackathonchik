@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import duckdb
+import numpy as np
 
 from src.enrich.okved_link import (
     MIN_LIFT,
@@ -36,60 +37,80 @@ from src.enrich.okved_link import (
     split_dates,
     src_of,
 )
-from src.eval.metrics import bootstrap_ci
 
 RESULTS = ROOT / "eval" / "results"
 
 
+def cluster_ci(values: list[float], groups: list[str], n: int = 2000, seed: int = 250) -> tuple[float, float]:
+    """Percentile bootstrap of the mean over `groups` (winners), not over pairs: one winner has many lots."""
+    if not values:
+        return 0.0, 0.0
+    ids = {g: i for i, g in enumerate(dict.fromkeys(groups))}
+    sums, counts = np.zeros(len(ids)), np.zeros(len(ids))
+    for v, g in zip(values, groups, strict=True):
+        sums[ids[g]] += v
+        counts[ids[g]] += 1
+    if len(ids) < 2:
+        v = float(sums.sum() / counts.sum())
+        return v, v
+    pick = np.random.default_rng(seed).integers(0, len(ids), size=(n, len(ids)))
+    means = sums[pick].sum(axis=1) / counts[pick].sum(axis=1)
+    return float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975))
+
+
 def evaluate(cutoff: date, holdout_from: date, processed: Path = PROCESSED, pool: Path = POOL, *,
              min_lift: float = MIN_LIFT, min_suppliers: int = MIN_SUPPLIERS, top: int = TOP) -> dict:
-    """Cold dev winners: share whose main OKVED is selected, per rule, with the size of the selection."""
+    """Cold dev winners: share whose main OKVED is selected, per rule, with the size of the selection.
+
+    A rule is a set of (class, full main OKVED): D-036 prefixes are matched against the full code, the learned
+    codes — exactly at class level (as `okveds()` documents). Intervals are bootstrapped over winners."""
     con = duckdb.connect()
-    prepare(con, processed, pool, cutoff)
-    lo, hi = lit(cutoff.isoformat()), lit(holdout_from.isoformat())
+    prepare(con, processed, pool, cutoff, holdout_from)
+    lo = lit(cutoff.isoformat())
     con.execute(f"""CREATE TEMP TABLE cold AS SELECT DISTINCT lot_id, supplier_inn AS inn FROM p
-        WHERE is_winner AND publish_date >= DATE {lo} AND publish_date < DATE {hi}
+        WHERE is_winner AND publish_date >= DATE {lo}
           AND supplier_inn NOT IN (SELECT supplier_inn FROM p WHERE publish_date < DATE {lo})""")
     cold_all = con.execute("SELECT count(*) FROM cold").fetchone()[0]  # type: ignore[index]
-    con.execute("CREATE TEMP TABLE dev AS SELECT c.lot_id, c.inn, ok.okv FROM cold c JOIN ok USING (inn)")
+    con.execute("CREATE TEMP TABLE dev AS SELECT c.lot_id, c.inn, ok.code FROM cold c JOIN ok USING (inn)")
     pairs = con.execute("SELECT lot_id, inn FROM dev ORDER BY lot_id, inn").fetchall()
-    con.execute(f"CREATE TEMP TABLE cnt AS SELECT {OKV} AS okv, count(*) AS n FROM {src_of(pool / 'okved.parquet')} "
+    winners = [inn for _, inn in pairs]
+    con.execute(f"CREATE TEMP TABLE cnt AS SELECT code, count(*) AS n FROM {src_of(pool / 'okved.parquet')} "
                 f"WHERE main AND region_code IN ({','.join(map(lit, REGIONS))}) GROUP BY 1")
-    con.execute("CREATE TEMP TABLE okall AS SELECT okv FROM ok UNION SELECT okv FROM cnt")
+    con.execute(f"CREATE TEMP TABLE codes AS SELECT code, {OKV} AS okv "
+                "FROM (SELECT code FROM ok UNION SELECT code FROM cnt)")
     classes = [r[0] for r in con.execute("SELECT DISTINCT cls FROM lc").fetchall()]
     con.execute("CREATE TEMP TABLE d036 (cls VARCHAR, pfx VARCHAR)")
     con.executemany("INSERT INTO d036 VALUES (?, ?)", rule_d036(classes))
-    learned = f"SELECT cls, okved AS pfx FROM ({select(min_lift, min_suppliers, top)})"
-    rules = {
-        "class": "SELECT cls, cls AS pfx FROM (SELECT DISTINCT cls FROM lc)",
-        "d036": "SELECT cls, pfx FROM d036",
-        "learned": learned,
-        "class+learned": f"SELECT cls, cls AS pfx FROM (SELECT DISTINCT cls FROM lc) UNION {learned}",
-        "d036+learned": f"SELECT cls, pfx FROM d036 UNION {learned}",
-    }
+    by_class = "SELECT l.cls, k.code FROM (SELECT DISTINCT cls FROM lc) l JOIN codes k ON starts_with(k.code, l.cls)"
+    by_d036 = "SELECT r.cls, k.code FROM d036 r JOIN codes k ON starts_with(k.code, r.pfx)"
+    by_link = f"SELECT r.cls, k.code FROM ({select(min_lift, min_suppliers, top)}) r JOIN codes k ON k.okv = r.okved"
+    rules = {"class": by_class, "d036": by_d036, "learned": by_link,
+             "class+learned": f"{by_class} UNION {by_link}", "d036+learned": f"{by_d036} UNION {by_link}"}
     hits: dict[str, list[float]] = {}
     out: dict[str, dict] = {}
     for name, sql in rules.items():
         con.execute("DROP TABLE IF EXISTS rx")
-        con.execute(f"CREATE TEMP TABLE rx AS SELECT DISTINCT r.cls, k.okv FROM ({sql}) r JOIN okall k "
-                    "ON starts_with(k.okv, r.pfx)")
+        con.execute(f"CREATE TEMP TABLE rx AS SELECT DISTINCT cls, code FROM ({sql})")
         found = set(con.execute("SELECT DISTINCT d.lot_id, d.inn FROM dev d JOIN lc USING (lot_id) "
-                                "JOIN rx ON rx.cls = lc.cls AND rx.okv = d.okv").fetchall())
+                                "JOIN rx ON rx.cls = lc.cls AND rx.code = d.code").fetchall())
         hits[name] = [1.0 if p in found else 0.0 for p in pairs]
-        size = con.execute("""SELECT median(s), avg(s) FROM (SELECT d.lot_id, coalesce(sum(t.n), 0) AS s
-            FROM (SELECT DISTINCT lot_id FROM dev) d LEFT JOIN (SELECT DISTINCT lc.lot_id, k.okv, k.n FROM lc
-            JOIN rx USING (cls) JOIN cnt k USING (okv)) t USING (lot_id) GROUP BY 1)""").fetchone()
+        size = con.execute("""SELECT median(s), avg(s), quantile_cont(s, 0.9), avg((s = 0)::INT)
+            FROM (SELECT d.lot_id, coalesce(sum(t.n), 0) AS s
+            FROM (SELECT DISTINCT lot_id FROM dev) d LEFT JOIN (SELECT DISTINCT lc.lot_id, k.code, k.n FROM lc
+            JOIN rx USING (cls) JOIN cnt k USING (code)) t USING (lot_id) GROUP BY 1)""").fetchone()
         mean = sum(hits[name]) / len(pairs) if pairs else 0.0
-        out[name] = {"hit": round(mean, 4), "ci95": [round(v, 4) for v in bootstrap_ci(hits[name])],
-                     "candidates_median": float(size[0] or 0),  # type: ignore[index]
-                     "candidates_mean": round(float(size[1] or 0), 1)}  # type: ignore[index]
+        med, avg, p90, empty = (float(v or 0) for v in size)  # type: ignore[union-attr]
+        out[name] = {"hit": round(mean, 4), "ci95": [round(v, 4) for v in cluster_ci(hits[name], winners)],
+                     "candidates_median": med, "candidates_mean": round(avg, 1), "candidates_p90": round(p90, 1),
+                     "empty_selection_share": round(empty, 4),
+                     "classes": con.execute("SELECT count(DISTINCT cls) FROM rx").fetchone()[0]}  # type: ignore[index]
     deltas = {}
-    for a, b in (("class+learned", "d036"), ("d036+learned", "d036"), ("learned", "d036")):
+    for a, b in (("learned", "d036"), ("class+learned", "d036"), ("d036+learned", "d036")):
         diff = [x - y for x, y in zip(hits[a], hits[b], strict=True)]
         deltas[f"{a} - {b}"] = {"delta": round(sum(diff) / len(diff), 4) if diff else 0.0,
-                                "ci95": [round(v, 4) for v in bootstrap_ci(diff)]}
+                                "ci95": [round(v, 4) for v in cluster_ci(diff, winners)]}
     rows, link_classes = con.execute("SELECT count(*), count(DISTINCT cls) FROM link").fetchone()  # type: ignore[misc]
-    return {"n": len(pairs), "cold_winner_pairs": cold_all,
+    return {"n": len(pairs), "winners": len(set(winners)), "cold_winner_pairs": cold_all,
             "cold_in_pool_share": round(len(pairs) / cold_all, 4) if cold_all else 0.0,
             "rules": out, "deltas": deltas, "link": {"rows": rows, "classes": link_classes}}
 
@@ -122,8 +143,9 @@ def main(argv: list[str] | None = None) -> int:
     RESULTS.mkdir(parents=True, exist_ok=True)
     (RESULTS / f"{args.exp}.json").write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     for name, r in body["rules"].items():
-        print(f"{name:15s} hit {r['hit']:.3f} [{r['ci95'][0]:.3f}, {r['ci95'][1]:.3f}]  "
-              f"кандидатов СПб+ЛО, медиана {r['candidates_median']:.0f}")
+        print(f"{name:15s} hit {r['hit']:.3f} [{r['ci95'][0]:.3f}, {r['ci95'][1]:.3f}]  кандидатов СПб+ЛО: "
+              f"медиана {r['candidates_median']:.0f}, среднее {r['candidates_mean']:.0f}, "
+              f"p90 {r['candidates_p90']:.0f}, пустой набор у {r['empty_selection_share']:.1%} лотов")
     for name, d in body["deltas"].items():
         print(f"{name:25s} {d['delta']:+.3f} [{d['ci95'][0]:+.3f}, {d['ci95'][1]:+.3f}]")
     return 0

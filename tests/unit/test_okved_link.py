@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from src.enrich import okved_link
+from src.enrich import discover, okved_link
 from src.eval import okved_link as link_eval
 
 CUTOFF, HOLDOUT = date(2025, 7, 1), date(2025, 10, 1)
@@ -20,12 +20,15 @@ LOTS = [
     (5, "21.20", "2025-08-10", [("A", True)]),  # dev, the winner is known from train — not cold
     (6, "21.20", "2025-11-01", [("X", True)]),  # holdout — never read
     (8, "17.12", "2025-07-15", [("B", False), ("D", True)]),  # after the cutoff: must not teach the link
+    (9, "21.20", "2025-08-20", [("K", True)]),  # dev, cold winner whose full code is a deep row of the hand table
+    (10, "21.20", "2025-08-21", [("S", True)]),  # dev, cold winner with a short code — no exact match
 ]
 # (inn, code, main, region)
 OKVED = [
     ("A", "46.46.1", True, "78"), ("A", "17.12", False, "78"),  # the additional code is ignored
     ("B", "46.46", True, "78"), ("C", "46.90", True, "78"), ("D", "46.90", True, "47"), ("E", "46.90", True, "78"),
     ("F", "17.12", True, "78"), ("G", "46.46", True, "78"), ("H", "46.90", True, "78"), ("X", "46.46", True, "78"),
+    ("K", "46.46.1", True, "78"), ("S", "46.4", True, "78"),
     ("N1", "46.46", True, "78"), ("N2", "46.46.2", True, "47"), ("N3", "46.46", True, "77"),  # not suppliers
 ]
 
@@ -95,20 +98,37 @@ def test_okveds_applies_thresholds_and_explains(dirs):
     assert okved_link.okveds("99.99", table) == [] and okved_link.okveds("21.20", processed / "absent.parquet") == []
 
 
-def test_rule_d036_is_class_plus_wholesale_row():
-    assert ("21.20", "21.20") in okved_link.rule_d036(["21.20"])
-    assert all(cls == "21.20" for cls, _ in okved_link.rule_d036(["21.20"]))
+def test_rule_d036_is_class_plus_wholesale_row(monkeypatch):
+    monkeypatch.setattr(discover, "WHOLESALE", {"21": ("46.46.1", "46.18")})
+    assert okved_link.rule_d036(["21.20", "17.12"]) == [("21.20", "21.20"), ("21.20", "46.46.1"), ("21.20", "46.18"),
+                                                        ("17.12", "17.12")]
 
 
-def test_evaluate_counts_only_cold_dev_winners_and_never_the_holdout(dirs):
+def test_evaluate_counts_only_cold_dev_winners_and_never_the_holdout(dirs, monkeypatch):
+    monkeypatch.setattr(discover, "WHOLESALE", {"21": ("46.46.1",)})
     processed, pool = dirs
     res = link_eval.evaluate(CUTOFF, HOLDOUT, processed, pool, min_lift=1.5, min_suppliers=2)
-    # cold dev winners: G (lot 3) and H (lot 4); A (lot 5) and D (lot 8) are known from train, X (lot 6) is holdout
-    assert (res["n"], res["cold_winner_pairs"], res["cold_in_pool_share"]) == (2, 2, 1.0)
+    # cold dev winners: G, H, K, S; A (lot 5) and D (lot 8) are known from train, X (lot 6) is holdout
+    assert (res["n"], res["winners"], res["cold_winner_pairs"], res["cold_in_pool_share"]) == (4, 4, 4, 1.0)
     assert res["rules"]["class"]["hit"] == 0.0  # nobody has OKVED 21.20 / 17.12
-    assert res["rules"]["learned"]["hit"] == 0.5  # G by 46.46 for 21.20; H's 46.90 has lift 1.33 — not selected
-    assert res["rules"]["class+learned"]["hit"] == 0.5
-    # СПб+ЛО pool companies with main OKVED 46.46: A, B, G, X, N1, N2 (N3 is Moscow) — for lot 3; lot 4 selects none
-    assert res["rules"]["learned"]["candidates_mean"] == 3.0
-    assert res["deltas"]["learned - d036"]["delta"] == res["rules"]["learned"]["hit"] - res["rules"]["d036"]["hit"]
+    # the hand table's deep code 46.46.1 is matched against the FULL code: K only (G is plain 46.46)
+    assert res["rules"]["d036"]["hit"] == 0.25
+    # learned 46.46 is the class level, matched exactly: G and K; S's short 46.4 is another code; H's 46.90 — lift 1.33
+    assert res["rules"]["learned"]["hit"] == 0.5
+    assert res["rules"]["d036+learned"]["hit"] == 0.5 and res["rules"]["class+learned"]["hit"] == 0.5
+    assert res["deltas"]["learned - d036"]["delta"] == 0.25
+    # СПб+ЛО pool companies under 46.46: A, B, G, X, K, N1, N2 (N3 is Moscow, S is 46.4) for lots 3, 9, 10; lot 4 — none
+    learned = res["rules"]["learned"]
+    assert learned["candidates_mean"] == pytest.approx(5.25, abs=0.06)  # stored with one decimal
+    assert (learned["candidates_median"], learned["empty_selection_share"]) == (7.0, 0.25)
+    # D-036: 21.20 → 46.46.1 → A and K
+    assert res["rules"]["d036"]["candidates_median"] == 2.0
     assert res["link"] == {"rows": 4, "classes": 2}
+
+
+def test_cluster_ci_resamples_winners_not_pairs():
+    # one winner with 50 identical lots must not narrow the interval: 3 winners → wide interval
+    values = [1.0] * 50 + [0.0, 0.0]
+    lo, hi = link_eval.cluster_ci(values, ["big"] * 50 + ["b", "c"])
+    assert lo == 0.0 and hi == 1.0
+    assert link_eval.cluster_ci([1.0, 0.0], ["a", "a"]) == (0.5, 0.5) and link_eval.cluster_ci([], []) == (0.0, 0.0)
