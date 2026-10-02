@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.contracts import Query
+from src.ingest.notice import notice_query
 
 log = logging.getLogger(__name__)
 
@@ -97,8 +98,6 @@ def _rows(path: Path, columns: tuple[str, ...], required: tuple[str, ...], warni
 
 def load_testset(folder: Path) -> TestSet:
     """Read the export; TestDataError on a broken format, TestSet with warnings otherwise."""
-    from src.api.lots import _query  # one notice -> Query rule for training and test lots
-
     if not folder.is_dir():
         raise TestDataError(f"папка {folder} не найдена")
     warnings: list[str] = []
@@ -138,8 +137,8 @@ def load_testset(folder: Path) -> TestSet:
         except ValueError:
             notes.append(f"НМЦК «{row.get('start_price')}» не число — не учитывается")
             price = ""
-        q = _query(lot_id, subject or None, pname or None, price or None, row.get("customer_inn") or None,
-                   row.get("is_eshop_or_aisgz") or None, okpd2=okpd2)
+        q = notice_query(lot_id, subject or None, pname or None, price or None, row.get("customer_inn") or None,
+                         row.get("is_eshop_or_aisgz") or None, okpd2=okpd2)
         lots.append(TestLot(lot_id=lot_id, reqnum=row.get("reqnum") or None, query=q, notes=notes))
     if not lots:
         raise TestDataError(f"{n_path.name}: ни одного лота с lot_id")

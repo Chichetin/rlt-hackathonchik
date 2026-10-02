@@ -8,7 +8,7 @@
         -> appends `llm:<model>` rows to eval/labels/new_suppliers.csv (idempotent, human rows untouched)
 
 The tool never judges: judges are sub-agents of the main session. Agreement with the human and the
-20 pairs / 80 % threshold are computed by `label_new score`.
+20 pairs / 80 % threshold are computed by `label_new score`; LLM labels enter the metric only with `--with-llm` (D-133).
 """
 
 from __future__ import annotations

@@ -12,20 +12,20 @@ What goes to the cache (src/sources/cache.py):
 
 `captchaRequired: true` or HTTP 400 with a captcha error → CaptchaRequired: we stop, never solve
 captchas (research/SOURCES.md).
-Requests are paced (MIN_INTERVAL_S between any two requests to the host).
+Requests are paced (MIN_INTERVAL_S between any two requests to the host, src/sources/pacing.py).
 """
 
 from __future__ import annotations
 
 import json
 import os
-import threading
 import time
 from typing import Any
 
 import httpx
 
 from src.sources.cache import CachedPage, SourceCache
+from src.sources.pacing import HostPacer
 
 BASE = "https://pb.nalog.ru"
 SOURCE = "ФНС «Прозрачный бизнес»"
@@ -33,11 +33,10 @@ UA = "Mozilla/5.0 (compatible; RLTHack-Enrich/0.1; hackathon, cached, paced)"
 MIN_INTERVAL_S = float(os.environ.get("PB_MIN_INTERVAL_S", "1.0"))
 TIMEOUT_S = 20.0
 POLL_TRIES = 5
-
-_lock = threading.Lock()
-_last_request = 0.0
-_blocked_until = 0.0
 BLOCK_COOLDOWN_S = 900.0
+
+# MIN_INTERVAL_S is read at every request (a test or an operator may override the module value)
+PACER = HostPacer(lambda: MIN_INTERVAL_S, BLOCK_COOLDOWN_S)
 
 
 class CaptchaRequired(RuntimeError):
@@ -50,12 +49,11 @@ class NotFound(KeyError):
 
 def blocked() -> bool:
     """True after a captcha demand (or PB_DISABLED=1): no request goes to the host — every one extends the block."""
-    return os.environ.get("PB_DISABLED") == "1" or time.monotonic() < _blocked_until
+    return os.environ.get("PB_DISABLED") == "1" or PACER.blocked()
 
 
 def _captcha(msg: str) -> CaptchaRequired:
-    global _blocked_until
-    _blocked_until = time.monotonic() + BLOCK_COOLDOWN_S
+    PACER.block()
     return CaptchaRequired(msg)
 
 
@@ -69,15 +67,8 @@ def raw_url(inn: str) -> str:
 
 
 def _post(client: httpx.Client, path: str, data: dict[str, str]) -> httpx.Response:
-    global _last_request
-    with _lock:
-        wait = MIN_INTERVAL_S - (time.monotonic() - _last_request)
-        if wait > 0:
-            time.sleep(wait)
-        try:
-            r = client.post(BASE + path, data=data)
-        finally:
-            _last_request = time.monotonic()
+    with PACER.slot():
+        r = client.post(BASE + path, data=data)
     # Seen live 01.10: the captcha demand is HTTP 400 `{"ERRORS": {"pbSearchCaptcha": [...]}}`,
     # not `captchaRequired` in a 200 body. Without this the worker would count it as a failed
     # task and keep knocking.

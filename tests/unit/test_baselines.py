@@ -175,7 +175,8 @@ def test_evaluate_baseline_on_fixture(hist):
     assert (first["winner_new"], second["winner_new"]) == (False, True)
     assert (first["channel"], second["channel"]) == ("ЭМ", "АИС ГЗ")
     assert set(body["slices"]) == {"channel=ЭМ", "channel=АИС ГЗ", "winner=new", "winner=known",
-                                   "channel=ЭМ,winner=known", "channel=АИС ГЗ,winner=new"}
+                                   "channel=ЭМ,winner=known", "channel=АИС ГЗ,winner=new",
+                                   "type=goods"}  # paper, OKPD2 17 (#104)
     assert body["slices"]["winner=new"]["metrics"]["recall@10"]["value"] == 0.5
     assert body["metrics"]["recall@10"]["value"] == 0.75
     assert "ranked" not in R.evaluate(cases, {"method": "inc", "k": 20}, cutoff=CUTOFF, ranked_limit=1)["per_query"][0]
@@ -339,3 +340,12 @@ def test_lost_main_uses_the_recorded_config_and_rejects_an_unknown_config_of(tmp
     assert h15f is not None and h15f["weights"]["geography"] == 0.0 and h15f["options"]["tie_break"] == "bm25"
     assert L.main(["A", "B", "--config-of", "no-such-id"], results=tmp_path) == 2
     assert "no-such-id" in capsys.readouterr().err
+
+
+def test_history_is_one_per_data_not_per_store_object(hist, search_data):
+    """DATA_STORE=auto with Postgres down re-creates the parquet store every 30 s: no rebuild, no copy (review #367)."""
+    from src.match.store import ParquetStore
+
+    a = B.history(CUTOFF, ParquetStore(search_data))
+    assert B.history(CUTOFF, ParquetStore(search_data)) is a
+    assert B.history(None, ParquetStore(search_data)) is not a

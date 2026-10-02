@@ -14,8 +14,9 @@ and locality are dropped before anything is cached (152-ФЗ, research/SOURCES.m
 403 / 429 / a non-JSON page / `captchaRequired` → Blocked: we stop talking to the host for
 BLOCK_COOLDOWN_S and never try to get around it. A timeout or a dead connection pauses the host
 for DOWN_COOLDOWN_S: a hanging source is not asked again by every next search.
-Requests are paced (MIN_INTERVAL_S). A caller may pass a `deadline` (time.monotonic()): pacing,
-connect and read together do not outlive it (connect and read get half of the remaining time each).
+Requests are paced (MIN_INTERVAL_S, src/sources/pacing.py). A caller may pass a `deadline`
+(time.monotonic()): pacing, connect and read together do not outlive it (connect and read get half of
+the remaining time each).
 
 `python -m src.sources.rmsp seed <dir>` loads recorded answers (tests/fixtures/rmsp) into the cache:
 the e2e demo and an offline demo run on them without network.
@@ -27,8 +28,6 @@ import argparse
 import json
 import os
 import re
-import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,9 +36,12 @@ import httpx
 
 from src.contracts import inn_is_valid
 from src.sources.cache import CachedPage, SourceCache
+from src.sources.pacing import HostPacer, NoTimeLeft
 
 BASE = "https://rmsp.nalog.ru"
 SOURCE = "ФНС: единый реестр субъектов МСП"
+# the registry's category codes (the card, the dump, the open data): enrich, discover and msp_dump read it here (#294)
+MSP_CATEGORY = {"1": "микропредприятие", "2": "малое предприятие", "3": "среднее предприятие"}
 UA = "Mozilla/5.0 (compatible; RLTHack-Discovery/0.1; hackathon, cached, paced)"
 MIN_INTERVAL_S = float(os.environ.get("RMSP_MIN_INTERVAL_S", "1.0"))
 TIMEOUT_S = float(os.environ.get("RMSP_TIMEOUT_S", "3.0"))
@@ -59,9 +61,8 @@ META_FIELDS = ("rowCount", "dtQueryEnd")
 _OKVED = re.compile(r"\d{2}(\.\d{1,2}){0,2}", re.ASCII)
 _REGION = re.compile(r"\d{2}", re.ASCII)
 
-_lock = threading.Lock()
-_last_request = 0.0
-_blocked_until = 0.0
+# MIN_INTERVAL_S is read at every request (a test or an operator may override the module value)
+PACER = HostPacer(lambda: MIN_INTERVAL_S, BLOCK_COOLDOWN_S)
 
 
 class Blocked(RuntimeError):
@@ -140,39 +141,26 @@ def parse(text: str) -> Answer:
 
 def blocked() -> bool:
     """True while the host is paused: after a refusal (15 min) or after a timeout (DOWN_COOLDOWN_S)."""
-    return time.monotonic() < _blocked_until
-
-
-def _pause(seconds: float) -> None:
-    global _blocked_until
-    _blocked_until = max(_blocked_until, time.monotonic() + seconds)
+    return PACER.blocked()
 
 
 def _block(reason: str) -> Blocked:
-    _pause(BLOCK_COOLDOWN_S)
+    PACER.block()
     return Blocked(f"rmsp.nalog.ru: {reason} — останавливаемся, защиту не обходим")
 
 
 def _post(client: httpx.Client, data: dict[str, str], deadline: float | None,
           timeout: float | None = None) -> httpx.Response:
-    global _last_request
-    with _lock:
-        wait = max(0.0, MIN_INTERVAL_S - (time.monotonic() - _last_request))
-        limit = timeout or TIMEOUT_S
-        if deadline is not None:
-            limit = min(limit, deadline - time.monotonic() - wait)
-            if limit < MIN_ATTEMPT_S:
-                raise Paused("rmsp.nalog.ru: на запрос не осталось времени")
-        if wait > 0:
-            time.sleep(wait)
-        try:
-            # httpx timeouts are per phase: connect and read share the limit, so both ≤ limit in total
-            return client.post(BASE + "/search-proc.json", data=data, timeout=limit / 2)
-        except httpx.TransportError:
-            _pause(DOWN_COOLDOWN_S)  # timeout / no connection: leave the host alone for a while
-            raise
-        finally:
-            _last_request = time.monotonic()
+    try:
+        with PACER.slot(deadline, timeout=timeout or TIMEOUT_S, min_attempt_s=MIN_ATTEMPT_S) as limit:
+            try:
+                # httpx timeouts are per phase: connect and read share the limit, so both ≤ limit in total
+                return client.post(BASE + "/search-proc.json", data=data, timeout=limit / 2)
+            except httpx.TransportError:
+                PACER.block(DOWN_COOLDOWN_S)  # timeout / no connection: leave the host alone for a while
+                raise
+    except NoTimeLeft:
+        raise Paused("rmsp.nalog.ru: на запрос не осталось времени") from None
 
 
 def _checked(r: httpx.Response) -> dict[str, Any]:
