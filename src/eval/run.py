@@ -26,6 +26,7 @@ from src.eval.split import ROOT, EvalCase, load_cases, split_config
 from src.match import pipeline, ranker
 from src.match import search as search_mod
 from src.match.profiles import procurement_type
+from src.settings import get_settings
 
 log = logging.getLogger(__name__)
 SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
@@ -40,8 +41,11 @@ RESULTS = ROOT / "eval" / "results"
 # Files whose bytes define the evaluated configuration (sha256 for eval-final).
 CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
 # Code that defines the method (not UI/API): its committed tree enters the hash.
-METHOD_PATHS = ("src/contracts.py", "src/ingest", "src/match", "src/sources", "src/enrich", "src/eval", "src/llm",
+METHOD_PATHS = ("src/contracts.py", "src/settings.py", "src/regions.py", "src/ingest", "src/match", "src/sources",
+                "src/enrich", "src/eval", "src/llm",
                 "src/db")  # src/db: normalization and the embedding model of retriever pg_hybrid
+# settings.py parses the variables the method reads (tokenizer, data and index dirs), regions.py feeds the region
+# features; tests/unit/test_eval_seal.py checks that every module eval imports is here (#448, D-150)
 
 
 class GitError(RuntimeError):
@@ -76,6 +80,10 @@ def config_sha256(root: Path | None = None) -> str:
         data = (root / rel).read_bytes().replace(b"\r\n", b"\n")
         h.update(rel.encode() + b"\0" + data + b"\0")
     h.update(b"method-tree\0" + git("ls-tree", "-r", "HEAD", "--", *METHOD_PATHS, root=root, strict=True).encode())
+    # The environment overrides the method too (#440): BM25_TOKENIZER replaces `tokenizer:` of the YAML. Only a set
+    # override enters the hash, so every signature computed without one stays valid.
+    if tok := get_settings().bm25_tokenizer:
+        h.update(b"env:BM25_TOKENIZER\0" + tok.encode() + b"\0")
     return h.hexdigest()
 
 
