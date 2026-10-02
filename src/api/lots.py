@@ -90,18 +90,19 @@ def find_lot(ident: str) -> Query:
     return _store_lot(lambda s: s.lot(ident), ident)
 
 
+class NoTestFiles(LookupError):
+    pass
+
+
 def find_procedure(ident: str) -> Query:
-    """Procedure number (Извещения.procedure_id, 1:1 with the lot, #617) -> the Query of its lot, as find_lot."""
+    """Procedure number (Извещения.procedure_id, 1:1 with the lot) -> the Query of its lot — only in the uploaded
+    test export files (and TEST_DATA_DIR), never in the training data (#639). No files -> NoTestFiles."""
     ident = ident.strip()
-    for ts in _test_sets():
+    sets = _test_sets()
+    if not sets:
+        raise NoTestFiles(ident)
+    for ts in sets:
         lot = ts.find_procedure(ident)
         if lot is not None:
             return lot.query
-    if len(ident) > 18:  # longer than bigint: no such procedure, not a database error
-        raise LotNotFound(ident)
-
-    def by_procedure(store: Store) -> tuple | None:
-        lot_id = store.lot_by_procedure(int(ident))
-        return None if lot_id is None else store.lot(str(lot_id))
-
-    return _store_lot(by_procedure, ident)
+    raise LotNotFound(ident)
