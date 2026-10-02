@@ -241,6 +241,7 @@ def test_tokenizer_override_changes_the_signature(repo, monkeypatch):
     monkeypatch.delenv("BM25_TOKENIZER")
     assert R.config_sha256(repo) == plain
 
+
 def test_every_module_the_evaluation_imports_is_in_the_hashed_method_code():
     """A module the backtest runs but the eval-final hash does not cover lets a changed method pass the gate under
     the old sha (#448: src/settings.py and src/regions.py were outside). Walk the import graph from src.eval.run —
@@ -261,7 +262,7 @@ def test_every_module_the_evaluation_imports_is_in_the_hashed_method_code():
             graph.setdefault(e.src, set()).add(e.dst)
     finally:
         del sys.modules[name]
-    reached, todo = set(), ["src.eval.run"]
+    reached, todo = set(), ["src.eval.run", "src.eval.final"]  # make eval and make eval-final
     while todo:
         m = todo.pop()
         if m not in reached:
