@@ -38,7 +38,7 @@ import yaml
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.ingest.load import from_rows
 from src.ingest.okpd2 import label
-from src.match import fallback, ranker
+from src.match import candidates, fallback, ranker
 from src.match.index import LotIndex, get_index
 from src.match.profiles import profile_overrides, profile_weights
 from src.match.signals import customer_lots, mix_incumbent, signal_shares
@@ -108,6 +108,7 @@ def check_config(cfg: dict) -> dict:
     if cfg.get("retriever") not in RETRIEVERS:
         raise ValueError(f"retriever {cfg.get('retriever')!r} не поддерживается (есть: {', '.join(RETRIEVERS)})")
     scoring_options(cfg)
+    candidates.sizes(cfg)
     ranker.spec(cfg)  # learned ranker (#198): on by default since D-103
     profile_overrides(cfg)  # weights by procurement type (#104), off by default
     return cfg
@@ -139,6 +140,7 @@ class Candidate:
     class_lots: int = 0
     class_wins: int = 0
     found_by: str = ""  # fallback ladder (src/match/fallback.py): the first phrase of product_fit
+    counted: str = ""  # what n_lots / n_wins count when not lots with similar positions (#195 extra candidates)
 
 
 def _retrieve(store: Store, idx: LotIndex, lots: LotHits, as_of: date | None) -> list[Candidate]:
@@ -299,7 +301,7 @@ def _experience(c: Candidate, codes: list[str], as_of: date | None, by: str = "c
         groups = ", ".join(label(g) for g in sorted({x[2] or x[0] for x in map(levels, codes)}))
         lots, wins, what = c.class_lots, c.class_wins, f"по ОКПД2 {groups}"
     else:
-        lots, wins, what = c.n_lots, c.n_wins, "с похожими позициями"
+        lots, wins, what = c.n_lots, c.n_wins, c.counted or "с похожими позициями"
     value = 0.5 * _sat(lots, sat_lots) + 0.5 * _sat(wins, sat_wins)
     return value, f"{lots} лот(ов) {what} {_period(as_of)}, из них побед: {wins}"
 
@@ -465,6 +467,7 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
         guess = _predict_okpd2(store, idx, hits, lots, words)
         codes, predicted = ([guess], True) if guess else ([], False)
     if codes:
+        cands += candidates.extra(store, {c.inn for c in cands}, codes, query.customer_inn, as_of, cfg, own)  # #195
         _class_history(store, cands, codes, as_of)
     rk = ranker.spec(cfg)
     ranked = rk is not None or features_out is not None  # ranker features wanted (#198)

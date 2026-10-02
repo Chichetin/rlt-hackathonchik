@@ -19,7 +19,7 @@ import json
 import logging
 import math
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -153,15 +153,25 @@ class Model:
     path: Path
     params: dict  # logreg: fill, mean, std, coef, intercept
     booster: Any = None  # lgbm.Booster
+    ablate: tuple[int, ...] = ()  # feature columns fed as missing (NaN): eval-time ablation, #361
+
+    def _x(self, x: np.ndarray) -> np.ndarray:
+        if not self.ablate:
+            return x
+        x = np.array(x, dtype=float)
+        x[:, list(self.ablate)] = np.nan
+        return x
 
     def raw(self, x: np.ndarray) -> np.ndarray:
         """Ranking score (higher is better) of rows x (n, len(NAMES))."""
+        x = self._x(x)
         if self.kind == "lgbm":
             return np.asarray(self.booster.predict(x, raw_score=True, num_threads=1), dtype=float)
         return self._z(x) @ self.params["coef"] + self.params["intercept"]
 
     def contrib(self, x: np.ndarray) -> np.ndarray:
         """Per-feature contribution to raw() (n, len(NAMES)), the bias excluded."""
+        x = self._x(x)
         if self.kind == "lgbm":
             return np.asarray(self.booster.predict(x, pred_contrib=True, num_threads=1), dtype=float)[:, :-1]
         return self._z(x) * self.params["coef"]
@@ -181,8 +191,11 @@ def spec(cfg: dict) -> dict | None:
     raw = cfg.get("ranker")
     if not raw:
         return None
-    if not isinstance(raw, dict) or set(raw) - {"kind", "model"}:
-        raise ValueError(f"ranker: ожидается {{kind, model}}, получено {raw!r}")
+    if not isinstance(raw, dict) or set(raw) - {"kind", "model", "ablate"}:
+        raise ValueError(f"ranker: ожидается {{kind, model[, ablate]}}, получено {raw!r}")
+    bad = set(raw.get("ablate") or []) - set(NAMES)
+    if bad:
+        raise ValueError(f"ranker.ablate: неизвестные признаки {sorted(bad)}")
     if raw.get("kind") not in KINDS:
         raise ValueError(f"ranker.kind = {raw.get('kind')!r}: ожидается одно из {KINDS}")
     if not raw.get("model"):
@@ -191,7 +204,14 @@ def spec(cfg: dict) -> dict | None:
 
 
 def load(sp: dict) -> Model:
-    """Model of the spec, cached in memory by (path, mtime)."""
+    """Model of the spec, cached in memory by (path, mtime); `ablate` gives a copy with those features missing."""
+    model = _load(sp)
+    if sp.get("ablate"):
+        model = replace(model, ablate=tuple(NAMES.index(n) for n in sp["ablate"]))
+    return model
+
+
+def _load(sp: dict) -> Model:
     path = Path(sp["model"])
     path = path if path.is_absolute() else ROOT / path
     key = (str(path), path.stat().st_mtime)
