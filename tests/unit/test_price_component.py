@@ -86,3 +86,18 @@ def test_experience_wins_rate():
     assert _experience(few, [], CUTOFF, "similar", wins="rate")[1].endswith("(доля побед со сглаживанием 80%)")
     with pytest.raises(ValueError):
         scoring_options({"options": {"experience_wins": "bogus"}})
+
+
+def test_last_similar_is_before_as_of_and_is_the_latest_matched_lot(search_data):
+    from src.match import index as index_mod
+    from src.match.search import _retrieve
+    from src.match.store import get_store
+    from src.match.text import tokenize
+
+    store = get_store()
+    idx = index_mod.get_index(store, CUTOFF)
+    hits = idx.retrieve(tokenize("бумага офисная"), search_mod.TOP_DOCS)
+    cands = _retrieve(store, idx, idx.lot_hits(hits), CUTOFF)
+    assert cands
+    for c in cands:
+        assert c.last_similar is not None and c.best_date <= c.last_similar < CUTOFF
