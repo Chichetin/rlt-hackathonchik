@@ -53,7 +53,7 @@ import httpx
 
 from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, ScoreComponent
 from src.enrich import web_discover
-from src.enrich.enrich import enrich, from_card
+from src.enrich.enrich import enrich, from_bo, from_card
 from src.enrich.evidence import check_counterparty, strip_unverified, value_in_page
 from src.match import new_fit
 from src.match import search as search_mod
@@ -62,7 +62,7 @@ from src.match.index import processed_dir
 from src.match.store import Store, get_store, store_for
 from src.regions import NEIGHBOUR, NEIGHBOUR_VALUE, REGION_CODE, REGION_NAME
 from src.settings import get_settings
-from src.sources import gisp, pb_nalog, rmsp, role, web_leads
+from src.sources import bo_nalog, gisp, msp_dump, pb_nalog, rmsp, role, web_leads
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
 
@@ -988,6 +988,34 @@ POOL_LIMIT = 400  # pool candidates per region read for one query (main OKVED fi
 POOL_EXTRA_FIT = 0.5  # an additional OKVED of the class (decision 22 of IR630): below the 0.6 step of «Новые»
 
 
+LARGE_SOURCE = {"bo": "ГИР БО", "pb": "Карточка ФНС"}  # who names the region of a company outside the registry
+
+
+def from_large(row: dict) -> Counterparty:
+    """A company of the pool that is NOT in the dump of the МСП registry (#219, `large` of src/db/pool.py):
+    the Evidence is built from the cached page of the row by the code of a live answer — from_bo() for ГИР БО,
+    from_card() for the registry card. ГИР БО has no KPP: the region is the one its row names, when it is a
+    region of src/regions.py. «Не МСП»: the card says so itself (`rsmpcategory`); otherwise it is the lookup
+    in the registry dump — the page `msp_absent_page()` that large_pages() cached under the dump's address."""
+    inn = row["inn"]
+    page = CachedPage(url=row["url"], body=row["body"], fetched_at=row["fetched_at"], status=200)
+    cp = from_card(inn, page) if row["source"] == "pb" else from_bo(inn, page)
+    ev, update = list(cp.evidence), {}
+    line = next((ln for ln in row["body"].splitlines() if ln.startswith(f"row.{inn}.region: ")), None)
+    region = REGION_NAME.get(row["region_code"] or "")
+    if row["source"] == "bo" and line is not None and region is not None:
+        ev.append(Evidence(source=bo_nalog.SOURCE, url=page.url, field="region", value=line,
+                           fetched_at=datetime.fromtimestamp(page.fetched_at, UTC),
+                           fact=f"Регион по ГИР БО: {line.split(': ', 1)[1]}"))
+        update["region"] = region
+    if cp.is_msp is None and row["msp_checked_at"] is not None:
+        ev.append(Evidence(source=msp_dump.SOURCE, url=msp_dump.page_url(inn), field="msp", value="inn_rows: 0",
+                           fetched_at=datetime.fromtimestamp(row["msp_checked_at"], UTC),
+                           fact=f"В выгрузке реестра МСП ФНС на {msp_dump.AS_OF} записи с этим ИНН нет — не МСП"))
+        update["is_msp"] = False
+    return cp.model_copy(update={**update, "evidence": ev}) if update else cp
+
+
 def pool_source() -> tuple[str | None, Path | None]:
     """(Postgres url, parquet dir) of the pool (#185, D-090): the parquet when built, else Postgres when
     DATABASE_URL is one; (None, None) — the pool is not loaded."""
@@ -1016,15 +1044,26 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
     if not plan:
         return [], {}, False
     rows: dict[str, dict] = {}
+    large: set[str] = set()  # companies outside the registry dump (#219): the `large` table of the pool
     for region in _regions(query):  # the query's region first: its rows win the limit
-        for r in pool_mod.candidates([ch.okved for ch in plan], regions=[region], limit=limit, url=url,
+        prefixes = [ch.okved for ch in plan]
+        for r in pool_mod.candidates(prefixes, regions=[region], limit=limit, url=url,
                                      pool_dir=pool_dir or pool_mod.POOL):
             rows.setdefault(r["inn"], r)
+        for r in pool_mod.large_candidates(prefixes, regions=[region], pool_dir=pool_dir or pool_mod.POOL):
+            if r["inn"] not in rows:
+                rows[r["inn"]] = r
+                large.add(r["inn"])
     known = known_inns(list(rows), query.as_of, store_for(processed))
     if known is None:
         return [], {}, False
     fresh = [inn for inn in rows if inn not in known]
-    cps = pool_mod.counterparties(fresh, cache, url=url, pool_dir=pool_dir or pool_mod.POOL)
+    cps = pool_mod.counterparties([i for i in fresh if i not in large], cache, url=url,
+                                  pool_dir=pool_dir or pool_mod.POOL)
+    outside = {inn: row for inn, row in pool_mod.large_pages(
+        [i for i in fresh if i in large], cache, pool_dir=pool_dir or pool_mod.POOL).items()
+        if pool_mod.large_active(row)}  # a newer answer in the cache may say the company is no longer active
+    cps |= {inn: from_large(row) for inn, row in outside.items()}
     target, target_note = search_mod.customer_region(query)
     out: list[CounterpartyMatch] = []
     relation: dict[str, str] = {}
@@ -1037,14 +1076,17 @@ def from_pool(query: Query, codes: Sequence[str], *, predicted: bool, weights: d
         rc = next(((e.value or "").rsplit(": ", 1)[-1] for e in cp.evidence if e.field == "region"), "")
         name = next((e.value or "" for e in cp.evidence if e.field == "okved" and main and ": " not in (e.value or "")),
                     "")
+        if inn in outside:  # the region code is the table's: ГИР БО names the region, the card gives a KPP
+            rc = outside[inn]["region_code"] or ""
         row = {"okved1": code, "okved1name": name, "regioncode": rc}
-        comps = _components(cp, row, ch, predicted, False, target, weights, target_note)
+        comps = _components(cp, row, ch, predicted, inn in outside, target, weights, target_note)
         if not main:
             fit = POOL_EXTRA_FIT if ch.relation == "class" else min(FIT[ch.relation], POOL_EXTRA_FIT)
             comps = [c.model_copy(update={"value": fit, "explanation": (
                 f"Дополнительный ОКВЭД {code} (реестр МСП) — класс ОКПД2 {ch.okpd_class}; основной вид деятельности "
                 "другой, поэтому ниже основного")}) if c.name == "product_fit" else c for c in comps]
-        comps = [c.model_copy(update={"explanation": c.explanation.replace("Реестр МСП", "Выгрузка реестра МСП")})
+        where = LARGE_SOURCE[outside[inn]["source"]] if inn in outside else "Выгрузка реестра МСП"
+        comps = [c.model_copy(update={"explanation": c.explanation.replace("Реестр МСП", where)})
                  if c.name == "geography" else c for c in comps]
         relation[inn] = ch.relation if main or ch.relation == "wholesale" else "extra"
         out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,

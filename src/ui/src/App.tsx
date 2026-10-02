@@ -253,6 +253,20 @@ export function noteText(note: string | undefined): string | undefined {
   return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
+const NEW_BLOCK_LEAD = "В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: ";
+const GISP_MARK = "реестру Минпромторга (ГИСП)"; // src/enrich/discover.py GISP_MARK: in product_fit only when the product is confirmed
+const MSP_SOURCES = ["ФНС: единый реестр субъектов МСП", "ФНС: реестр МСП, выгрузка открытых данных"]; // rmsp.SOURCE, msp_dump.SOURCE
+
+/** Caption of «Новые» (#477): names the channels the block really holds. A ГИСП maker counts only when its product_fit
+ * says the registry confirmed the product — ГИСП evidence that only backs the role of a МСП row does not. */
+export function newBlockHint(rows: CounterpartyMatch[]): string {
+  const gisp = rows.some(m => m.components.some(c => c.name === "product_fit" && c.explanation.includes(GISP_MARK)));
+  if (!gisp) return NEW_BLOCK_LEAD + "первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора";
+  const msp = rows.some(m => (m.counterparty.evidence ?? []).some(e => MSP_SOURCES.includes(e.source)));
+  return NEW_BLOCK_LEAD + "изготовители из реестра промышленной продукции Минпромторга (ГИСП) — по товару закупки"
+    + (msp ? ", и действующие записи реестра МСП по ОКВЭД и региону" : "");
+}
+
 /** Why «Новые» may be incomplete (X-Discovery-Error, #287): the source failed, or novelty was not checked. */
 export function discoveryAlert(code: string | undefined): string | undefined {
   if (!code) return undefined;
@@ -980,7 +994,7 @@ export function App() {
             variant="new"
             tag="Открытые реестры"
             title="Новые из открытых источников"
-            hint="В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора"
+            hint={newBlockHint(res.discovered)}
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             alert={discoveryAlert(res.discoveryError)}
             chip={res.discoveryClass?.predicted ? `ОКПД2 определён по тексту: ${okpd2Text(res.discoveryClass.classes, discoveryLabels)}` : undefined}
