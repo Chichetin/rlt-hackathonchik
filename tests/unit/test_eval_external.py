@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+
+import duckdb
 
 from src.eval import external as EX
 from src.eval.build_cases import Lot
@@ -38,3 +41,30 @@ def test_selection_requires_a_winner_with_valid_inn() -> None:
 def test_selection_never_returns_a_case_before_the_cutoff() -> None:
     cases, stats = EX.select_cases([_lot(1, date(2024, 12, 31))], [1], CUTOFF, HOLDOUT_FROM)
     assert cases == [] and stats["before_cutoff"] == 1
+
+
+def test_sealed_lot_is_counted_by_date_before_its_participants_are_looked_at() -> None:
+    """The date check precedes the winner check: a sealed lot without a winner is `holdout_period`, not `no_winner`."""
+    sealed_no_winner = _lot(1, date(2025, 11, 1), participants=[(L, False, True)])
+    _, stats = EX.select_cases([sealed_no_winner], [1], CUTOFF, HOLDOUT_FROM)
+    assert stats["holdout_period"] == 1 and stats["no_winner"] == 0
+
+
+def test_lots_are_classified_by_dates_without_being_loaded() -> None:
+    dates = {1: date(2025, 11, 1), 2: date(2024, 12, 31), 3: date(2025, 5, 1)}
+    cases, stats = EX.select_cases([], [1, 2, 3, 4], CUTOFF, HOLDOUT_FROM, dates)
+    assert cases == []
+    assert (stats["holdout_period"], stats["before_cutoff"], stats["not_in_data"]) == (1, 1, 2)  # 3: window, not loaded
+
+
+def test_read_ids_drops_duplicates_and_takes_the_first_n(tmp_path: Path) -> None:
+    f = tmp_path / "lots.csv"
+    f.write_text("lot_id\n5\n7\n5\n9\n", encoding="utf-8")
+    assert EX.read_ids(f, None) == [5, 7, 9]
+    assert EX.read_ids(f, 2) == [5, 7]
+
+
+def test_publish_dates_reads_only_the_listed_notices(tmp_path: Path) -> None:
+    duckdb.sql(f"COPY (SELECT * FROM (VALUES (1, DATE '2025-03-01'), (2, DATE '2025-11-01'), (3, DATE '2025-04-01'))"
+               f" t(lot_id, publish_date)) TO '{(tmp_path / 'notices.parquet').as_posix()}' (FORMAT parquet)")
+    assert EX.publish_dates(tmp_path, [1, 2]) == {1: date(2025, 3, 1), 2: date(2025, 11, 1)}

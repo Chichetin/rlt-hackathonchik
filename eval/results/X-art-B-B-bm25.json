@@ -1,9 +1,9 @@
 {
   "exp_id": "X-art-B-B-bm25",
   "part": "ext-art7235_lots-n2000",
-  "created_at": "2026-10-02T01:59:34+00:00",
-  "commit": "023ef45faba52b07a39aee0494e524c38c904d8f",
-  "dirty": false,
+  "created_at": "2026-10-02T02:10:46+00:00",
+  "commit": "673b94b0890f3e4a58fc6ef6cc90ff71825e9a2b",
+  "dirty": true,
   "config": {
     "baseline": "B-bm25",
     "method": "bm25",
@@ -11,12 +11,13 @@
     "tokenizer": "prefix5"
   },
   "tokenizer_version": "prefix5-v1",
-  "config_sha256": "d825f00d9035399807bb17d49b5fd45694c5bda7e2d1c4dfacdf827552beb3ff",
+  "exact_docs": 20,
+  "config_sha256": "26729ed38e2112d961264990970d0f4f46ede28fefdfce3cd64461fcec870b6b",
   "stub": false,
   "vectors": null,
   "store": "parquet",
   "n_queries": 384,
-  "elapsed_s": 46.7,
+  "elapsed_s": 41.2,
   "metrics": {
     "recall@10": {
       "value": 0.43323561565749064,
@@ -810,8 +811,8 @@
   },
   "selection": {
     "listed": 2000,
-    "not_in_data": 911,
-    "before_cutoff": 0,
+    "not_in_data": 0,
+    "before_cutoff": 911,
     "holdout_period": 705,
     "no_winner": 0,
     "no_text": 0,

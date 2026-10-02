@@ -15,6 +15,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import duckdb
+
 from src.eval import build_cases as BC
 from src.eval import run as R
 from src.eval.split import ROOT, EvalCase, split_config
@@ -24,22 +26,31 @@ DEFAULT_LOTS = ROOT / "eval" / "cases" / "art7235_lots.csv"
 DEFAULT_CUTOFF = date(2025, 1, 1)
 
 
-def select_cases(lots: list[BC.Lot], ids: list[int], cutoff: date,
-                 holdout_from: date) -> tuple[list[EvalCase], dict[str, int]]:
-    """Cases for the listed lot ids, in the order of the list; stats say why a listed lot was dropped."""
+def select_cases(lots: list[BC.Lot], ids: list[int], cutoff: date, holdout_from: date,
+                 dates: dict[int, date] | None = None) -> tuple[list[EvalCase], dict[str, int]]:
+    """Cases for the listed lot ids, in the order of the list; stats say why a listed lot was dropped.
+
+    `dates` — publish date of the listed lots (ids and dates only, never outcomes), so that lots of the sealed
+    period are counted without being loaded; by default the dates of `lots`. The date checks come before
+    anything that looks at participants: a sealed lot never reaches the winner check.
+    """
     by_id = {lot.lot_id: lot for lot in lots}
+    dates = dates if dates is not None else {lot.lot_id: lot.date for lot in lots}
     stats: dict[str, int] = dict.fromkeys(
         ("listed", "not_in_data", "before_cutoff", "holdout_period", "no_winner", "no_text"), 0)
     stats["listed"] = len(ids)
     cases: list[EvalCase] = []
     for lot_id in ids:
         lot = by_id.get(lot_id)
-        if lot is None:
+        published = dates.get(lot_id)
+        if published is None:
             stats["not_in_data"] += 1
-        elif lot.date < cutoff:
+        elif published < cutoff:
             stats["before_cutoff"] += 1
-        elif lot.date >= holdout_from:
+        elif published >= holdout_from:
             stats["holdout_period"] += 1
+        elif lot is None:
+            stats["not_in_data"] += 1  # inside the window but not loaded: the caller read a narrower range
         elif not any(g >= 2 for g in BC._relevant(lot).values()):
             stats["no_winner"] += 1
         elif not BC.query_text(lot.subject, lot.procedure_name, [n for n, _ in lot.items]):
@@ -50,9 +61,17 @@ def select_cases(lots: list[BC.Lot], ids: list[int], cutoff: date,
 
 
 def read_ids(path: Path, n: int | None) -> list[int]:
+    """lot_id column of a csv, duplicates dropped, first `n` (all when n is falsy)."""
     with path.open(encoding="utf-8", newline="") as f:
-        ids = [int(row["lot_id"]) for row in csv.DictReader(f)]
+        ids = list(dict.fromkeys(int(row["lot_id"]) for row in csv.DictReader(f)))
     return ids[:n] if n else ids
+
+
+def publish_dates(processed: Path, ids: list[int]) -> dict[int, date]:
+    """lot_id -> publish_date from the notices only (no participants, no outcomes)."""
+    path = (processed / "notices.parquet").as_posix().replace("'", "''")
+    rows = duckdb.sql(f"SELECT lot_id, publish_date FROM '{path}' WHERE lot_id IN ({','.join(map(str, ids))})")
+    return dict(rows.fetchall())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,14 +81,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--n", type=int, default=1000, help="first N listed lots (their README: 1 000)")
     ap.add_argument("--cutoff", type=date.fromisoformat, default=DEFAULT_CUTOFF, help="history strictly before")
     ap.add_argument("--baseline", default=None, help="entry of configs/baselines.yaml (B-pop, B-inc, B-bm25)")
+    ap.add_argument("--dump-ids", type=Path, default=None,
+                    help="write the lot_id of the kept cases to this csv (input of scripts/art7235_driver.py)")
     ap.add_argument("--config-of", default=None,
                     help="entry of configs/experiments.yaml under this id (v2: no ranker, trained on 2025-04…06)")
     args = ap.parse_args(argv)
     cfg = R.load_method_config(args.exp, args.baseline, args.config_of)
     holdout_from = date.fromisoformat(str(split_config()["holdout_from"]))
-    lots = BC.read_lots(processed_dir(), args.cutoff)
-    cases, stats = select_cases(lots, read_ids(args.lots, args.n), args.cutoff, holdout_from)
+    ids = read_ids(args.lots, args.n)
+    lots = BC.read_lots(processed_dir(), args.cutoff, holdout_from)  # the sealed period is never loaded
+    cases, stats = select_cases(lots, ids, args.cutoff, holdout_from, publish_dates(processed_dir(), ids))
     print("отбор:", stats, f"-> {len(cases)} кейсов", flush=True)
+    if args.dump_ids:
+        args.dump_ids.write_text("lot_id\n" + "".join(f"{c.query.query_id.removeprefix('lot-')}\n" for c in cases),
+                                 encoding="utf-8")
     rec = R.result_record(args.exp, f"ext-{args.lots.stem}-n{args.n}", cfg, R.evaluate(cases, cfg, args.cutoff))
     rec["selection"] = {**stats, "cases": len(cases), "cutoff": args.cutoff.isoformat(), "lots_file": args.lots.name}
     R.RESULTS.mkdir(parents=True, exist_ok=True)
