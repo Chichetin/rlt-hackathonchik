@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from src.contracts import Counterparty, CounterpartyMatch, ScoreComponent
@@ -17,8 +18,9 @@ def test_thin_cases_one_per_group_then_next_round(tmp_path):
     first = thin_cases(2, cases, thin)
     assert {c["query"]["okpd2"][0][:5] for c in first} == {"21.20", "56.29"}  # one per group before a second round
     assert len(thin_cases(10, cases, thin)) == 3  # the non-thin case never enters
-    assert [c["query"]["query_id"] for c in thin_cases(3, cases, thin)] == \
-           [c["query"]["query_id"] for c in thin_cases(3, cases, thin)]  # seeded: same order every run
+    # inside a group the order is the sha256 of query_id (a2 before a1 here), not the order of the file
+    order = [c["query"]["query_id"] for c in thin_cases(10, cases, thin) if c["query"]["okpd2"][0][:5] == "21.20"]
+    assert order == sorted(["a1", "a2"], key=lambda q: hashlib.sha256(q.encode()).hexdigest()) == ["a2", "a1"]
 
 
 def _match(explanation: str) -> CounterpartyMatch:

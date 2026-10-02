@@ -30,6 +30,7 @@ import logging
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -77,7 +78,8 @@ def site_of(m: CounterpartyMatch) -> str | None:
     return next((e.url for e in m.counterparty.evidence if e.source.startswith("Яндекс") or "сайт" in e.source), None)
 
 
-def run_lot(case: dict, cache: SourceCache, *, offline: bool, enqueue=None) -> dict:  # type: ignore[no-untyped-def]
+def run_lot(case: dict, cache: SourceCache, *, offline: bool,
+            enqueue: Callable[[str], object] | None = None) -> dict:
     q = Query(**{k: v for k, v in case["query"].items() if k != "as_of"})
     history = search_mod.search(q, k=20)
     code = search_mod.predicted_code()
@@ -89,6 +91,8 @@ def run_lot(case: dict, cache: SourceCache, *, offline: bool, enqueue=None) -> d
         "query_id": q.query_id, "text": q.text[:160], "okpd2": q.okpd2, "classes": res.okpd_classes,
         "history": len(history), "new_total": len(rows), "new_from_yandex": len(ya),
         "yandex_line": next((line for line in res.leads if line.startswith("Яндекс")), None),
+        # a registry request that failed (timeout → pause of the source) leaves the lot without its pages (#521 review)
+        "source_failed": res.source_failed, "registry": res.requests,
         "companies": [{"inn": m.counterparty.inn, "name": m.counterparty.name, "kind": m.counterparty.kind,
                        "site": site_of(m), "score": round(m.score, 3),
                        "product_fit": next((c.explanation for c in m.components if c.name == "product_fit"), "")}
