@@ -47,7 +47,7 @@ html[data-theme="light"] .workspace-nav a[aria-current="page"] { color: #1b4b91;
 html[data-theme="light"] .nav-indicator { border-color: #1b4b91; background: #1b4b9112; box-shadow: none; }
 html[data-theme="light"] .theme-toggle { border-color: #14233f2e; color: #14233f; }
 html[data-theme="light"] .theme-toggle:hover:not(:disabled) { background: #1b4b910f; border-color: #1b4b91; color: #14233f; }
-html[data-theme="light"] .search-background, html[data-theme="light"] .wave-field { display: none; }
+/* #640: the waves stay, recoloured in WaveField.tsx (dark blue on white) */
 html[data-theme="light"] .landing-hero { background: transparent; }
 html[data-theme="light"] .landing-intro, html[data-theme="light"] .landing-description, html[data-theme="light"] .quiet-link { color: #46556e; }
 html[data-theme="light"] .landing h1 { color: #14233f; }
