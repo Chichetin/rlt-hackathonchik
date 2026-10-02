@@ -190,7 +190,7 @@ test("lot 503 says data is not connected and falls back to free text", async () 
   render(<App />);
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent("не подключены");
-  expect(alert).toHaveTextContent("основное поле");
+  expect(alert).toHaveTextContent("в форме поиска");
 });
 
 test("card shows stats and the unconfirmed INN note", async () => {
