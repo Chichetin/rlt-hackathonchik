@@ -395,12 +395,14 @@ def _drop_own(lots: LotHits, own: int | None) -> LotHits:
     return lots.without(own)
 
 def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
-           config: dict | None = None, features_out: list | None = None) -> list[CounterpartyMatch]:
+           config: dict | None = None, features_out: list | None = None,
+           candidate_inns_out: list[str] | None = None) -> list[CounterpartyMatch]:
     """Top-k suppliers from organizers' data for the query; FileNotFoundError if data is not built.
 
     `config`: the whole configuration of an experiment (eval); by default configs/search.yaml.
     Why the answer is empty (or found by the fallback ladder): fallback.search_note() after the call.
     `features_out`: gets (inn, ranker features) of every scored candidate — training of the ranker (#198).
+    `candidate_inns_out`: all scored suppliers before ranking and top-k truncation, for pool audits.
     """
     fallback.reset_note()
     _excluded.set(None)
@@ -499,6 +501,8 @@ def search(query: Query, k: int = 20, weights: dict[str, float] | None = None,
                                            cp, query, ref, codes, predicted))
     if features_out is not None:
         features_out.extend(zip((m.counterparty.inn for m in out), rows, strict=True))
+    if candidate_inns_out is not None:
+        candidate_inns_out.extend(m.counterparty.inn for m in out if m.counterparty.inn is not None)
     if rk is not None:
         try:
             model = ranker.load(rk)

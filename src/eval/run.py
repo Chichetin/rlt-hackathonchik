@@ -20,10 +20,10 @@ from pathlib import Path
 import yaml
 
 from src.contracts import Query
-from src.eval import baselines
+from src.eval import baselines, input_audit
 from src.eval.metrics import METRICS, WINNER_METRICS, bootstrap_ci
 from src.eval.split import ROOT, EvalCase, load_cases, split_config
-from src.match import pipeline
+from src.match import pipeline, ranker
 from src.match import search as search_mod
 from src.match.profiles import procurement_type
 
@@ -33,9 +33,9 @@ SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
 BASELINES_CONFIG = ROOT / "configs" / "baselines.yaml"
 SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 # Experiments of the scoring (#22): experiment id -> overrides of configs/search.yaml (weights, signals, options).
-SAMPLE_SEED = 20261001  # --sample: one fixed subset, so screened experiments are paired
 EXPERIMENTS_CONFIG = ROOT / "configs" / "experiments.yaml"
 RANKED_LIMIT = 5000  # per-case top-k lists are stored for parts up to this size
+CANDIDATE_METRICS = ("candidate_winner_hit",)  # full scored pool, whose union can exceed 200 (#318)
 RESULTS = ROOT / "eval" / "results"
 # Files whose bytes define the evaluated configuration (sha256 for eval-final).
 CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
@@ -91,12 +91,12 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
     return query
 
 
-def _rank_search(query: Query, cfg: dict) -> list[str]:
+def _rank_search(query: Query, cfg: dict, candidate_inns_out: list[str] | None = None) -> list[str]:
     """What the user sees: the history block of /api/search — the same pipeline (src/match/pipeline.py, #220)
     in its backtest mode: user filters on organizers' data and the Evidence check, top-k as on screen; no
     «Новые» (never relevant) and nothing from the cache — status, РНП, МСП, role there are today's facts,
     a leak in a backtest (D-097)."""
-    picked = pipeline.pick(query, config=cfg, backtest=True)
+    picked = pipeline.pick(query, config=cfg, backtest=True, candidate_inns_out=candidate_inns_out)
     shown = pipeline.verified(picked.history[: cfg.get("k", 20)])  # a row without an INN takes its slot, as on screen
     return [m.counterparty.inn for m in shown if m.counterparty.inn]
 
@@ -107,7 +107,7 @@ def _summary(rows: list[dict]) -> dict:
         vals = [q[name] for q in rows]
         lo, hi = bootstrap_ci(vals)
         metrics[name] = {"value": sum(vals) / len(vals) if vals else 0.0, "ci95": [lo, hi]}
-    for name in WINNER_METRICS:  # over the cases with a winner only; "n" says how many (#280)
+    for name in (*WINNER_METRICS, *CANDIDATE_METRICS):  # only cases with a winner; "n" says how many
         vals = [q[name] for q in rows if q.get(name) is not None]
         if vals:
             lo, hi = bootstrap_ci(vals)
@@ -156,23 +156,38 @@ def slices(per_query: list[dict]) -> dict:
     return {name: {"n_queries": len(rows), "metrics": _summary(rows)} for name, rows in sorted(groups.items())}
 
 
-def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranked_limit: int = RANKED_LIMIT) -> dict:
+def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranked_limit: int = RANKED_LIMIT,
+             candidate_audit: bool = False) -> dict:
     """Runs the method of `cfg` (search() or a baseline, `cfg['method']`) over the cases.
 
     Per case: metrics, channel, winner novelty and — up to `ranked_limit` cases — the returned top-k
     INNs (research/ERROR_ANALYSIS.md needs them; a larger part would not fit the 5 MB guard).
+    With `candidate_audit`, also record winner presence in the full scored pool before ranking/truncation.
+    Pool INNs use one shared dictionary: per_query.candidate_ids index the result's candidate_inns list.
+    Those ids follow the same `ranked_limit` as top-k lists, while counts and metrics are always retained.
     """
     cutoff = cutoff or date.fromisoformat(str(split_config()["cutoff"]))
     method = cfg.get("method", "search")
+    if candidate_audit and method != "search":
+        raise ValueError("candidate-audit доступен только для search")
+    if method == "search" and (ranker_spec := ranker.spec(cfg)) is not None:
+        # Product search may fall back to its formula; an experiment must measure the requested model.
+        ranker.load(ranker_spec)
+    input_data = input_audit.audit(cfg, (with_cutoff(c.query, cutoff).as_of or cutoff for c in cases))
     novelty = winner_novelty(cases, cutoff)
     per_query = []
+    candidate_index: dict[str, int] = {}
     audit = pipeline.TodayAudit() if method == "search" else None
     strict, search_mod.STRICT_RETRIEVER = search_mod.STRICT_RETRIEVER, True  # unavailable retriever fails the run
     started = time.monotonic()
     try:
         for i, case in enumerate(cases):
             query = with_cutoff(case.query, cutoff)
-            ranked = _rank_search(query, cfg) if method == "search" else baselines.rank(query, cfg)
+            candidate_inns: list[str] | None = [] if candidate_audit else None
+            if method == "search":
+                ranked = (_rank_search(query, cfg, candidate_inns) if candidate_audit else _rank_search(query, cfg))
+            else:
+                ranked = baselines.rank(query, cfg)
             rel = set(case.relevant_inns)
             winners = {inn for inn, g in case.grades.items() if g >= 2}
             if audit is not None:
@@ -180,6 +195,12 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
             row: dict = {"query_id": case.query.query_id, **{name: fn(ranked, rel) for name, fn in METRICS.items()},
                          "channel": case.query.channel, "type": procurement_type(case.query.okpd2) or "unknown"}
             row.update({name: fn(ranked, winners) if winners else None for name, fn in WINNER_METRICS.items()})
+            if candidate_inns is not None:
+                row["n_candidates"] = len(candidate_inns)
+                row["candidate_winner_hit"] = float(bool(winners.intersection(candidate_inns))) if winners else None
+                if len(cases) <= ranked_limit:
+                    row["candidate_ids"] = [candidate_index.setdefault(inn, len(candidate_index))
+                                            for inn in candidate_inns]
             if novelty is not None:
                 row["winner_new"] = novelty[i]
             if len(cases) <= ranked_limit:
@@ -192,9 +213,11 @@ def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None, ranke
     finally:
         search_mod.STRICT_RETRIEVER = strict
     out = {"n_queries": len(per_query), "elapsed_s": round(time.monotonic() - started, 1),
-           "metrics": _summary(per_query), "slices": slices(per_query)}
+           "metrics": _summary(per_query), "slices": slices(per_query), "input_data": input_data}
     if audit is not None:
         out["today_filters"] = audit.record()
+    if candidate_audit and len(cases) <= ranked_limit:
+        out["candidate_inns"] = list(candidate_index)
     return {**out, "per_query": per_query}
 
 
@@ -246,7 +269,7 @@ def print_table(rec: dict) -> None:
           f"{' (dirty)' if rec['dirty'] else ''}{' | STUB' if rec['stub'] else ''}")
     rows = [("all", rec["n_queries"], rec["metrics"]),
             *((name, s["n_queries"], s["metrics"]) for name, s in rec.get("slices", {}).items())]
-    for group in (list(METRICS), list(WINNER_METRICS)):  # winner metrics: own block, n = cases with a winner (#280)
+    for group in (list(METRICS), list(WINNER_METRICS), list(CANDIDATE_METRICS)):
         names = [n for n in group if n in rec["metrics"]]
         if not names:
             continue
@@ -306,6 +329,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="entry of configs/experiments.yaml to run under another id (--exp H-15f-real)")
     ap.add_argument("--sample", type=int, default=None,
                     help="first screen on N cases of the part (fixed seed): winners only go to the full run")
+    ap.add_argument("--candidate-audit", action="store_true",
+                    help="record winner ceiling, sizes and compact INN lists of the full scored candidate pool")
     args = ap.parse_args(argv)
     if args.exp.startswith("final"):
         print("id final* зарезервирован за make eval-final", file=sys.stderr)
@@ -327,7 +352,11 @@ def main(argv: list[str] | None = None) -> int:
         keep = set(random.Random(SAMPLE_SEED).sample(range(len(cases)), args.sample))
         cases = [c for i, c in enumerate(cases) if i in keep]  # the same N cases for every experiment
         part = f"{args.part}-s{args.sample}"
-    rec = result_record(args.exp, part, cfg, evaluate(cases, cfg))
+    if args.candidate_audit and cfg.get("method", "search") != "search":
+        print("--candidate-audit доступен только для search", file=sys.stderr)
+        return 2
+    body = evaluate(cases, cfg, candidate_audit=True) if args.candidate_audit else evaluate(cases, cfg)
+    rec = result_record(args.exp, part, cfg, body)
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{args.exp}.json"
     out.write_text(dump_record(rec), encoding="utf-8")

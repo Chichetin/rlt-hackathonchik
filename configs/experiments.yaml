@@ -97,3 +97,99 @@ S2-hyb-user:     # pg_hybrid, deepvk/USER-base (vec.names_user_base) — луч�
   retriever: pg_hybrid
   embedding_model: deepvk/USER-base
   ranker: null
+
+# #318 E6: frozen D101 baseline; only customer candidate union and retraining vary.
+E6-base:
+  retriever: bm25
+  tokenizer: prefix5
+  k: 20
+  weights: &id001
+    product_fit: 0.762
+    experience: 0.19
+    reliability: 0.0
+    activity: 0.048
+    geography: 0.0
+    price: 0.0
+  options: &id002
+    fit_bm25_share: 0.8
+    experience_by: similar
+    tie_break: bm25
+  signals: &id003
+    incumbent: 0.0
+    inn_region: 0.0
+  ranker:
+    kind: lgbm
+    model: models/ranker/R-198-gbm.txt
+  weights_by_type: &id004 {}
+  candidates:
+    customer: 0
+    okpd2: 0
+E6-cust-ranker:
+  retriever: bm25
+  tokenizer: prefix5
+  k: 20
+  weights: *id001
+  options: *id002
+  signals: *id003
+  ranker:
+    kind: lgbm
+    model: models/ranker/E6-cust-gbm.txt
+  weights_by_type: *id004
+  candidates:
+    customer: 30
+    okpd2: 0
+E6-cust-shuffled:
+  retriever: bm25
+  tokenizer: prefix5
+  k: 20
+  weights: *id001
+  options: *id002
+  signals: *id003
+  ranker:
+    kind: lgbm
+    model: models/ranker/E6-shuffled-gbm.txt
+  weights_by_type: *id004
+  candidates:
+    customer: 30
+    okpd2: 0
+E6-cust-ablate:
+  retriever: bm25
+  tokenizer: prefix5
+  k: 20
+  weights: *id001
+  options: *id002
+  signals: *id003
+  ranker:
+    kind: lgbm
+    model: models/ranker/E6-ablate-gbm.txt
+  weights_by_type: *id004
+  candidates:
+    customer: 30
+    okpd2: 0
+
+# Mechanism control: same expanded pool, original model without retraining.
+E6-cust-untrained:
+  retriever: bm25
+  tokenizer: prefix5
+  k: 20
+  weights:
+    product_fit: 0.762
+    experience: 0.19
+    reliability: 0.0
+    activity: 0.048
+    geography: 0.0
+    price: 0.0
+  options:
+    fit_bm25_share: 0.8
+    experience_by: similar
+    tie_break: bm25
+  signals:
+    incumbent: 0.0
+    inn_region: 0.0
+  ranker:
+    kind: lgbm
+    model: models/ranker/R-198-gbm.txt
+  weights_by_type: {}
+  candidates:
+    customer: 30
+    okpd2: 0

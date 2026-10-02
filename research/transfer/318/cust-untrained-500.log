@@ -1,0 +1,9 @@
+uv run --frozen python -m src.eval.run --exp E6-cust-untrained-500 --config-of E6-cust-untrained --sample 500 --candidate-audit
+эксперимент E6-cust-untrained: поверх search.yaml наложено {'retriever': 'bm25', 'tokenizer': 'prefix5', 'k': 20, 'weights': {'product_fit': 0.762, 'experience': 0.19, 'reliability': 0.0, 'activity': 0.048, 'geography': 0.0, 'price': 0.0}, 'options': {'fit_bm25_share': 0.8, 'experience_by': 'similar', 'tie_break': 'bm25'}, 'signals': {'incumbent': 0.0, 'inn_region': 0.0}, 'ranker': {'kind': 'lgbm', 'model': 'models/ranker/R-198-gbm.txt'}, 'weights_by_type': {}, 'candidates': {'customer': 30, 'okpd2': 0}}
+eval 50/500, 0.4 с/запрос, осталось ≈ 3 мин
+eval 100/500, 0.4 с/запрос, осталось ≈ 3 мин
+eval 150/500, 0.4 с/запрос, осталось ≈ 2 мин
+eval 200/500, 0.4 с/запрос, осталось ≈ 2 мин
+eval 250/500, 0.4 с/запрос, осталось ≈ 2 мин
+eval 300/500, 0.4 с/запрос, осталось ≈ 1 мин
+make: *** [Makefile:95: eval] Error 143

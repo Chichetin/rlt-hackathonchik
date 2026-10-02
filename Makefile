@@ -92,7 +92,7 @@ e2e: ui-build      ## e2e демо-сценария (Playwright), свой по�
 
 eval:              ## make eval EXP=<id> → eval/results/<id>.json (dev-часть)
 	@[ -n "$(EXP)" ] || { echo "нужен EXP=<id> (research/EXPERIMENTS.md)"; exit 2; }
-	$(PY) python -m src.eval.run --exp $(EXP)
+	$(PY) python -m src.eval.run --exp $(EXP) $(EVAL_ARGS)
 
 parity:            ## побитовое сравнение выдач (ranked) двух прогонов eval: make parity A=<id> B=<id>; коды 0/1/2 (совпали / различаются / не сравнить) — у python -m src.eval.parity, у make — Error 1 / Error 2
 	$(PY) python -m src.eval.parity "$(A)" "$(B)"

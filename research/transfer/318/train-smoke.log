@@ -1,0 +1,18 @@
+WARNING:src.eval.run:эксперимент E6-cust-ranker: поверх search.yaml наложено {'retriever': 'bm25', 'tokenizer': 'prefix5', 'k': 20, 'weights': {'product_fit': 0.762, 'experience': 0.19, 'reliability': 0.0, 'activity': 0.048, 'geography': 0.0, 'price': 0.0}, 'options': {'fit_bm25_share': 0.8, 'experience_by': 'similar', 'tie_break': 'bm25'}, 'signals': {'incumbent': 0.0, 'inn_region': 0.0}, 'ranker': {'kind': 'lgbm', 'model': 'models/ranker/E6-cust-gbm.txt'}, 'weights_by_type': {}, 'candidates': {'customer': 30, 'okpd2': 0}}
+данные: /home/m1x/Documents/hackathons/rlt-hackathonchik/.claude/worktrees/318-cust-ranker/data/processed (DATA_PROCESSED_DIR), INDEX_DIR=indexes
+обучающих запросов: 50 из [2025-04-01, 2025-07-01), as_of признаков = 2025-04-01
+DEBUG:bm25s:Building index from tokens
+строк 9173, положительных 66, запросов с участником среди кандидатов 38/50 (76.0%); признаки 30 с
+lgbm: 0.3 с, деревьев 14, валидация 6 запросов, ndcg@10 0.4691
+  fit                  0.107
+  n_wins               0.103
+  exp                  0.099
+  days_first           0.086
+  bm25_rel             0.080
+  price_gap            0.078
+  n_lots               0.072
+  channel_share        0.059
+  cust_lots            0.058
+  top_customer_share   0.031
+  active_months        0.024
+  smp_contracts        0.024

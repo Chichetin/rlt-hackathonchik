@@ -128,3 +128,80 @@ def test_saturation_summary_counts_distinct_scores():
     near = [[0.9996, 0.9973, 0.9849, 0.9835, 0.9628]]
     assert summarize(near)["distinct_scores_mean"] == 5.0 and summarize(near)["share_first_at_max"] == 1.0
     assert summarize(near, decimals=2)["distinct_scores_mean"] == 3.0  # 1.00, 1.00, 0.98, 0.98, 0.96
+
+
+def test_candidate_audit_sees_unranked_winners_without_adding_them(search_data, monkeypatch, tmp_path):
+    """Changing the answer changes only the metric; search sees the same query and candidate pool."""
+    monkeypatch.setenv("SOURCE_CACHE", str(tmp_path / "c.sqlite"))
+    cfg = {**search_mod.load_config(), "ranker": None, "k": 1}
+    query = Query(query_id="pool-probe", text="бумага офисная А4", as_of=CUTOFF)
+    pool = [m.counterparty.inn for m in search_mod.search(query, k=search_mod.CANDIDATES, config=cfg)
+            if m.counterparty.inn]
+    assert len(pool) > 1
+    present = pool[-1]
+    assert present is not None
+    cases = [EvalCase(query=query.model_copy(update={"query_id": f"audit-{i}"}),
+                      relevant_inns=list(grades), grades=grades, date=date(2025, 7, 10))
+             for i, grades in enumerate(({present: 2}, {"absent-winner": 2}, {present: 1}))]
+    plain = R.evaluate(cases, cfg)
+    audited = R.evaluate(cases, cfg, candidate_audit=True)
+    rows = audited["per_query"]
+    assert [r["ranked"] for r in rows] == [r["ranked"] for r in plain["per_query"]]
+    assert all(r["n_candidates"] == len(pool) for r in rows)
+    decoded = [[audited["candidate_inns"][i] for i in r["candidate_ids"]] for r in rows]
+    assert decoded[0] == decoded[1] == decoded[2]
+    assert set(decoded[0]) == set(pool) and "absent-winner" not in decoded[1]
+    assert rows[0]["winner@10"] == 0.0  # k=1: the winner was scored but did not survive truncation
+    assert [r["candidate_winner_hit"] for r in rows] == [1.0, 0.0, None]
+    metric = audited["metrics"]["candidate_winner_hit"]
+    assert metric["value"] == 0.5 and metric["n"] == 2  # an absent winner is a miss, not a dropped lot
+    assert "candidate_inns" not in plain and "candidate_ids" not in plain["per_query"][0]
+
+
+def test_candidate_audit_keeps_full_union_beyond_pipeline_limit(monkeypatch):
+    """The pipeline requests 200 displayed candidates; its trace must retain the whole expanded pool."""
+    from src.contracts import Counterparty, CounterpartyMatch
+
+    full_pool = [f"supplier-{i}" for i in range(search_mod.CANDIDATES)] + ["extra-winner"]
+    seen = []
+
+    def search(q, k=20, weights=None, config=None, candidate_inns_out=None):
+        seen.append(k)
+        assert candidate_inns_out is not None
+        candidate_inns_out.extend(full_pool)
+        return [CounterpartyMatch(counterparty=Counterparty(inn="7801000012", name="Test"),
+                                  score=0, components=[], origin="history")]
+
+    monkeypatch.setattr(search_mod, "search", search)
+    monkeypatch.setattr(R.pipeline, "verified", lambda matches: matches)
+    monkeypatch.setattr(R.pipeline.TodayAudit, "add", lambda *args: None)
+    c = case("union", ["extra-winner"]).model_copy(update={"grades": {"extra-winner": 2}})
+    body = R.evaluate([c], {"k": 20}, candidate_audit=True)
+    row = body["per_query"][0]
+    assert seen == [search_mod.CANDIDATES]
+    assert row["n_candidates"] == search_mod.CANDIDATES + 1
+    assert row["candidate_winner_hit"] == 1.0 and row["winner@20"] == 0.0
+    assert [body["candidate_inns"][i] for i in row["candidate_ids"]] == full_pool
+    limited = R.evaluate([c], {"k": 20}, candidate_audit=True, ranked_limit=0)
+    assert "candidate_inns" not in limited and "candidate_ids" not in limited["per_query"][0]
+    assert limited["metrics"]["candidate_winner_hit"]["value"] == 1.0
+
+
+def test_candidate_audit_requires_search():
+    with pytest.raises(ValueError, match="только для search"):
+        R.evaluate([], {"method": "B-pop"}, candidate_audit=True)
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_eval_refuses_unavailable_ranker_before_retrieval(monkeypatch, tmp_path, stale):
+    model = tmp_path / "model.json"
+    if stale:
+        model.write_text('{"features": ["old-feature"]}', encoding="utf-8")
+
+    def no_search(*args, **kwargs):
+        raise AssertionError("an unavailable model must fail before retrieval, not run the formula fallback")
+
+    monkeypatch.setattr(R, "_rank_search", no_search)
+    cfg = {"k": 20, "ranker": {"kind": "logreg", "model": str(model)}}
+    with pytest.raises(ValueError if stale else FileNotFoundError):
+        R.evaluate([case("бумага", ["7801000012"])], cfg)

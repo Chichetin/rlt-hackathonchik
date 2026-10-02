@@ -123,27 +123,34 @@ def to_case(lot: Lot, as_of: date) -> EvalCase:
     return EvalCase(query=query, relevant_inns=sorted(grades), date=lot.date, grades=grades)
 
 
-def read_lots(processed: Path, start: date) -> list[Lot]:
-    """Every lot published on or after `start` (no earlier lot is ever a case), ordered by lot_id."""
+def read_lots(processed: Path, start: date, until: date | None = None) -> list[Lot]:
+    """Lots in [start, until), ordered by lot_id; the upper bound is applied before loading labels.
+
+    Training supplies `until` so that dev/holdout lots and their labels are never materialized.
+    The case builder omits it because that command prepares all split files in one pass.
+    """
     def pq(name: str) -> str:
         return "'" + (processed / f"{name}.parquet").as_posix().replace("'", "''") + "'"
 
+    upper = f"AND publish_date < DATE '{until.isoformat()}'" if until is not None else ""
     rows = duckdb.sql(
         f"""
-        WITH it AS (
+        WITH eligible AS (
+            SELECT * FROM {pq("notices")}
+            WHERE publish_date >= DATE '{start.isoformat()}' {upper}
+        ), it AS (
             SELECT lot_id,
                    list(struct_pack(n := product_name, c := okpd2_code) ORDER BY okpd2_code, product_name) AS items
-            FROM {pq("items")} GROUP BY lot_id
+            FROM {pq("items")} WHERE lot_id IN (SELECT lot_id FROM eligible) GROUP BY lot_id
         ), pt AS (
             SELECT lot_id,
                    list(struct_pack(i := supplier_inn, w := is_winner, v := inn_valid) ORDER BY supplier_inn)
                        AS participants
-            FROM {pq("participants")} GROUP BY lot_id
+            FROM {pq("participants")} WHERE lot_id IN (SELECT lot_id FROM eligible) GROUP BY lot_id
         )
         SELECT n.lot_id, n.publish_date, n.channel, n.subject, n.procedure_name, n.customer_inn,
                n.start_price, coalesce(it.items, []), coalesce(pt.participants, [])
-        FROM {pq("notices")} n LEFT JOIN it USING (lot_id) LEFT JOIN pt USING (lot_id)
-        WHERE n.publish_date >= DATE '{start.isoformat()}'
+        FROM eligible n LEFT JOIN it USING (lot_id) LEFT JOIN pt USING (lot_id)
         ORDER BY n.lot_id
         """
     ).fetchall()

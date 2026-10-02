@@ -62,13 +62,15 @@ def is_stub() -> bool:
 
 
 def pick(query: Query, *, config: dict | None = None, discovery: bool = True, backtest: bool = False,
-         enqueue: Callable[[str], object] | None = None, offline: bool | None = None) -> Picked:
+         enqueue: Callable[[str], object] | None = None, offline: bool | None = None,
+         candidate_inns_out: list[str] | None = None) -> Picked:
     """Every candidate of the query after the filters, best first. FileNotFoundError — data not built.
 
     «Новые» INNs are queued by discover() itself (`enqueue`); history INNs without a cache are only
     collected in `uncached` — the caller queues the visible page. The hard filters run on the enriched
     rows; the cached card passes strip_unverified BEFORE the filters, so «только производители» keeps
     only a role whose basis passed the check.
+    `candidate_inns_out`: optional eval trace of the full scored pool before ranking, truncation and filters.
     """
     if backtest:
         if query.as_of is None:
@@ -78,6 +80,8 @@ def pick(query: Query, *, config: dict | None = None, discovery: bool = True, ba
             raise ValueError(f"{query.query_id}: фильтр МСП / роли в backtest — это факты кеша на сегодня (D-097)")
     # `config` only when given: the product reads configs/search.yaml on every call (and tests stub search())
     kw = {"config": config, "weights": config.get("weights")} if config is not None else {}
+    if candidate_inns_out is not None:
+        kw["candidate_inns_out"] = candidate_inns_out
     found = search_mod.search(query, k=search_mod.CANDIDATES, **kw)
     out = Picked(matches=[], note=fallback.search_note())
     candidates: list[CounterpartyMatch] | None = None  # «Новые» before the user filters, None — no discovery
@@ -207,4 +211,3 @@ class TodayAudit:
                 "legal_dropped": self.dropped, "legal_dropped_relevant": self.dropped_relevant,
                 "cases_with_legal_dropped_relevant": self.cases_with_dropped_relevant,
                 "note": f"сегодняшний кеш ФНС/РНП по top-{self.k} backtest; в метрики и bootstrap не входит (D-097)"}
-
