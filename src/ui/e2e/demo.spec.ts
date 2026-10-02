@@ -267,3 +267,35 @@ test("deep link: обновление страницы сохраняет фил
   await expect(page.getByLabel("НМЦК, ₽")).toHaveValue("45000");
   await expect(page.getByLabel("ИНН заказчика")).toHaveValue("7801000051");
 });
+
+// #395, повторное ревью: ссылка в ТОЙ ЖЕ вкладке, где этот запрос уже искали, — новый переход, поиск запускается
+test("deep link: ссылка на уже искомый лот в той же вкладке ищет заново; назад/вперёд и возврат из фильтров держат адрес", async ({ page }) => {
+  const history = page.getByRole("region", { name: "С опытом госзакупок" });
+  await page.goto("/search");
+  await page.getByLabel("Номер закупки (необязательно)").fill(DEMO_LOT);
+  await page.getByRole("button", { name: "Загрузить закупку" }).click();
+  await page.getByRole("button", { name: "Найти поставщиков" }).click();
+  await expect(history.locator(".item").first()).toBeVisible();
+
+  await page.goto(`/search?lot=${DEMO_LOT}`);
+  await expect(history.locator(".item").first()).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/results\\?lot=${DEMO_LOT}$`));
+  await expect(page.getByText("Проверьте и нажмите")).toHaveCount(0);
+
+  await page.goto("/search?q=" + encodeURIComponent("Бумага офисная А4"));
+  await expect(history.locator(".item").first()).toBeVisible();
+  await page.goto("/search?q=" + encodeURIComponent("Бумага офисная А4"));
+  await expect(history.locator(".item").first()).toBeVisible();
+
+  // назад к форме и вперёд к результатам внутри страницы: выдача на месте, адрес с параметрами
+  await page.goBack();
+  await expect(page).toHaveURL(/\/search/);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/results\?q=/);
+  await expect(history.locator(".item").first()).toBeVisible();
+
+  // возврат из «Фильтров» на результаты — адрес с параметрами
+  await page.getByRole("navigation").getByRole("link", { name: "Фильтры" }).click();
+  await page.getByRole("button", { name: "Готово, вернуться к подбору" }).click();
+  await expect(page).toHaveURL(/\/results\?q=/);
+});

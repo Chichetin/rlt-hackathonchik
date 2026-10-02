@@ -273,7 +273,7 @@ function usePath(): [Path, (next: Path) => void] {
   const go = (next: Path) => {
     // the same page keeps its address: /results?lot=N is not replaced by /results (#395)
     if (next !== window.location.pathname && next !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, "", next);
-    setPath(next);
+    setPath(next.replace(/[?#].*$/, ""));
     window.scrollTo?.({ top: 0, behavior: "instant" });
   };
   return [path, go];
@@ -406,7 +406,7 @@ export function App() {
   // the query of a loaded lot, for a search that must not wait for the form state to update
   type Ready = { text: string; extra: Extra; lotId: string; budget: string; customerInn: string };
 
-  async function loadLot(id: string = lotId): Promise<Ready | null> {
+  async function loadLot(id: string = lotId, auto = false): Promise<Ready | null> {
     if (!id.trim()) return null;
     setLotBusy(true);
     setLotMsg(null);
@@ -417,7 +417,7 @@ export function App() {
       setCustomerInn(q.customer_inn ?? "");
       setLot({ okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget });
       setLotQueryId(q.query_id);
-      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}: запрос заполнен из извещения. Проверьте и нажмите «Найти поставщиков».` });
+      setLotMsg({ kind: "ok", text: `Закупка ${id.trim()}: запрос заполнен из извещения.${auto ? "" : " Проверьте и нажмите «Найти поставщиков»."}` });
       const budgetText = q.budget ? String(q.budget) : "";
       const lotCtx = { okpd2: q.okpd2, channel: q.channel, customer_inn: q.customer_inn, budget: q.budget };
       return {
@@ -452,7 +452,7 @@ export function App() {
     setPickedLot(id);
     setLotId(id);
     try {
-      const ready = await loadLot(id);
+      const ready = await loadLot(id, true);
       if (ready) await run(filters, ready);
     } finally {
       setPickedLot(null);
@@ -556,11 +556,14 @@ export function App() {
 
   // a deep link /search?lot=N or ?q=text (#395) — from a button in a procurement card of АИС ГЗ:
   // the lot is loaded by the same /api/lot path as by hand, the search starts at once
-  // the link of this very tab's last search (a reload, F5) is not a new link: the saved query with its filters repeats
+  // a reload (F5) or back/forward of this tab's last search is not a new link: the saved query with its filters repeats;
+  // a link followed in the same tab (navigation type "navigate") always searches
   const deepAtMount = useRef<DeepLink>(
     (() => {
       if (path !== "/search" && path !== "/results") return {};
       const d = parseDeepLink(window.location.search);
+      const nav = (window.performance?.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
+      if (nav !== "reload" && nav !== "back_forward") return d;
       if (d.lot && saved.lotId === d.lot && saved.lot) return {};
       if (d.q && !d.lot && saved.text === d.q && !saved.lot) return {};
       return d;
@@ -576,7 +579,7 @@ export function App() {
     void (async () => {
       if (d.lot) {
         setLotId(d.lot);
-        const ready = await loadLot(d.lot);
+        const ready = await loadLot(d.lot, true);
         if (ready) await run(NO_FILTERS, ready);
         else {
           setState("idle");
@@ -728,7 +731,11 @@ export function App() {
         exit={{ opacity: 0, y: reduced ? 0 : -8 }} transition={{ duration: reduced ? 0 : 0.2, ease: easeOut }}>
       {path === "/" ? <Landing searchLink={link("/search")} aboutLink={link("/about")} onStart={startSearch} />
       : path === "/about" ? <AboutPage onStart={() => go("/search")} />
-      : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => go(filterReturn.current)} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
+      : path === "/settings" ? <SettingsPage facets={res?.facets} onBack={() => {
+        // back to the results keeps the link of their search (#395)
+        const s = loadSaved();
+        go(filterReturn.current === "/results" && s.text ? `/results${deepLinkSearch(s.lotId ?? "", !!s.lot, s.text)}` : filterReturn.current);
+      }} filters={filters} onChange={toggle} onReset={resetAll} weightSet={weightSet} onWeights={applyWeights} />
       : path !== "/search" && path !== "/results" ? <NotFound onHome={() => go("/")} />
       : <>
       <div className="top">
