@@ -192,7 +192,8 @@ def from_bo(inn: str, page: CachedPage, msp_page: CachedPage | None = None) -> C
         add("name", f.get("shortName"), f"Наименование: {f.get('shortName')}")
         code = f.get("statusCode")
         add("status", f"statusCode: {code}" if code else None, f"Статус в ГИР БО: {code}")
-        add("okved", f.get("okved2"), f"Основной ОКВЭД {f.get('okved2')} (код, ГИР БО)")
+        okved = f.get("okved2")  # with its key: a bare «17.12» is shorter than evidence.MIN_TEXT and never passes
+        add("okved", f"okved2: {okved}" if okved else None, f"Основной ОКВЭД {okved} (код, ГИР БО)")
         kind = role.assign(f.get("okved2"), None, f"row.{inn}.okved2: {f.get('okved2')}", add)
     is_msp = None
     if msp_page is not None and not any(r.get("inn") == inn for r in rmsp.parse(msp_page.body).rows):
