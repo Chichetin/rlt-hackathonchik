@@ -215,6 +215,32 @@ def test_discover_adds_registry_manufacturers_of_this_product(gdir, cache, tmp_p
     assert any("ГИСП" in line and "в блок 2" in line for line in res.gisp)
 
 
+def test_discover_keeps_the_inn_types_of_the_block(gdir, cache, tmp_path, monkeypatch):
+    """DISCOVERY_NP_TYPES=IP: the three legal entities of the class stay out by type, the ИП — by its region (37)."""
+    monkeypatch.setenv("DISCOVERY_NP_TYPES", "IP")
+    res = D.discover(_query(), cache=cache, weights=WEIGHTS, processed=_processed(tmp_path, []), offline=True)
+    assert res.matches == []
+    assert any("тип ИНН не из DISCOVERY_NP_TYPES 2, другой регион 1, в блок 0" in line for line in res.gisp)
+
+
+@pytest.mark.parametrize(("text", "shown"), [("конверты почтовые", {POLY}), ("папки канцелярские", set())])
+def test_the_code_alone_is_not_this_product(gdir, cache, tmp_path, text, shown):
+    """«Прочие» codes are wide: a registry company joins the block only when a word of the query is in the
+    name of its product of this code. POLY makes «Конверты почтовые» 17.23.12.110."""
+    res = D.discover(_query(text=text, okpd2=["17.23.12.110"]), cache=cache, weights=WEIGHTS,
+                     processed=_processed(tmp_path, []), offline=True)
+    assert {m.counterparty.inn for m in res.matches} == shown
+    if shown:
+        assert "слова запроса в наименовании продукции: Конверты, почтовые;" in res.matches[0].components[0].explanation
+
+
+def test_query_words_and_shared_words():
+    stems = D.query_stems("Поставка папок канцелярских для нужд ГБОУ СОШ № 5 Санкт-Петербурга; папки")
+    assert stems == ["папо", "канце", "сош", "папк"]  # service words of a purchase are dropped
+    assert D.shared_words(stems, "Папка-скоросшиватель Дело картонная") == ["папк"]
+    assert D.shared_words(stems, "Билеты, ярлыки из картона") == []
+
+
 def test_discover_skips_registry_companies_already_in_organizers_data(gdir, cache, tmp_path):
     res = D.discover(_query(), cache=cache, weights=WEIGHTS, processed=_processed(tmp_path, [EKO]), offline=True)
     assert [m.counterparty.inn for m in res.matches] == [PONI]
