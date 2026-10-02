@@ -41,3 +41,15 @@ N-order-size:
 N-order-all:
   method: pool_recall
   order: {fit: 1.0, main: 1.0, report: 1.0, link: 1.0, size: 0.5}
+N-order-size3:   # численность решает внутри уровня канала
+  method: pool_recall
+  order: {fit: 1.0, main: 1.0, size: 3.0}
+N-order-ul-base: # канал продукта (как N-pool-recall-ul), порядок правила
+  method: pool_recall
+  main_only: true
+  entities: [ЮЛ]
+N-order-ul-size: # канал продукта, порядок по численности
+  method: pool_recall
+  main_only: true
+  entities: [ЮЛ]
+  order: {fit: 1.0, main: 1.0, size: 1.0}

@@ -344,10 +344,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     a, b = (json.loads((RESULTS / f"{x}.json").read_text(encoding="utf-8")) for x in (args.a, args.b))
     res = paired(a, b)
-    print(f"{args.a} − {args.b}, n={res['n_queries']}")
+    print(f"{args.a} - {args.b}, n={res['n_queries']}")  # ASCII: a Windows console is cp1251
     for m in PAIRED:
         r = res[m]
-        print(f"  {m:<11} {r['a']:.4f} − {r['b']:.4f} = {r['delta']:+.4f} [{r['ci95'][0]:+.4f}, {r['ci95'][1]:+.4f}]")
+        print(f"  {m:<11} {r['a']:.4f} - {r['b']:.4f} = {r['delta']:+.4f} [{r['ci95'][0]:+.4f}, {r['ci95'][1]:+.4f}]")
     return 0
 
 
