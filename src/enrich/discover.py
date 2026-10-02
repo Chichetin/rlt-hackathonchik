@@ -936,8 +936,8 @@ def discover(
 # literally on the company's site 1.0, the goods in a catalog / marketplace 0.8, the main OKVED of the class
 # 0.6, an additional OKVED of the class 0.5 (decision 22), a wholesale OKVED 0.4. `make predict` shows by it.
 STEP = {"site": 1.0, "catalog": 0.8, "class": 0.6, "extra": 0.5, "wholesale": 0.4,
-        # ГИСП (#74, decision of IR630 02.10 in the body of #74): the registry names this code with a word of the
-        # items — 1.0; a code of the same kind with two words — 0.8, as a product in a catalog
+        # ГИСП (#74): the registry names this code with a word of the items — 1.0 (decision of IR630 02.10 in the
+        # body of #74); a code of the same kind with two words — 0.8, our reading within that decision (as a catalog)
         "registry": 1.0, "registry_kind": 0.8}
 POOL_LIMIT = 400  # pool candidates per region read for one query (main OKVED first)
 POOL_EXTRA_FIT = 0.5  # an additional OKVED of the class (decision 22 of IR630): below the 0.6 step of «Новые»
