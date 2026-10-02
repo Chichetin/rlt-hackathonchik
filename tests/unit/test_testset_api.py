@@ -56,7 +56,7 @@ def test_upload_lists_lots_and_becomes_active(client, root):
     assert body["files"] == [NOTICES, ITEMS] and body["lots"] == 3
     assert [it["lot_id"] for it in body["items"]] == ["9001", "9002", "9003"]
     first = body["items"][0]
-    assert first == {"lot_id": "9001", "reqnum": "0172200000126000001", "text": "Поставка бумаги офисной А4",
+    assert first == {"lot_id": "9001", "reqnum": "0172200000126000001", "procedure_id": "901", "text": "Поставка бумаги офисной А4",
                      "okpd2": ["17.12.14.110"], "notes": []}
     assert body["items"][1]["reqnum"] is None
     # Поставщики*.csv: a warning, never stored or read (the answer must not come from it)

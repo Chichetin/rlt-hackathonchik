@@ -10,7 +10,7 @@ const SET = {
   warnings: ["Поставщики*.csv не используется: ответ из него не берём"],
   items: [
     { lot_id: "9001", reqnum: "0172200001126000001", text: "Поставка бумаги офисной", okpd2: ["17.12.14.110"], notes: [] },
-    { lot_id: "9002", reqnum: null, text: "Ремонт кровли", okpd2: [], notes: ["пустой ОКПД2"] },
+    { lot_id: "9002", reqnum: null, procedure_id: "902", text: "Ремонт кровли", okpd2: [], notes: ["пустой ОКПД2"] },
   ],
 };
 
@@ -40,7 +40,10 @@ test("upload: files go as text in JSON, the procedures are listed, a click picks
   expect(JSON.parse(String(post?.init?.body))).toEqual({ files: [{ name: "Извещения_тест.csv", text: "lot_id;subject\n9001;Бумага\n" }] });
 
   await userEvent.click(screen.getByRole("button", { name: /процедура 0172200001126000001/ }));
-  expect(onPick).toHaveBeenCalledWith("9001");
+  expect(onPick).toHaveBeenCalledWith("9001", undefined);
+  // #644: the number shown is the procedure number from the file, and the pick goes by it
+  await userEvent.click(within(list).getByRole("button", { name: /процедура 902/ }));
+  expect(onPick).toHaveBeenLastCalledWith("9002", "902");
   expect(screen.getByRole("button", { name: /Скачать прогноз/ })).toBeEnabled();
 });
 

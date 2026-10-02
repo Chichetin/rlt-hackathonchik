@@ -34,7 +34,8 @@ export function predictEstimate(lots: number): string {
   return `≈ ${lots} ${plural(lots, "процедура", "процедуры", "процедур")}, ${wait}`;
 }
 
-export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => void; busyLot: string | null }) {
+// onPick: the lot id, and the procedure number when the file has one (#644) — the search then goes by it
+export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string, procedureId?: string) => void; busyLot: string | null }) {
   const [set, setSet] = useState<Testset | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [state, setState] = useState<"idle" | "uploading" | "error">("idle");
@@ -113,7 +114,7 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
 
   const items = set?.items ?? [];
   const q = filter.trim().toLowerCase();
-  const shown = q ? items.filter((it) => it.lot_id.includes(q) || (it.reqnum ?? "").includes(q) || it.text.toLowerCase().includes(q)) : items;
+  const shown = q ? items.filter((it) => it.lot_id.includes(q) || (it.procedure_id ?? "").includes(q) || (it.reqnum ?? "").includes(q) || it.text.toLowerCase().includes(q)) : items;
 
   return (
     <section className="testset" aria-labelledby="testset-title">
@@ -221,10 +222,10 @@ export function TestsetPanel({ onPick, busyLot }: { onPick: (lotId: string) => v
                     type="button"
                     className="testset-lot"
                     disabled={busyLot !== null}
-                    aria-label={`Подобрать поставщиков: процедура ${it.reqnum || it.lot_id}`}
-                    onClick={() => onPick(it.lot_id)}
+                    aria-label={`Подобрать поставщиков: процедура ${it.procedure_id || it.reqnum || it.lot_id}`}
+                    onClick={() => onPick(it.lot_id, it.procedure_id ?? undefined)}
                   >
-                    <span className="testset-id">{it.reqnum || it.lot_id}</span>
+                    <span className="testset-id">{it.procedure_id || it.reqnum || it.lot_id}</span>
                     <span className="testset-text">{it.text || "предмет не указан"}</span>
                     <span className="testset-okpd">
                       {it.okpd2.length ? `ОКПД2 ${it.okpd2.slice(0, 2).join(", ")}${it.okpd2.length > 2 ? ` +${it.okpd2.length - 2}` : ""}` : "без ОКПД2"}

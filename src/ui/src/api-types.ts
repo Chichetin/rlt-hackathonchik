@@ -235,6 +235,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/procedure/{ident}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Procedure
+         * @description Procedure number (Извещения.procedure_id) -> Query of its lot from the uploaded test export files only (#639);
+         *     query_id names the lot (lot-<lot_id>). 409 when no files are uploaded.
+         */
+        get: operations["api_procedure_api_procedure__ident__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lot/{ident}/backtest": {
         parameters: {
             query?: never;
@@ -752,6 +773,11 @@ export interface components {
             /** Reqnum */
             reqnum: string | null;
             /**
+             * Procedure Id
+             * @description Извещения.procedure_id — номер процедуры (#644)
+             */
+            procedure_id?: string | null;
+            /**
              * Text
              * @description текст запроса подбора (Query.text) — тем же правилом, что /api/lot
              */
@@ -1268,6 +1294,37 @@ export interface operations {
         };
     };
     api_lot_api_lot__ident__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ident: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Query"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_procedure_api_procedure__ident__get: {
         parameters: {
             query?: never;
             header?: never;

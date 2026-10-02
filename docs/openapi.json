@@ -588,6 +588,46 @@
         }
       }
     },
+    "/api/procedure/{ident}": {
+      "get": {
+        "summary": "Api Procedure",
+        "description": "Procedure number (Извещения.procedure_id) -> Query of its lot from the uploaded test export files only (#639);\nquery_id names the lot (lot-<lot_id>). 409 when no files are uploaded.",
+        "operationId": "api_procedure_api_procedure__ident__get",
+        "parameters": [
+          {
+            "name": "ident",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ident"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Query"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/lot/{ident}/backtest": {
       "get": {
         "summary": "Api Lot Backtest",
@@ -1903,6 +1943,18 @@
               }
             ],
             "title": "Reqnum"
+          },
+          "procedure_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Procedure Id",
+            "description": "Извещения.procedure_id — номер процедуры (#644)"
           },
           "text": {
             "type": "string",

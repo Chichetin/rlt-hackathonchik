@@ -83,6 +83,7 @@ class UploadTemplateRequest(BaseModel):
 class UploadedLot(BaseModel):
     lot_id: str
     reqnum: str | None
+    procedure_id: str | None = Field(None, description="Извещения.procedure_id — номер процедуры (#644)")
     text: str = Field(description="текст запроса подбора (Query.text) — тем же правилом, что /api/lot")
     okpd2: list[str]
     notes: list[str] = Field(description="что не так с лотом: пустой ОКПД2, предмет, НМЦК")
@@ -195,8 +196,8 @@ def _info(set_id: str, folder: Path, ts: TestSet) -> UploadedTestset:
     # dict: a template is one user's file behind both Извещения and ТРУ
     files = list(dict.fromkeys(names[k] for k in (f"{NOTICES}.csv", f"{ITEMS}.csv") if k in names))
     warnings = [*meta.get("warnings", []), *(_rename(w, names) for w in ts.warnings)]
-    items = [UploadedLot(lot_id=lt.lot_id, reqnum=lt.reqnum, text=lt.query.text, okpd2=list(lt.query.okpd2),
-                         notes=list(lt.notes)) for lt in ts.lots]
+    items = [UploadedLot(lot_id=lt.lot_id, reqnum=lt.reqnum, procedure_id=lt.procedure_id, text=lt.query.text,
+                         okpd2=list(lt.query.okpd2), notes=list(lt.notes)) for lt in ts.lots]
     return UploadedTestset(id=set_id, files=files, lots=len(ts.lots), warnings=warnings, items=items)
 
 
