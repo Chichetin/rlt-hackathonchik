@@ -1,8 +1,8 @@
 {
   "exp_id": "L-okved-link-v1",
   "part": "dev (cold winners in the MSP pool)",
-  "created_at": "2026-10-02T02:03:53+00:00",
-  "commit": "0120a69893ec6b46f4d9acbf7b5dec485fc838e9",
+  "created_at": "2026-10-02T02:07:55+00:00",
+  "commit": "b4e3b8dd57ea1fa00c9c506b187fd67b0e4cdd9c",
   "dirty": false,
   "config": {
     "cutoff": "2025-07-01",
