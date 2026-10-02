@@ -14,7 +14,7 @@ const text=id=>all.find(s=>s.id===id).text;
 const ru=n=>n.toFixed(1).replace('.',',');
 check(baseline.n_queries===current.n_queries&&JSON.stringify(baseline.per_query.map(q=>q.query_id))===JSON.stringify(current.per_query.map(q=>q.query_id)),'Comparison uses identical query IDs');
 check(text('s6').includes(ru(baseline.metrics['recall@10'].value*100)+'%')&&text('s6').includes(ru(current.metrics['recall@10'].value*100)+'%'),'Main percentages agree with both saved reports');
-check(text('s6').includes(((current.metrics['recall@10'].value-baseline.metrics['recall@10'].value)*100).toFixed(2).replace('.',',')),'Percentage point delta computed from full precision values');
+check(text('s6').includes('+'+((current.metrics['recall@10'].value-baseline.metrics['recall@10'].value)*100).toFixed(1).replace('.',',')),'Percentage point delta agrees with pitch/facts.md (+0.041, one decimal)');
 check(text('s6').includes('2 000')&&current.n_queries===2000,'Displayed evaluation sample size agrees');
 check(text('s3').includes(manifest.rows.notices.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.suppliers.toLocaleString('en-US').replaceAll(',',' '))&&text('s3').includes(manifest.rows.items.toLocaleString('en-US').replaceAll(',',' ')),'Corpus counts agree with manifest');
 check(text('b1').includes(String(example.result.score))&&text('s5').includes('126')&&text('s5').includes('36'),'Example score and evidence preserved');
