@@ -1,0 +1,9 @@
+{
+  "captured_at": "2026-10-01T23:23:00.017650+00:00",
+  "exact_build_commit": "UNKNOWN",
+  "note": "Screenshots use an already-running local UI. Existing bundle was not rebuilt for the presentation. These bundle hashes identify the locally served assets inspected at completion.",
+  "assets_sha256": {
+    "src/ui/dist/assets/index-CEnvuiDB.js": "b6f138c10ec97e53bac7783601520504efadd6aac1cf1656bfbb94ce185b77be",
+    "src/ui/dist/assets/index-rICWCjGc.css": "596f31dd0149045fa53e0a6e21a06d6eb3ffa9de59b81bde108d0f4c3520ee34"
+  }
+}
