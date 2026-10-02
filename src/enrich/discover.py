@@ -15,7 +15,14 @@ Block «Новые из открытых источников» (`origin="discov
 4. Dropped: excluded from the registry, already present in organizers' data (suppliers*.parquet),
    liquidated by the ФНС card. Organizers' data absent → `history_checked=False`: the caller must
    not call these companies «новые».
-5. Every shown fact is an Evidence whose value literally occurs in the cached answer. The ФНС card
+5. ГИСП (#74, src/sources/gisp.py, offline export of the registry of Russian industrial products): a company whose
+   product's OKPD2 agrees with the query's code (gisp.agrees) gets product_fit 1.0 «производит этот товар по
+   реестру Минпромторга» and the role «производитель» with the registry as its basis — a company of the МСП channel
+   or a web lead is confirmed, a registry company outside both is added (INN type DISCOVERY_NP_TYPES, region by
+   the cached ФНС card's KPP, else by the INN's tax office code — said to be unconfirmed; the card is queued).
+   Among equal scores a confirmed product comes first. Any registry product of a shown company makes it a
+   manufacturer by the registry. No export → nothing changes.
+6. Every shown fact is an Evidence whose value literally occurs in the cached answer. The ФНС card
    (status, KPP, address) is added only from the cache; an INN without a cached card goes to the
    enrichment queue (`enqueue`), so the request itself makes no pb.nalog.ru calls.
 
@@ -52,7 +59,7 @@ from src.match import new_fit
 from src.match import search as search_mod
 from src.match.filters import REGION_CODE, apply_filters, apply_legal
 from src.match.index import processed_dir
-from src.sources import pb_nalog, rmsp, role, web_leads
+from src.sources import gisp, pb_nalog, rmsp, role, web_leads
 from src.sources.cache import CachedPage, SourceCache
 from src.sources.rmsp import MSP_CATEGORY
 
@@ -136,6 +143,8 @@ class Discovery:
     profile: new_fit.Profile | None = None  # signal 8: words of the full OKPD2 code of the query
     profile_gap: str | None = None  # why `profile` is None in shadow / on: «not computed», not «0»
     source_failed: bool = False  # a registry request was refused or failed: the block may be incomplete (#287)
+    gisp: list[str] = field(default_factory=list)  # ГИСП (#74): what the registry of industrial products gave
+    gisp_backed: set[str] = field(default_factory=set)  # INNs whose product the registry confirms (product_fit 1.0)
 
 
 def predicted_class_allowed() -> bool:
@@ -407,7 +416,13 @@ def _components(cp: Counterparty, row: dict[str, str], ch: Channel, predicted: b
             for n in COMPONENT_ORDER]
 
 
-def _mix(ranked: list[CounterpartyMatch], relation: dict[str, Relation]) -> list[CounterpartyMatch]:
+def _order(backed: set[str]) -> Callable[[CounterpartyMatch], tuple[float, bool, str]]:
+    """Score order; among equal scores a product confirmed by the registry (ГИСП) first, then by INN."""
+    return lambda m: (-m.score, (m.counterparty.inn or "") not in backed, m.counterparty.inn or "~")
+
+
+def _mix(ranked: list[CounterpartyMatch], relation: dict[str, Relation],
+         backed: set[str] | None = None) -> list[CounterpartyMatch]:
     """Top MAX_SHOWN with both kinds present: producers and distributors take slots in turn (best
     first within a kind), so ten producers do not hide every distributor; shown in score order."""
     queues = [[m for m in ranked if relation[m.counterparty.inn or ""] == r] for r in ("class", "wholesale")]
@@ -416,7 +431,7 @@ def _mix(ranked: list[CounterpartyMatch], relation: dict[str, Relation]) -> list
         for q in queues:
             if q and len(picked) < MAX_SHOWN:
                 picked.append(q.pop(0))
-    return sorted(picked, key=lambda m: (-m.score, m.counterparty.inn or "~"))
+    return sorted(picked, key=_order(backed or set()))
 
 
 def leads_enabled() -> bool:
@@ -492,6 +507,100 @@ def lead_matches(
             f"тип ИНН не из DISCOVERY_NP_TYPES {other_type}, ОКВЭД не подтвердил класс {other_okved}, "
             f"другой регион {other_region}, регион не установлен {no_region}, в блок {len(out)}")
     return out, relation, no_card, line
+
+
+GISP_MARK = "реестру Минпромторга (ГИСП)"  # in product_fit of a product confirmed by the registry (#74)
+
+
+def _gisp_why(p: gisp.Product, codes: Sequence[str], predicted: bool) -> str:
+    """product_fit 1.0 by the registry: which product, its code against the query's one."""
+    near = max(codes, key=lambda c: (gisp.agrees(c, p.okpd2), len(os.path.commonprefix([c, p.okpd2]))))
+    if p.okpd2 == near:
+        agree = f"совпадает с ОКПД2 {'класса' if predicted else 'запроса'} {near}"
+    else:
+        common = os.path.commonprefix([near, p.okpd2])[:gisp.KIND_DEPTH].rstrip(".")
+        agree = f"ОКПД2 {'класса' if predicted else 'запроса'} {near} — тот же товар до {common}"
+    auto = " (в запросе ОКПД2 не указан — класс определён автоматически)" if predicted else ""
+    return (f"Производит этот товар по {GISP_MARK}: «{p.name}», ОКПД2 {p.okpd2} — {agree}{auto}; "
+            f"реестровая запись № {p.reg_number}")
+
+
+def _rescore(m: CounterpartyMatch, cp: Counterparty, comps: list[ScoreComponent]) -> CounterpartyMatch:
+    return m.model_copy(update={"counterparty": cp, "components": comps,
+                                "score": round(sum(c.value * c.weight for c in comps), 4)})
+
+
+def gisp_confirm(m: CounterpartyMatch, hit: Sequence[gisp.Product], other: Sequence[gisp.Product],
+                 codes: Sequence[str], predicted: bool, cache: SourceCache) -> CounterpartyMatch:
+    """A candidate of another channel and the registry: its product of the query's code (`hit`) → product_fit
+    1.0 with the registry as the reason, the channel's own sentence kept; any registry product (`other`) →
+    the role «производитель» by the registry. Neither → the match as it was."""
+    cp = m.counterparty
+    if hit:
+        cp = gisp.with_role(cp, hit, cache)
+        comps = [c.model_copy(update={"value": 1.0, "explanation": f"{_gisp_why(hit[0], codes, predicted)}. "
+                                                                   f"{c.explanation}"})
+                 if c.name == "product_fit" else c for c in m.components]
+        return _rescore(m, cp, comps)
+    if other:
+        return m.model_copy(update={"counterparty": gisp.with_role(cp, other[:1], cache)})
+    return m
+
+
+def gisp_matches(
+    query: Query, codes: Sequence[str], hits: dict[str, list[gisp.Product]], skip: set[str], cache: SourceCache,
+    weights: dict[str, float], predicted: bool, processed: Path, region: str, region_note: str | None,
+    okpd_class: str,
+) -> tuple[list[CounterpartyMatch], list[str], str]:
+    """Registry makers of the query's product that no other channel found (#74). Shown when absent from
+    organizers' data, of an INN type of DISCOVERY_NP_TYPES and of the query's region or its neighbour — by the
+    KPP of a cached ФНС card, else by the INN's tax office code (said to be unconfirmed; the card is queued).
+    Returns the matches, the INNs without a cached card and one line for `Discovery.gisp`."""
+    fresh = {inn: products for inn, products in hits.items() if inn not in skip}
+    known = known_inns(list(fresh), query.as_of, processed) or set()
+    regions, np_types = _regions(query), _np_types()
+    out: list[CounterpartyMatch] = []
+    no_card: list[str] = []
+    other_type = other_region = 0
+    ch = Channel(okved="", okpd_class=okpd_class, relation="class")
+    for inn, products in fresh.items():
+        if inn in known:
+            continue
+        np_type = "UL" if len(inn) == 10 else "IP"
+        if np_type not in np_types:
+            other_type += 1
+            continue
+        cp = gisp.counterparty(inn, products, cache)
+        if cp is None:
+            continue
+        cp = cp.model_copy(update={"name": display_name({"name_ex": cp.name, "nptype": np_type}) or cp.name})
+        cp, has_card = with_card(cp, cache)
+        by_kpp = bool(has_card and cp.kpp and cp.kpp[:2] not in ("00", "99"))
+        code = cp.kpp[:2] if by_kpp and cp.kpp else inn[:2]
+        if code not in regions:
+            other_region += 1
+            continue
+        if not has_card:
+            no_card.append(inn)
+        row = {"okved1": "", "regioncode": code}
+        comps = []
+        for c in _components(cp, row, ch, predicted, has_card, region, weights, region_note):
+            why = c.explanation
+            if c.name == "product_fit":
+                why = _gisp_why(products[0], codes, predicted)
+            elif c.name == "geography":
+                why = why.replace("Реестр МСП", "Карточка ФНС (КПП)") if by_kpp else why.replace(
+                    "Реестр МСП", f"По ИНН (код налогового органа {code}; регион не подтверждён карточкой ФНС)")
+            elif c.name == "reliability" and not (has_card and cp.status):
+                why = ("Изготовитель в реестре Минпромторга; статус в ЕГРЮЛ ещё не проверен (обогащение в очереди) — "
+                       "в score не входит")
+            comps.append(c.model_copy(update={"explanation": why}))
+        out.append(CounterpartyMatch(counterparty=cp, origin="discovered", components=comps,
+                                     score=round(sum(c.value * c.weight for c in comps), 4)))
+    line = (f"ГИСП: изготовителей продукции с ОКПД2 запроса {len(hits)}, уже найдены другими каналами "
+            f"{len(hits) - len(fresh)}, уже в данных {len(known)}, тип ИНН не из DISCOVERY_NP_TYPES {other_type}, "
+            f"другой регион {other_region}, в блок {len(out)}")
+    return out, no_card, line
 
 
 def _regions(query: Query) -> list[str]:
@@ -639,11 +748,37 @@ def discover(
         relation.update(lead_relation)
         if line:
             res.leads.append(line)
-    res.candidates = sorted(apply_legal(matches), key=lambda m: (-m.score, m.counterparty.inn or "~"))
+    gisp_no_card: list[str] = []
+    if gisp.available():  # ГИСП (#74): registry makers of the query's product; no export → nothing changes
+        try:
+            hits = gisp.by_okpd2(codes)
+            shown = [m.counterparty.inn for m in matches if m.counterparty.inn]
+            any_product = gisp.by_inn([i for i in shown if i not in hits])
+            matches = [gisp_confirm(m, hits.get(m.counterparty.inn or "", []),
+                                    any_product.get(m.counterparty.inn or "", []), codes, res.predicted, cache)
+                       for m in matches]
+            res.gisp_backed = {i for i in shown if i in hits}
+            for inn in res.gisp_backed:
+                relation[inn] = "class"  # a maker of this product by the registry takes a producer's slot
+            extra, gisp_no_card, line = gisp_matches(
+                query, codes, hits, set(shown), cache, weights, res.predicted, processed, target, target_note,
+                res.okpd_classes[0])
+            matches.extend(extra)
+            for m in extra:
+                relation[m.counterparty.inn or ""] = "class"
+                res.gisp_backed.add(m.counterparty.inn or "")
+            no_card.update(gisp_no_card)
+            res.gisp.append(f"{line}; подтверждён товар у найденных по ОКВЭД или веб-поиском "
+                            f"{len(res.gisp_backed) - len(extra)}")
+        except Exception as e:  # noqa: BLE001 — a broken export never takes the other channels down
+            log.exception("discovery: ГИСП пропущен из-за ошибки")
+            res.gisp.append(f"ГИСП: выгрузка не прочитана ({type(e).__name__}) — канал пропущен")
+    order = _order(res.gisp_backed)
+    res.candidates = sorted(apply_legal(matches), key=order)
     matches = apply_filters(matches, query)  # liquidated by the ФНС card are dropped here
-    matches.sort(key=lambda m: (-m.score, m.counterparty.inn or "~"))
+    matches.sort(key=order)
     res.pool = matches
-    res.matches = _mix(matches, relation)
+    res.matches = _mix(matches, relation, res.gisp_backed)
     if res.fit_new:
         log.info("discovery %s: product_fit_new (%s), профиль ОКПД2 %s: %s", query.query_id, res.fit_mode,
                  res.profile.code if res.profile else "—",
@@ -668,7 +803,7 @@ def _report(query: Query, res: Discovery, cache: SourceCache) -> None:
           f"{' (определён автоматически search() по похожим закупкам)' if res.predicted else ''}")
     for line in res.requests:
         print(f"  rmsp: {line}")
-    for line in res.leads:
+    for line in [*res.leads, *res.gisp]:
         print(f"  {line}")
     for note in res.notes:
         print(f"  ! {note}")

@@ -10,6 +10,10 @@ The basis is an Evidence of its own: `field="okved"`, `value` = the whole page l
 this INN — only the keys of BASIS_KEYS (`vyp.КодОКВЭД: 33.12`, `row.<inn>.okved1: 17.12`).
 src/enrich/evidence.py keeps `kind` only when that line is on the cached page as a whole line and the rule
 applied to its code gives the same kind.
+
+The state registry of manufacturers comes first (#186, #74): a product of this INN in the registry of Russian
+industrial products (ГИСП, src/sources/gisp.py) makes it a manufacturer. Its basis is an Evidence with
+`field="product"` and `value` = the line `gisp.<inn>.product: <name>` of that INN's registry record page.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ _CODE = re.compile(r"\d{2}(?:\.\d{1,2}){0,3}", re.ASCII)
 # (`okved1`) and of ГИР БО (`okved2`) — a search page holds many rows and the query's own `query.okved1`.
 CARD_KEYS = ("vyp.КодОКВЭД", "search.okved2main")
 ROW_KEYS = ("okved1", "okved2")
+GISP_KEY = "product"  # `gisp.<inn>.product: <name>` — a product of this INN in the registry of industrial products
 
 
 def classify(okved: str | None) -> tuple[Kind, str] | None:
@@ -57,9 +62,12 @@ def basis_keys(inn: str | None) -> set[str]:
 
 
 def basis_kind(value: str | None, inn: str | None) -> Kind | None:
-    """Kind backed by a basis value `<key>: <code>` with a key of the main OKVED of this INN; else None.
+    """Kind backed by a basis value `<key>: <code>` with a key of the main OKVED of this INN, or by a registry
+    product line `gisp.<inn>.product: <name>` of this INN (manufacturer); else None.
     Whether the line is on the page is checked by src/enrich/evidence.py."""
     key, sep, code = (value or "").strip().partition(": ")
+    if sep and inn and key == f"gisp.{inn}.{GISP_KEY}":
+        return "manufacturer" if code.strip() else None
     role = classify(code) if sep and key in basis_keys(inn) else None
     return role[0] if role else None
 

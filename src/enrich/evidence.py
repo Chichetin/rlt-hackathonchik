@@ -11,7 +11,8 @@ Rules (CLAUDE.md, «Проверки кодом»):
 5. the counterparty INN and every contact are backed by an Evidence with the same field/value;
    the role (`kind`) by an `okved` Evidence whose value is a WHOLE line of the page with the main OKVED
    of this INN (`role.basis_keys`) and whose code gives the same kind by the rule of src/sources/role.py
-   (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19;
+   (D-057) — a substring would let `vyp.КодОКВЭД: 46` pass on a page with 46.19; or by a `product` Evidence
+   whose value is the WHOLE line `gisp.<inn>.product: <name>` of a registry record of this INN (ГИСП, #74);
 6. `data:` URLs are only for organizers' data (`source` starting with "data:"); DATA's loader
    checks those rows, not this module.
 
@@ -33,6 +34,8 @@ PageText = Callable[[str], str | None]  # url -> cached page text or None
 FIELDS = {"inn", "ogrn", "kpp", "phone", "email", "address", "name", "site", "okved", "status", "msp", "region",
           "rnp"}
 FIELDS |= {"employees", "income", "expenses", "tax_regime", "tax_debt"}  # src/sources/fns_opendata.py
+FIELDS |= {"product"}  # src/sources/gisp.py: a product of the company in the registry of industrial products
+ROLE_FIELDS = ("okved", "product")  # Evidence that may hold the basis of the role (src/sources/role.py)
 MIN_TEXT = 6
 
 _WS = re.compile(r"\s+")
@@ -174,7 +177,7 @@ def _backed(cp: Counterparty, field: str, value: str, page_text: PageText) -> bo
 def _kind_backed(cp: Counterparty, page_text: PageText) -> bool:
     pages = cached_pages(page_text)
     for e in cp.evidence:
-        if e.field != "okved" or e.value is None or basis_kind(e.value, cp.inn) != cp.kind:
+        if e.field not in ROLE_FIELDS or e.value is None or basis_kind(e.value, cp.inn) != cp.kind:
             continue
         page = pages.page(e.url)
         if page is not None and e.value.strip() in page.lines and not check_evidence(e, pages):
@@ -193,7 +196,8 @@ def check_counterparty(cp: Counterparty, page_text: PageText) -> list[str]:
         if not any(e.field == field and e.value == value for e in cp.evidence):
             errors.append(f"контакт {field}={value!r} без Evidence")
     if cp.kind is not None and not _kind_backed(cp, page_text):
-        errors.append(f"роль {cp.kind} без подтверждённого основного ОКВЭД с этой ролью по правилу")
+        errors.append(f"роль {cp.kind} без подтверждённого основания: ни основного ОКВЭД с этой ролью по правилу, "
+                      "ни продукции в реестре Минпромторга")
     return errors
 
 
