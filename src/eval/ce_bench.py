@@ -114,7 +114,7 @@ def rerank_ties(hits: Sequence[tuple[int, float]], ce: Mapping[int, float], n: i
 
 def _revision(model: str, cache: str | None) -> str | None:
     """Snapshot commit of the cached model (the card version the numbers belong to)."""
-    from huggingface_hub import try_to_load_from_cache
+    from huggingface_hub import try_to_load_from_cache  # pyright: ignore[reportMissingImports]
 
     path = try_to_load_from_cache(model, "config.json", cache_dir=cache)
     return Path(path).parent.name if isinstance(path, str) else None
@@ -132,7 +132,7 @@ class Scorer:
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         dtype = getattr(torch, RERANKERS.get(model, "float32")) if self.device == "cuda" else torch.float32
-        cache = os.environ.get("CE_HF_CACHE")  # hub cache of the rerankers, if not the default one
+        cache = None  # the default hub cache (HF_HOME): no environment reads outside src/settings.py
         self.tok = AutoTokenizer.from_pretrained(model, cache_dir=cache)
         self.model = AutoModelForSequenceClassification.from_pretrained(model, dtype=dtype, cache_dir=cache)
         self.model.to(self.device).eval()
