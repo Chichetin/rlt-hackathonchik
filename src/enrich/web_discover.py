@@ -226,7 +226,7 @@ def lot_leads(lot: str, text: str, okpd_class: str, strong: int, *, okpd2: Seque
     out.used = True
     notes: list[str] = []
     seen: set[str] = set()
-    max_sites = int(cfg.get("max_sites", 6))
+    max_sites = int(cfg.get("live_max_sites" if force else "max_sites", 6))
     timed_out = False
 
     def left() -> float | None:

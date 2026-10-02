@@ -48,6 +48,7 @@ import {
 import { deepLinkSearch, parseDeepLink, type DeepLink } from "./deeplink";
 import { reviewLinks } from "./reviews";
 import { ExternalReviews } from "./ExternalReviews";
+import { LIVE_IDLE, LiveSearch, type LiveState } from "./LiveSearch";
 import { BacktestPanel } from "./Backtest";
 import { TestsetPanel } from "./TestsetPanel";
 import { KINDS, LEVELS, minScore, RelevanceTag, ROLE, RoleBadge, RoleIcon, type MinLevel } from "./roles";
@@ -260,20 +261,6 @@ export function noteText(note: string | undefined): string | undefined {
   return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
-const NEW_BLOCK_LEAD = "В закупках АИС ГЗ не участвовали — кандидаты, которых заказчик сам бы не нашёл. Найдены в открытых источниках: ";
-const GISP_MARK = "реестру Минпромторга (ГИСП)"; // src/enrich/discover.py GISP_MARK: in product_fit only when the product is confirmed
-const MSP_SOURCES = ["ФНС: единый реестр субъектов МСП", "ФНС: реестр МСП, выгрузка открытых данных"]; // rmsp.SOURCE, msp_dump.SOURCE
-
-/** Caption of «Новые» (#477): names the channels the block really holds. A ГИСП maker counts only when its product_fit
- * says the registry confirmed the product — ГИСП evidence that only backs the role of a МСП row does not. */
-export function newBlockHint(rows: CounterpartyMatch[]): string {
-  const gisp = rows.some(m => m.components.some(c => c.name === "product_fit" && c.explanation.includes(GISP_MARK)));
-  if (!gisp) return NEW_BLOCK_LEAD + "первые 10 действующих записей реестра МСП по ОКВЭД и региону, без отбора";
-  const msp = rows.some(m => (m.counterparty.evidence ?? []).some(e => MSP_SOURCES.includes(e.source)));
-  return NEW_BLOCK_LEAD + "изготовители из реестра промышленной продукции Минпромторга (ГИСП) — по товару закупки"
-    + (msp ? ", и действующие записи реестра МСП по ОКВЭД и региону" : "");
-}
-
 /** Why «Новые» may be incomplete (X-Discovery-Error, #287): the source failed, or novelty was not checked. */
 export function discoveryAlert(code: string | undefined): string | undefined {
   if (!code) return undefined;
@@ -483,8 +470,7 @@ export function App() {
   weightsRef.current = weights;
   const [shown, setShown] = useState(PAGE);
   // #550: the live Yandex search of this purchase — its state and the INNs it added to «Новые»
-  const [live, setLive] = useState<{ state: "idle" | "loading" | "done" | "error"; text: string; inns: Set<string> }>(
-    { state: "idle", text: "", inns: new Set() });
+  const [live, setLive] = useState<LiveState>(LIVE_IDLE);
 
   // with local weights the whole candidate set (≤ ALL) is re-ranked here: load it once for the shown query
   const loadingAll = useRef(false);
@@ -539,7 +525,7 @@ export function App() {
       if (seq !== runSeq.current) return;
       setRes(r);
       setShown(PAGE);
-      setLive({ state: "idle", text: "", inns: new Set() });
+      setLive(LIVE_IDLE);
       setShownQuery(q);
       setBase(b ?? r);
       setState("idle");
@@ -570,7 +556,7 @@ export function App() {
     if (!res || !shownQuery) return;
     const seq = runSeq.current;
     const okpd2 = shownQuery.okpd2?.length ? shownQuery.okpd2 : res.discoveryClass?.classes ?? [];
-    setLive({ state: "loading", text: "", inns: live.inns });
+    setLive({ ...LIVE_IDLE, state: "loading", inns: live.inns });
     try {
       const found = await liveSearch({ ...shownQuery, okpd2 });
       if (seq !== runSeq.current) return;
@@ -578,12 +564,11 @@ export function App() {
       const added = found.matches.filter((m) => m.counterparty.inn && !known.has(m.counterparty.inn));
       const inns = new Set([...live.inns, ...added.map((m) => m.counterparty.inn as string)]);
       setRes({ ...res, discovered: [...added, ...res.discovered], total: { ...res.total, discovered: res.total.discovered + added.length } });
-      setLive({ state: "done", inns, text: added.length
-        ? `Живые данные — найдено: ${added.length}. ${found.note}`
-        : `Новых компаний не найдено. ${found.note}` });
+      setLive({ state: "done", inns, note: found.note,
+        text: added.length ? `Найдено в реальном времени: ${added.length}` : "Новых компаний не найдено" });
     } catch (e) {
       if (seq !== runSeq.current) return;
-      setLive({ state: "error", text: e instanceof Error ? e.message : String(e), inns: live.inns });
+      setLive({ ...LIVE_IDLE, state: "error", text: e instanceof Error ? e.message : String(e), inns: live.inns });
     }
   }
 
@@ -1002,7 +987,6 @@ export function App() {
             variant="history"
             tag="История закупок"
             title="С опытом госзакупок"
-            hint="Уже участвовали в похожих закупках СПб в 2024–2025 (данные АИС ГЗ): видны опыт, победы и заказчики"
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             alert={res.weakMatch}
             rows={historyRows}
@@ -1023,22 +1007,13 @@ export function App() {
             variant="new"
             tag="Открытые реестры"
             title="Новые из открытых источников"
-            hint={newBlockHint(res.discovered)}
             ratings={customerRatings.summaries} ratingsState={customerRatings.state}
             alert={discoveryAlert(res.discoveryError)}
             chip={res.discoveryClass?.predicted ? `ОКПД2 определён по тексту: ${okpd2Text(res.discoveryClass.classes, discoveryLabels)}` : undefined}
             rows={newRows}
             total={newTotal}
             liveInns={live.inns}
-            action={
-              <div className="live-search" data-testid="live-search">
-                <button type="button" className="secondary" disabled={live.state === "loading"} onClick={() => void runLive()}
-                  title="Яндекс Поиск → сайт компании → ИНН на сайте → карточка ФНС; сниппет выдачи фактом не становится">
-                  {live.state === "loading" ? "Ищем в реальном времени…" : "Искать в реальном времени"}
-                </button>
-                {live.text && <p className={live.state === "error" ? "stub block-alert" : "hint"} role="status">{live.text}</p>}
-              </div>
-            }
+            action={<LiveSearch live={live} onRun={() => void runLive()} />}
             onMore={weights ? undefined : () => void showMore("discovered")}
             loadingMore={more}
             onOpen={selectResult}
@@ -1076,7 +1051,7 @@ export function App() {
 
 function Block(props: {
   title: string;
-  hint: string;
+  hint?: string;
   rows: CounterpartyMatch[];
   ratings: Record<string, RatingSummary>;
   ratingsState: "loading" | "ready" | "error";
@@ -1101,7 +1076,7 @@ function Block(props: {
       <h2>
         {props.title} <span className="count"><RollingNumber value={props.total} /></span>
       </h2>
-      <p className="hint">{props.hint}</p>
+      {props.hint && <p className="hint">{props.hint}</p>}
       {props.chip && <div className="chips block-chips"><span className="chip" data-testid="discovery-class">{props.chip}</span></div>}
       {props.alert && <p className="stub block-alert" role="status" data-testid={props.variant === "new" ? "discovery-error" : "weak-match"}>{props.alert}</p>}
       {props.action}
