@@ -369,8 +369,8 @@ def api_export(query: Query) -> StreamingResponse:
     ws = wb.active
     assert ws is not None
     ws.title = "Поставщики"
-    # «Место» — the order of the block (the ranker's, D-103); «Релевантность» — the formula of the components, as the
-    # card's sum (D-150): a lower row may have a higher one, «Выше следующего» says why the model put it above
+    # «Место» — the order of the block («С опытом» — the ranker's, D-103); «Релевантность» — the formula of the
+    # components, as the card's sum (D-150): a lower row may have a higher one, «Выше следующего» says why
     ws.append(["Блок", "Наименование", "ИНН", "Роль", "ЮЛ/ИП", "Регион", "МСП", "Место в блоке",
                "Релевантность (формула критериев)", "Выше следующего", "Почему в списке", "Источники"])
     for block, rows in (("С опытом госзакупок", res.history), ("Новые из открытых источников", res.discovered)):
