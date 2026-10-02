@@ -1,0 +1,404 @@
+bash scripts/check_changed.sh
+check-changed: 75 файл(ов) относительно origin/main
+  общий файл: Makefile
+check-changed: затронут общий файл → полный make check
+make[1]: Entering directory '/home/m1hairu/Documents/rlt-hackathonchik/.claude/worktrees/318-cust-ranker'
+uv run --frozen ruff check src tests scripts .claude/hooks
+All checks passed!
+uv run --frozen pyright
+0 errors, 0 warnings, 0 informations
+cd src/ui && npx tsc -b --noEmit
+npm notice run rlt-supplier-ui@0.1.0 npx
+npm notice run 'tsc' -b --noEmit
+uv run --frozen pytest
+........................................................................ [  6%]
+........................................................................ [ 12%]
+...........................................................sssssssssssss [ 18%]
+ss.....s..........s..................................................... [ 24%]
+........................................................................ [ 30%]
+........................................................................ [ 36%]
+........................................................................ [ 42%]
+........................................................................ [ 48%]
+........................................................................ [ 54%]
+........................................................................ [ 60%]
+........ss..ss.......................................................... [ 66%]
+........................................................................ [ 72%]
+........................................................................ [ 78%]
+........................................................................ [ 84%]
+........................................................................ [ 90%]
+...................................ssssssssss........................... [ 96%]
+.....................................                                    [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/m1hairu/Documents/rlt-hackathonchik/.claude/worktrees/318-cust-ranker/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/unit/test_api_enrich.py: 4 warnings
+tests/unit/test_api_limits.py: 4 warnings
+tests/unit/test_core.py: 10 warnings
+tests/unit/test_enrich.py: 2 warnings
+tests/unit/test_prefetch.py: 27 warnings
+  /home/m1hairu/Documents/rlt-hackathonchik/.claude/worktrees/318-cust-ranker/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py:1180: DeprecationWarning: The default datetime adapter is deprecated as of Python 3.12; see the sqlite3 documentation for suggested replacement recipes
+    cursor.execute(statement, parameters)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1158 passed, 31 skipped, 48 warnings in 74.55s (0:01:14)
+cd src/ui && npx vitest run
+npm notice run rlt-supplier-ui@0.1.0 npx
+npm notice run 'vitest' run
+
+ RUN  v5.0.3 /home/m1hairu/Documents/rlt-hackathonchik/.claude/worktrees/318-cust-ranker/src/ui
+
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: Window's scrollTo() method
+
+ Test Files  7 passed (7)
+      Tests  70 passed (70)
+   Start at  05:06:06
+   Duration  4.24s (tests 55%, environment 33%, transform 5%, setup 4%, import 4%)
+
+bash .claude/hooks/test-hooks.sh
+ok:   settings: check-issue.sh подключён к PreToolUse (Edit)
+ok:   settings: check-issue.sh подключён к PreToolUse (Write)
+ok:   settings: check-issue.sh подключён к PreToolUse (MultiEdit)
+ok:   settings: check-issue.sh подключён к PreToolUse (NotebookEdit)
+ok:   settings: check-issue.sh подключён к PreToolUse (Bash)
+ok:   settings: check-data-files.sh подключён к PreToolUse (Bash)
+ok:   settings: session-context.sh подключён к SessionStart
+ok:   settings: check-secrets.sh подключён к Stop
+ok:   settings: check-tests.sh подключён к Stop
+ok:   settings: check-upstream.sh подключён к Stop
+ok:   settings: check-worktrees.sh подключён к SubagentStop
+ok:   секреты: чистый репозиторий
+ok:   секреты: .env.example с плейсхолдером
+ok:   секреты: токен в коде
+ok:   секреты: строка с secret-scan: allow
+ok:   секреты: ключ LLM в коде
+ok:   секреты: .env не в .gitignore
+ok:   секреты: .env в .gitignore
+ok:   секреты: приватный ключ
+ok:   тесты: тестов нет — хук молчит
+ok:   тесты: npm test падает
+ok:   тесты: npm test зелёный
+ok:   тесты: ничего не менялось с зелёного прогона
+ok:   страж: data/raw в индексе
+ok:   страж: parquet в src/
+ok:   страж: файл 6 МБ
+ok:   страж: обычный код
+ok:   страж: данные ловятся и из подкаталога
+ok:   страж pre-tool: чистый индекс — пропуск
+ok:   страж pre-tool: данные — deny
+ok:   контекст: основная копия на main — предупреждение
+ok:   контекст: нет remote — предупреждение, без падения
+ok:   контекст: мои задачи
+ok:   контекст: входящее называет задачу
+ok:   контекст: входящее — свой последний комментарий не входящее
+ok:   контекст: занятая другим area: с временем
+ok:   контекст: свободная задача не занята
+ok:   контекст: blocker виден
+ok:   контекст: обычная задача не blocker
+ok:   контекст: кандидат на перехват > 45 мин
+ok:   контекст: брошенная area: не занята
+ok:   контекст: GitHub недоступен — предупреждение
+ok:   контекст: ближайшая веха и время до неё
+ok:   контекст: прошедшая веха пропускается
+ok:   контекст: в worktree без предупреждения
+ok:   задача: правка в основной копии
+ok:   задача: ветка без номера
+ok:   задача: моя открытая
+ok:   задача: назначена на другого
+ok:   задача: закрыта
+ok:   задача: такой нет
+ok:   задача: файл вне репозитория (scratchpad)
+ok:   задача: git commit в основной копии
+ok:   задача: git -C worktree commit
+ok:   задача: git -C "путь" commit в кавычках
+ok:   задача: обычная команда Bash
+ok:   задача: git push внутри heredoc — данные
+ok:   задача: push --delete — уборка
+ok:   задача: grep "git push" — текст, не команда
+ok:   задача: git log | grep "git commit"
+ok:   задача: git -c k=v commit в основной копии
+ok:   задача: git --no-pager commit
+ok:   задача: удаление ветки не освобождает соседний commit
+ok:   задача: FOO=1 git commit
+ok:   задача: cd в worktree задачи && git commit
+ok:   задача: cd в worktree, потом cd обратно
+ok:   задача: cd "путь с пробелом" в чужой репозиторий
+ok:   задача: сессия в подкаталоге worktree задачи
+ok:   задача: многострочная команда, commit во второй строке
+ok:   задача: комментарий не съедает следующую строку
+ok:   задача: перенос строки обратным слешем
+ok:   задача: cd worktree && commit с heredoc-сообщением
+ok:   задача: "<<" в кавычках — не heredoc
+ok:   задача: GitHub недоступен — номер в ветке есть, пропуск
+ok:   задача: другой репозиторий
+ok:   pre-push: удаление ветки пропускается
+ok:   pre-push: push из основной копии отклонён
+ok:   pre-commit: коммит в основной копии отклонён
+ok:   pre-commit: worktree моей задачи — пропуск
+ok:   take: свежий PR (10 мин) — отказ
+ok:   take: свежий коммит в ветке — отказ
+ok:   take: ровно 45 мин — ещё отказ
+ok:   take: 55 мин без движения — перехват
+ok:   take: перехват оставил комментарий с временем и веткой
+ok:   take: прежний исполнитель снят
+ok:   take --force: прямое указание человека
+ok:   take --force: комментарий оставлен
+ok:   take: занятая area: — предупреждение, не отказ
+ok:   take: свободная задача без комментария перехвата
+ok:   take: брошенная area:data не предупреждает
+ok:   take: ветка старше задачи — не её ветка
+ok:   take: старая ветка не попала в комментарий
+ok:   take: GitHub вернул ошибку — движение неизвестно
+ok:   take: порог ISSUES_STALE_MIN=60 — 55 мин свежие
+ok:   take: закрытой задачи нет среди открытых
+ok:   note: сделано/дальше/блокер
+ok:   take без remote: предупреждение, код 3
+ok:   board без remote: код 0
+ok:   worktrees: секретов нигде нет
+ok:   worktrees: секрет в чужом worktree
+ok:   upstream: новых коммитов нет
+ok:   upstream: чужой коммит не пересекается
+ok:   upstream: пересечение с незакоммиченным файлом
+ok:   upstream: то же состояние второй раз не блокирует
+ok:   upstream: изменён контракт — показать всегда
+ok:   upstream: сеть недоступна — молчит
+test-hooks: все проверки зелёные
+bash scripts/openapi_check.sh
+openapi: контракты, OpenAPI и типы UI совпадают
+bash scripts/seal_check.sh
+seal: holdout читается только через make eval-final
+uv run --frozen python scripts/check_layers.py
+layers: OK — модулей 82, импортов 255, допущенных нарушений 11 (layers_allowlist.txt)
+uv run --frozen python scripts/check_stubs.py
+stubs: в демо-пути нет # STUB
+make check: OK
+make[1]: Leaving directory '/home/m1hairu/Documents/rlt-hackathonchik/.claude/worktrees/318-cust-ranker'
+make[1]: Entering directory '/home/m1hairu/Documents/rlt-hackathonchik/.claude/worktrees/318-cust-ranker'
+cd src/ui && npx vite build
+npm notice run rlt-supplier-ui@0.1.0 npx
+npm notice run 'vite' build
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 517 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                   0.44 kB │ gzip:   0.32 kB
+dist/assets/Tektur-DcO-tfex.ttf                 163.16 kB
+dist/assets/JetBrainsMono-Regular-Dh36KTnx.ttf  273.90 kB
+dist/assets/index-CXK6vSwQ.css                  104.55 kB │ gzip:  21.23 kB
+dist/assets/index-C9lcI2XV.js                   543.21 kB │ gzip: 169.48 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 128ms
+cd src/ui && npx playwright test
+npm notice run rlt-supplier-ui@0.1.0 npx
+npm notice run 'playwright' test
+[WebServer] INFO:     Started server process [2920926]
+[WebServer] INFO:     Waiting for application startup.
+[WebServer] INFO:     Application startup complete.
+[WebServer] INFO:     Uvicorn running on http://127.0.0.1:8831 (Press CTRL+C to quit)
+
+Running 23 tests using 2 workers
+
+(node:2922365) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2922366) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] cache/e2e-processed/fns_opendata.parquet нет — открытые данные ФНС не собраны (download, build)
+  ✓   1 [rest] › e2e/glass.spec.ts:3:1 › главная — один hero без общей панели и переключателей фона (905ms)
+  ✓   2 [rest] › e2e/interior.spec.ts:3:1 › рабочая область занимает экран без третьей прокрутки и цветных боковых полос (954ms)
+  ✓   3 [rest] › e2e/glass.spec.ts:15:1 › меню сверху на телефоне; на подборе рёбра вместо волн (1.0s)
+  ✓   5 [rest] › e2e/glass.spec.ts:32:1 › все рабочие страницы на чёрном фоне без общей панели (871ms)
+  ✓   4 [rest] › e2e/micro.spec.ts:3:1 › волны двигаются, reduced motion останавливает фон (2.2s)
+  ✓   7 [rest] › e2e/micro.spec.ts:24:1 › примеры выбираются с клавиатуры и сохраняют свободный ввод (556ms)
+  ✓   6 [rest] › e2e/navigation.spec.ts:3:1 › страницы доступны напрямую, меню и история браузера работают (1.4s)
+  ✓   8 [rest] › e2e/micro.spec.ts:62:1 › подсказка меню доступна с клавиатуры, закрывается Escape и при переходе (1.0s)
+  ✓   9 [rest] › e2e/navigation.spec.ts:22:1 › результаты и запрос сохраняются при переходах и обновлении (941ms)
+  ✓  10 [rest] › e2e/micro.spec.ts:78:1 › прокрутка на главной сразу ведёт в «Подбор» (1.8s)
+  ✓  11 [rest] › e2e/navigation.spec.ts:42:1 › главная и подбор — отдельные страницы, движение меню и reduced motion не ломают переходы (2.4s)
+  ✓  12 [rest] › e2e/micro.spec.ts:90:1 › масштабирование и прокрутка вверх не открывают подбор (1.1s)
+  ✓  13 [rest] › e2e/ratings.spec.ts:54:1 › оценка заказчика обновляет список и карточку, но не релевантность поставщика (935ms)
+  ✓  14 [rest] › e2e/results-view.spec.ts:12:1 › просмотр без модального окна сохраняет выбор и место в каждой группе (1.1s)
+  ✓  16 [rest] › e2e/results-view.spec.ts:46:1 › на телефоне можно перейти от компании к деталям и вернуться в список (706ms)
+  ✓  15 [rest] › e2e/ratings.spec.ts:88:1 › черновик привязан к компании; ошибка сети сохраняет отзыв дистрибьютору для повторной отправки (1.5s)
+  ✓  17 [rest] › e2e/results-view.spec.ts:63:1 › мобильный пустой список после фильтра не запирает пользователя в деталях (1.0s)
+  ✓  18 [rest] › e2e/testset.spec.ts:8:1 › тестовая выгрузка: загрузка CSV → процедура → выдача, прогноз по всем (1.0s)
+  ✓  19 [rest] › e2e/weights.spec.ts:3:1 › пресет весов пересчитывает выдачу только в этом браузере (1.0s)
+(node:2933272) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  20 [demo] › e2e/demo.spec.ts:10:1 › демо: запрос → два блока → карточка → фильтр → выгрузка (6.7s)
+  ✓  21 [demo] › e2e/demo.spec.ts:146:1 › фильтр роли: счётчик дистрибьюторов совпадает с выдачей и бейджами (2.6s)
+  ✓  22 [demo] › e2e/demo.spec.ts:187:1 › номер закупки не найден → понятное сообщение, свободный текст работает (522ms)
+  ✓  23 [demo] › e2e/demo.spec.ts:203:1 › мобильная выдача и карточка без горизонтальной прокрутки (951ms)
+
+  23 passed (25.0s)
+make[1]: Leaving directory '/home/m1hairu/Documents/rlt-hackathonchik/.claude/worktrees/318-cust-ranker'

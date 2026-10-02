@@ -179,7 +179,11 @@ def test_candidate_audit_keeps_full_union_and_weak_flag_from_one_pipeline_call(m
     monkeypatch.setattr(search_mod, "fit_signals", lambda: {
         "top_bm25": 0.5 if weak else 10.0, "tokens": 1, "retriever": "bm25", "ladder": False,
     })
-    monkeypatch.setattr(R.pipeline, "verified", lambda matches: matches)
+    def verified(matches, *, open_data):
+        assert open_data is False  # today's open data must not enter the historical evaluation
+        return matches
+
+    monkeypatch.setattr(R.pipeline, "verified", verified)
     monkeypatch.setattr(R.pipeline.TodayAudit, "add", lambda *args: None)
     c = case("union", ["extra-winner"]).model_copy(update={"grades": {"extra-winner": 2}})
     body = R.evaluate([c], {"k": 20}, candidate_audit=True)
@@ -215,3 +219,11 @@ def test_eval_refuses_unavailable_ranker_before_retrieval(monkeypatch, tmp_path,
     cfg = {"k": 20, "ranker": {"kind": "logreg", "model": str(model)}}
     with pytest.raises(ValueError if stale else FileNotFoundError):
         R.evaluate([case("бумага", ["7801000012"])], cfg)
+
+
+def test_drop_okpd2_keeps_text_and_everything_else():
+    c = case("бумага офисная", ["7801000012"])
+    c = c.model_copy(update={"query": c.query.model_copy(update={"okpd2": ["17.12.14.110", "17.12"]})})
+    (got,) = R.drop_okpd2([c])
+    assert got.query.okpd2 == [] and got.query.text == c.query.text and got.relevant_inns == c.relevant_inns
+    assert c.query.okpd2 == ["17.12.14.110", "17.12"]  # the input is not mutated

@@ -133,12 +133,19 @@ def _spelled(query: Query, config: dict | None) -> speller.Correction | None:
     return fixed if fixed.changed else None
 
 
-def verified(matches: list[CounterpartyMatch]) -> list[CounterpartyMatch]:
-    """What the card, the xlsx and the predict CSV show: only facts and contacts that pass the Evidence check."""
+def verified(matches: list[CounterpartyMatch], open_data: bool = True) -> list[CounterpartyMatch]:
+    """What the card, the xlsx and the predict CSV show: ФНС open data added (only here, not in the loop over all
+    candidates), then only facts and contacts that pass the Evidence check. `open_data=False` in a backtest:
+    the facts are dated today, later than `as_of` (D-097)."""
     if is_stub():
         return matches
-    pages = cached_pages(SourceCache().page_text)  # one read and one normalization per page per call
-    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in matches]
+    cache = SourceCache()
+    # one query for the whole list; before cached_pages(), because the facts' texts land in the cache here
+    cards = enrich_mod.add_open_data([m.counterparty for m in matches], cache) if open_data else None
+    shown = ([m.model_copy(update={"counterparty": cp}) for m, cp in zip(matches, cards, strict=True)]
+             if cards is not None else matches)
+    pages = cached_pages(cache.page_text)  # one read and one normalization per page per call
+    return [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, pages)}) for m in shown]
 
 
 def enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[CounterpartyMatch]:
@@ -157,7 +164,7 @@ def enriched(history: list[CounterpartyMatch], uncached: set[str]) -> list[Count
             continue
         try:
             # filters see only facts that pass the Evidence check, as the card does (strip before filters)
-            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True), pages)
+            card = strip_unverified(enrich_mod.enrich(cp.inn, cache, offline=True, open_data=False), pages)
         except KeyError:  # nothing cached for this INN
             uncached.add(cp.inn)
             out.append(m)
@@ -217,7 +224,7 @@ class TodayAudit:
             if inn not in self._cards:
                 cache = cache or SourceCache()
                 try:
-                    self._cards[inn] = legal_ok(enrich_mod.enrich(inn, cache, offline=True))
+                    self._cards[inn] = legal_ok(enrich_mod.enrich(inn, cache, offline=True, open_data=False))
                 except KeyError:  # nothing cached
                     self._cards[inn] = None
                 except Exception:  # noqa: BLE001 — a broken cached page is «no card», never a failed eval
