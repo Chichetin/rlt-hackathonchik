@@ -181,14 +181,17 @@
 .hero-problem{font:21px/1.45 var(--body);color:#90949f;margin-top:34px;max-width:650px}
 .hero-pain{font:19px/1.45 var(--body);color:#c3c7d0;margin-top:12px;max-width:650px}.hero-pain b{color:#fff;font-weight:600}
 #s3 h1{font-size:62px;line-height:1.13;margin-bottom:0}
-.candidate-branches{display:grid;grid-template-columns:1fr 1fr;gap:52px;margin-top:42px}
+.candidate-branches{display:grid;grid-template-columns:1fr 1fr;gap:52px;margin-top:30px}
 .candidate-branch{padding:26px 0;border-top:1px solid #ffffff40}
 .branch-label{font:18px var(--body);color:#a0a7b3}
-.candidate-branch h2{font:500 30px var(--body);margin:22px 0 30px}
+.candidate-branch h2{font:500 30px var(--body);margin:18px 0 24px}
 .branch-route{display:flex;align-items:center;gap:22px;font:28px var(--body)}
 .branch-route b{font:24px var(--body);color:#92afd4}.registry .branch-route b{color:#aaa8b6}
-.candidate-branch p{font:22px var(--body);color:#aeb3bd;margin:28px 0 0}
-.new-candidates-note{font:20px var(--body);color:#b4b8c2;margin:13px 0 32px}
+.candidate-branch p{font:22px var(--body);color:#aeb3bd;margin:20px 0 0}
+.new-example{margin:6px 0 18px;padding:14px 0 0;border-top:1px solid #ffffff25}
+.new-example p{font:19px/1.35 var(--body);color:#b4b8c2;margin:8px 0 0}
+.new-example .new-example-name{font:22px var(--body);color:#e1e3e9}.new-example-name b{font-weight:500}
+.new-example .new-example-source{font-size:16px;color:#999faa}
 .corpus-strip{display:flex;justify-content:space-between;border-top:1px solid #ffffff25;padding-top:25px;font:19px var(--body);color:#999faa}
 .corpus-strip b{font:26px var(--body);color:#e1e3e9;font-weight:500;margin-right:10px}
 #s4 h1{font-size:57px;line-height:1.1;margin-bottom:16px}

@@ -130,7 +130,7 @@
   }
   const objects = {
     s1:'.brand-title, .hero .lead, .hero-result',
-    s3:'.candidate-branch, .new-candidates-note, .corpus-strip',
+    s3:'.candidate-branch, .new-example, .corpus-strip',
     s2:'.scenario-rail, .demo-panel:not([hidden])',
     s4:'.lane-label, .prep .node, .query-flow .node, .architecture-foot',
     s5:'.evidence-card, .factor, .score-total, .takeaway',
