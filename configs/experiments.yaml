@@ -75,6 +75,16 @@ R-198-lr:        # обученный ранжировщик (#198): логис�
 R-198-gbm:       # обученный ранжировщик (#198): LightGBM LambdaMART, объяснение — pred_contrib
   spell: false
   ranker: {kind: lgbm, model: models/ranker/R-198-gbm.txt}
+# Шире набор кандидатов (#195): + поставщики заказчика и частые поставщики группы ОКПД2, поверх v2 (без ранжировщика).
+C-195-cg:        # заказчик 30 + группа ОКПД2 30
+  spell: false
+  ranker: null
+  candidates: {customer: 30, okpd2: 30}
+C-195-cgi:       # то же + инкумбент-сигнал 0.3 (как H-15g): поставщикам заказчика есть чем подняться
+  spell: false
+  ranker: null
+  candidates: {customer: 30, okpd2: 30}
+  signals: {incumbent: 0.3}
 H-15f-geo-c:     # #218: как H-15f-geo на коде после #218 (география от заказчика); не прогоняется — см. EXPERIMENTS
   spell: false
   weights: {product_fit: 0.8, experience: 0.2, reliability: 0.0, activity: 0.05, geography: 0.05, price: 0.0}
