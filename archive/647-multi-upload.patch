@@ -1,0 +1,362 @@
+diff --git a/src/api/app.py b/src/api/app.py
+index 3e489bd5..b6495a3a 100644
+--- a/src/api/app.py
++++ b/src/api/app.py
+@@ -41,7 +41,7 @@ import time
+ from collections.abc import AsyncIterator
+ from contextlib import asynccontextmanager, nullcontext
+ from dataclasses import dataclass, field
+-from datetime import date
++from datetime import UTC, date, datetime
+ from typing import Any
+ from urllib.parse import quote
+ 
+@@ -60,10 +60,10 @@ from src.api.ratings import router as ratings_router
+ from src.api.reviews import router as reviews_router
+ from src.api.testset import UploadLimit
+ from src.api.testset import router as testset_router
+-from src.contracts import Counterparty, CounterpartyMatch, Query, SearchResponse, inn_is_valid
++from src.contracts import Counterparty, CounterpartyMatch, Evidence, Query, SearchResponse, inn_is_valid
+ from src.enrich import discover as discover_mod
+ from src.enrich import enrich as enrich_mod
+-from src.enrich.evidence import strip_unverified
++from src.enrich.evidence import check_evidence, strip_unverified
+ from src.ingest.okpd2 import label as okpd2_label
+ from src.llm.provider import get_provider
+ from src.match import pipeline
+@@ -73,7 +73,8 @@ from src.match.purchase_type import PURCHASE_LABEL, default_near, purchase_basis
+ from src.match.reliability import reliability_mode
+ from src.match.store import get_store
+ from src.settings import get_settings
+-from src.sources.cache import SourceCache
++from src.sources import companium, rmsp
++from src.sources.cache import CachedPage, SourceCache
+ from src.sources.pb_nalog import CaptchaRequired, card_url
+ from src.sources.role import LABEL as ROLE_LABEL
+ from src.worker.queue import QueueFull, engine_from_env, enqueue, status_counts
+@@ -467,6 +468,9 @@ _LIMITED: dict[int | str, dict[str, Any]] = {
+ }
+ 
+ 
++CONTACT_LABEL = {"phone": "Телефон", "email": "Email", "site": "Сайт"}
++
++
+ def _answers_from_cache(inn: str) -> bool:
+     """True when enrich() needs no network: offline mode, or a fresh pb card in the cache (its first branch)."""
+     return get_settings().enrich_offline or SourceCache().get(card_url(inn)) is not None
+@@ -494,6 +498,54 @@ def api_counterparty(inn: str) -> Counterparty:
+     return strip_unverified(cp, SourceCache().page_text)
+ 
+ 
++@app.get("/api/contacts/{inn}", response_model=list[Evidence], dependencies=[Depends(guard.require_api_key)])
++def api_contacts(inn: str) -> list[Evidence]:
++    """Phone, email and site of the company: the МСП registry quick search by INN, then the companium.ru card by
++    OGRN (legal entities only: of an ИП only registries, 152-ФЗ). Cache first, else one live request per source;
++    only values that pass the Evidence check against their cached page."""
++    if not inn_is_valid(inn):
++        raise HTTPException(422, "ИНН не проходит контрольные цифры")
++    cache = SourceCache()
++    offline = get_settings().enrich_offline
++    out: list[Evidence] = []
++
++    def add(source: str, page: CachedPage, pairs: list[tuple[str, str]]) -> None:
++        at = datetime.fromtimestamp(page.fetched_at, tz=UTC)
++        for field, value in pairs:
++            if any(e.field == field and e.value == value for e in out):
++                continue
++            ev = Evidence(source=source, url=page.url, fetched_at=at, fact=f"{CONTACT_LABEL[field]}: {value}",
++                          field=field, value=value)
++            if not check_evidence(ev, cache.page_text):
++                out.append(ev)
++
++    ogrn = None
++    try:
++        page = rmsp.fetch_quick(inn, cache, offline=offline)
++    except (rmsp.Blocked, TimeoutError, httpx.HTTPError, ValueError) as e:
++        log.warning("contacts %s: реестр МСП не ответил (%s)", inn, e)
++        page = None
++    row = next((r for r in rmsp.parse(page.body).rows if r.get("inn") == inn), None) if page else None
++    if page is not None and row is not None:
++        ogrn = row.get("ogrn")
++        add(rmsp.SOURCE, page, [(f, row[f].strip()) for f in ("phone", "email") if (row.get(f) or "").strip()])
++    if not ogrn:
++        try:
++            card = enrich_mod.enrich(inn, cache, offline=True, open_data=False)
++            ogrn = next((e.value for e in card.evidence if e.field == "ogrn" and e.value), None)
++        except (KeyError, ValueError) as e:
++            log.warning("contacts %s: ОГРН не найден в кеше (%s)", inn, e)
++    if ogrn and len(inn) == 10:
++        try:
++            card_page = companium.fetch_card(ogrn, cache, offline=offline)
++        except (companium.Blocked, httpx.HTTPError, ValueError) as e:
++            log.warning("contacts %s: companium.ru не ответил (%s)", inn, e)
++            card_page = None
++        if card_page is not None and card_page.status == 200:
++            add(companium.SOURCE, card_page, companium.contacts(card_page.body))
++    return out
++
++
+ @app.post("/api/enrich/{inn}", response_model=EnqueueResult, status_code=202,
+           dependencies=[Depends(guard.require_api_key)], responses=_LIMITED)
+ def api_enqueue(inn: str) -> EnqueueResult:
+diff --git a/src/enrich/discover.py b/src/enrich/discover.py
+index d91a6199..9e03fca2 100644
+--- a/src/enrich/discover.py
++++ b/src/enrich/discover.py
+@@ -963,6 +963,7 @@ def discover(
+     net_ok = True  # False after the first network failure: the rest of the query is cache only
+     found: dict[str, tuple[dict[str, str], Channel, CachedPage]] = {}
+     last_rows: dict[tuple[str, str, str], int] = {}
++    unknown_codes = 0  # requests the registry answered with 400: the OKVED is not in its classifier
+     for (ch, region, np_type), page_no in _pages(jobs, pages, last_rows):
+         if page_no is None:  # the previous page was the last one
+             continue
+@@ -983,6 +984,19 @@ def discover(
+             res.notes.append(str(e))
+             res.source_failed = True
+             continue
++        except httpx.HTTPStatusError as e:
++            if e.response.status_code != 400:  # 403/429 are Blocked above; 400 below is about this one code
++                net_ok = False
++                log.warning("discovery: %s: %s", label, e)
++                res.requests.append(f"{label}: источник не ответил ({type(e).__name__})")
++                res.source_failed = True
++                continue
++            # the registry answers 400 to an OKVED that is not in its classifier (02.12 from OKPD2 02.12): the code is
++            # unknown, the source is fine — the other channels of the block still go to the network (#647)
++            log.warning("discovery: %s: реестр не знает такого кода ОКВЭД (HTTP 400)", label)
++            res.requests.append(f"{label}: код ОКВЭД не найден в реестре (HTTP 400)")
++            unknown_codes += 1
++            continue
+         except (httpx.HTTPError, ValueError) as e:
+             net_ok = False
+             log.warning("discovery: %s: %s", label, e)
+@@ -1007,6 +1021,19 @@ def discover(
+             if row.get("okved1"):  # no OKVED in the row → nothing to explain the match with
+                 found.setdefault(row["inn"], (row, ch, page))  # first channel wins: class before wholesale
+ 
++    if unknown_codes and unknown_codes == len(res.requests) and not res.predicted:
++        # the purchase's own OKPD2 maps to OKVED codes the registry does not have (a wrong code in the notice, #647):
++        # build the block by the class of its text, as for a query without a code (predict_class; no recursion twice)
++        again = discover(query.model_copy(update={"okpd2": []}), history, cache=cache, weights=weights,
++                         processed=processed, enqueue=enqueue, offline=offline, budget_s=budget_s, client=client,
++                         max_requests=max_requests, pages=pages, predicted_class=True, fit_mode=fit_mode,
++                         predicted_code=None, pool=pool, pool_limit=pool_limit, min_score=min_score,
++                         max_shown=max_shown)
++        if again.predicted:
++            again.notes.append(f"ОКПД2 закупки ({', '.join(codes)}) не найден в реестре МСП по ОКВЭД — "
++                               "класс определён по тексту закупки")
++            return again
++
+     fit_cfg = new_fit.config()
+     res.fit_mode = new_fit.mode(fit_cfg) if fit_mode is None else fit_mode
+     if res.fit_mode not in new_fit.MODES:
+diff --git a/src/ui/src/App.tsx b/src/ui/src/App.tsx
+index a1437034..ae540913 100644
+--- a/src/ui/src/App.tsx
++++ b/src/ui/src/App.tsx
+@@ -15,6 +15,7 @@ import { WaveField } from "./WaveField";
+ import { Landing } from "./Landing";
+ import { easeOut, glide, ScrollTools } from "./Motion";
+ import { Requisites } from "./Requisites";
++import { Contacts } from "./Contacts";
+ import { lookupOkpd2Name, okpd2Text, useOkpd2Labels } from "./okpd2";
+ import {
+   ALL,
+@@ -1259,6 +1260,7 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
+         <span>Оценка <strong>{m.score.toFixed(2)}</strong> <RelevanceTag score={m.score} /></span>
+       </div>
+       <p className="card-role"><RoleBadge kind={cp.kind} /></p>
++      <Contacts key={cp.inn ?? "no-inn"} cp={cp} />
+       <Breakdown m={m} />
+       <h3>Почему в списке</h3>
+       {weightsNote && <p className="weights-card-note">Оценка пересчитана с вашими весами: «{weightsNote}». У коллег и в выгрузке — стандартные.</p>}
+@@ -1307,7 +1309,6 @@ function Card({ m, onClose, weightsNote, customerRegion }: { m: CounterpartyMatc
+         )}
+         <dt>Регион</dt>
+         <dd>{regionLabel(cp)}</dd>
+-        {Object.entries(cp.contacts ?? {}).map(([k, v]) => [<dt key={`k-${k}`}>{k}</dt>, <dd key={`v-${k}`}>{v}</dd>])}
+       </dl>
+ 
+       {Object.keys(cp.stats ?? {}).length > 0 && (
+diff --git a/src/sources/companium.py b/src/sources/companium.py
+new file mode 100644
+index 00000000..c574a2fa
+--- /dev/null
++++ b/src/sources/companium.py
+@@ -0,0 +1,93 @@
++"""companium.ru — the company card by OGRN: phones, emails and site the card lists. Owner: SOURCES.
++
++One GET of https://companium.ru/id/<ogrn> per company (robots.txt closes /search? and /id/*/contacts; the card
++itself is open), through SourceCache, one request at a time with MIN_INTERVAL_S between them. Only the contact
++block of the card is kept, as flat lines `phone: …` / `email: …` / `site: …`, so every value is literally on the
++cached page (src/enrich/evidence.py). A 403/429 or a page without the OGRN (a protection page) pauses the host.
++"""
++
++from __future__ import annotations
++
++import html
++import re
++
++import httpx
++
++from src.sources.cache import CachedPage, SourceCache
++from src.sources.pacing import HostPacer
++
++SOURCE = "companium.ru"
++BASE = "https://companium.ru"
++MIN_INTERVAL_S = 2.0
++BLOCK_COOLDOWN_S = 600.0
++DOWN_COOLDOWN_S = 60.0
++TIMEOUT_S = 10.0
++UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"
++PACER = HostPacer(lambda: MIN_INTERVAL_S, BLOCK_COOLDOWN_S)
++
++_BLOCK_START = re.compile(r">\s*(?:Телефоны|Электронная почта|Веб-сайт)\s*</strong>")
++_BLOCK_END = re.compile(r"Соцсети и мессенджеры|Юридический адрес|Адрес</")
++_TEL = re.compile(r'href="tel:[^"]*"[^>]*>([^<]+)</a>')
++_MAIL = re.compile(r'href="mailto:([^"?]+)"')
++_SITE = re.compile(r'Веб-сайт\s*</strong>\s*<a[^>]*href="(https?://[^"]+)"')
++
++
++class Blocked(RuntimeError):
++    """The host refuses us (403/429, a protection page): stop for a while."""
++
++
++def card_url(ogrn: str) -> str:
++    if not (ogrn.isascii() and ogrn.isdigit() and len(ogrn) in (13, 15)):
++        raise ValueError(f"companium: OGRN {ogrn!r} is not 13/15 digits")
++    return f"{BASE}/id/{ogrn}"
++
++
++def flatten(page: str) -> str:
++    """The contact block of the card as flat lines; empty when the card lists no contacts."""
++    start = _BLOCK_START.search(page)
++    if start is None:
++        return ""
++    end = _BLOCK_END.search(page, start.end())
++    block = page[start.start(): end.start() if end else start.end() + 6000]
++    lines = [f"phone: {html.unescape(t).strip()}" for t in _TEL.findall(block)]
++    lines += [f"email: {html.unescape(m).strip()}" for m in _MAIL.findall(block)]
++    lines += [f"site: {html.unescape(s).strip()}" for s in _SITE.findall(block)]
++    return "\n".join(dict.fromkeys(lines))
++
++
++def contacts(body: str) -> list[tuple[str, str]]:
++    """(field, value) pairs of a cached card, in the card's order."""
++    out = []
++    for line in body.splitlines():
++        field, _, value = line.partition(": ")
++        if field in ("phone", "email", "site") and value:
++            out.append((field, value))
++    return out
++
++
++def fetch_card(ogrn: str, cache: SourceCache | None = None, offline: bool = False) -> CachedPage | None:
++    """Cached card (stale is fine offline); None offline when absent."""
++    cache = cache or SourceCache()
++    url = card_url(ogrn)
++    if offline:
++        return cache.get(url, allow_stale=True)
++
++    def live(_: str) -> tuple[int, str]:
++        if PACER.blocked():
++            raise Blocked("companium.ru: пауза после отказа источника ещё не истекла")
++        with PACER.slot(timeout=TIMEOUT_S) as limit:
++            try:
++                r = httpx.get(url, headers={"User-Agent": UA, "Accept-Language": "ru"}, timeout=limit,
++                              follow_redirects=True)
++            except httpx.TransportError:
++                PACER.block(DOWN_COOLDOWN_S)
++                raise
++        if r.status_code == 404:
++            return 404, ""
++        if r.status_code in (403, 429) or (r.status_code == 200 and ogrn not in r.text):
++            PACER.block()
++            raise Blocked(f"companium.ru: HTTP {r.status_code}, страница без ОГРН — источник ограничил доступ")
++        r.raise_for_status()
++        return 200, flatten(r.text)
++
++    return cache.fetch(url, live)
+diff --git a/src/ui/src/Contacts.tsx b/src/ui/src/Contacts.tsx
+new file mode 100644
+index 00000000..839cfdf6
+--- /dev/null
++++ b/src/ui/src/Contacts.tsx
+@@ -0,0 +1,76 @@
++import { useEffect, useState } from "react";
++import type { CounterpartyMatch } from "./api";
++import type { components } from "./api-types";
++
++type Cp = CounterpartyMatch["counterparty"];
++type Evidence = components["schemas"]["Evidence"];
++type Row = { field: string; value: string; source?: Evidence };
++
++const LABEL: Record<string, string> = { phone: "Телефон", email: "Email", site: "Сайт", address: "Адрес" };
++
++function href(field: string, value: string): string | undefined {
++  if (field === "phone") return `tel:${value.replace(/[^\d+]/g, "")}`;
++  if (field === "email") return `mailto:${value}`;
++  if (field === "site") return value.startsWith("http") ? value : `https://${value}`;
++  return undefined;
++}
++
++/** Contacts of the supplier: those the search already has (cp.contacts, each with its Evidence) plus the phone and
++ *  email of the МСП registry by INN (/api/contacts), asked when the card opens. Every value links to its source. */
++export function Contacts({ cp }: { cp: Cp }) {
++  const [found, setFound] = useState<Evidence[] | null>(null);
++  useEffect(() => {
++    if (!cp.inn) {
++      setFound([]);
++      return;
++    }
++    const controller = new AbortController();
++    fetch(`/api/contacts/${cp.inn}`, { signal: controller.signal })
++      .then((r) => (r.ok ? r.json() : []))
++      .then((evs: Evidence[]) => setFound(evs))
++      .catch(() => {
++        if (!controller.signal.aborted) setFound([]);
++      });
++    return () => controller.abort();
++  }, [cp.inn]);
++
++  const rows: Row[] = Object.entries(cp.contacts ?? {}).map(([field, value]) => ({
++    field,
++    value,
++    source: (cp.evidence ?? []).find((e) => e.field === field && e.value === value),
++  }));
++  for (const ev of found ?? []) {
++    if (ev.field && ev.value && !rows.some((r) => r.field === ev.field && r.value === ev.value)) {
++      rows.push({ field: ev.field, value: ev.value, source: ev });
++    }
++  }
++
++  return (
++    <section className="requisites" aria-label="Контакты" aria-busy={found === null}>
++      <h3>Контакты</h3>
++      {rows.length > 0 && (
++        <dl className="facts">
++          {rows.map((r) => {
++            const link = href(r.field, r.value);
++            return [
++              <dt key={`k-${r.field}-${r.value}`}>{LABEL[r.field] ?? r.field}</dt>,
++              <dd key={`v-${r.field}-${r.value}`}>
++                {link ? <a href={link} target={r.field === "site" ? "_blank" : undefined} rel="noreferrer">{r.value}</a> : r.value}
++                {r.source && (
++                  <>
++                    {" · "}
++                    <a className="hint" href={r.source.url} target="_blank" rel="noreferrer">{r.source.source}</a>
++                  </>
++                )}
++              </dd>,
++            ];
++          })}
++        </dl>
++      )}
++      {found === null && <p className="hint" role="status">Ищем контакты в реестре МСП и на companium.ru…</p>}
++      {found !== null && rows.length === 0 && (
++        <p className="hint">{cp.inn ? "В открытых источниках контактов не нашли." : "ИНН не подтверждён — искать контакты не по чему."}</p>
++      )}
++    </section>
++  );
++}

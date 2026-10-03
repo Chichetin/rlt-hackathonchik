@@ -1,0 +1,1385 @@
+diff --git a/src/eval/build_cases.py b/src/eval/build_cases.py
+index 87a7f365..14c2fa68 100644
+--- a/src/eval/build_cases.py
++++ b/src/eval/build_cases.py
+@@ -38,6 +38,7 @@ from pathlib import Path
+ import duckdb
+ 
+ from src.contracts import Query
++from src.eval.slices import case_flags, history_stats
+ from src.eval.split import ROOT, EvalCase, split_config, write_cases
+ 
+ MAX_ITEMS = 10  # position names in Query.text; lots have p90 = 8 positions (D-018)
+@@ -230,6 +231,8 @@ def build_all(processed: Path, cfg: dict, sample_n: int = SAMPLE_N, seed: int =
+                                      if lot.channel == "ЭМ" and not any(w for _, w, _ in lot.participants)),
+         }
+     dev_cases = {lot.lot_id: to_case(lot, cutoff) for lot in kept["dev"]}
++    # cold start / new-for-customer shares from history before cutoff (src/eval/slices.py, research/EVAL.md)
++    stats["parts"]["dev"]["history"] = history_stats(case_flags(list(dev_cases.values()), cutoff, processed))
+     write_cases("dev_full", list(dev_cases.values()), cfg)
+     write_cases("holdout", [to_case(lot, cutoff) for lot in kept["holdout"]], cfg)
+     chosen = stratified_sample([(f"{lot.channel}|{lot.main_class or '-'}", lot.lot_id) for lot in kept["dev"]],
+diff --git a/src/eval/final.py b/src/eval/final.py
+index 22d063ed..b7cd5476 100644
+--- a/src/eval/final.py
++++ b/src/eval/final.py
+@@ -17,12 +17,13 @@ from __future__ import annotations
+ import json
+ import os
+ import sys
+-from datetime import UTC, datetime
++from datetime import UTC, date, datetime
+ from pathlib import Path
+ 
+ import yaml
+ 
+ from src.eval import run as R
++from src.eval.slices import case_flags
+ from src.eval.split import ROOT, load_cases, split_config, unseal
+ from src.match import search as search_mod
+ 
+@@ -70,7 +71,9 @@ def main() -> int:
+         f.write(f"{sha} {datetime.now(UTC).isoformat(timespec='seconds')} {os.environ.get('USER', '?')}\n")
+     with unseal():
+         cases = load_cases("holdout", split_config())
+-        rec = R.result_record(f"final-{sha[:8]}", "holdout", cfg, R.evaluate(cases, cfg))
++        cutoff = date.fromisoformat(str(split_config()["cutoff"]))
++        rec = R.result_record(f"final-{sha[:8]}", "holdout", cfg,
++                              R.evaluate(cases, cfg, cutoff, case_flags(cases, cutoff)))
+     out = R.RESULTS / f"final-{sha[:8]}.json"
+     out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+     m = rec["metrics"]
+diff --git a/src/eval/run.py b/src/eval/run.py
+index 154b04bd..b75778f4 100644
+--- a/src/eval/run.py
++++ b/src/eval/run.py
+@@ -11,6 +11,7 @@ import hashlib
+ import json
+ import subprocess
+ import sys
++from collections.abc import Callable
+ from datetime import UTC, date, datetime
+ from pathlib import Path
+ 
+@@ -18,16 +19,20 @@ import yaml
+ 
+ from src.contracts import Query
+ from src.enrich.evidence import strip_unverified
+-from src.eval.metrics import METRICS, bootstrap_ci
++from src.eval import baselines
++from src.eval.metrics import METRICS, bootstrap_ci, recall_at_k
++from src.eval.slices import CaseFlags, case_flags, winners
+ from src.eval.split import ROOT, EvalCase, load_cases, split_config
+ from src.match import search as search_mod
+ from src.sources.cache import SourceCache
+ 
+ SEARCH_CONFIG = ROOT / "configs" / "search.yaml"
++BASELINES_DIR = ROOT / "configs" / "baselines"
+ RESULTS = ROOT / "eval" / "results"
+ # Files whose bytes define the evaluated configuration (sha256 for eval-final).
+ CONFIG_FILES = ("configs/search.yaml", "configs/split.yaml")
+ # Code that defines the method (not UI/API): its committed tree enters the hash.
++WINNER_RECALL = "winner_recall@10"  # share of the winners (grade 2) in the top 10; None without a winner
+ METHOD_PATHS = ("src/contracts.py", "src/ingest", "src/match", "src/sources", "src/enrich", "src/eval", "src/llm")
+ 
+ 
+@@ -78,35 +83,72 @@ def with_cutoff(query: Query, cutoff: date) -> Query:
+     return query
+ 
+ 
+-def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None) -> dict:
++def _summary(rows: list[dict], names: list[str]) -> dict:
++    metrics = {}
++    for name in names:
++        vals = [r[name] for r in rows if r[name] is not None]
++        lo, hi = bootstrap_ci(vals)
++        metrics[name] = {"value": sum(vals) / len(vals) if vals else 0.0, "ci95": [lo, hi]}
++    return metrics
++
++
++def _slices(per_query: list[dict], with_flags: bool) -> dict:
++    """Metrics and bootstrap CI per slice: all / by channel / winner new or known for the customer."""
++    names = [*METRICS, WINNER_RECALL]
++    picks: dict[str, Callable[[dict], bool]] = {
++        "all": lambda q: True,
++        "ЭМ": lambda q: q["channel"] == "ЭМ",
++        "АИС ГЗ": lambda q: q["channel"] == "АИС ГЗ",
++    }
++    if with_flags:
++        picks["new_for_customer"] = lambda q: q["new_for_customer"] is True
++        picks["known_for_customer"] = lambda q: q["new_for_customer"] is False
++    out = {}
++    for name, pick in picks.items():
++        rows = [q for q in per_query if pick(q)]
++        out[name] = {"n": len(rows), "metrics": _summary(rows, names)}
++    return out
++
++
++def evaluate(cases: list[EvalCase], cfg: dict, cutoff: date | None = None,
++             flags: dict[str, CaseFlags] | None = None) -> dict:
++    """Backtest of one configuration: the product search() or a baseline (cfg["baseline"], D-033).
++
++    `flags` (src/eval/slices.py, from history before cutoff) add the «winner new for the customer» slice.
++    """
+     cutoff = cutoff or date.fromisoformat(str(split_config()["cutoff"]))
++    rank = baselines.make_ranker(cfg) if cfg.get("baseline") else None
+     per_query = []
+     for case in cases:
+         query = with_cutoff(case.query, cutoff)
+-        matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"))
+-        if not getattr(search_mod, "IS_STUB", False):  # measure what the user sees (as /api/search)
+-            cache = SourceCache()
+-            matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
+-                       for m in matches]
+-        ranked = [m.counterparty.inn for m in matches if m.origin == "history" and m.counterparty.inn]
++        if rank:
++            ranked = rank(query)
++        else:
++            matches = search_mod.search(query, k=cfg.get("k", 20), weights=cfg.get("weights"))
++            if not getattr(search_mod, "IS_STUB", False):  # measure what the user sees (as /api/search)
++                cache = SourceCache()
++                matches = [m.model_copy(update={"counterparty": strip_unverified(m.counterparty, cache.page_text)})
++                           for m in matches]
++            ranked = [m.counterparty.inn for m in matches if m.origin == "history" and m.counterparty.inn]
+         rel = set(case.relevant_inns)
+-        per_query.append({"query_id": case.query.query_id,
+-                          **{name: fn(ranked, rel) for name, fn in METRICS.items()}})
+-    metrics = {}
+-    for name in METRICS:
+-        vals = [q[name] for q in per_query]
+-        lo, hi = bootstrap_ci(vals)
+-        metrics[name] = {"value": sum(vals) / len(vals) if vals else 0.0, "ci95": [lo, hi]}
+-    return {"n_queries": len(per_query), "metrics": metrics, "per_query": per_query}
++        won = winners(case)
++        flag = flags.get(case.query.query_id) if flags else None
++        per_query.append({"query_id": case.query.query_id, "channel": case.query.channel,
++                          "new_for_customer": flag.new_for_customer if flag else None,
++                          **{name: fn(ranked, rel) for name, fn in METRICS.items()},
++                          WINNER_RECALL: recall_at_k(ranked, set(won), 10) if won else None})
++    return {"n_queries": len(per_query), "metrics": _summary(per_query, list(METRICS)),
++            "slices": _slices(per_query, flags is not None), "per_query": per_query}
+ 
+ 
+-def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
++def result_record(exp_id: str, part: str, cfg: dict, body: dict, config_path: Path | None = None) -> dict:
+     return {
+         "exp_id": exp_id,
+         "part": part,
+         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+         "commit": git("rev-parse", "HEAD"),
+         "dirty": bool(git("status", "--porcelain", "--", "src", "configs")),
++        "config_path": _rel(config_path or SEARCH_CONFIG),
+         "config": cfg,
+         "config_sha256": _safe_sha(),
+         "stub": bool(getattr(search_mod, "IS_STUB", False)),
+@@ -114,6 +156,13 @@ def result_record(exp_id: str, part: str, cfg: dict, body: dict) -> dict:
+     }
+ 
+ 
++def _rel(path: Path) -> str:
++    try:
++        return path.relative_to(ROOT).as_posix()
++    except ValueError:
++        return path.as_posix()
++
++
+ def _safe_sha() -> str | None:
+     try:
+         return config_sha256()
+@@ -121,12 +170,22 @@ def _safe_sha() -> str | None:
+         return None
+ 
+ 
++def resolve_config(exp_id: str, explicit: Path | None = None) -> Path:
++    """--config, else configs/baselines/<exp>.yaml if it exists (B-pop, B-inc, B-bm25), else the product config."""
++    if explicit:
++        return explicit if explicit.is_absolute() else ROOT / explicit
++    candidate = BASELINES_DIR / f"{exp_id}.yaml"
++    return candidate if candidate.exists() else SEARCH_CONFIG
++
++
+ def print_table(rec: dict) -> None:
+-    print(f"EXP {rec['exp_id']} | part={rec['part']} | n={rec['n_queries']} | commit={rec['commit'][:8]}"
+-          f"{' (dirty)' if rec['dirty'] else ''}{' | STUB' if rec['stub'] else ''}")
+-    print(f"{'metric':<10} {'value':>7}  95% CI")
+-    for name, m in rec["metrics"].items():
+-        print(f"{name:<10} {m['value']:>7.3f}  [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}]")
++    print(f"EXP {rec['exp_id']} | part={rec['part']} | n={rec['n_queries']} | config={rec.get('config_path', '?')} | "
++          f"commit={rec['commit'][:8]}{' (dirty)' if rec['dirty'] else ''}{' | STUB' if rec['stub'] else ''}")
++    print(f"{'slice':<20} {'n':>6}  " + "  ".join(f"{name:<24}" for name in (*METRICS, WINNER_RECALL)))
++    for slice_name, s in (rec.get("slices") or {"all": {"n": rec["n_queries"], "metrics": rec["metrics"]}}).items():
++        cells = [f"{s['metrics'][n]['value']:.3f} [{s['metrics'][n]['ci95'][0]:.3f}, {s['metrics'][n]['ci95'][1]:.3f}]"
++                 if n in s["metrics"] else "" for n in (*METRICS, WINNER_RECALL)]
++        print(f"{slice_name:<20} {s['n']:>6}  " + "  ".join(f"{c:<24}" for c in cells))
+ 
+ 
+ def main(argv: list[str] | None = None) -> int:
+@@ -134,17 +193,22 @@ def main(argv: list[str] | None = None) -> int:
+     ap.add_argument("--exp", required=True, help="experiment id, e.g. H-07 (research/EXPERIMENTS.md)")
+     ap.add_argument("--part", default="dev", choices=("dev", "dev_full", "real"),
+                     help="dev sample (default), all dev cases or the 5–10 real cases; never holdout")
++    ap.add_argument("--config", type=Path, default=None,
++                    help="config file; default configs/baselines/<exp>.yaml if present, else configs/search.yaml")
+     args = ap.parse_args(argv)
+     if args.exp.startswith("final"):
+         print("id final* зарезервирован за make eval-final", file=sys.stderr)
+         return 2
+-    cfg = yaml.safe_load(SEARCH_CONFIG.read_text(encoding="utf-8"))
+-    rec = result_record(args.exp, args.part, cfg, evaluate(load_cases(args.part, split_config()), cfg))
++    path = resolve_config(args.exp, args.config)
++    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
++    cases = load_cases(args.part, split_config())
++    cutoff = date.fromisoformat(str(split_config()["cutoff"]))
++    rec = result_record(args.exp, args.part, cfg, evaluate(cases, cfg, cutoff, case_flags(cases, cutoff)), path)
+     RESULTS.mkdir(parents=True, exist_ok=True)
+     out = RESULTS / f"{args.exp}.json"
+     out.write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+     print_table(rec)
+-    print(f"-> {out.relative_to(ROOT)}")
++    print(f"-> {_rel(out)}")
+     return 0
+ 
+ 
+diff --git a/tests/unit/test_build_cases.py b/tests/unit/test_build_cases.py
+index 5481cc54..dfc4cec9 100644
+--- a/tests/unit/test_build_cases.py
++++ b/tests/unit/test_build_cases.py
+@@ -114,6 +114,14 @@ def test_exclusions_are_counted(built: tuple[dict, dict]) -> None:
+     assert stats["parts"]["holdout"]["cases"] == 2
+ 
+ 
++def test_history_shares_use_only_participations_before_cutoff(built: tuple[dict, dict]) -> None:
++    """Only lot 1 (2025-03-01) is history: lot 13's winner took part on 07-01 (the cutoff day) — a cold start."""
++    _, stats = built
++    assert stats["parts"]["dev"]["history"] == {
++        "n": 4, "n_with_winner": 3, "winner_without_history": 0.25, "all_relevant_without_history": 0.25,
++        "winner_new_for_customer": 0.25, "n_new_for_customer": 1}
++
++
+ def test_invalid_inn_never_relevant() -> None:
+     lot = BC.Lot(lot_id=1, date=CUTOFF, channel="ЭМ", subject="Бумага", procedure_name="Бумага",
+                  customer_inn=None, start_price=None, items=[],
+diff --git a/src/eval/baselines.py b/src/eval/baselines.py
+new file mode 100644
+index 00000000..dfc7f1df
+--- /dev/null
++++ b/src/eval/baselines.py
+@@ -0,0 +1,180 @@
++"""Baselines for `make eval` (T-08, research/EVAL.md A, D-033): what we must beat.
++
++A baseline is a configuration (configs/baselines/<id>.yaml, key `baseline`) that ranks INNs from
++organizers' history strictly before `Query.as_of` — nothing else, no scoring components:
++
++  pop   B-pop    popularity: suppliers by participations (then wins) in the OKPD2 group of the lot
++                 (4 digits, backoff to the 2-digit class, then to the whole history);
++  inc   B-inc    incumbents: suppliers that took part at THIS customer in that group (wins first,
++                 then participations), backoff to the class, then padded by B-pop;
++  bm25  B-bm25   pure lexical BM25 over lot positions (src/match index, no OKPD2 depth, experience,
++                 activity or geography): supplier score = best BM25 of the lots it took part in.
++
++`src/match` is only read through its public index (`get_index`, `tokenize`); the product search()
++and configs/search.yaml are untouched. Ties are broken by INN, so the ranking is deterministic.
++A query without `as_of` is refused: a baseline that sees the whole data would leak the test lot.
++"""
++
++from __future__ import annotations
++
++import threading
++from collections.abc import Callable
++from datetime import date
++from pathlib import Path
++
++import duckdb
++
++from src.contracts import Query
++from src.match.index import get_index, processed_dir
++from src.match.text import tokenize
++
++KINDS = ("pop", "inc", "bm25")
++# OKPD2 level (digits) -> (ps column, prefix length): okpd2_l4 = code[:5] "XX.XX", okpd2_l2 = code[:2]
++LEVELS = {4: ("g4", 5), 2: ("g2", 2)}
++ORDER = {"lots": "count(DISTINCT lot_id)", "wins": "count(DISTINCT lot_id) FILTER (win)"}
++GLOBAL_POOL = 500  # globally most popular suppliers kept as the last padding
++
++
++def _lit(path: Path) -> str:
++    return "'" + path.as_posix().replace("'", "''") + "'"
++
++
++def _order_sql(rank_by: list[str]) -> str:
++    bad = [r for r in rank_by if r not in ORDER]
++    if bad or not rank_by:
++        raise ValueError(f"rank_by {rank_by!r}: допустимо {sorted(ORDER)}")
++    return ", ".join(f"{ORDER[r]} DESC" for r in rank_by) + ", inn"
++
++
++def _groups(codes: list[str], level: int) -> list[str]:
++    n = LEVELS[level][1]
++    return sorted({c.strip()[:n] for c in codes if len(c.strip()) >= n})
++
++
++class History:
++    """Participations before `as_of` with the OKPD2 groups of their lots (one table, valid INNs only)."""
++
++    def __init__(self, processed: Path, as_of: date) -> None:
++        self.as_of = as_of
++        self.con = duckdb.connect()
++        self._lock = threading.Lock()
++        p, i = _lit(processed / "participants.parquet"), _lit(processed / "items.parquet")
++        cond = f"publish_date < DATE '{as_of.isoformat()}' AND inn_valid"
++        self.con.execute(
++            f"""
++            CREATE TABLE ps AS
++            SELECT p.lot_id, p.supplier_inn AS inn, p.is_winner AS win, p.customer_inn AS cust,
++                   i.okpd2_l2 AS g2, i.okpd2_l4 AS g4
++            FROM (SELECT * FROM read_parquet({p}) WHERE {cond}) p
++            JOIN read_parquet({i}) i USING (lot_id)
++            ORDER BY p.customer_inn
++            """
++        )
++        self.global_top = [r[0] for r in self.con.execute(
++            f"""
++            SELECT supplier_inn AS inn FROM read_parquet({p}) WHERE {cond}
++            GROUP BY inn ORDER BY count(DISTINCT lot_id) DESC,
++                     count(DISTINCT lot_id) FILTER (is_winner) DESC, inn
++            LIMIT {GLOBAL_POOL}
++            """
++        ).fetchall()]
++
++    def top(self, codes: list[str], levels: list[int], rank_by: list[str], k: int, *, customer: str | None = None,
++            exclude: list[str] | None = None) -> list[str]:
++        """Up to k INNs by group popularity (or at `customer`), level by level until k, minus `exclude`."""
++        out: list[str] = list(exclude or [])
++        base = len(out)
++        order = _order_sql(rank_by)
++        for level in levels:
++            groups = _groups(codes, level)
++            if not groups:
++                continue
++            col = LEVELS[level][0]
++            where = f"{col} IN (SELECT unnest($g))" + (" AND cust = $c" if customer else "")
++            params: dict = {"g": groups, **({"c": customer} if customer else {})}
++            with self._lock:
++                rows = self.con.execute(
++                    f"SELECT inn FROM ps WHERE {where} GROUP BY inn ORDER BY {order} LIMIT {k + len(out)}", params
++                ).fetchall()
++            out.extend(r[0] for r in rows if r[0] not in out)
++            if len(out) - base >= k:
++                break
++        return out[base:][:k]
++
++
++def pop_rank(hist: History, query: Query, cfg: dict) -> list[str]:
++    k = cfg.get("k", 20)
++    ranked = hist.top(query.okpd2, cfg.get("levels", [4, 2]), cfg.get("rank_by", ["lots", "wins"]), k)
++    return [*ranked, *(x for x in hist.global_top if x not in ranked)][:k]
++
++
++def inc_rank(hist: History, query: Query, cfg: dict) -> list[str]:
++    k = cfg.get("k", 20)
++    ranked: list[str] = []
++    if query.customer_inn:
++        ranked = hist.top(query.okpd2, cfg.get("levels", [4, 2]), cfg.get("rank_by", ["wins", "lots"]), k,
++                          customer=query.customer_inn)
++    fill = pop_rank(hist, query, {**cfg.get("fill", {}), "k": k + len(ranked)})
++    return [*ranked, *(x for x in fill if x not in ranked)][:k]
++
++
++class Bm25Context:
++    """BM25 index (src/match, as_of = cutoff) + doc -> lot -> participant tables for one as_of."""
++
++    def __init__(self, processed: Path, as_of: date) -> None:
++        self.as_of = as_of
++        self.processed = processed
++        self.idx = get_index(processed, as_of)
++        self.con = duckdb.connect()
++        self._lock = threading.Lock()
++        p = _lit(processed / "participants.parquet")
++        docs = _lit(self.idx.path / "docs.parquet")
++        self.con.execute(f"CREATE TABLE docs AS SELECT doc_id, lot_id FROM read_parquet({docs}) ORDER BY doc_id")
++        self.con.execute(
++            f"CREATE TABLE pl AS SELECT DISTINCT lot_id, supplier_inn AS inn FROM read_parquet({p}) "
++            f"WHERE publish_date < DATE '{as_of.isoformat()}' AND inn_valid ORDER BY lot_id"
++        )
++
++    def rank(self, query: Query, k: int, top_docs: int) -> list[str]:
++        hits = self.idx.retrieve(tokenize(query.text), top_docs)
++        if not hits:
++            return []
++        with self._lock:
++            self.con.execute("CREATE OR REPLACE TEMP TABLE h AS SELECT unnest($d) AS doc_id, unnest($s) AS score",
++                             {"d": [d for d, _ in hits], "s": [s for _, s in hits]})
++            rows = self.con.execute(
++                f"""
++                SELECT pl.inn FROM (SELECT lot_id, max(score) AS score
++                                    FROM docs JOIN h USING (doc_id) GROUP BY lot_id) l
++                JOIN pl USING (lot_id)
++                GROUP BY pl.inn ORDER BY max(l.score) DESC, count(*) DESC, pl.inn LIMIT {k}
++                """
++            ).fetchall()
++        return [r[0] for r in rows]
++
++
++def make_ranker(cfg: dict) -> Callable[[Query], list[str]]:
++    """Query -> ranked INNs for the baseline named by cfg["baseline"]."""
++    kind = cfg.get("baseline")
++    if kind not in KINDS:
++        raise ValueError(f"baseline {kind!r}: допустимо {KINDS}")
++    processed = processed_dir()
++    contexts: dict[date, History | Bm25Context] = {}
++    lock = threading.Lock()
++
++    def context(as_of: date | None, query_id: str) -> History | Bm25Context:
++        if as_of is None:
++            raise ValueError(f"{query_id}: baseline без as_of видел бы всю историю — утечка тестовой закупки")
++        with lock:
++            if as_of not in contexts:
++                contexts[as_of] = Bm25Context(processed, as_of) if kind == "bm25" else History(processed, as_of)
++            return contexts[as_of]
++
++    def rank(query: Query) -> list[str]:
++        ctx = context(query.as_of, query.query_id)
++        k = cfg.get("k", 20)
++        if isinstance(ctx, Bm25Context):
++            return ctx.rank(query, k, cfg.get("top_docs", 500))
++        return (pop_rank if kind == "pop" else inc_rank)(ctx, query, cfg)
++
++    return rank
+diff --git a/src/eval/slices.py b/src/eval/slices.py
+new file mode 100644
+index 00000000..7239841b
+--- /dev/null
++++ b/src/eval/slices.py
+@@ -0,0 +1,84 @@
++"""Case flags for eval slices, computed ONLY from participations strictly before the cutoff (D-018, D-033).
++
++  new_for_customer  every winner (grade 2) had no offer or win at this `customer_inn` before cutoff —
++                    the case where "ask whoever supplied us before" (B-inc) can not work.
++                    None: the case has no winner (ЭМ lots without one) or no customer.
++  winner_cold       every winner had no participation anywhere before cutoff (cold start).
++                    None: no winner.
++  relevant_cold     every relevant INN had no participation before cutoff: recall ceiling on history.
++
++`history_stats` turns the flags into the shares written to eval/cases/build_stats.json
++(research/EVAL.md): the numbers there are reproduced by `uv run python -m src.eval.build_cases`.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from datetime import date
++from pathlib import Path
++
++import duckdb
++
++from src.eval.split import EvalCase
++from src.match.index import processed_dir
++
++
++@dataclass(frozen=True)
++class CaseFlags:
++    new_for_customer: bool | None
++    winner_cold: bool | None
++    relevant_cold: bool
++
++
++def winners(case: EvalCase) -> list[str]:
++    return sorted(inn for inn, g in case.grades.items() if g == 2)
++
++
++def case_flags(cases: list[EvalCase], cutoff: date, processed: Path | None = None) -> dict[str, CaseFlags]:
++    """query_id -> flags from `participants.parquet` rows with publish_date < cutoff (strictly)."""
++    processed = processed or processed_dir()
++    path = (processed / "participants.parquet").as_posix().replace("'", "''")
++    inns = sorted({i for c in cases for i in c.relevant_inns})
++    customers = sorted({c.query.customer_inn for c in cases if c.query.customer_inn})
++    con = duckdb.connect()
++    try:
++        con.execute("CREATE TEMP TABLE q_inn AS SELECT unnest($a) AS inn", {"a": inns})
++        con.execute("CREATE TEMP TABLE q_cust AS SELECT unnest($a) AS cust", {"a": customers})
++        base = f"FROM read_parquet('{path}') WHERE publish_date < $c"
++        seen = {r[0] for r in con.execute(
++            f"SELECT DISTINCT supplier_inn {base} AND supplier_inn IN (SELECT inn FROM q_inn)", {"c": cutoff}
++        ).fetchall()}
++        pairs = set(con.execute(
++            f"SELECT DISTINCT customer_inn, supplier_inn {base} AND customer_inn IN (SELECT cust FROM q_cust)"
++            " AND supplier_inn IN (SELECT inn FROM q_inn)", {"c": cutoff}
++        ).fetchall())
++    finally:
++        con.close()
++    out: dict[str, CaseFlags] = {}
++    for c in cases:
++        won = winners(c)
++        cust = c.query.customer_inn
++        out[c.query.query_id] = CaseFlags(
++            new_for_customer=(all((cust, w) not in pairs for w in won) if won and cust else None),
++            winner_cold=(all(w not in seen for w in won) if won else None),
++            relevant_cold=all(i not in seen for i in c.relevant_inns),
++        )
++    return out
++
++
++def history_stats(flags: dict[str, CaseFlags]) -> dict:
++    """Shares of all n cases; a case without a winner (or customer) is never counted as cold / new."""
++    n = len(flags)
++    have_winner = [f for f in flags.values() if f.winner_cold is not None]
++
++    def share(hits: int, total: int) -> float:
++        return round(hits / total, 4) if total else 0.0
++
++    return {
++        "n": n,
++        "n_with_winner": len(have_winner),
++        "winner_without_history": share(sum(bool(f.winner_cold) for f in flags.values()), n),
++        "all_relevant_without_history": share(sum(f.relevant_cold for f in flags.values()), n),
++        "winner_new_for_customer": share(sum(bool(f.new_for_customer) for f in flags.values()), n),
++        "n_new_for_customer": sum(bool(f.new_for_customer) for f in flags.values()),
++    }
+diff --git a/tests/unit/test_baselines.py b/tests/unit/test_baselines.py
+new file mode 100644
+index 00000000..8a67528c
+--- /dev/null
++++ b/tests/unit/test_baselines.py
+@@ -0,0 +1,263 @@
++"""Baselines B-pop / B-inc / B-bm25 and eval slices (T-08, #15, D-033): hand-computed on the ingest fixture.
++
++Fixture (tests/fixtures/ingest/README.md), cutoff 2025-07-01. Paper (OKPD2 17.12.14.110, group 17.12):
++lot 1 (2024-03-01, customer 7801000051): 7801000012 won, 7801000020, 780100000090 lost;
++lot 3 (2024-11-05, customer 7701000040): 7801000012 won, 4701000038 lost, 7801000013 invalid INN;
++lot 6 (2025-08-01, customer 7801000051): 780100000090 won, 7801000012 lost — after cutoff;
++lot 7 (2025-10-15, customer 7701000040): 470100000088 won, 7801000012 lost — after cutoff.
++"""
++
++from __future__ import annotations
++
++import json
++from datetime import date
++from pathlib import Path
++
++import pytest
++import yaml
++
++from src.contracts import Query
++from src.eval import baselines as B
++from src.eval import run as R
++from src.eval import slices as S
++from src.eval.split import EvalCase
++from src.match import search as search_mod
++
++CUTOFF = date(2025, 7, 1)
++ROOT = Path(__file__).resolve().parents[2]
++PAPER = "17.12.14.110"
++A, B2, C, D, E, F = ("7801000012", "7801000020", "780100000090", "4701000038", "470100000088", "7802010006")
++CUST1, CUST2 = "7801000051", "7701000040"
++
++
++def q(codes: list[str] | None = None, customer: str | None = None, as_of: date | None = CUTOFF,
++      text: str = "бумага", channel: str | None = "ЭМ") -> Query:
++    return Query(query_id="q", text=text, okpd2=codes if codes is not None else [PAPER], customer_inn=customer,
++                 channel=channel, as_of=as_of)  # type: ignore[arg-type]
++
++
++def ranker(baseline: str, **cfg):
++    return B.make_ranker({"baseline": baseline, "k": cfg.pop("k", 20), **cfg})
++
++
++def case(qid: str, relevant: dict[str, int], customer: str | None, channel: str | None = "ЭМ",
++         codes: list[str] | None = None) -> EvalCase:
++    query = q(codes, customer, channel=channel).model_copy(update={"query_id": qid})
++    return EvalCase(query=query, relevant_inns=sorted(relevant), date=date(2025, 7, 10), grades=relevant)
++
++
++# --- B-pop -------------------------------------------------------------------------------------
++
++def test_pop_ranks_by_group_participations_then_wins_then_inn(search_data):
++    assert ranker("pop", k=4)(q()) == [A, D, C, B2]  # A: 2 lots/2 wins; the rest 1 lot/0 wins in the group, by INN
++
++
++def test_pop_pads_with_global_popularity(search_data):
++    # group has 4 suppliers; the fifth comes from the whole history (E took part in lot 4, before cutoff)
++    assert ranker("pop", k=6)(q()) == [A, D, C, B2, E]
++    assert ranker("pop")(q([])) == [A, B2, D, E, C]  # no OKPD2 -> global: A 3 lots/3 wins, B2 3/2, D 2, E, C
++
++
++def test_pop_backs_off_from_group_to_class(search_data):
++    assert ranker("pop", k=3)(q(["17.99.99.999"])) == [A, D, C]  # no group 17.99 -> class 17
++    assert ranker("pop", k=3, levels=[4])(q(["17.99.99.999"])) == [A, B2, D]  # no backoff: whole history
++
++
++def test_pop_excludes_lots_on_and_after_as_of(search_data):
++    assert E not in ranker("pop", k=3)(q())  # E's only paper lot is 7 (after cutoff)
++    assert ranker("pop", k=3)(q(as_of=date(2026, 1, 1))) == [A, C, E]  # all data: lots 1, 3, 6, 7
++    assert ranker("pop", k=3)(q(as_of=date(2024, 3, 1))) == [A]  # lot 1 is ON as_of -> not history
++    assert ranker("pop", k=3)(q(as_of=date(2024, 3, 2))) == [A, C, B2]  # a day later it is
++
++
++def test_pop_never_returns_invalid_inn(search_data):
++    assert "7801000013" not in ranker("pop")(q())
++
++
++def test_rank_by_is_validated(search_data):
++    with pytest.raises(ValueError, match="rank_by"):
++        ranker("pop", rank_by=["price"])(q())
++
++
++def test_rank_by_decides_between_many_lots_and_wins(tmp_path, monkeypatch):
++    """S3: 3 lots, no win; S5, S9: 1 lot, 1 win; S1: 1 lot, no win — all in group 10.10 before as_of."""
++    import duckdb
++
++    rows = [(1, "S3", False), (1, "S9", True), (2, "S3", False), (2, "S1", False), (3, "S3", False), (3, "S5", True)]
++    con = duckdb.connect()
++    con.execute("CREATE TABLE p(lot_id BIGINT, supplier_inn VARCHAR, is_winner BOOLEAN, inn_valid BOOLEAN,"
++                " publish_date DATE, customer_inn VARCHAR)")
++    con.executemany("INSERT INTO p VALUES (?, ?, ?, true, DATE '2024-05-01', 'c1')", rows)
++    con.execute("CREATE TABLE i AS SELECT * FROM (VALUES (1, '10', '10.10'), (2, '10', '10.10'), (3, '10', '10.10'))"
++                " t(lot_id, okpd2_l2, okpd2_l4)")
++    con.execute(f"COPY p TO '{tmp_path / 'participants.parquet'}' (FORMAT parquet)")
++    con.execute(f"COPY i TO '{tmp_path / 'items.parquet'}' (FORMAT parquet)")
++    monkeypatch.setattr(B, "processed_dir", lambda: tmp_path)
++    query = q(["10.10.10.100"], as_of=date(2025, 1, 1))
++    assert ranker("pop")(query) == ["S3", "S5", "S9", "S1"]  # lots first, then wins, then INN
++    assert ranker("pop", rank_by=["wins", "lots"])(query) == ["S5", "S9", "S3", "S1"]
++    assert ranker("pop")(q([], as_of=date(2025, 1, 1))) == ["S3", "S5", "S9", "S1"]  # global padding: lots, wins, INN
++    assert ranker("inc")(q(["10.10.10.100"], "c1", as_of=date(2025, 1, 1))) == ["S5", "S9", "S3", "S1"]  # wins first
++
++
++# --- B-inc -------------------------------------------------------------------------------------
++
++def test_inc_puts_customer_incumbents_first_then_pop(search_data):
++    # customer 7801000051 before cutoff: only lot 1 -> A (won), C, B2; padded by B-pop: D, E
++    assert ranker("inc", k=5)(q(customer=CUST1)) == [A, C, B2, D, E]
++    assert ranker("pop", k=5)(q()) == [A, D, C, B2, E]  # B-pop puts D second: customer history decides
++    assert ranker("inc", k=4)(q(customer=CUST2)) == [A, D, C, B2]  # lot 3: A won, D lost
++
++
++def test_inc_does_not_see_the_customers_later_lots(search_data):
++    assert ranker("inc", k=2)(q(customer=CUST2)) == [A, D]  # E won lot 7 at CUST2, after cutoff
++    assert ranker("inc", k=3)(q(customer=CUST2, as_of=date(2026, 1, 1))) == [A, E, D]
++
++
++def test_inc_without_customer_is_pop(search_data):
++    assert ranker("inc", k=5)(q(customer=None)) == ranker("pop", k=5)(q())
++
++
++def test_inc_unknown_customer_is_pop(search_data):
++    assert ranker("inc", k=5)(q(customer="7800000000")) == ranker("pop", k=5)(q())
++
++
++# --- B-bm25 ------------------------------------------------------------------------------------
++
++def test_bm25_ranks_participants_of_the_best_matching_lot(search_data):
++    ranked = ranker("bm25")(q(text="Бумага офисная"))
++    assert ranked[0] == A and D in ranked and E not in ranked and "7801000013" not in ranked
++
++
++def test_bm25_sees_only_history_before_as_of(search_data):
++    assert ranker("bm25")(q(text="Ручки шариковые")) == []  # lot 7 is after cutoff
++    assert set(ranker("bm25")(q(text="Ручки шариковые", as_of=date(2026, 1, 1)))) == {A, E}
++
++
++def test_bm25_unknown_words_give_nothing(search_data):
++    assert ranker("bm25")(q(text="zzzz qqqq")) == []
++
++
++def test_bm25_ignores_okpd2_and_customer(search_data):
++    base = ranker("bm25")(q(text="Бумага офисная", codes=[], customer=None))
++    assert ranker("bm25")(q(text="Бумага офисная", codes=["26.20.40.110"], customer=CUST1)) == base
++
++
++# --- common ------------------------------------------------------------------------------------
++
++@pytest.mark.parametrize("kind", B.KINDS)
++def test_baseline_refuses_query_without_as_of(search_data, kind):
++    with pytest.raises(ValueError, match="утечка"):
++        ranker(kind)(q(as_of=None))
++
++
++def test_unknown_baseline_is_refused():
++    with pytest.raises(ValueError, match="baseline"):
++        B.make_ranker({"baseline": "random"})
++
++
++def test_baseline_configs_are_valid_and_do_not_touch_the_product_config():
++    files = sorted((ROOT / "configs" / "baselines").glob("*.yaml"))
++    assert {f.stem for f in files} == {"B-pop", "B-inc", "B-bm25"}
++    for f in files:
++        assert yaml.safe_load(f.read_text(encoding="utf-8"))["baseline"] in B.KINDS
++    assert "baseline" not in yaml.safe_load((ROOT / "configs" / "search.yaml").read_text(encoding="utf-8"))
++
++
++def test_resolve_config_by_experiment_id(tmp_path):
++    assert R.resolve_config("B-pop") == ROOT / "configs" / "baselines" / "B-pop.yaml"
++    assert R.resolve_config("E-001") == R.SEARCH_CONFIG
++    assert R.resolve_config("B-pop", Path("configs/search.yaml")) == ROOT / "configs" / "search.yaml"
++    assert R.resolve_config("x", tmp_path / "c.yaml") == tmp_path / "c.yaml"
++
++
++# --- evaluate: baseline instead of search(), slices ---------------------------------------------
++
++def test_evaluate_runs_the_baseline_not_the_product_search(search_data, monkeypatch):
++    monkeypatch.setattr(search_mod, "search", lambda *a, **k: pytest.fail("search() called for a baseline"))
++    c = case("c1", {D: 1}, CUST1)
++    body = R.evaluate([c], {"baseline": "pop", "k": 4})
++    assert body["per_query"][0]["mrr"] == 0.5 and body["per_query"][0]["recall@10"] == 1.0  # D is 2nd
++
++
++def test_evaluate_slices_by_channel_and_customer_history(search_data):
++    cases = [
++        case("known-em", {A: 2, D: 1}, CUST1),           # A won at CUST1 before: known
++        case("new-em", {E: 2}, CUST2),                   # E at CUST2 only after cutoff: new
++        case("new-aisgz", {F: 2}, CUST1, "АИС ГЗ"),      # F never seen: new (and cold)
++        case("nowinner-em", {A: 1}, CUST1),              # no winner: in no customer slice
++        case("mixed-em", {F: 2, A: 1}, CUST1),           # winner F is cold; loser A is found
++        case("nochannel", {A: 2}, CUST1, None),          # channel unknown: only in «all»
++    ]
++    flags = S.case_flags(cases, CUTOFF)
++    body = R.evaluate(cases, {"baseline": "inc", "k": 5}, CUTOFF, flags)
++    sl = body["slices"]
++    assert {k: v["n"] for k, v in sl.items()} == {"all": 6, "ЭМ": 4, "АИС ГЗ": 1, "new_for_customer": 3,
++                                                  "known_for_customer": 2}
++    by_id = {p["query_id"]: p for p in body["per_query"]}
++    new_mrr = [by_id[i]["mrr"] for i in ("new-em", "new-aisgz", "mixed-em")]
++    assert sl["new_for_customer"]["metrics"]["mrr"]["value"] == pytest.approx(sum(new_mrr) / 3)
++    assert by_id["mixed-em"]["recall@10"] == 0.5 and by_id["mixed-em"]["winner_recall@10"] == 0.0
++    assert by_id["known-em"]["mrr"] == 1.0 and by_id["new-aisgz"]["mrr"] == 0.0  # F can't be found: no history
++    assert by_id["nowinner-em"]["winner_recall@10"] is None and by_id["known-em"]["winner_recall@10"] == 1.0
++    assert sl["АИС ГЗ"]["metrics"]["recall@10"]["ci95"] == [0.0, 0.0]  # one query: the point twice
++    assert body["metrics"] == {k: sl["all"]["metrics"][k] for k in body["metrics"]}
++
++
++def test_evaluate_without_flags_has_only_channel_slices(search_data):
++    body = R.evaluate([case("c", {A: 2}, CUST1)], {"baseline": "pop"}, CUTOFF)
++    assert set(body["slices"]) == {"all", "ЭМ", "АИС ГЗ"}
++
++
++def test_main_writes_slices_and_config_path(search_data, monkeypatch, tmp_path):
++    cases = [case("known-em", {A: 2}, CUST1), case("new-em", {E: 2}, CUST2)]
++    monkeypatch.setattr(R, "load_cases", lambda part, cfg=None: cases)
++    monkeypatch.setattr(R, "RESULTS", tmp_path)
++    assert R.main(["--exp", "B-pop"]) == 0
++    rec = json.loads((tmp_path / "B-pop.json").read_text(encoding="utf-8"))
++    assert rec["config_path"] == "configs/baselines/B-pop.yaml" and rec["config"]["baseline"] == "pop"
++    assert rec["slices"]["new_for_customer"]["n"] == 1 and rec["slices"]["known_for_customer"]["n"] == 1
++    assert rec["stub"] is False and rec["n_queries"] == 2
++
++
++# --- slice flags use only history before the cutoff ----------------------------------------------
++
++def flags(cases: list[EvalCase], cutoff: date = CUTOFF) -> dict[str, S.CaseFlags]:
++    return S.case_flags(cases, cutoff)
++
++
++def test_new_for_customer_flag(search_data):
++    f = flags([
++        case("known", {A: 2}, CUST1),
++        case("new", {E: 2}, CUST2),
++        case("one-known-winner", {E: 2, A: 2}, CUST2),
++        case("nowinner", {A: 1}, CUST1),
++        case("nocustomer", {A: 2}, None),
++        case("cold", {F: 2}, CUST1),
++        case("one-cold-winner", {F: 2, A: 2}, CUST1),
++    ])
++    assert {k: v.new_for_customer for k, v in f.items()} == {
++        "known": False, "new": True, "one-known-winner": False, "nowinner": None, "nocustomer": None, "cold": True,
++        "one-cold-winner": False}
++    assert {k: v.winner_cold for k, v in f.items()} == {
++        "known": False, "new": False, "one-known-winner": False, "nowinner": None, "nocustomer": False, "cold": True,
++        "one-cold-winner": False}
++    assert {k: v.relevant_cold for k, v in f.items()}["cold"] is True
++
++
++def test_flag_uses_only_participations_before_the_cutoff(search_data):
++    """E won at CUST2 in lot 7 (2025-10-15): known only to a cutoff after that day (strictly before)."""
++    c = [case("c", {E: 2}, CUST2)]
++    assert flags(c, CUTOFF)["c"].new_for_customer is True
++    assert flags(c, date(2025, 10, 15))["c"].new_for_customer is True  # the lot day itself is not history
++    assert flags(c, date(2025, 10, 16))["c"].new_for_customer is False
++    # E took part elsewhere (lot 4, 2025-02-14): not a cold start at the cutoff, and not before that day
++    assert flags(c, CUTOFF)["c"].winner_cold is False and flags(c, date(2025, 2, 14))["c"].winner_cold is True
++
++
++def test_history_stats(search_data):
++    cases = [case("known", {A: 2, D: 1}, CUST1), case("new", {E: 2}, CUST2), case("cold", {F: 2}, CUST1),
++             case("nowinner", {A: 1}, CUST1)]
++    st = S.history_stats(flags(cases))
++    assert st == {"n": 4, "n_with_winner": 3, "winner_without_history": 0.25, "all_relevant_without_history": 0.25,
++                  "winner_new_for_customer": 0.5, "n_new_for_customer": 2}
+diff --git a/eval/results/B-bm25.json b/eval/results/B-bm25.json
+new file mode 100644
+index 00000000..98d9dc9d
+--- /dev/null
++++ b/eval/results/B-bm25.json
+@@ -0,0 +1,280 @@
++{
++  "exp_id": "B-bm25",
++  "part": "real",
++  "created_at": "2026-10-01T10:56:11+00:00",
++  "commit": "2539e340a3af28d124f67ff909fee704dd3988a7",
++  "dirty": true,
++  "config_path": "configs/baselines/B-bm25.yaml",
++  "config": {
++    "baseline": "bm25",
++    "k": 20,
++    "top_docs": 500
++  },
++  "config_sha256": "3c925a9683567fb1090219ae7d99c2f0e124d94f250956bd40c8c5adfe037fb3",
++  "stub": false,
++  "n_queries": 8,
++  "metrics": {
++    "recall@10": {
++      "value": 0.34375,
++      "ci95": [
++        0.09375,
++        0.6145833333333333
++      ]
++    },
++    "mrr": {
++      "value": 0.45416666666666666,
++      "ci95": [
++        0.15,
++        0.7583333333333333
++      ]
++    },
++    "ndcg@10": {
++      "value": 0.2845634505010297,
++      "ci95": [
++        0.07886621919643219,
++        0.49029185828509086
++      ]
++    }
++  },
++  "slices": {
++    "all": {
++      "n": 8,
++      "metrics": {
++        "recall@10": {
++          "value": 0.34375,
++          "ci95": [
++            0.09375,
++            0.6145833333333333
++          ]
++        },
++        "mrr": {
++          "value": 0.45416666666666666,
++          "ci95": [
++            0.15,
++            0.7583333333333333
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.2845634505010297,
++          "ci95": [
++            0.07886621919643219,
++            0.49029185828509086
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.25,
++          "ci95": [
++            0.0,
++            0.625
++          ]
++        }
++      }
++    },
++    "ЭМ": {
++      "n": 4,
++      "metrics": {
++        "recall@10": {
++          "value": 0.4375,
++          "ci95": [
++            0.16666666666666666,
++            0.7083333333333333
++          ]
++        },
++        "mrr": {
++          "value": 0.7666666666666667,
++          "ci95": [
++            0.3,
++            1.0
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.41139446260919504,
++          "ci95": [
++            0.15123267486380104,
++            0.6259415168572543
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.25,
++          "ci95": [
++            0.0,
++            0.75
++          ]
++        }
++      }
++    },
++    "АИС ГЗ": {
++      "n": 4,
++      "metrics": {
++        "recall@10": {
++          "value": 0.25,
++          "ci95": [
++            0.0,
++            0.75
++          ]
++        },
++        "mrr": {
++          "value": 0.14166666666666666,
++          "ci95": [
++            0.0,
++            0.375
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.15773243839286438,
++          "ci95": [
++            0.0,
++            0.47319731517859315
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.25,
++          "ci95": [
++            0.0,
++            0.75
++          ]
++        }
++      }
++    },
++    "new_for_customer": {
++      "n": 4,
++      "metrics": {
++        "recall@10": {
++          "value": 0.08333333333333333,
++          "ci95": [
++            0.0,
++            0.25
++          ]
++        },
++        "mrr": {
++          "value": 0.26666666666666666,
++          "ci95": [
++            0.0,
++            0.75
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.0984237041805679,
++          "ci95": [
++            0.0,
++            0.2952711125417037
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.0,
++          "ci95": [
++            0.0,
++            0.0
++          ]
++        }
++      }
++    },
++    "known_for_customer": {
++      "n": 4,
++      "metrics": {
++        "recall@10": {
++          "value": 0.6041666666666666,
++          "ci95": [
++            0.1875,
++            0.9166666666666666
++          ]
++        },
++        "mrr": {
++          "value": 0.6416666666666667,
++          "ci95": [
++            0.2833333333333333,
++            1.0
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.47070319682149153,
++          "ci95": [
++            0.15773243839286438,
++            0.638941043915381
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.5,
++          "ci95": [
++            0.0,
++            1.0
++          ]
++        }
++      }
++    }
++  },
++  "per_query": [
++    {
++      "query_id": "lot-5761234",
++      "channel": "АИС ГЗ",
++      "new_for_customer": false,
++      "recall@10": 1.0,
++      "mrr": 0.5,
++      "ndcg@10": 0.6309297535714575,
++      "winner_recall@10": 1.0
++    },
++    {
++      "query_id": "lot-5779719",
++      "channel": "АИС ГЗ",
++      "new_for_customer": false,
++      "recall@10": 0.0,
++      "mrr": 0.06666666666666667,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5786484",
++      "channel": "ЭМ",
++      "new_for_customer": false,
++      "recall@10": 0.75,
++      "mrr": 1.0,
++      "ndcg@10": 0.6469523342593044,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5798959",
++      "channel": "ЭМ",
++      "new_for_customer": false,
++      "recall@10": 0.6666666666666666,
++      "mrr": 1.0,
++      "ndcg@10": 0.6049306994552042,
++      "winner_recall@10": 1.0
++    },
++    {
++      "query_id": "lot-5802116",
++      "channel": "ЭМ",
++      "new_for_customer": true,
++      "recall@10": 0.0,
++      "mrr": 0.06666666666666667,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5804197",
++      "channel": "АИС ГЗ",
++      "new_for_customer": true,
++      "recall@10": 0.0,
++      "mrr": 0.0,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5809419",
++      "channel": "АИС ГЗ",
++      "new_for_customer": true,
++      "recall@10": 0.0,
++      "mrr": 0.0,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5860547",
++      "channel": "ЭМ",
++      "new_for_customer": true,
++      "recall@10": 0.3333333333333333,
++      "mrr": 1.0,
++      "ndcg@10": 0.3936948167222716,
++      "winner_recall@10": 0.0
++    }
++  ]
++}
+diff --git a/eval/results/B-pop.json b/eval/results/B-pop.json
+new file mode 100644
+index 00000000..cafdb9bd
+--- /dev/null
++++ b/eval/results/B-pop.json
+@@ -0,0 +1,287 @@
++{
++  "exp_id": "B-pop",
++  "part": "real",
++  "created_at": "2026-10-01T10:56:08+00:00",
++  "commit": "2539e340a3af28d124f67ff909fee704dd3988a7",
++  "dirty": true,
++  "config_path": "configs/baselines/B-pop.yaml",
++  "config": {
++    "baseline": "pop",
++    "k": 20,
++    "levels": [
++      4,
++      2
++    ],
++    "rank_by": [
++      "lots",
++      "wins"
++    ]
++  },
++  "config_sha256": "3c925a9683567fb1090219ae7d99c2f0e124d94f250956bd40c8c5adfe037fb3",
++  "stub": false,
++  "n_queries": 8,
++  "metrics": {
++    "recall@10": {
++      "value": 0.125,
++      "ci95": [
++        0.0,
++        0.3125
++      ]
++    },
++    "mrr": {
++      "value": 0.1683080808080808,
++      "ci95": [
++        0.018308080808080808,
++        0.4227840909090906
++      ]
++    },
++    "ndcg@10": {
++      "value": 0.10130921140614665,
++      "ci95": [
++        0.0,
++        0.23906462784826044
++      ]
++    }
++  },
++  "slices": {
++    "all": {
++      "n": 8,
++      "metrics": {
++        "recall@10": {
++          "value": 0.125,
++          "ci95": [
++            0.0,
++            0.3125
++          ]
++        },
++        "mrr": {
++          "value": 0.1683080808080808,
++          "ci95": [
++            0.018308080808080808,
++            0.4227840909090906
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.10130921140614665,
++          "ci95": [
++            0.0,
++            0.23906462784826044
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.0,
++          "ci95": [
++            0.0,
++            0.0
++          ]
++        }
++      }
++    },
++    "ЭМ": {
++      "n": 4,
++      "metrics": {
++        "recall@10": {
++          "value": 0.25,
++          "ci95": [
++            0.0,
++            0.5
++          ]
++        },
++        "mrr": {
++          "value": 0.32272727272727275,
++          "ci95": [
++            0.045454545454545456,
++            0.7727272727272727
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.2026184228122933,
++          "ci95": [
++            0.0,
++            0.4052368456245866
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.0,
++          "ci95": [
++            0.0,
++            0.0
++          ]
++        }
++      }
++    },
++    "АИС ГЗ": {
++      "n": 4,
++      "metrics": {
++        "recall@10": {
++          "value": 0.0,
++          "ci95": [
++            0.0,
++            0.0
++          ]
++        },
++        "mrr": {
++          "value": 0.013888888888888888,
++          "ci95": [
++            0.0,
++            0.041666666666666664
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.0,
++          "ci95": [
++            0.0,
++            0.0
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.0,
++          "ci95": [
++            0.0,
++            0.0
++          ]
++        }
++      }
++    },
++    "new_for_customer": {
++      "n": 4,
++      "metrics": {
++        "recall@10": {
++          "value": 0.125,
++          "ci95": [
++            0.0,
++            0.375
++          ]
++        },
++        "mrr": {
++          "value": 0.25,
++          "ci95": [
++            0.0,
++            0.75
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.1300994733776481,
++          "ci95": [
++            0.0,
++            0.3902984201329443
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.0,
++          "ci95": [
++            0.0,
++            0.0
++          ]
++        }
++      }
++    },
++    "known_for_customer": {
++      "n": 4,
++      "metrics": {
++        "recall@10": {
++          "value": 0.125,
++          "ci95": [
++            0.0,
++            0.375
++          ]
++        },
++        "mrr": {
++          "value": 0.08661616161616162,
++          "ci95": [
++            0.022727272727272728,
++            0.16388888888888892
++          ]
++        },
++        "ndcg@10": {
++          "value": 0.07251894943464521,
++          "ci95": [
++            0.0,
++            0.21755684830393562
++          ]
++        },
++        "winner_recall@10": {
++          "value": 0.0,
++          "ci95": [
++            0.0,
++            0.0
++          ]
++        }
++      }
++    }
++  },
++  "per_query": [
++    {
++      "query_id": "lot-5761234",
++      "channel": "АИС ГЗ",
++      "new_for_customer": false,
++      "recall@10": 0.0,
++      "mrr": 0.0,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5779719",
++      "channel": "АИС ГЗ",
++      "new_for_customer": false,
++      "recall@10": 0.0,
++      "mrr": 0.05555555555555555,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5786484",
++      "channel": "ЭМ",
++      "new_for_customer": false,
++      "recall@10": 0.5,
++      "mrr": 0.2,
++      "ndcg@10": 0.29007579773858083,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5798959",
++      "channel": "ЭМ",
++      "new_for_customer": false,
++      "recall@10": 0.0,
++      "mrr": 0.09090909090909091,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5802116",
++      "channel": "ЭМ",
++      "new_for_customer": true,
++      "recall@10": 0.0,
++      "mrr": 0.0,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5804197",
++      "channel": "АИС ГЗ",
++      "new_for_customer": true,
++      "recall@10": 0.0,
++      "mrr": 0.0,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5809419",
++      "channel": "АИС ГЗ",
++      "new_for_customer": true,
++      "recall@10": 0.0,
++      "mrr": 0.0,
++      "ndcg@10": 0.0,
++      "winner_recall@10": 0.0
++    },
++    {
++      "query_id": "lot-5860547",
++      "channel": "ЭМ",
++      "new_for_customer": true,
++      "recall@10": 0.5,
++      "mrr": 1.0,
++      "ndcg@10": 0.5203978935105924,
++      "winner_recall@10": 0.0
++    }
++  ]
++}

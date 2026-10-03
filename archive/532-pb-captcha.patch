@@ -1,0 +1,19 @@
+diff --git a/src/sources/pb_nalog.py b/src/sources/pb_nalog.py
+index 9447ed0e..aac656f2 100644
+--- a/src/sources/pb_nalog.py
++++ b/src/sources/pb_nalog.py
+@@ -79,11 +79,11 @@ def _post(client: httpx.Client, path: str, data: dict[str, str]) -> httpx.Respon
+     # not `captchaRequired` in a 200 body. Without this the worker would count it as a failed
+     # task and keep knocking.
+     if r.status_code == 400 and "captcha" in r.text.lower():
+-        token = pb_captcha.solve(client, BASE, PACER.slot) if _solving() else None
+-        if token is None:
++        solved = pb_captcha.solve(client, BASE, PACER.slot) if _solving() else None
++        if solved is None:
+             raise _captcha("pb.nalog.ru требует капчу (HTTP 400) — стоп (решатель выключен или не справился)")
+         with PACER.slot():
+-            r = client.post(BASE + path, data={**data, "pbCaptchaToken": token})
++            r = client.post(BASE + path, data={**data, "pbCaptchaToken": solved})
+         if r.status_code == 400 and "captcha" in r.text.lower():
+             raise _captcha("pb.nalog.ru требует капчу и после решения — останавливаемся")
+     return r
